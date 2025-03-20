@@ -1,10 +1,10 @@
+version: "3.8"
 services:
-  web:
-    build: .
+  app:
+    build:
+      context: .
     ports:
-      - "3000:3000"  # Map port 3000 inside the container to port 3000 on the host machine
-    volumes:
-      - .:/app  # Mount the local directory to the /app directory inside the container (useful for live reload during development)
+      - "3000:3000"
     environment:
-      - NODE_ENV=production  # Set the environment to production for optimized performance
-    command: ["npm", "run", "start"]  # Start the app in production mode
+      - NODE_ENV=production
+    command: npm start
