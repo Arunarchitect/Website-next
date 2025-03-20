@@ -1,41 +1,52 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Node.js dependencies
+node_modules/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Build output
+.next/
+out/
 
-# testing
-/coverage
+# TypeScript build output (if using TypeScript with Next.js)
+*.tsbuildinfo
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# Dependency directories
+/.pnp
+.pnp.js
 
-# vercel
-.vercel
+# Next.js
+# Next.js automatically creates a `.next` directory for build output.
+.next/
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Docker
+# Docker files for cache and build output
+.docker/
+
+# Local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE and Editor directories
+.vscode/
+.idea/
+*.sublime-workspace
+
+# Test and coverage output
+coverage/
+
+# Yarn and npm lock files (optional)
+# You may choose to include these if you want to version them.
+# yarn.lock
+# package-lock.json
+
