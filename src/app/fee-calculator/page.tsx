@@ -47,11 +47,11 @@ const BudgetCalculator: React.FC = () => {
   const [selectAll, setSelectAll] = useState<boolean>(false); // State to manage "Select All" checkbox
 
   const handleCalculate = () => {
-    let total = 0;
-    let selectedServices = [];
-
+    let total = 0; // Change const to let since we are modifying total
+    const selectedServices = [];
+  
     const designfee = 175; // Hardcoded design fee constant
-
+  
     Object.keys(selectedComponents).forEach((service) => {
       if (selectedComponents[service]) {
         const feeMultiplier = feePercentages[service] / 100; // Convert percentage to multiplier
@@ -60,9 +60,10 @@ const BudgetCalculator: React.FC = () => {
         selectedServices.push(service); // Track selected services
       }
     });
-
+  
     setResult(total); // Set the result after calculation
   };
+  
 
   // Function to generate and download the PDF
   const generatePDF = () => {

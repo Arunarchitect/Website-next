@@ -1,3 +1,5 @@
+// src/app/layout.tsx
+
 'use client'; // Marking this file as a client component
 
 import React, { useState, useEffect } from 'react';
@@ -6,7 +8,7 @@ import Link from 'next/link';
 import './globals.css'; // Optionally import global CSS if you have any
 
 // This layout will wrap the entire application
-const Layout: React.FC = ({ children }) => {
+const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false); // State for hamburger menu
   const [isPageLoaded, setIsPageLoaded] = useState(false); // State to track page load
   const router = useRouter(); // Next.js Router
