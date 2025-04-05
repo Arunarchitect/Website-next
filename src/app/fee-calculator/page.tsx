@@ -6,11 +6,12 @@ import React, { useState } from 'react';
 import { jsPDF } from 'jspdf';
 
 const BudgetCalculator: React.FC = () => {
-  const [area, setArea] = useState<number>(0);
-  const [promoCode, setPromoCode] = useState<string>(''); // New: promo code
-  const [baseFee, setBaseFee] = useState<number | null>(null); // Fetched fee
+  const [area, setArea] = useState<number | ''>('');
+  const [promoCode, setPromoCode] = useState<string>('');
+  const [baseFee, setBaseFee] = useState<number | null>(null);
   const [result, setResult] = useState<number | null>(null);
   const [selectAll, setSelectAll] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedComponents, setSelectedComponents] = useState<{ [key: string]: boolean }>({
     'Advance, Site visit': false,
     'Sketch Design': false,
@@ -44,7 +45,7 @@ const BudgetCalculator: React.FC = () => {
     'Wardrobe Design': 7.2,
     'Interior Finish': 2.4,
     'Gate & Wall Design': 2.4,
-    'Completion Drawings': 1.6,
+    'Completion Drawings': 1.5,
   };
 
   const handleCheckboxChange = (service: string) => {
@@ -62,10 +63,21 @@ const BudgetCalculator: React.FC = () => {
   };
 
   const handleCalculate = async () => {
-    if (!area) return alert('Please enter area');
+    setError(null);
+    if (!area) {
+      setError('Please enter area');
+      return;
+    }
+
     try {
       const res = await fetch(`https://api.modelflick.com/api/fee/?promo_code=${promoCode}`);
       const data = await res.json();
+
+      if (data.error === 'No valid promo code.') {
+        setError('No valid promo code.');
+        return;
+      }
+
       const designFee = data.base_fee_per_sqft;
       setBaseFee(designFee);
 
@@ -80,7 +92,7 @@ const BudgetCalculator: React.FC = () => {
       setResult(total);
     } catch (err) {
       console.error('Error fetching fee:', err);
-      alert('Failed to fetch fee. Please try again.');
+      setError('Failed to fetch fee. Please try again.');
     }
   };
 
@@ -104,25 +116,29 @@ const BudgetCalculator: React.FC = () => {
   };
 
   return (
-    <div className="bg-black text-white min-h-screen flex flex-col justify-center items-center p-4">
+    <div className="bg-black text-white min-h-screen flex flex-col items-center p-4 pt-20 sm:pt-24 overflow-y-auto">
       <h1 className="text-4xl sm:text-6xl md:text-8xl uppercase font-extrabold mb-8 text-center">
-        Budget Calculator
+        Know your Design Fee!
       </h1>
 
       <div className="mb-4 w-full max-w-md">
         <label htmlFor="area" className="text-lg block mb-1">Area (in sq.ft):</label>
         <input
-          type="number"
-          id="area"
-          className="bg-gray-800 text-white py-2 px-4 rounded w-full"
-          value={area}
-          onChange={(e) => setArea(Number(e.target.value))}
-          placeholder="Enter area in sq.ft"
-        />
+  type="number"
+  id="area"
+  className="bg-gray-800 text-white py-2 px-4 rounded w-full"
+  value={area}
+  onChange={(e) => {
+    const val = e.target.value;
+    setArea(val === '' ? '' : Number(val));
+  }}
+  placeholder="Enter your area in square feet"
+/>
+
       </div>
 
       <div className="mb-4 w-full max-w-md">
-        <label htmlFor="promoCode" className="text-lg block mb-1">Promo Code (optional):</label>
+        <label htmlFor="promoCode" className="text-lg block mb-1">Security Code:</label>
         <input
           type="text"
           id="promoCode"
@@ -166,9 +182,15 @@ const BudgetCalculator: React.FC = () => {
         Calculate
       </button>
 
+      {error && (
+        <div className="bg-red-600 text-white px-4 py-2 rounded mt-4 max-w-md w-full text-center font-medium">
+          {error}
+        </div>
+      )}
+
       {result !== null && (
         <div className="mt-8 text-xl text-center">
-          <p>Total Estimated Cost:</p>
+          <p>Your Design Fee is:</p>
           <p className="font-bold">₹{result.toLocaleString()}</p>
         </div>
       )}
