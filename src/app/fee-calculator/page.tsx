@@ -1,12 +1,16 @@
 // src/app/budget-calculator/page.tsx
 
-'use client'; // Marking this file as a client component
+'use client';
 
 import React, { useState } from 'react';
-import { jsPDF } from 'jspdf'; // Import jsPDF
+import { jsPDF } from 'jspdf';
 
 const BudgetCalculator: React.FC = () => {
-  const [area, setArea] = useState<number>(0); // Area in sq.ft
+  const [area, setArea] = useState<number>(0);
+  const [promoCode, setPromoCode] = useState<string>(''); // New: promo code
+  const [baseFee, setBaseFee] = useState<number | null>(null); // Fetched fee
+  const [result, setResult] = useState<number | null>(null);
+  const [selectAll, setSelectAll] = useState<boolean>(false);
   const [selectedComponents, setSelectedComponents] = useState<{ [key: string]: boolean }>({
     'Advance, Site visit': false,
     'Sketch Design': false,
@@ -43,90 +47,93 @@ const BudgetCalculator: React.FC = () => {
     'Completion Drawings': 1.6,
   };
 
-  const [result, setResult] = useState<number | null>(null); // The calculated result
-  const [selectAll, setSelectAll] = useState<boolean>(false); // State to manage "Select All" checkbox
-
-  const handleCalculate = () => {
-    let total = 0; // Change const to let since we are modifying total
-    const selectedServices = [];
-  
-    const designfee = 175; // Hardcoded design fee constant
-  
-    Object.keys(selectedComponents).forEach((service) => {
-      if (selectedComponents[service]) {
-        const feeMultiplier = feePercentages[service] / 100; // Convert percentage to multiplier
-        const feeComponent = designfee * feeMultiplier; // Multiply design fee by the multiplier
-        total += feeComponent * area; // Calculate the fee for the selected service and multiply by area
-        selectedServices.push(service); // Track selected services
-      }
-    });
-  
-    setResult(total); // Set the result after calculation
-  };
-  
-
-  // Function to generate and download the PDF
-  const generatePDF = () => {
-    const doc = new jsPDF();
-
-    // Add Title
-    doc.setFontSize(20);
-    doc.text('Budget Calculator Report', 20, 20);
-
-    // Add Calculated Result
-    doc.setFontSize(14);
-    doc.text(`Area: ${area} sq.ft`, 20, 40);
-
-    // List selected services
-    const selectedServices = Object.keys(selectedComponents).filter(service => selectedComponents[service]);
-    doc.text(`Selected Options: ${selectedServices.join(', ')}`, 20, 50);
-
-    // Add Result to PDF
-    doc.text(`Calculated Result: ${result} rupees.`, 20, 60);
-
-    // Save the PDF with a filename
-    doc.save('budget-calculator-report.pdf');
-  };
-
   const handleCheckboxChange = (service: string) => {
-    setSelectedComponents((prevState) => ({
-      ...prevState,
-      [service]: !prevState[service],
+    setSelectedComponents((prev) => ({
+      ...prev,
+      [service]: !prev[service],
     }));
   };
 
-  // Function to handle "Select All" checkbox
   const handleSelectAllChange = () => {
-    setSelectAll(!selectAll);
-    const newSelectedComponents = Object.keys(selectedComponents).reduce((acc, service) => {
-      acc[service] = !selectAll;
-      return acc;
-    }, {} as { [key: string]: boolean });
+    const newState = !selectAll;
+    setSelectAll(newState);
+    const updated = Object.fromEntries(Object.keys(selectedComponents).map(key => [key, newState]));
+    setSelectedComponents(updated);
+  };
 
-    setSelectedComponents(newSelectedComponents);
+  const handleCalculate = async () => {
+    if (!area) return alert('Please enter area');
+    try {
+      const res = await fetch(`https://api.modelflick.com/api/fee/?promo_code=${promoCode}`);
+      const data = await res.json();
+      const designFee = data.base_fee_per_sqft;
+      setBaseFee(designFee);
+
+      let total = 0;
+      Object.keys(selectedComponents).forEach(service => {
+        if (selectedComponents[service]) {
+          const percent = feePercentages[service] / 100;
+          total += designFee * percent * area;
+        }
+      });
+
+      setResult(total);
+    } catch (err) {
+      console.error('Error fetching fee:', err);
+      alert('Failed to fetch fee. Please try again.');
+    }
+  };
+
+  const generatePDF = () => {
+    const doc = new jsPDF();
+
+    doc.setFontSize(20);
+    doc.text('Budget Calculator Report', 20, 20);
+
+    doc.setFontSize(14);
+    doc.text(`Area: ${area} sq.ft`, 20, 40);
+    doc.text(`Promo Code: ${promoCode || 'None'}`, 20, 50);
+    doc.text(`Base Fee per sq.ft: ₹${baseFee}`, 20, 60);
+
+    const selected = Object.keys(selectedComponents).filter(service => selectedComponents[service]);
+    doc.text(`Selected Options: ${selected.join(', ')}`, 20, 70);
+
+    doc.text(`Total Estimated Cost: ₹${result}`, 20, 90);
+
+    doc.save('budget-calculator-report.pdf');
   };
 
   return (
     <div className="bg-black text-white min-h-screen flex flex-col justify-center items-center p-4">
-      <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl xl:text-9xl uppercase font-extrabold mb-8">
+      <h1 className="text-4xl sm:text-6xl md:text-8xl uppercase font-extrabold mb-8 text-center">
         Budget Calculator
       </h1>
 
-      {/* Input field for area */}
-      <div className="mb-4">
-        <label htmlFor="area" className="text-lg sm:text-xl">Area (in sq.ft):</label>
+      <div className="mb-4 w-full max-w-md">
+        <label htmlFor="area" className="text-lg block mb-1">Area (in sq.ft):</label>
         <input
           type="number"
           id="area"
-          className="bg-gray-800 text-white py-2 px-4 rounded mt-2 w-72"
+          className="bg-gray-800 text-white py-2 px-4 rounded w-full"
           value={area}
           onChange={(e) => setArea(Number(e.target.value))}
           placeholder="Enter area in sq.ft"
         />
       </div>
 
-      {/* Select All Checkbox */}
-      <div className="mb-4">
+      <div className="mb-4 w-full max-w-md">
+        <label htmlFor="promoCode" className="text-lg block mb-1">Promo Code (optional):</label>
+        <input
+          type="text"
+          id="promoCode"
+          className="bg-gray-800 text-white py-2 px-4 rounded w-full"
+          value={promoCode}
+          onChange={(e) => setPromoCode(e.target.value)}
+          placeholder="Enter promo code"
+        />
+      </div>
+
+      <div className="mb-4 w-full max-w-md">
         <input
           type="checkbox"
           id="select-all"
@@ -134,11 +141,10 @@ const BudgetCalculator: React.FC = () => {
           onChange={handleSelectAllChange}
           className="mr-2"
         />
-        <label htmlFor="select-all" className="text-lg sm:text-xl">Select All</label>
+        <label htmlFor="select-all" className="text-lg">Select All</label>
       </div>
 
-      {/* Checkbox inputs for all service components */}
-      <div className="space-y-4 mb-8 max-h-80 overflow-auto">
+      <div className="space-y-2 mb-8 max-h-80 overflow-auto w-full max-w-md">
         {Object.keys(feePercentages).map((service) => (
           <div key={service}>
             <input
@@ -148,32 +154,29 @@ const BudgetCalculator: React.FC = () => {
               onChange={() => handleCheckboxChange(service)}
               className="mr-2"
             />
-            <label htmlFor={service} className="text-lg sm:text-xl">{service}</label>
+            <label htmlFor={service} className="text-base">{service}</label>
           </div>
         ))}
       </div>
 
-      {/* Calculate button */}
       <button
         onClick={handleCalculate}
-        className="bg-white text-black py-2 px-6 rounded-lg text-xl uppercase font-bold hover:bg-gray-200 transition duration-300"
+        className="bg-white text-black py-2 px-6 rounded-lg text-xl font-bold hover:bg-gray-300 transition"
       >
         Calculate
       </button>
 
-      {/* Display the result */}
       {result !== null && (
-        <div className="mt-8 text-xl sm:text-2xl">
-          <p>The calculated result is:</p>
-          <p className="font-bold">{result} rupees.</p>
+        <div className="mt-8 text-xl text-center">
+          <p>Total Estimated Cost:</p>
+          <p className="font-bold">₹{result.toLocaleString()}</p>
         </div>
       )}
 
-      {/* PDF Download Button */}
       {result !== null && (
         <button
           onClick={generatePDF}
-          className="bg-white text-black py-2 px-6 rounded-lg text-xl uppercase font-bold hover:bg-gray-200 transition duration-300 mt-4"
+          className="bg-white text-black py-2 px-6 rounded-lg text-xl font-bold hover:bg-gray-300 transition mt-4"
         >
           Download PDF Report
         </button>
