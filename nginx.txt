@@ -1,0 +1,51 @@
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name modelflick.com www.modelflick.com;
+
+    # Redirect all HTTP traffic to HTTPS
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS server block
+server {
+    listen 443 ssl;
+    server_name modelflick.com www.modelflick.com;
+
+    # SSL configuration (managed by Certbot)
+    ssl_certificate /etc/letsencrypt/live/modelflick.com/fullchain.pem;  # Path to SSL cert
+    ssl_certificate_key /etc/letsencrypt/live/modelflick.com/privkey.pem;  # Path to SSL key
+    include /etc/letsencrypt/options-ssl-nginx.conf;  # SSL optimization
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;  # SSL Diffie-Hellman parameters
+
+    # Proxy to the Next.js app running on port 3000
+    location / {
+        proxy_pass http://localhost:3000;  # Assuming Next.js app is running on port 3000
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Optional: Serve static files directly via Nginx (if needed)
+    location /static/ {
+        root /root/Website-django;  # Adjust the path to your static files directory
+    }
+
+    # Optional: Serve media files (if needed)
+    location /media/ {
+        root /root/Website-django;  # Adjust the path to your media files directory
+    }
+
+    # Error page handling (optional)
+    error_page 404 /404.html;
+    location = /404.html {
+        root /usr/share/nginx/html;
+    }
+
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+}
+
