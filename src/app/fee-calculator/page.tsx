@@ -1,9 +1,8 @@
-// src/app/budget-calculator/page.tsx
-
 'use client';
 
 import React, { useState } from 'react';
 import { jsPDF } from 'jspdf';
+import 'svg2pdf.js'; // Adds the svg() method to jsPDF
 
 const BudgetCalculator: React.FC = () => {
   const [area, setArea] = useState<number | ''>('');
@@ -47,6 +46,13 @@ const BudgetCalculator: React.FC = () => {
     'Gate & Wall Design': 2.4,
     'Completion Drawings': 1.5,
   };
+
+  const escapeXML = (str: string) =>
+    str.replace(/&/g, '&amp;')
+       .replace(/</g, '&lt;')
+       .replace(/>/g, '&gt;')
+       .replace(/"/g, '&quot;')
+       .replace(/'/g, '&apos;');
 
   const handleCheckboxChange = (service: string) => {
     setSelectedComponents((prev) => ({
@@ -96,24 +102,51 @@ const BudgetCalculator: React.FC = () => {
     }
   };
 
-  const generatePDF = () => {
-    const doc = new jsPDF();
-
-    doc.setFontSize(20);
-    doc.text('Budget Calculator Report', 20, 20);
-
-    doc.setFontSize(14);
-    doc.text(`Area: ${area} sq.ft`, 20, 40);
-    doc.text(`Promo Code: ${promoCode || 'None'}`, 20, 50);
-    doc.text(`Base Fee per sq.ft: ₹${baseFee}`, 20, 60);
-
-    const selected = Object.keys(selectedComponents).filter(service => selectedComponents[service]);
-    doc.text(`Selected Options: ${selected.join(', ')}`, 20, 70);
-
-    doc.text(`Total Estimated Cost: ₹${result}`, 20, 90);
-
-    doc.save('budget-calculator-report.pdf');
+  const generatePDF = async () => {
+    try {
+      const response = await fetch('/svg/template.svg');
+      let svgText = await response.text();
+  
+      const selected = Object.keys(selectedComponents).filter(service => selectedComponents[service]);
+  
+      // Generate bullet list in two columns
+      const column1X = 70;
+      const column2X = 300;
+      const startY = 250;
+      const lineHeight = 24;
+      const mid = Math.ceil(selected.length / 2);
+  
+      const bulletElements = selected.map((item, index) => {
+        const col = index < mid ? 0 : 1;
+        const x = col === 0 ? column1X : column2X;
+        const y = startY + (index % mid) * lineHeight;
+        const text = `• ${item}`;
+        return `<text x="${x}" y="${y}">${escapeXML(text)}</text>`;
+      }).join('\n');
+  
+      // Replace placeholders
+      svgText = svgText
+        .replace('{{AREA}}', escapeXML(`${area} sq.ft`))
+        .replace('{{PROMO}}', escapeXML(promoCode || 'None'))
+        .replace('{{BASE_FEE}}', escapeXML(`${baseFee}`))
+        .replace('{{TOTAL}}', escapeXML(`₹${result?.toLocaleString()}`))
+        .replace('{{BULLET_LIST}}', bulletElements);
+  
+      const parser = new DOMParser();
+      const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+      const svgElement = svgDoc.documentElement;
+  
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  
+      // @ts-ignore
+      await pdf.svg(svgElement, { x: 0, y: 0, width: 595, height: 842 });
+  
+      pdf.save('budget-calculator-report.pdf');
+    } catch (err) {
+      console.error('Error generating PDF:', err);
+    }
   };
+  
 
   return (
     <div className="bg-black text-white min-h-screen flex flex-col items-center p-4 pt-20 sm:pt-24 overflow-y-auto">
@@ -124,17 +157,16 @@ const BudgetCalculator: React.FC = () => {
       <div className="mb-4 w-full max-w-md">
         <label htmlFor="area" className="text-lg block mb-1">Area (in sq.ft):</label>
         <input
-  type="number"
-  id="area"
-  className="bg-gray-800 text-white py-2 px-4 rounded w-full"
-  value={area}
-  onChange={(e) => {
-    const val = e.target.value;
-    setArea(val === '' ? '' : Number(val));
-  }}
-  placeholder="Enter your area in square feet"
-/>
-
+          type="number"
+          id="area"
+          className="bg-gray-800 text-white py-2 px-4 rounded w-full"
+          value={area}
+          onChange={(e) => {
+            const val = e.target.value;
+            setArea(val === '' ? '' : Number(val));
+          }}
+          placeholder="Enter your area in square feet"
+        />
       </div>
 
       <div className="mb-4 w-full max-w-md">

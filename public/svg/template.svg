@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="595pt"
+   height="842pt"
+   viewBox="0 0 595 842"
+   version="1.1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <style>
+    text {
+      font-family: 'ISOCPEUR', Arial, sans-serif;
+      fill: black;
+      font-size: 16px;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .label {
+      font-weight: bold;
+    }
+  </style>
+
+  <text x="50" y="80" class="title">Know Your Design Fee!</text>
+
+  <text x="50" y="130"><tspan class="label">Area:</tspan> {{AREA}}</text>
+  <text x="50" y="160"><tspan class="label">Promo Code:</tspan> {{PROMO}}</text>
+  <text x="50" y="190"><tspan class="label">Base Fee/sq.ft:</tspan> ₹{{BASE_FEE}}</text>
+  <text x="50" y="220"><tspan class="label">Selected Components:</tspan></text>
+
+  <!-- Bullet list placeholder, rendered dynamically -->
+  {{BULLET_LIST}}
+
+  <text x="50" y="600"><tspan class="label">Total Fee:</tspan> ₹{{TOTAL}}</text>
+</svg>

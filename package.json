@@ -12,7 +12,8 @@
     "jspdf": "^3.0.1",
     "next": "15.2.3",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "svg2pdf.js": "^2.5.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
