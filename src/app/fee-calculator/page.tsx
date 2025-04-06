@@ -138,8 +138,9 @@ const BudgetCalculator: React.FC = () => {
   
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
   
-      // @ts-ignore
+      // @ts-expect-error
       await pdf.svg(svgElement, { x: 0, y: 0, width: 595, height: 842 });
+
   
       pdf.save('budget-calculator-report.pdf');
     } catch (err) {
