@@ -2,7 +2,13 @@
 
 import React, { useState } from 'react';
 import { jsPDF } from 'jspdf';
-import 'svg2pdf.js'; // Adds the svg() method to jsPDF
+import 'svg2pdf.js';
+
+declare module 'jspdf' {
+  interface jsPDF {
+    svg: (element: SVGElement, options?: any) => Promise<void>;
+  }
+}
 
 const BudgetCalculator: React.FC = () => {
   const [area, setArea] = useState<number | ''>('');
@@ -11,6 +17,7 @@ const BudgetCalculator: React.FC = () => {
   const [result, setResult] = useState<number | null>(null);
   const [selectAll, setSelectAll] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
   const [selectedComponents, setSelectedComponents] = useState<{ [key: string]: boolean }>({
     'Advance, Site visit': false,
     'Sketch Design': false,
@@ -91,7 +98,7 @@ const BudgetCalculator: React.FC = () => {
       Object.keys(selectedComponents).forEach(service => {
         if (selectedComponents[service]) {
           const percent = feePercentages[service] / 100;
-          total += designFee * percent * area;
+          total += designFee * percent * Number(area);
         }
       });
 
@@ -104,50 +111,44 @@ const BudgetCalculator: React.FC = () => {
 
   const generatePDF = async () => {
     try {
+      console.log('Starting PDF generation...');
       const response = await fetch('/svg/template.svg');
-      let svgText = await response.text();
-  
+      const svgText = await response.text();
+      console.log('SVG template loaded');
+
       const selected = Object.keys(selectedComponents).filter(service => selectedComponents[service]);
-  
-      // Generate bullet list in two columns
+
       const column1X = 70;
       const column2X = 300;
       const startY = 250;
       const lineHeight = 24;
       const mid = Math.ceil(selected.length / 2);
-  
+
       const bulletElements = selected.map((item, index) => {
         const col = index < mid ? 0 : 1;
         const x = col === 0 ? column1X : column2X;
         const y = startY + (index % mid) * lineHeight;
-        const text = `• ${item}`;
-        return `<text x="${x}" y="${y}">${escapeXML(text)}</text>`;
+        return `<text x="${x}" y="${y}">• ${escapeXML(item)}</text>`;
       }).join('\n');
-  
-      // Replace placeholders
-      svgText = svgText
+
+      const filledSVG = svgText
         .replace('{{AREA}}', escapeXML(`${area} sq.ft`))
         .replace('{{PROMO}}', escapeXML(promoCode || 'None'))
         .replace('{{BASE_FEE}}', escapeXML(`${baseFee}`))
-        .replace('{{TOTAL}}', escapeXML(`₹${result?.toLocaleString()}`))
+        .replace('{{TOTAL}}', escapeXML(`${result?.toLocaleString()}`))
         .replace('{{BULLET_LIST}}', bulletElements);
-  
-      const parser = new DOMParser();
-      const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
-      const svgElement = svgDoc.documentElement;
-  
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-  
-      // @ts-expect-error
-      await pdf.svg(svgElement, { x: 0, y: 0, width: 595, height: 842 });
 
-  
+      const parser = new DOMParser();
+      const svgDoc = parser.parseFromString(filledSVG, 'image/svg+xml');
+      const svgElement = svgDoc.documentElement;
+
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      await pdf.svg(svgElement, { x: 0, y: 0, width: 595, height: 842 });
       pdf.save('budget-calculator-report.pdf');
     } catch (err) {
       console.error('Error generating PDF:', err);
     }
   };
-  
 
   return (
     <div className="bg-black text-white min-h-screen flex flex-col items-center p-4 pt-20 sm:pt-24 overflow-y-auto">
@@ -222,19 +223,19 @@ const BudgetCalculator: React.FC = () => {
       )}
 
       {result !== null && (
-        <div className="mt-8 text-xl text-center">
-          <p>Your Design Fee is:</p>
-          <p className="font-bold">₹{result.toLocaleString()}</p>
-        </div>
-      )}
+        <>
+          <div className="mt-8 text-xl text-center">
+            <p>Your Design Fee is:</p>
+            <p className="font-bold">₹{result.toLocaleString()}</p>
+          </div>
 
-      {result !== null && (
-        <button
-          onClick={generatePDF}
-          className="bg-white text-black py-2 px-6 rounded-lg text-xl font-bold hover:bg-gray-300 transition mt-4"
-        >
-          Download PDF Report
-        </button>
+          <button
+            onClick={generatePDF}
+            className="bg-white text-black py-2 px-6 rounded-lg text-xl font-bold hover:bg-gray-300 transition mt-4"
+          >
+            Download PDF Report
+          </button>
+        </>
       )}
     </div>
   );

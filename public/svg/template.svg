@@ -27,11 +27,11 @@
 
   <text x="50" y="130"><tspan class="label">Area:</tspan> {{AREA}}</text>
   <text x="50" y="160"><tspan class="label">Promo Code:</tspan> {{PROMO}}</text>
-  <text x="50" y="190"><tspan class="label">Base Fee/sq.ft:</tspan> ₹{{BASE_FEE}}</text>
+  <text x="50" y="190"><tspan class="label">Base Fee/sq.ft:</tspan> Rs. {{BASE_FEE}}</text>
   <text x="50" y="220"><tspan class="label">Selected Components:</tspan></text>
 
   <!-- Bullet list placeholder, rendered dynamically -->
   {{BULLET_LIST}}
 
-  <text x="50" y="600"><tspan class="label">Total Fee:</tspan> ₹{{TOTAL}}</text>
+  <text x="50" y="600"><tspan class="label">Total Fee:</tspan> Rs. {{TOTAL}}</text>
 </svg>
