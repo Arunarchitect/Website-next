@@ -4,11 +4,6 @@ import React, { useState } from 'react';
 import { jsPDF } from 'jspdf';
 import 'svg2pdf.js';
 
-declare module 'jspdf' {
-  interface jsPDF {
-    svg: (element: SVGElement, options?: any) => Promise<void>;
-  }
-}
 
 const BudgetCalculator: React.FC = () => {
   const [area, setArea] = useState<number | ''>('');
@@ -19,8 +14,8 @@ const BudgetCalculator: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedComponents, setSelectedComponents] = useState<{ [key: string]: boolean }>({
-    'Advance, Site visit': false,
-    'Sketch Design': false,
+    'Advance Payment , Initial Site visit': false,
+    'First Sketch Design': false,
     'Detailed Plan': false,
     'Statutory Permit': false,
     'Structural Drawing': false,
@@ -31,14 +26,14 @@ const BudgetCalculator: React.FC = () => {
     'Toilet Design': false,
     'Kitchen Design': false,
     'Wardrobe Design': false,
-    'Interior Finish': false,
+    'Selection of Interior Finish': false,
     'Gate & Wall Design': false,
     'Completion Drawings': false,
   });
 
   const feePercentages: { [key: string]: number } = {
-    'Advance, Site visit': 5.0,
-    'Sketch Design': 16.0,
+    'Advance Payment, Initial Site visit': 5.0,
+    'First Sketch Design': 16.0,
     'Detailed Plan': 12.0,
     'Statutory Permit': 8.0,
     'Structural Drawing': 12.0,
@@ -49,7 +44,7 @@ const BudgetCalculator: React.FC = () => {
     'Toilet Design': 4.0,
     'Kitchen Design': 5.6,
     'Wardrobe Design': 7.2,
-    'Interior Finish': 2.4,
+    'Selection of Interior Finish': 2.4,
     'Gate & Wall Design': 2.4,
     'Completion Drawings': 1.5,
   };
@@ -242,3 +237,4 @@ const BudgetCalculator: React.FC = () => {
 };
 
 export default BudgetCalculator;
+ Payment  Initial
