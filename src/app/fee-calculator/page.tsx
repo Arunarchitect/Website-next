@@ -14,7 +14,7 @@ const BudgetCalculator: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedComponents, setSelectedComponents] = useState<{ [key: string]: boolean }>({
-    'Advance Payment , Initial Site visit': false,
+    'Advance Payment, Initial Site visit': false,
     'First Sketch Design': false,
     'Detailed Plan': false,
     'Statutory Permit': false,
@@ -237,4 +237,3 @@ const BudgetCalculator: React.FC = () => {
 };
 
 export default BudgetCalculator;
- Payment  Initial
