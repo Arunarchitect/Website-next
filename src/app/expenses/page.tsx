@@ -200,10 +200,11 @@ export default function ExpensesPage() {
       ...expense,
       item_id: expense.item.id,
       category_id: expense.category.id,
-      brand_id: expense.brand?.id || '',
-      shop_id: expense.shop?.id || '',
+      brand_id: expense.brand?.id ?? undefined, // Use `undefined` instead of an empty string
+      shop_id: expense.shop?.id ?? undefined,  // Use `undefined` instead of an empty string
     });
   };
+  
 
   const handleFieldChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -239,13 +240,6 @@ export default function ExpensesPage() {
     }
   };
 
-  interface CopyExpensePayload extends Omit<Expense, 'id'> {
-    item_id: number;
-    category_id: number;
-    who_spent_id: number;
-    brand_id?: number; // Optional because not every expense has a brand
-    shop_id?: number;  // Optional because not every expense has a shop
-  }
 
   type CopyExpensePayload = Omit<Expense, 'id'> & {
     item_id: number;
