@@ -53,6 +53,7 @@ const ClientLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => 
             <Link href="/about" className="hover:text-gray-400">About</Link>
             <Link href="/services" className="hover:text-gray-400">Services</Link>
             <Link href="/projects" className="hover:text-gray-400">Projects</Link>
+            <Link href="/expenses" className="hover:text-gray-400">Expenses</Link>
             <Link href="/contact" className="hover:text-gray-400">Contact</Link>
           </div>
         </div>
@@ -69,6 +70,7 @@ const ClientLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => 
             <button className="block text-white text-2xl uppercase" onClick={() => closeMenuAndNavigate("/about")}>About</button>
             <button className="block text-white text-2xl uppercase" onClick={() => closeMenuAndNavigate("/services")}>Services</button>
             <button className="block text-white text-2xl uppercase" onClick={() => closeMenuAndNavigate("/projects")}>Projects</button>
+            <button className="block text-white text-2xl uppercase" onClick={() => closeMenuAndNavigate("/expenses")}>Expenses</button>
             <button className="block text-white text-2xl uppercase" onClick={() => closeMenuAndNavigate("/contact")}>Contact</button>
           </div>
         </div>
