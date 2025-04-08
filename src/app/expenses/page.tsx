@@ -7,7 +7,6 @@ import { saveAs } from 'file-saver';
 
 const CORRECT_PIN = '1234';
 
-// Define types for the nested objects. Adjust according to your models.
 type Item = {
   id: number;
   name: string;
@@ -36,23 +35,19 @@ type MonthlyExpenses = {
 };
 
 export default function ExpensesPage() {
-  // Authentication and error state
   const [pinInput, setPinInput] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
-  const [createExpenseError, setCreateExpenseError] = useState<string>('');
+  const [createExpenseError, setCreateExpenseError] = useState('');
 
-  // Expenses and grouping
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [grouped, setGrouped] = useState<MonthlyExpenses>({});
 
-  // Dropdown data lists
   const [itemsList, setItemsList] = useState<Item[]>([]);
   const [categoriesList, setCategoriesList] = useState<Category[]>([]);
   const [brandsList, setBrandsList] = useState<Brand[]>([]);
   const [shopsList, setShopsList] = useState<Shop[]>([]);
 
-  // Inline creation states for dropdown lists
   const [isAddingNewItem, setIsAddingNewItem] = useState(false);
   const [newItemName, setNewItemName] = useState('');
 
@@ -65,13 +60,23 @@ export default function ExpensesPage() {
   const [isAddingNewShop, setIsAddingNewShop] = useState(false);
   const [newShopName, setNewShopName] = useState('');
 
-  // For editing an existing expense.
   const [editingId, setEditingId] = useState<number | null>(null);
-  // editedExpense stores changes; for dropdowns we expect editedExpense.item_id, etc.
-  const [editedExpense, setEditedExpense] = useState<Partial<Expense>>({});
+  const [editedExpense, setEditedExpense] = useState<Partial<Expense & {
+    item_id: number | string;
+    category_id: number | string;
+    brand_id: number | string;
+    shop_id: number | string;
+  }>>({});
 
-  // New expense creation; note each foreign key field is separate.
-  const [newExpense, setNewExpense] = useState<Partial<Expense>>({
+  const [newExpense, setNewExpense] = useState<Partial<Expense & {
+    item_id: string;
+    category_id: string;
+    brand_id: string;
+    shop_id: string;
+    quantity: string;
+    price: string;
+    rate: string;
+  }>>({
     date_of_purchase: '',
     item_id: '',
     category_id: '',
@@ -90,7 +95,6 @@ export default function ExpensesPage() {
     else setError('Incorrect PIN');
   };
 
-  // Fetch expenses and group by month.
   const fetchExpenses = () => {
     fetch('https://api.modelflick.com/expenses/expenses/')
       .then((res) => res.json())
@@ -110,7 +114,6 @@ export default function ExpensesPage() {
       });
   };
 
-  // Fetch dropdown data.
   const fetchItems = () => {
     fetch('https://api.modelflick.com/expenses/items/')
       .then((res) => res.json())
@@ -191,10 +194,8 @@ export default function ExpensesPage() {
     saveAs(blob, 'expenses.csv');
   };
 
-  // --- Editing Handlers ---
   const handleEdit = (expense: Expense) => {
     setEditingId(expense.id);
-    // For editing, initialize editedExpense with dropdown fields using ids.
     setEditedExpense({
       ...expense,
       item_id: expense.item.id,
@@ -227,7 +228,6 @@ export default function ExpensesPage() {
       .catch((err) => console.error(err));
   };
 
-  // --- Delete Handler ---
   const handleDelete = (expenseId: number) => {
     if (window.confirm('Are you sure you want to delete this expense?')) {
       fetch(`https://api.modelflick.com/expenses/expenses/${expenseId}/`, { method: 'DELETE' })
@@ -239,19 +239,21 @@ export default function ExpensesPage() {
     }
   };
 
-  // --- Copy Handler ---
   const handleCopy = (expense: Expense) => {
     const { id, ...copyData } = expense;
-    copyData['item_id'] = expense.item.id;
-    copyData['category_id'] = expense.category.id;
-    if (expense.brand) copyData['brand_id'] = expense.brand.id;
-    if (expense.shop) copyData['shop_id'] = expense.shop.id;
-    copyData['who_spent_id'] = expense.who_spent.id;
+    const copyPayload: any = {
+      ...copyData,
+      item_id: expense.item.id,
+      category_id: expense.category.id,
+      who_spent_id: expense.who_spent.id,
+    };
+    if (expense.brand) copyPayload.brand_id = expense.brand.id;
+    if (expense.shop) copyPayload.shop_id = expense.shop.id;
 
     fetch('https://api.modelflick.com/expenses/expenses/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(copyData),
+      body: JSON.stringify(copyPayload),
     })
       .then((res) => {
         if (!res.ok) throw new Error('Failed to copy the expense.');
@@ -261,22 +263,24 @@ export default function ExpensesPage() {
       .catch((err) => console.error(err));
   };
 
-  // --- New Expense Handlers ---
   const handleNewExpenseChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setNewExpense((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleCreateNewExpense = () => {
-    setCreateExpenseError(''); // reset any previous error
+    setCreateExpenseError('');
     const payload: any = {
       ...newExpense,
-      item_id: newExpense.item_id,
-      category_id: newExpense.category_id,
-      who_spent_id: 1, // Adjust as needed.
+      item_id: Number(newExpense.item_id),
+      category_id: Number(newExpense.category_id),
+      who_spent_id: 1,
+      quantity: Number(newExpense.quantity),
+      price: Number(newExpense.price),
+      rate: Number(newExpense.rate),
     };
-    if (newExpense.brand_id) payload.brand_id = newExpense.brand_id;
-    if (newExpense.shop_id) payload.shop_id = newExpense.shop_id;
+    if (newExpense.brand_id) payload.brand_id = Number(newExpense.brand_id);
+    if (newExpense.shop_id) payload.shop_id = Number(newExpense.shop_id);
 
     fetch('https://api.modelflick.com/expenses/expenses/', {
       method: 'POST',
@@ -292,7 +296,6 @@ export default function ExpensesPage() {
         return res.json();
       })
       .then(() => {
-        // Clear the new expense fields on success.
         setNewExpense({
           date_of_purchase: '',
           item_id: '',
@@ -314,7 +317,6 @@ export default function ExpensesPage() {
       });
   };
 
-  // --- New Item Handlers ---
   const handleNewItemNameChange = (e: ChangeEvent<HTMLInputElement>) => setNewItemName(e.target.value);
   const handleAddNewItem = () => {
     fetch('https://api.modelflick.com/expenses/items/', {
@@ -328,14 +330,13 @@ export default function ExpensesPage() {
       })
       .then((data: Item) => {
         fetchItems();
-        setNewExpense((prev) => ({ ...prev, item_id: data.id }));
+        setNewExpense((prev) => ({ ...prev, item_id: String(data.id) }));
         setNewItemName('');
         setIsAddingNewItem(false);
       })
       .catch((err) => console.error(err));
   };
 
-  // --- New Category Handlers ---
   const handleNewCategoryNameChange = (e: ChangeEvent<HTMLInputElement>) => setNewCategoryName(e.target.value);
   const handleAddNewCategory = () => {
     fetch('https://api.modelflick.com/expenses/categories/', {
@@ -349,14 +350,13 @@ export default function ExpensesPage() {
       })
       .then((data: Category) => {
         fetchCategories();
-        setNewExpense((prev) => ({ ...prev, category_id: data.id }));
+        setNewExpense((prev) => ({ ...prev, category_id: String(data.id) }));
         setNewCategoryName('');
         setIsAddingNewCategory(false);
       })
       .catch((err) => console.error(err));
   };
 
-  // --- New Brand Handlers ---
   const handleNewBrandNameChange = (e: ChangeEvent<HTMLInputElement>) => setNewBrandName(e.target.value);
   const handleAddNewBrand = () => {
     fetch('https://api.modelflick.com/expenses/brands/', {
@@ -370,14 +370,13 @@ export default function ExpensesPage() {
       })
       .then((data: Brand) => {
         fetchBrands();
-        setNewExpense((prev) => ({ ...prev, brand_id: data.id }));
+        setNewExpense((prev) => ({ ...prev, brand_id: String(data.id) }));
         setNewBrandName('');
         setIsAddingNewBrand(false);
       })
       .catch((err) => console.error(err));
   };
 
-  // --- New Shop Handlers ---
   const handleNewShopNameChange = (e: ChangeEvent<HTMLInputElement>) => setNewShopName(e.target.value);
   const handleAddNewShop = () => {
     fetch('https://api.modelflick.com/expenses/shops/', {
@@ -391,7 +390,7 @@ export default function ExpensesPage() {
       })
       .then((data: Shop) => {
         fetchShops();
-        setNewExpense((prev) => ({ ...prev, shop_id: data.id }));
+        setNewExpense((prev) => ({ ...prev, shop_id: String(data.id) }));
         setNewShopName('');
         setIsAddingNewShop(false);
       })
@@ -419,7 +418,6 @@ export default function ExpensesPage() {
     );
   }
 
-  // Render each existing expense row.
   const renderRow = (expense: Expense) => {
     const isEditing = editingId === expense.id;
     return (
@@ -437,7 +435,6 @@ export default function ExpensesPage() {
             expense.date_of_purchase
           )}
         </td>
-        {/* Item Column */}
         <td className="p-1 border">
           {isEditing ? (
             <select
@@ -456,7 +453,6 @@ export default function ExpensesPage() {
             expense.item.name
           )}
         </td>
-        {/* Category Column */}
         <td className="p-1 border">
           {isEditing ? (
             <select
@@ -475,7 +471,6 @@ export default function ExpensesPage() {
             expense.category.name
           )}
         </td>
-        {/* Brand Column */}
         <td className="p-1 border">
           {isEditing ? (
             <select
@@ -484,6 +479,7 @@ export default function ExpensesPage() {
               onChange={handleFieldChange}
               className="border rounded px-1 py-0.5"
             >
+              <option value="">-</option>
               {brandsList.map((brand) => (
                 <option key={brand.id} value={brand.id}>
                   {brand.name}
@@ -494,7 +490,6 @@ export default function ExpensesPage() {
             expense.brand?.name || '-'
           )}
         </td>
-        {/* Shop Column */}
         <td className="p-1 border">
           {isEditing ? (
             <select
@@ -503,6 +498,7 @@ export default function ExpensesPage() {
               onChange={handleFieldChange}
               className="border rounded px-1 py-0.5"
             >
+              <option value="">-</option>
               {shopsList.map((shop) => (
                 <option key={shop.id} value={shop.id}>
                   {shop.name}
@@ -513,7 +509,6 @@ export default function ExpensesPage() {
             expense.shop?.name || '-'
           )}
         </td>
-        {/* Quantity */}
         <td className="p-1 border">
           {isEditing ? (
             <input
@@ -527,7 +522,6 @@ export default function ExpensesPage() {
             expense.quantity
           )}
         </td>
-        {/* Unit */}
         <td className="p-1 border">
           {isEditing ? (
             <select
@@ -549,7 +543,6 @@ export default function ExpensesPage() {
             expense.unit
           )}
         </td>
-        {/* Price */}
         <td className="p-1 border">
           {isEditing ? (
             <input
@@ -564,7 +557,6 @@ export default function ExpensesPage() {
             `₹${expense.price}`
           )}
         </td>
-        {/* Rate */}
         <td className="p-1 border">
           {isEditing ? (
             <input
@@ -580,7 +572,6 @@ export default function ExpensesPage() {
             `₹${parseFloat(String(expense.rate || 0)).toFixed(2)}`
           )}
         </td>
-        {/* Remarks */}
         <td className="p-1 border">
           {isEditing ? (
             <input
@@ -594,7 +585,6 @@ export default function ExpensesPage() {
             expense.remarks
           )}
         </td>
-        {/* Actions */}
         <td className="p-1 border">
           {isEditing ? (
             <button onClick={() => handleSave(expense.id)} title="Save" className="text-green-600 mr-2">
@@ -618,10 +608,8 @@ export default function ExpensesPage() {
     );
   };
 
-  // New expense row with separate columns for each field.
   const renderNewExpenseRow = () => (
     <tr className="border bg-gray-50">
-      {/* Date */}
       <td className="p-1 border">
         <input
           type="date"
@@ -631,8 +619,6 @@ export default function ExpensesPage() {
           className="border rounded px-1 py-0.5"
         />
       </td>
-  
-      {/* Item Column */}
       <td className="p-1 border">
         <div className="flex items-center">
           <select
@@ -658,8 +644,6 @@ export default function ExpensesPage() {
           </button>
         </div>
       </td>
-  
-      {/* Category Column */}
       <td className="p-1 border">
         <div className="flex items-center">
           <select
@@ -685,8 +669,6 @@ export default function ExpensesPage() {
           </button>
         </div>
       </td>
-  
-      {/* Brand Column */}
       <td className="p-1 border">
         <div className="flex items-center">
           <select
@@ -712,8 +694,6 @@ export default function ExpensesPage() {
           </button>
         </div>
       </td>
-  
-      {/* Shop Column */}
       <td className="p-1 border">
         <div className="flex items-center">
           <select
@@ -739,8 +719,6 @@ export default function ExpensesPage() {
           </button>
         </div>
       </td>
-  
-      {/* Quantity */}
       <td className="p-1 border">
         <input
           type="number"
@@ -750,8 +728,6 @@ export default function ExpensesPage() {
           className="border rounded px-1 py-0.5"
         />
       </td>
-  
-      {/* Unit */}
       <td className="p-1 border">
         <select
           name="unit"
@@ -769,8 +745,6 @@ export default function ExpensesPage() {
           <option value="sq.m">Square Metre</option>
         </select>
       </td>
-  
-      {/* Price */}
       <td className="p-1 border">
         <input
           type="number"
@@ -781,8 +755,6 @@ export default function ExpensesPage() {
           className="border rounded px-1 py-0.5"
         />
       </td>
-  
-      {/* Rate */}
       <td className="p-1 border">
         <input
           type="number"
@@ -794,8 +766,6 @@ export default function ExpensesPage() {
           disabled
         />
       </td>
-  
-      {/* Remarks */}
       <td className="p-1 border">
         <input
           type="text"
@@ -806,8 +776,6 @@ export default function ExpensesPage() {
           className="border rounded px-1 py-0.5"
         />
       </td>
-  
-      {/* Actions */}
       <td className="p-1 border">
         <button onClick={handleCreateNewExpense} title="Add New Expense" className="text-green-600">
           &#10003;
@@ -818,11 +786,9 @@ export default function ExpensesPage() {
       </td>
     </tr>
   );
-  
 
   return (
     <div className="p-6">
-      {/* Inline modals for new dropdown entries */}
       {isAddingNewItem && (
         <div className="mb-4 p-4 border rounded bg-gray-100 max-w-xs">
           <div className="flex flex-col">
