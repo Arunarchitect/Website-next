@@ -62,33 +62,33 @@ export default function ExpensesPage() {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editedExpense, setEditedExpense] = useState<Partial<Expense & {
-    item_id: number | string;
-    category_id: number | string;
-    brand_id: number | string;
-    shop_id: number | string;
+    item_id: number ;
+    category_id: number ;
+    brand_id: number ;
+    shop_id: number ;
   }>>({});
 
   const [newExpense, setNewExpense] = useState<Partial<Expense & {
-    item_id: string;
-    category_id: string;
-    brand_id: string;
-    shop_id: string;
-    quantity: string;
-    price: string;
-    rate: string;
+    item_id: number;
+    category_id: number;
+    brand_id: number;
+    shop_id: number;
+    quantity: number;
+    price: number;
+    rate: number;
   }>>({
-    date_of_purchase: '',
-    item_id: '',
-    category_id: '',
-    brand_id: '',
-    shop_id: '',
-    quantity: '',
-    unit: 'kg',
-    price: '',
-    rate: '',
-    remarks: '',
+    date_of_purchase: '',  // Assuming date_of_purchase is a string
+    item_id: 0,            // Default to a number, you can adjust the default value
+    category_id: 0,        // Default to a number
+    brand_id: 0,           // Default to a number
+    shop_id: 0,            // Default to a number
+    quantity: 0,           // Default to a number
+    unit: 'kg',            // Default to string (unit can be a string)
+    price: 0,              // Default to a number
+    rate: 0,               // Default to a number
+    remarks: '',           // Assuming remarks is a string
   });
-
+  
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (pinInput === CORRECT_PIN) setIsAuthenticated(true);
@@ -239,17 +239,36 @@ export default function ExpensesPage() {
     }
   };
 
+  interface CopyExpensePayload extends Omit<Expense, 'id'> {
+    item_id: number;
+    category_id: number;
+    who_spent_id: number;
+    brand_id?: number; // Optional because not every expense has a brand
+    shop_id?: number;  // Optional because not every expense has a shop
+  }
+
+  type CopyExpensePayload = Omit<Expense, 'id'> & {
+    item_id: number;
+    category_id: number;
+    who_spent_id: number;
+    brand_id?: number;
+    shop_id?: number;
+  };
+  
   const handleCopy = (expense: Expense) => {
-    const { id, ...copyData } = expense;
-    const copyPayload: any = {
-      ...copyData,
+    // Create the payload while omitting 'id' from the spread using Omit type
+    const copyPayload: CopyExpensePayload = {
+      ...expense,  // Spread everything except 'id' because 'id' is omitted
       item_id: expense.item.id,
       category_id: expense.category.id,
       who_spent_id: expense.who_spent.id,
     };
+  
+    // Conditionally add other properties if they exist
     if (expense.brand) copyPayload.brand_id = expense.brand.id;
     if (expense.shop) copyPayload.shop_id = expense.shop.id;
-
+  
+    // Send the POST request with copyPayload, which doesn't contain 'id'
     fetch('https://api.modelflick.com/expenses/expenses/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -259,9 +278,11 @@ export default function ExpensesPage() {
         if (!res.ok) throw new Error('Failed to copy the expense.');
         return res.json();
       })
-      .then(() => fetchExpenses())
-      .catch((err) => console.error(err));
+      .then(() => fetchExpenses())  // Refresh the expense list
+      .catch((err) => console.error(err));  // Handle any errors
   };
+  
+  
 
   const handleNewExpenseChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -269,19 +290,19 @@ export default function ExpensesPage() {
   };
 
   const handleCreateNewExpense = () => {
-    setCreateExpenseError('');
-    const payload: any = {
+    setCreateExpenseError(''); // Clear any existing error
+  
+    // Prepare the payload, no need to convert to numbers since they are already numbers
+    const payload = {
       ...newExpense,
-      item_id: Number(newExpense.item_id),
-      category_id: Number(newExpense.category_id),
-      who_spent_id: 1,
-      quantity: Number(newExpense.quantity),
-      price: Number(newExpense.price),
-      rate: Number(newExpense.rate),
+      who_spent_id: 1,  // Assuming a fixed value for 'who_spent_id'
     };
-    if (newExpense.brand_id) payload.brand_id = Number(newExpense.brand_id);
-    if (newExpense.shop_id) payload.shop_id = Number(newExpense.shop_id);
-
+  
+    // Conditionally add brand_id and shop_id to the payload if they are provided
+    if (newExpense.brand_id) payload.brand_id = newExpense.brand_id;
+    if (newExpense.shop_id) payload.shop_id = newExpense.shop_id;
+  
+    // Send the POST request to create the new expense
     fetch('https://api.modelflick.com/expenses/expenses/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -296,46 +317,52 @@ export default function ExpensesPage() {
         return res.json();
       })
       .then(() => {
+        // Reset the newExpense state after successful creation
         setNewExpense({
           date_of_purchase: '',
-          item_id: '',
-          category_id: '',
-          brand_id: '',
-          shop_id: '',
-          quantity: '',
-          unit: 'kg',
-          price: '',
-          rate: '',
+          item_id: 0,  // Default to number 0 for item_id
+          category_id: 0,  // Default to number 0 for category_id
+          brand_id: 0,  // Default to number 0 for brand_id
+          shop_id: 0,  // Default to number 0 for shop_id
+          quantity: 0,  // Default to number 0 for quantity
+          unit: 'kg',  // Default to 'kg' as a string
+          price: 0,  // Default to number 0 for price
+          rate: 0,  // Default to number 0 for rate
           remarks: '',
         });
-        setCreateExpenseError('');
-        fetchExpenses();
+  
+        setCreateExpenseError('');  // Clear any errors after successful creation
+        fetchExpenses();  // Refresh the expense list
       })
       .catch((err) => {
         console.error(err);
-        setCreateExpenseError(err.message);
+        setCreateExpenseError(err.message);  // Set the error message if any
       });
   };
+  
+  
 
   const handleNewItemNameChange = (e: ChangeEvent<HTMLInputElement>) => setNewItemName(e.target.value);
+  
   const handleAddNewItem = () => {
     fetch('https://api.modelflick.com/expenses/items/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newItemName }),
+      body: JSON.stringify({ name: newItemName }),  // Sending new item name to the API
     })
       .then((res) => {
         if (!res.ok) throw new Error('Failed to add new item.');
         return res.json();
       })
       .then((data: Item) => {
-        fetchItems();
-        setNewExpense((prev) => ({ ...prev, item_id: String(data.id) }));
-        setNewItemName('');
-        setIsAddingNewItem(false);
+        fetchItems();  // Refresh the items list
+        setNewExpense((prev) => ({ ...prev, item_id: data.id }));  // Update item_id as a number
+        setNewItemName('');  // Reset the item name input
+        setIsAddingNewItem(false);  // Close the "Add Item" form or UI
       })
-      .catch((err) => console.error(err));
+      .catch((err) => console.error(err));  // Log any errors that occur
   };
+  
 
   const handleNewCategoryNameChange = (e: ChangeEvent<HTMLInputElement>) => setNewCategoryName(e.target.value);
   const handleAddNewCategory = () => {
@@ -350,7 +377,7 @@ export default function ExpensesPage() {
       })
       .then((data: Category) => {
         fetchCategories();
-        setNewExpense((prev) => ({ ...prev, category_id: String(data.id) }));
+        setNewExpense((prev) => ({ ...prev, category_id: data.id }));
         setNewCategoryName('');
         setIsAddingNewCategory(false);
       })
@@ -370,7 +397,7 @@ export default function ExpensesPage() {
       })
       .then((data: Brand) => {
         fetchBrands();
-        setNewExpense((prev) => ({ ...prev, brand_id: String(data.id) }));
+        setNewExpense((prev) => ({ ...prev, brand_id: data.id }));
         setNewBrandName('');
         setIsAddingNewBrand(false);
       })
@@ -390,7 +417,7 @@ export default function ExpensesPage() {
       })
       .then((data: Shop) => {
         fetchShops();
-        setNewExpense((prev) => ({ ...prev, shop_id: String(data.id) }));
+        setNewExpense((prev) => ({ ...prev, shop_id: data.id }));
         setNewShopName('');
         setIsAddingNewShop(false);
       })
