@@ -5,7 +5,7 @@ import { Expense } from '@/types/expense';
 import { parseISO, format } from 'date-fns';
 import { saveAs } from 'file-saver';
 
-const CORRECT_PIN = '1234';
+const CORRECT_PIN = 'dream';
 
 type Item = {
   id: number;

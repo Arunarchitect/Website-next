@@ -9,7 +9,7 @@ interface WorkTypeDuration {
 }
 
 interface Deliverable {
-  name: string;
+  name: string;        // now a string instead of a relation object
   stage: string;
   status: string;
   remarks?: string;
