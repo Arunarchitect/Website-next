@@ -34,8 +34,13 @@ type MonthlyExpenses = {
   };
 };
 
-function getValue<T>(obj: T, path: string): any {
-  return path.split('.').reduce((acc: any, part) => acc?.[part], obj);
+function getValue<T>(obj: T, path: string): unknown {
+  return path.split('.').reduce<unknown>((acc, part) => {
+    if (acc && typeof acc === 'object' && part in acc) {
+      return (acc as Record<string, unknown>)[part];
+    }
+    return undefined;
+  }, obj);
 }
 
 
@@ -933,48 +938,53 @@ export default function ExpensesPage() {
       </div>
   
       {Object.entries(grouped).map(([month, { total, items }]) => {
-      const sortedItems = [...items];
-      if (sortConfig) {
-        sortedItems.sort((a, b) => {
-          let aVal = getValue(a, sortConfig.key);
-          let bVal = getValue(b, sortConfig.key);
-      
-          // Parse numbers explicitly
-          if (['quantity', 'price', 'rate'].includes(sortConfig.key)) {
-            aVal = Number(aVal);
-            bVal = Number(bVal);
-          }
-      
-          // Date sorting
-          if (sortConfig.key === 'date_of_purchase') {
-            aVal = new Date(aVal);
-            bVal = new Date(bVal);
-          }
-      
-          // Number comparison
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-          }
-      
-          // Date comparison
-          if (aVal instanceof Date && bVal instanceof Date) {
-            return sortConfig.direction === 'asc'
-              ? aVal.getTime() - bVal.getTime()
-              : bVal.getTime() - aVal.getTime();
-          }
-      
-          // String comparison
-          if (typeof aVal === 'string' && typeof bVal === 'string') {
-            aVal = aVal.toLowerCase();
-            bVal = bVal.toLowerCase();
-            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-            return 0;
-          }
-      
-          return 0;
-        });
+  const sortedItems = [...items];
+  if (sortConfig) {
+    sortedItems.sort((a, b) => {
+      let aVal = getValue(a, sortConfig.key);
+      let bVal = getValue(b, sortConfig.key);
+
+      // Parse numbers explicitly
+      if (['quantity', 'price', 'rate'].includes(sortConfig.key)) {
+        aVal = Number(aVal);
+        bVal = Number(bVal);
       }
+
+      // Date sorting
+      if (sortConfig.key === 'date_of_purchase') {
+        if (typeof aVal === 'string' || typeof aVal === 'number' || aVal instanceof Date) {
+          aVal = new Date(aVal);
+        }
+        if (typeof bVal === 'string' || typeof bVal === 'number' || bVal instanceof Date) {
+          bVal = new Date(bVal);
+        }
+      }
+
+      // Number comparison
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+
+      // Date comparison
+      if (aVal instanceof Date && bVal instanceof Date) {
+        return sortConfig.direction === 'asc'
+          ? aVal.getTime() - bVal.getTime()
+          : bVal.getTime() - aVal.getTime();
+      }
+
+      // String comparison
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const aStr = aVal.toLowerCase();
+        const bStr = bVal.toLowerCase();
+        if (aStr < bStr) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aStr > bStr) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      }
+
+      return 0;
+    });
+  }
+
       
 
         
