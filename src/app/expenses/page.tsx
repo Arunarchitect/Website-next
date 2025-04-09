@@ -34,6 +34,12 @@ type MonthlyExpenses = {
   };
 };
 
+function getValue<T>(obj: T, path: string): any {
+  return path.split('.').reduce((acc: any, part) => acc?.[part], obj);
+}
+
+
+
 export default function ExpensesPage() {
   const [pinInput, setPinInput] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -59,6 +65,9 @@ export default function ExpensesPage() {
 
   const [isAddingNewShop, setIsAddingNewShop] = useState(false);
   const [newShopName, setNewShopName] = useState('');
+
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editedExpense, setEditedExpense] = useState<Partial<Expense & {
@@ -808,6 +817,27 @@ export default function ExpensesPage() {
     </tr>
   );
 
+
+  const handleSort = (key: string) => {
+    setSortConfig((prev) => {
+      if (prev && prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+  
+  
+  const getArrow = (key: string) => {
+    if (sortConfig?.key === key) {
+      return sortConfig.direction === 'asc' ? ' ▲' : ' ▼';
+    }
+    return ' ⇅';
+  };
+  
+  
+  
+  
   return (
     <div className="p-6">
       {isAddingNewItem && (
@@ -894,42 +924,93 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
-
+  
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-semibold">Expenses by Month</h1>
         <button onClick={downloadCSV} className="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded">
           Download CSV
         </button>
       </div>
+  
+      {Object.entries(grouped).map(([month, { total, items }]) => {
+      const sortedItems = [...items];
+      if (sortConfig) {
+        sortedItems.sort((a, b) => {
+          let aVal = getValue(a, sortConfig.key);
+          let bVal = getValue(b, sortConfig.key);
+      
+          // Parse numbers explicitly
+          if (['quantity', 'price', 'rate'].includes(sortConfig.key)) {
+            aVal = Number(aVal);
+            bVal = Number(bVal);
+          }
+      
+          // Date sorting
+          if (sortConfig.key === 'date_of_purchase') {
+            aVal = new Date(aVal);
+            bVal = new Date(bVal);
+          }
+      
+          // Number comparison
+          if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+          }
+      
+          // Date comparison
+          if (aVal instanceof Date && bVal instanceof Date) {
+            return sortConfig.direction === 'asc'
+              ? aVal.getTime() - bVal.getTime()
+              : bVal.getTime() - aVal.getTime();
+          }
+      
+          // String comparison
+          if (typeof aVal === 'string' && typeof bVal === 'string') {
+            aVal = aVal.toLowerCase();
+            bVal = bVal.toLowerCase();
+            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+            return 0;
+          }
+      
+          return 0;
+        });
+      }
+      
 
-      {Object.entries(grouped).map(([month, { total, items }]) => (
-        <div key={month} className="mb-6">
-          <h2 className="text-xl font-bold mb-2">
-            {month} — ₹{total.toFixed(2)}
-          </h2>
-          <table className="w-full border text-sm">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="border p-1">Date</th>
-                <th className="border p-1">Item</th>
-                <th className="border p-1">Category</th>
-                <th className="border p-1">Brand</th>
-                <th className="border p-1">Shop</th>
-                <th className="border p-1">Qty</th>
-                <th className="border p-1">Unit</th>
-                <th className="border p-1">Price</th>
-                <th className="border p-1">Rate</th>
-                <th className="border p-1">Remarks</th>
-                <th className="border p-1">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((exp) => renderRow(exp))}
-              {renderNewExpenseRow()}
-            </tbody>
-          </table>
-        </div>
-      ))}
+        
+        
+  
+        return (
+          <div key={month} className="mb-6">
+            <h2 className="text-xl font-bold mb-2">
+              {month} — ₹{total.toFixed(2)}
+            </h2>
+            <table className="w-full border text-sm">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("date_of_purchase")}>Date{getArrow("date")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("item.name")}>Item{getArrow("item.name")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("category.name")}>Category{getArrow("category.name")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("brand.name")}>Brand{getArrow("brand.name")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("shop.name")}>Shop{getArrow("shop.name")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("quantity")}>Qty{getArrow("quantity")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("unit")}>Unit{getArrow("unit")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("price")}>Price{getArrow("price")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("rate")}>Rate{getArrow("rate")}</th>
+                  <th className="border p-1 cursor-pointer" onClick={() => handleSort("remarks")}>Remarks{getArrow("remarks")}</th>
+                  <th className="border p-1">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {renderNewExpenseRow()}
+                {sortedItems.map((exp) => renderRow(exp))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
     </div>
   );
+  
+  
 }
