@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.2",
+    "@heroicons/react": "^2.2.0",
     "@reduxjs/toolkit": "^2.7.0",
     "async-mutex": "^0.5.0",
     "classnames": "^2.5.1",

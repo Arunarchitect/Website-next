@@ -7,6 +7,10 @@ interface Config {
 	labelId: string;
 	type: string;
 	value: string;
+	link?: {
+		linkText:string;
+		linkUrl:string;
+	}
 	required?: boolean;
 }
 
@@ -34,6 +38,7 @@ export default function Form({
 					type={input.type}
 					onChange={onChange}
 					value={input.value}
+					link={input.link}
 					required={input.required}
 				>
 					{input.labelText}
