@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, ChangeEvent } from "react";
+import { useState, ChangeEvent, FormEvent } from "react";
 import Link from "next/link";
+import { useRegisterMutation } from "@/redux/features/authApiSlice";
+import { toast } from "react-toastify";
+import { useRouter } from "next/navigation";
 
 export default function Page() {
-  const [ formData, setFormData ] = useState({
+  const router = useRouter();
+  const [register, { isLoading }] = useRegisterMutation();
+
+  const [formData, setFormData] = useState({
     first_name: "",
     last_name: "",
     email: "",
@@ -17,6 +23,20 @@ export default function Page() {
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.target;
     setFormData({ ...formData, [name]: value });
+  };
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+
+    register({ first_name, last_name, email, password, re_password })
+      .unwrap()
+      .then(() => {
+        toast.success("Please check email");
+        router.push("/auth/login");
+      })
+      .catch(() => {
+        toast.error("Failed to register");
+      });
   };
 
   return (
@@ -33,7 +53,7 @@ export default function Page() {
       </div>
 
       <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm">
-        <form action="#" method="POST" className="space-y-6">
+        <form action="#" className="space-y-6" onSubmit={onSubmit}>
           <div>
             <label
               htmlFor="first_name"

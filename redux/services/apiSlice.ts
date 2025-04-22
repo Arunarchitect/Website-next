@@ -1,4 +1,4 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query";
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type {
   BaseQueryFn,
   FetchArgs,
@@ -10,7 +10,7 @@ import { Mutex } from "async-mutex";
 // create a new mutex
 const mutex = new Mutex();
 const baseQuery = fetchBaseQuery({
-  baseUrl: `${process.env.PUBLIC_HOST}/api`,
+  baseUrl:`${process.env.NEXT_PUBLIC_HOST || 'https://api.modelflick.com'}/api`,
   credentials: "include",
 });
 const baseQueryWithReauth: BaseQueryFn<

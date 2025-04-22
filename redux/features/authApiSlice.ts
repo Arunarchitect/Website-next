@@ -6,6 +6,11 @@ interface User {
   email: string;
 }
 
+interface AuthResponse {
+  access: string;
+  refresh: string;
+}
+
 interface GoogleAuthArgs {
   provider: string;
   state: string;
@@ -15,11 +20,45 @@ interface GoogleAuthArgs {
 interface CreateUserResponse {
   success: boolean;
   user: User;
+  tokens?: AuthResponse;
+}
+
+interface LoginArgs {
+  email: string;
+  password: string;
+}
+
+interface RegisterArgs {
+  first_name: string;
+  last_name: string;
+  email: string;
+  password: string;
+  re_password: string;
+}
+
+interface VerifyArgs {
+  token: string;
+}
+
+interface ActivationArgs {
+  uid: string;
+  token: string;
+}
+
+interface ResetPasswordArgs {
+  email: string;
+}
+
+interface ResetPasswordConfirmArgs {
+  uid: string;
+  token: string;
+  new_password: string;
+  re_new_password: string;
 }
 
 const authApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    retrieveUser: builder.query({
+    retrieveUser: builder.query<User, void>({
       query: () => "/users/me/",
     }),
     googleAuthenticate: builder.mutation<CreateUserResponse, GoogleAuthArgs>({
@@ -34,47 +73,48 @@ const authApiSlice = apiSlice.injectEndpoints({
         },
       }),
     }),
-    login: builder.mutation({
+    login: builder.mutation<AuthResponse, LoginArgs>({
       query: ({ email, password }) => ({
         url: "/jwt/create/",
         method: "POST",
         body: { email, password },
       }),
     }),
-    register: builder.mutation({
-      query: ({ first_name, last_name, email, password , re_password}) => ({
-        url: "/jwt/create/",
+    register: builder.mutation<User, RegisterArgs>({
+      query: ({ first_name, last_name, email, password, re_password }) => ({
+        url: "/users/",
         method: "POST",
         body: { first_name, last_name, email, password, re_password },
       }),
     }),
-    verify: builder.mutation({
-      query: () => ({
+    verify: builder.mutation<void, VerifyArgs>({
+      query: ({ token }) => ({
         url: "/jwt/verify/",
         method: "POST",
+        body: { token },
       }),
     }),
-    logout: builder.mutation({
+    logout: builder.mutation<void, void>({
       query: () => ({
         url: "/logout/",
         method: "POST",
       }),
     }),
-    activation: builder.mutation({
+    activation: builder.mutation<void, ActivationArgs>({
       query: ({ uid, token }) => ({
         url: "/users/activation/",
         method: "POST",
         body: { uid, token },
       }),
     }),
-    resetPassword: builder.mutation({
+    resetPassword: builder.mutation<void, ResetPasswordArgs>({
       query: ({ email }) => ({
         url: "/users/reset_password/",
         method: "POST",
         body: { email },
       }),
     }),
-    resetPasswordConfirm: builder.mutation({
+    resetPasswordConfirm: builder.mutation<void, ResetPasswordConfirmArgs>({
       query: ({ uid, token, new_password, re_new_password }) => ({
         url: "/users/reset_password_confirm/",
         method: "POST",
@@ -88,6 +128,7 @@ export const {
   useRetrieveUserQuery,
   useGoogleAuthenticateMutation,
   useLoginMutation,
+  useRegisterMutation,
   useVerifyMutation,
   useLogoutMutation,
   useActivationMutation,
