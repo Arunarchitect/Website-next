@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { RegisterForm } from "@/components/forms";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Modelflick | Register",
+  description: "Modelflick register page",
+};
 
 export default function Page() {
   return (
