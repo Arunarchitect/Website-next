@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRegisterMutation } from "@/redux/features/authApiSlice";
 import { toast } from "react-toastify";
 import { useRouter } from "next/navigation";
+import Spinner from "@/components/common/Spinner";
 
 export default function Page() {
   const router = useRouter();
@@ -150,12 +151,13 @@ export default function Page() {
               />
             </div>
           </div>
+
           <div>
             <button
               type="submit"
               className="flex w-full justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm/6 font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             >
-              Sign Up
+              {isLoading ? < Spinner sm /> : 'Sign Up'}
             </button>
           </div>
         </form>
