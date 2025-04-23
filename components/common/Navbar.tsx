@@ -12,7 +12,6 @@ import { NavLink } from '@/components/common';
 export default function Navbar() {
 	const pathname = usePathname();
 	const dispatch = useAppDispatch();
-	const router = useRouter(); // Initialize the router
 
 	const [logout] = useLogoutMutation();
 
@@ -23,7 +22,6 @@ export default function Navbar() {
 			.unwrap()
 			.then(() => {
 				dispatch(setLogout());
-				router.push('/'); // Navigate to homepage after logout
 			});
 	};
 
@@ -70,7 +68,7 @@ export default function Navbar() {
 					<div className='mx-auto max-w-7xl px-2 sm:px-6 lg:px-8'>
 						<div className='relative flex h-16 items-center justify-between'>
 							<div className='absolute inset-y-0 left-0 flex items-center sm:hidden'>
-								<DisclosureButton className='inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white'>
+								<Disclosure.Button className='inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white'>
 									<span className='sr-only'>
 										Open main menu
 									</span>
@@ -85,12 +83,12 @@ export default function Navbar() {
 											aria-hidden='true'
 										/>
 									)}
-								</DisclosureButton>
+								</Disclosure.Button>
 							</div>
 							<div className='flex flex-1 items-center justify-center sm:items-stretch sm:justify-start'>
 								<div className='flex flex-shrink-0 items-center'>
 									<NavLink href='/' isBanner>
-										Modelflick
+										Full Auth
 									</NavLink>
 								</div>
 								<div className='hidden sm:ml-6 sm:block'>
@@ -104,13 +102,13 @@ export default function Navbar() {
 						</div>
 					</div>
 
-					<DisclosurePanel className='sm:hidden'>
+					<Disclosure.Panel className='sm:hidden'>
 						<div className='space-y-1 px-2 pb-3 pt-2'>
 							{isAuthenticated
 								? authLinks(true)
 								: guestLinks(true)}
 						</div>
-					</DisclosurePanel>
+					</Disclosure.Panel>
 				</>
 			)}
 		</Disclosure>
