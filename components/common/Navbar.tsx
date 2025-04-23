@@ -10,7 +10,8 @@ import Link from "next/link";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import { logout as setLogout } from "@/redux/features/authSlice";
 import { useLogoutMutation } from "@/redux/features/authApiSlice";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
+import { NavLink } from "@/components/common";
 
 export default function Navbar() {
   const router = useRouter();
@@ -18,6 +19,8 @@ export default function Navbar() {
   const dispatch = useAppDispatch();
 
   const [logout] = useLogoutMutation();
+
+  const pathname = usePathname();
 
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
@@ -32,8 +35,41 @@ export default function Navbar() {
       });
   };
 
-  const authLinks = <div>AUTH LINKS</div>;
-  const guestLinks = <div>GUEST LINKS</div>;
+  const isSelected = (path: string) => (pathname === path ? true : false);
+
+  const authLinks = (isMobile: boolean) => (
+    <>
+      <NavLink
+        isSelected={isSelected("/dashboard")}
+        isMobile={isMobile}
+        href="/auth/login"
+      >
+        Register
+      </NavLink>
+      <NavLink isMobile={isMobile} onClick={handleLogout}>
+        Logout
+      </NavLink>
+    </>
+  );
+
+  const guestLinks = (isMobile: boolean) => (
+    <>
+      <NavLink
+        isSelected={isSelected("/auth/login")}
+        isMobile={isMobile}
+        href="/auth/login"
+      >
+        Login
+      </NavLink>
+      <NavLink
+        isSelected={isSelected("/auth/register")}
+        isMobile={isMobile}
+        href="/auth/register"
+      >
+        Dashboard
+      </NavLink>
+    </>
+  );
 
   return (
     <Disclosure as="nav" className="bg-gray-800">
@@ -56,16 +92,13 @@ export default function Navbar() {
           </div>
           <div className="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
             <div className="flex shrink-0 items-center">
-              <Link
-                className="text-gray-300 rounded-md px-3 py-2 font-medium"
-                href="/"
-              >
+              <NavLink href="/" isBanner>
                 Modelflick
-              </Link>
+              </NavLink>
             </div>
             <div className="hidden sm:ml-6 sm:block">
               <div className="flex space-x-4">
-                {isAuthenticated ? authLinks : guestLinks}
+                {isAuthenticated ? authLinks(false) : guestLinks(false)}
               </div>
             </div>
           </div>
@@ -74,7 +107,7 @@ export default function Navbar() {
 
       <DisclosurePanel className="sm:hidden">
         <div className="space-y-1 px-2 pt-2 pb-3">
-          {isAuthenticated ? authLinks : guestLinks}
+          {isAuthenticated ? authLinks(true) : guestLinks(true)}
         </div>
       </DisclosurePanel>
     </Disclosure>
