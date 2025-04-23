@@ -13,9 +13,9 @@ export default function Page() {
   useEffect(() => {
     const uid = params?.uid as string;
     const token = params?.token as string;
-
+  
     if (!uid || !token) return;
-
+  
     activation({ uid, token })
       .unwrap()
       .then(() => {
@@ -27,7 +27,8 @@ export default function Page() {
       .finally(() => {
         router.push("/auth/login");
       });
-  }, [params]);
+  }, [params, activation, router]);  // added activation and router to the dependency array
+  
 
   return (
     <div className="flex min-h-full flex-1 flex-col justify-center px-6 py-12 lg:px-8">
