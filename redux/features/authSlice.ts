@@ -1,14 +1,14 @@
-import { createSlice } from "@reduxjs/toolkit";
+import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 }
 
-const initialState = {
+const initialState: AuthState = {
   isAuthenticated: false,
   isLoading: true,
-} as AuthState;
+};
 
 const authSlice = createSlice({
   name: "auth",
@@ -19,6 +19,9 @@ const authSlice = createSlice({
     },
     logout: (state) => {
       state.isAuthenticated = false;
+      // Clear tokens from storage
+      localStorage.removeItem('access');
+      // Clear cookies by hitting logout endpoint
     },
     finishInitialLoad: (state) => {
       state.isLoading = false;
@@ -27,4 +30,4 @@ const authSlice = createSlice({
 });
 
 export const { setAuth, logout, finishInitialLoad } = authSlice.actions;
-export default authSlice.reducer
+export default authSlice.reducer;

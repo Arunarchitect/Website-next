@@ -60,6 +60,7 @@ const authApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     retrieveUser: builder.query<User, void>({
       query: () => "/users/me/",
+      providesTags: ['User'],
     }),
     googleAuthenticate: builder.mutation<CreateUserResponse, GoogleAuthArgs>({
       query: ({ provider, state, code }) => ({
@@ -72,6 +73,7 @@ const authApiSlice = apiSlice.injectEndpoints({
           "Content-Type": "application/x-www-form-urlencoded",
         },
       }),
+      invalidatesTags: ['User'],
     }),
     login: builder.mutation<AuthResponse, LoginArgs>({
       query: ({ email, password }) => ({
@@ -79,6 +81,7 @@ const authApiSlice = apiSlice.injectEndpoints({
         method: "POST",
         body: { email, password },
       }),
+      invalidatesTags: ['User'],
     }),
     register: builder.mutation<User, RegisterArgs>({
       query: ({ first_name, last_name, email, password, re_password }) => ({
@@ -87,7 +90,7 @@ const authApiSlice = apiSlice.injectEndpoints({
         body: { first_name, last_name, email, password, re_password },
       }),
     }),
-    verify: builder.mutation<void, VerifyArgs>({
+    verify: builder.mutation<void, { token: string }>({
       query: ({ token }) => ({
         url: "/jwt/verify/",
         method: "POST",
@@ -99,6 +102,7 @@ const authApiSlice = apiSlice.injectEndpoints({
         url: "/logout/",
         method: "POST",
       }),
+      invalidatesTags: ['User'],
     }),
     activation: builder.mutation<void, ActivationArgs>({
       query: ({ uid, token }) => ({
