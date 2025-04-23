@@ -1,23 +1,22 @@
-import { PasswordResetConfirmForm } from "@/components/forms";
-import type { Metadata } from "next";
-import Image from "next/image";
+// app/password-reset/[uid]/[token]/page.tsx
+import { PasswordResetConfirmForm } from '@/components/forms';
+import type { Metadata } from 'next';
+import Image from 'next/image';
+import { use } from 'react'
 
-// Page metadata
+// Optional metadata for the route
 export const metadata: Metadata = {
-  title: "Modelflick | Password Reset Confirm",
-  description: "Modelflick password reset confirm page",
+  title: 'Full Auth | Password Reset Confirm',
+  description: 'Full Auth password reset confirm page',
 };
 
-// Correct typing: receives params from Next.js router
-type PageProps = {
-  params: {
-    uid: string;
-    token: string;
-  };
-};
-
-export default function Page({ params }: PageProps) {
-  const { uid, token } = params;
+// ✅ In App Router, params are automatically passed (not a Promise)
+export default function Page({
+  params,
+}: {
+  params: Promise<{ uid: string; token: string }>
+}) {
+  const { uid, token } = use(params)
 
   return (
     <div className="flex min-h-full flex-1 flex-col justify-center px-6 py-12 lg:px-8">
