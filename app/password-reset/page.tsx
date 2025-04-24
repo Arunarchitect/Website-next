@@ -18,7 +18,7 @@ export default function Page() {
 						  width={40} // specify the width
 						  height={40} // specify the height
 						/>
-				<h2 className='mt-10 text-center text-2xl font-bold leading-9 tracking-tight text-gray-900'>
+				<h2 className='mt-10 text-center text-2xl font-bold leading-9 tracking-tight text-gray-700 dark:text-gray-300'>
 					Reset your password
 				</h2>
 			</div>

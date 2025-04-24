@@ -19,13 +19,14 @@ export default function Page() {
           width={40}  // specify the width
           height={40}  // specify the height
         />
-        <h2 className="mt-10 text-center text-2xl/9 font-bold tracking-tight text-gray-900">
+        <h2 className=" mt-10 text-center text-2xl/9 font-bold tracking-tight text-gray-700 dark:text-gray-300">
           Sign in to your Account
         </h2>
       </div>
 
-      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm">
-        <LoginForm />
+      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm ">
+        
+        <LoginForm  />
 
         <p className="mt-10 text-center text-sm/6 text-gray-500">
           Don&apos;t have an Account?{" "}

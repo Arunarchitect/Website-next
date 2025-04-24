@@ -19,7 +19,7 @@ export default function Page() {
           width={40} // specify the width
           height={40} // specify the height
         />
-        <h2 className="mt-10 text-center text-2xl/9 font-bold tracking-tight text-gray-900">
+        <h2 className="mt-10 text-center text-2xl/9 font-bold tracking-tighttext-gray-700 dark:text-gray-300">
           Sign Up
         </h2>
       </div>
