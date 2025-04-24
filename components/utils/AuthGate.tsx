@@ -3,8 +3,12 @@
 import { useAppSelector } from '@/redux/hooks';
 import { Spinner } from '@/components/common';
 
-export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isLoading } = useAppSelector(state => state.auth);
+interface Props {
+  children: React.ReactNode;
+}
+
+export default function AuthGate({ children }: Props) {
+  const { isLoading } = useAppSelector((state) => state.auth);
 
   if (isLoading) {
     return (
