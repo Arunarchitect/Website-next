@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect } from 'react';
 import { useAppDispatch } from '@/redux/hooks';
 import { setAuth, finishInitialLoad, logout } from '@/redux/features/authSlice';
@@ -10,30 +12,25 @@ export default function useVerify() {
   const router = useRouter();
 
   useEffect(() => {
-    const access = localStorage.getItem('access');
-    
-    if (access) {
-      verify({ token: access })
-        .unwrap()
-        .then(() => {
+    const verifyToken = async () => {
+      const access = localStorage.getItem('access');
+      
+      try {
+        if (access) {
+          await verify({ token: access }).unwrap();
           dispatch(setAuth());
-          dispatch(finishInitialLoad());
-        })
-        .catch(() => {
+        } else {
           dispatch(logout());
-          dispatch(finishInitialLoad());
-        });
-    } else {
-      dispatch(finishInitialLoad());
-    }
+        }
+      } catch (error) {
+        dispatch(logout());
+      } finally {
+        dispatch(finishInitialLoad());
+      }
+    };
+
+    verifyToken();
   }, [dispatch, verify]);
 
-  useEffect(() => {
-    // Automatically reload the page if authentication state changes
-    const authState = localStorage.getItem('access');
-    if (authState && typeof window !== 'undefined') {
-      // Using window.location.href for reloading the page without full reload
-      window.location.href = window.location.href;
-    }
-  }, [router]);
+  // No more automatic reload - state changes will trigger re-renders
 }

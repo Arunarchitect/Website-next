@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { redirect } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAppSelector } from '@/redux/hooks';
 import { Spinner } from '@/components/common';
 
@@ -11,12 +11,18 @@ interface Props {
 
 export default function RequireAuth({ children }: Props) {
   const { isAuthenticated, isLoading } = useAppSelector((state) => state.auth);
+  const router = useRouter();
 
   useEffect(() => {
-    console.log('Auth state:', { isLoading, isAuthenticated });
-  }, [isLoading, isAuthenticated]);
+    if (!isLoading && !isAuthenticated) {
+      // Add a slight delay to prevent flash of content
+      const timer = setTimeout(() => {
+        router.push('/auth/login');
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, isAuthenticated, router]);
 
-  // While checking token validity (hydrating)
   if (isLoading) {
     return (
       <div className="flex justify-center my-8">
@@ -25,12 +31,5 @@ export default function RequireAuth({ children }: Props) {
     );
   }
 
-  // Token is checked, but user is not authenticated
-  if (!isAuthenticated) {
-    redirect('/auth/login');
-    return null;
-  }
-
-  // Auth is verified
-  return <>{children}</>;
+  return isAuthenticated ? <>{children}</> : null;
 }
