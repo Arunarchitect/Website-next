@@ -4,7 +4,7 @@ import "./globals.css";
 import { Navbar, Footer } from "@/components/common";
 import Provider from "@/redux/provider";
 import { Setup } from "@/components/utils";
-
+import AuthGate from "@/components/utils/AuthGate"; // 👈 add this
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,9 +33,13 @@ export default function RootLayout({
       >
         <Provider>
           <Setup />
-          <Navbar />
-          <div className="mx-auto max-w-7xl px-2 sm:px-6 lg:px-8 my-8">{children}</div>
-          <Footer />
+          <AuthGate> {/* 👈 Add this */}
+            <Navbar />
+            <div className="mx-auto max-w-7xl px-2 sm:px-6 lg:px-8 my-8">
+              {children}
+            </div>
+            <Footer />
+          </AuthGate>
         </Provider>
       </body>
     </html>
