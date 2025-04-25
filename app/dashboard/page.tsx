@@ -5,13 +5,6 @@ import { List, Spinner } from '@/components/common';
 import { useRouter } from 'next/navigation';
 import WorklogForm from '@/components/forms/WorklogForm';
 
-interface UserData {
-  id: number;
-  first_name?: string;
-  last_name?: string;
-  email?: string;
-}
-
 export default function DashboardPage() {
   const { data: user, isLoading, isFetching } = useRetrieveUserQuery();
   const router = useRouter();

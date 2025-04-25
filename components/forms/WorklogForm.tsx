@@ -6,12 +6,25 @@ import {
   useGetProjectsQuery,
   useGetWorkTypesQuery
 } from '@/redux/features/worklogApiSlice';
-import { useRetrieveUserQuery } from '@/redux/features/authApiSlice';
 
-export default function WorklogForm() {
-  const { data: user } = useRetrieveUserQuery();
-  const { data: projects = [], isLoading: loadingProjects } = useGetProjectsQuery();
-  const { data: workTypes = [], isLoading: loadingWorkTypes } = useGetWorkTypesQuery();
+interface Project {
+  id: number;
+  name: string;
+}
+
+interface WorkType {
+  id: number;
+  name: string;
+}
+
+// Define props interface to accept userId
+interface WorklogFormProps {
+  userId: number;
+}
+
+export default function WorklogForm({ userId }: WorklogFormProps) {
+  const { data: projects = [] } = useGetProjectsQuery();
+  const { data: workTypes = [] } = useGetWorkTypesQuery();
 
   const [createWorklog, { isLoading }] = useCreateWorklogMutation();
 
@@ -32,14 +45,14 @@ export default function WorklogForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.id) return;
+    if (!userId) return;
 
     const payload = {
       project: Number(formData.project),
       work_type: Number(formData.work_type),
       start_time: new Date(formData.start_time).toISOString(),
       end_time: new Date(formData.end_time).toISOString(),
-      employee: user.id,
+      employee: userId,
     };
 
     console.log("Submitting worklog payload:", payload);
@@ -55,7 +68,6 @@ export default function WorklogForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 p-4 max-w-md mx-auto bg-white rounded-lg shadow">
-      
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700">Project</label>
         <select
@@ -66,7 +78,7 @@ export default function WorklogForm() {
           className="w-full px-3 py-2 border rounded-md"
         >
           <option value="">Select a project</option>
-          {projects.map((p: any) => (
+          {projects.map((p: Project) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
@@ -84,7 +96,7 @@ export default function WorklogForm() {
           className="w-full px-3 py-2 border rounded-md"
         >
           <option value="">Select work type</option>
-          {workTypes.map((w: any) => (
+          {workTypes.map((w: WorkType) => (
             <option key={w.id} value={w.id}>
               {w.name}
             </option>

@@ -1,9 +1,11 @@
 import { apiSlice } from "../services/apiSlice";
 
+// Define types for user data and response structures
 interface User {
-  first_name: string;
-  last_name: string;
-  email: string;
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
 }
 
 interface AuthResponse {
@@ -56,17 +58,19 @@ interface ResetPasswordConfirmArgs {
   re_new_password: string;
 }
 
+// Define your API slice with endpoints
 const authApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
+    // Retrieve the current authenticated user
     retrieveUser: builder.query<User, void>({
       query: () => "/users/me/",
       providesTags: ['User'],
     }),
+
+    // Google Authentication (OAuth)
     googleAuthenticate: builder.mutation<CreateUserResponse, GoogleAuthArgs>({
       query: ({ provider, state, code }) => ({
-        url: `/o/${provider}/?state=${encodeURIComponent(
-          state
-        )}&code=${encodeURIComponent(code)}`,
+        url: `/o/${provider}/?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}`,
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -75,6 +79,8 @@ const authApiSlice = apiSlice.injectEndpoints({
       }),
       invalidatesTags: ['User'],
     }),
+
+    // User login mutation
     login: builder.mutation<AuthResponse, LoginArgs>({
       query: ({ email, password }) => ({
         url: "/jwt/create/",
@@ -83,20 +89,26 @@ const authApiSlice = apiSlice.injectEndpoints({
       }),
       invalidatesTags: ['User'],
     }),
-    register: builder.mutation<User, RegisterArgs>({
+
+    // Register a new user
+    register: builder.mutation<CreateUserResponse, RegisterArgs>({
       query: ({ first_name, last_name, email, password, re_password }) => ({
         url: "/users/",
         method: "POST",
         body: { first_name, last_name, email, password, re_password },
       }),
     }),
-    verify: builder.mutation<void, { token: string }>({
+
+    // Verify JWT token
+    verify: builder.mutation<void, VerifyArgs>({
       query: ({ token }) => ({
         url: "/jwt/verify/",
         method: "POST",
         body: { token },
       }),
     }),
+
+    // Logout user
     logout: builder.mutation<void, void>({
       query: () => ({
         url: "/logout/",
@@ -104,6 +116,8 @@ const authApiSlice = apiSlice.injectEndpoints({
       }),
       invalidatesTags: ['User'],
     }),
+
+    // Activate a user's account
     activation: builder.mutation<void, ActivationArgs>({
       query: ({ uid, token }) => ({
         url: "/users/activation/",
@@ -111,6 +125,8 @@ const authApiSlice = apiSlice.injectEndpoints({
         body: { uid, token },
       }),
     }),
+
+    // Request password reset
     resetPassword: builder.mutation<void, ResetPasswordArgs>({
       query: ({ email }) => ({
         url: "/users/reset_password/",
@@ -118,6 +134,8 @@ const authApiSlice = apiSlice.injectEndpoints({
         body: { email },
       }),
     }),
+
+    // Confirm password reset with new password
     resetPasswordConfirm: builder.mutation<void, ResetPasswordConfirmArgs>({
       query: ({ uid, token, new_password, re_new_password }) => ({
         url: "/users/reset_password_confirm/",
@@ -128,6 +146,7 @@ const authApiSlice = apiSlice.injectEndpoints({
   }),
 });
 
+// Export hooks for each endpoint
 export const {
   useRetrieveUserQuery,
   useGoogleAuthenticateMutation,
