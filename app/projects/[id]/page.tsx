@@ -51,7 +51,7 @@ const ProjectDetailPage = () => {
     const fetchProjectDetails = async () => {
       console.log('Fetching project details with token:', token); // Log before making the API request
       try {
-        const res = await fetch(`https://api.modelflick.com/projects/projects/${id}/summary/`, {
+        const res = await fetch(`https://api.modelflick.com/api/projects/${id}/summary/`, {
           headers: {
             Authorization: `Bearer ${token}`, // Pass the token in the Authorization header
           },

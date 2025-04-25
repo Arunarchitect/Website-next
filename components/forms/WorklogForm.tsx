@@ -4,13 +4,6 @@ import { useState } from 'react';
 import { useCreateWorklogMutation } from '@/redux/features/worklogApiSlice';
 import { useRetrieveUserQuery } from '@/redux/features/authApiSlice';
 
-interface User {
-  id: number; // Add id to your User interface
-  first_name: string;
-  last_name: string;
-  email: string;
-}
-
 export default function WorklogForm() {
   const { data: user } = useRetrieveUserQuery();
   const [createWorklog, { isLoading, error }] = useCreateWorklogMutation();
@@ -32,17 +25,21 @@ export default function WorklogForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.id) return;
-    
+
+    const payload = {
+      project: Number(formData.project),
+      work_type: Number(formData.work_type),
+      start_time: new Date(formData.start_time).toISOString(),
+      end_time: new Date(formData.end_time).toISOString(),
+    };
+
+    console.log("Submitting worklog payload:", payload);
+
     try {
-      await createWorklog({
-        project: Number(formData.project),
-        work_type: Number(formData.work_type),
-        start_time: new Date(formData.start_time).toISOString(),
-        end_time: new Date(formData.end_time).toISOString(),
-        employee: user.id,
-      }).unwrap();
-      
-      // Reset form on success
+      await createWorklog(payload).unwrap();
+      console.log("✅ Worklog created successfully!");
+
+      // Reset form
       setFormData({
         project: '',
         work_type: '',
@@ -50,7 +47,7 @@ export default function WorklogForm() {
         end_time: '',
       });
     } catch (err) {
-      console.error('Failed to create worklog:', err);
+      console.error('❌ Failed to create worklog:', err);
     }
   };
 
@@ -106,7 +103,7 @@ export default function WorklogForm() {
 
       {error && (
         <div className="text-red-500 text-sm">
-          Error creating worklog: {('data' in error) ? (error.data as { detail?: string }).detail : 'An error occurred'}
+          Error creating worklog: {('data' in error) ? JSON.stringify(error.data) : 'An error occurred'}
         </div>
       )}
 

@@ -42,7 +42,7 @@ export default function ProjectsPage() {
     console.log('Fetching projects with token:', token);
 
     try {
-      const res = await fetch('https://api.modelflick.com/projects/projects/', {
+      const res = await fetch('https://api.modelflick.com/api/projects/', {
         headers: {
           Authorization: `Bearer ${token}`,
         },

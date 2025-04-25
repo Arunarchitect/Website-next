@@ -21,7 +21,7 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     createWorklog: builder.mutation<Worklog, Omit<CreateWorklogRequest, 'employee'>>({
       query: (worklog) => ({
-        url: "/projects/work-logs/",
+        url: "/work-logs/",
         method: "POST",
         body: worklog,
       }),
@@ -35,7 +35,7 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
       invalidatesTags: ['Worklog'],
     }),
     getWorklogs: builder.query<Worklog[], void>({
-      query: () => "/projects/work-logs/",
+      query: () => "/work-logs/",
       transformResponse: (response: Worklog[]) => response,
       providesTags: (result) => 
         result 
@@ -43,12 +43,12 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
           : ['Worklog'],
     }),
     getWorklogById: builder.query<Worklog, number>({
-      query: (id) => `/projects/work-logs/${id}/`,
+      query: (id) => `/work-logs/${id}/`,
       providesTags: (result, error, id) => [{ type: 'Worklog', id }],
     }),
     updateWorklog: builder.mutation<Worklog, Partial<Worklog> & Pick<Worklog, 'id'>>({
       query: ({ id, ...patch }) => ({
-        url: `/projects/work-logs/${id}/`,
+        url: `/work-logs/${id}/`,
         method: "PATCH",
         body: patch,
       }),
@@ -56,7 +56,7 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
     }),
     deleteWorklog: builder.mutation<{ success: boolean; id: number }, number>({
       query: (id) => ({
-        url: `/projects/work-logs/${id}/`,
+        url: `/work-logs/${id}/`,
         method: "DELETE",
       }),
       invalidatesTags: (result, error, id) => [{ type: 'Worklog', id }],
