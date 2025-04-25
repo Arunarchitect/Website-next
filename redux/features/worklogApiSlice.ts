@@ -17,6 +17,19 @@ interface CreateWorklogRequest {
   employee?: number; // Made optional since it will be added in the interceptor
 }
 
+interface Project {
+  id: number;
+  name: string;
+  location: string;
+  client_name: string;
+  current_stage: string;
+}
+
+interface WorkType {
+  id: number;
+  name: string;
+}
+
 export const worklogApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     createWorklog: builder.mutation<Worklog, Omit<CreateWorklogRequest, 'employee'>>({
@@ -61,6 +74,20 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
       }),
       invalidatesTags: (result, error, id) => [{ type: 'Worklog', id }],
     }),
+
+    // Fetch all projects
+    getProjects: builder.query<Project[], void>({
+      query: () => "/projects/",
+      transformResponse: (response: Project[]) => response,
+      providesTags: ['Projects'],
+    }),
+
+    // Fetch all work types
+    getWorkTypes: builder.query<WorkType[], void>({
+      query: () => "/work-types/",
+      transformResponse: (response: WorkType[]) => response,
+      providesTags: ['WorkTypes'],
+    }),
   }),
 });
 
@@ -70,4 +97,6 @@ export const {
   useGetWorklogByIdQuery,
   useUpdateWorklogMutation,
   useDeleteWorklogMutation,
+  useGetProjectsQuery,       // Hook for fetching projects
+  useGetWorkTypesQuery,      // Hook for fetching work types
 } = worklogApiSlice;

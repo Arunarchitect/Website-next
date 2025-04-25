@@ -4,6 +4,8 @@ import { setAuth, logout } from "../features/authSlice";
 import { Mutex } from "async-mutex";
 
 const mutex = new Mutex();
+
+// Base query with re-authentication logic
 const baseQuery = fetchBaseQuery({
   baseUrl: `${process.env.NEXT_PUBLIC_HOST || 'https://api.modelflick.com'}/api`,
   credentials: "include",
@@ -16,6 +18,7 @@ const baseQuery = fetchBaseQuery({
   }
 });
 
+// Base query with token refresh mechanism
 const baseQueryWithReauth: BaseQueryFn<
   string | FetchArgs,
   unknown,
@@ -23,7 +26,8 @@ const baseQueryWithReauth: BaseQueryFn<
 > = async (args, api, extraOptions) => {
   await mutex.waitForUnlock();
   let result = await baseQuery(args, api, extraOptions);
-  
+
+  // Handle 401 Unauthorized errors for token refresh
   if (result.error && result.error.status === 401) {
     if (!mutex.isLocked()) {
       const release = await mutex.acquire();
@@ -36,7 +40,7 @@ const baseQueryWithReauth: BaseQueryFn<
           api,
           extraOptions
         );
-        
+
         if (refreshResult.data) {
           // Store new tokens
           const { access } = refreshResult.data as { access: string };
@@ -58,9 +62,10 @@ const baseQueryWithReauth: BaseQueryFn<
   return result;
 };
 
+// Define the API slice
 export const apiSlice = createApi({
   reducerPath: "api",
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['User', 'Auth', 'Worklog'],
-  endpoints: () => ({}),
+  tagTypes: ['User', 'Auth', 'Worklog', 'Projects', 'WorkTypes'], // Add 'Projects' and 'WorkTypes' here
+  endpoints: () => ({}), // Define endpoints as needed
 });

@@ -1,12 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { useCreateWorklogMutation } from '@/redux/features/worklogApiSlice';
+import {
+  useCreateWorklogMutation,
+  useGetProjectsQuery,
+  useGetWorkTypesQuery
+} from '@/redux/features/worklogApiSlice';
 import { useRetrieveUserQuery } from '@/redux/features/authApiSlice';
 
 export default function WorklogForm() {
   const { data: user } = useRetrieveUserQuery();
-  const [createWorklog, { isLoading, error }] = useCreateWorklogMutation();
+  const { data: projects = [], isLoading: loadingProjects } = useGetProjectsQuery();
+  const { data: workTypes = [], isLoading: loadingWorkTypes } = useGetWorkTypesQuery();
+
+  const [createWorklog, { isLoading }] = useCreateWorklogMutation();
+
   const [formData, setFormData] = useState({
     project: '',
     work_type: '',
@@ -14,7 +22,7 @@ export default function WorklogForm() {
     end_time: '',
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -31,6 +39,7 @@ export default function WorklogForm() {
       work_type: Number(formData.work_type),
       start_time: new Date(formData.start_time).toISOString(),
       end_time: new Date(formData.end_time).toISOString(),
+      employee: user.id,
     };
 
     console.log("Submitting worklog payload:", payload);
@@ -38,14 +47,7 @@ export default function WorklogForm() {
     try {
       await createWorklog(payload).unwrap();
       console.log("✅ Worklog created successfully!");
-
-      // Reset form
-      setFormData({
-        project: '',
-        work_type: '',
-        start_time: '',
-        end_time: '',
-      });
+      setFormData({ project: '', work_type: '', start_time: '', end_time: '' });
     } catch (err) {
       console.error('❌ Failed to create worklog:', err);
     }
@@ -53,28 +55,41 @@ export default function WorklogForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 p-4 max-w-md mx-auto bg-white rounded-lg shadow">
+      
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">Project ID</label>
-        <input
-          type="number"
+        <label className="block text-sm font-medium text-gray-700">Project</label>
+        <select
           name="project"
           value={formData.project}
           onChange={handleChange}
           required
           className="w-full px-3 py-2 border rounded-md"
-        />
+        >
+          <option value="">Select a project</option>
+          {projects.map((p: any) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">Work Type ID</label>
-        <input
-          type="number"
+        <label className="block text-sm font-medium text-gray-700">Work Type</label>
+        <select
           name="work_type"
           value={formData.work_type}
           onChange={handleChange}
           required
           className="w-full px-3 py-2 border rounded-md"
-        />
+        >
+          <option value="">Select work type</option>
+          {workTypes.map((w: any) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="space-y-2">
@@ -101,14 +116,8 @@ export default function WorklogForm() {
         />
       </div>
 
-      {error && (
-        <div className="text-red-500 text-sm">
-          Error creating worklog: {('data' in error) ? JSON.stringify(error.data) : 'An error occurred'}
-        </div>
-      )}
-
       <button 
-        type="submit" 
+        type="submit"
         disabled={isLoading}
         className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded disabled:bg-blue-300"
       >
