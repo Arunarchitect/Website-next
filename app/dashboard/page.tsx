@@ -3,54 +3,50 @@
 import { useRetrieveUserQuery } from '@/redux/features/authApiSlice';
 import { List, Spinner } from '@/components/common';
 import { useRouter } from 'next/navigation';
+import WorklogForm from '@/components/forms/WorklogForm';
+
+interface UserData {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+}
 
 export default function DashboardPage() {
   const { data: user, isLoading, isFetching } = useRetrieveUserQuery();
   const router = useRouter();
 
-  const config = [
-    {
-      label: 'First Name',
-      value: user?.first_name,
-    },
-    {
-      label: 'Last Name',
-      value: user?.last_name,
-    },
-    {
-      label: 'Email',
-      value: user?.email,
-    },
-  ];
-
-  const handleGoToProjects = () => {
-    router.push('/projects');
-  };
-
   if (isLoading || isFetching) {
     return (
-      <div className='flex justify-center my-8'>
+      <div className="flex justify-center my-8">
         <Spinner lg />
       </div>
     );
   }
 
+  const userConfig = [
+    { label: 'First Name', value: user?.first_name },
+    { label: 'Last Name', value: user?.last_name },
+    { label: 'Email', value: user?.email },
+  ];
+
   return (
-    <>
-      <header className='bg-white shadow'>
-        <div className='mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8'>
-          <h1 className='text-3xl font-bold tracking-tight text-gray-900'>Dashboard</h1>
-        </div>
+    <div className="container mx-auto px-4 py-8">
+      <header className="bg-white shadow-sm rounded-lg p-6 mb-8">
+        <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
       </header>
-      <main className='mx-auto max-w-7xl py-6 my-8 sm:px-6 lg:px-8'>
-        <List config={config} />
+      
+      <div className="bg-white shadow-sm rounded-lg p-6 mb-8">
+        <List config={userConfig} />
         <button
-          onClick={handleGoToProjects}
-          className='mt-6 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-white'
+          onClick={() => router.push('/projects')}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
         >
           View Projects
         </button>
-      </main>
-    </>
+      </div>
+      
+      {user?.id && <WorklogForm userId={user.id} />}
+    </div>
   );
 }
