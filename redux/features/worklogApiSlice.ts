@@ -31,8 +31,7 @@ interface Deliverable {
   name: string;
 }
 
-// Extend the API slice with the custom tag types
-// Add 'Deliverables' to tagTypes array explicitly.
+// Extend the API slice with endpoints
 export const worklogApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     createWorklog: builder.mutation<Worklog, Omit<CreateWorklogRequest, 'employee'>>({
@@ -42,7 +41,7 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
         body: worklog,
       }),
       transformResponse: (response: Worklog) => response,
-      invalidatesTags: ['Worklog', 'Deliverables'],  // Invalidate both Worklog and Deliverables tags
+      invalidatesTags: ['Worklog', 'Deliverables'],
     }),
 
     getWorklogs: builder.query<Worklog[], void>({
@@ -85,12 +84,10 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
     getDeliverables: builder.query<Deliverable[], void>({
       query: () => "/deliverables/",
       transformResponse: (response: Deliverable[]) => response,
-      providesTags: ['Deliverables'], // Provide the Deliverables tag for cache invalidation
+      providesTags: ['Deliverables'],
     }),
   }),
-
-  // Register Deliverables tag along with other predefined tag types
-  tagTypes: ['Worklog', 'Projects', 'Deliverables', 'WorkTypes'] as const,  // Ensure 'Deliverables' is in the list
+  // ❌ Do NOT add `tagTypes` here. Only in `apiSlice.ts`
 });
 
 export const {

@@ -10,7 +10,7 @@ const baseQuery = fetchBaseQuery({
   baseUrl: `${process.env.NEXT_PUBLIC_HOST || 'https://api.modelflick.com'}/api`,
   credentials: "include",
   prepareHeaders: (headers) => {
-    const token = localStorage.getItem('access');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access') : null;
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
@@ -19,37 +19,32 @@ const baseQuery = fetchBaseQuery({
 });
 
 // Base query with token refresh mechanism
-const baseQueryWithReauth: BaseQueryFn<
-  string | FetchArgs,
-  unknown,
-  FetchBaseQueryError
-> = async (args, api, extraOptions) => {
+const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (args, api, extraOptions) => {
   await mutex.waitForUnlock();
   let result = await baseQuery(args, api, extraOptions);
 
-  // Handle 401 Unauthorized errors for token refresh
   if (result.error && result.error.status === 401) {
     if (!mutex.isLocked()) {
       const release = await mutex.acquire();
       try {
         const refreshResult = await baseQuery(
-          {
-            url: "/jwt/refresh/",
-            method: "POST",
-          },
+          { url: "/jwt/refresh/", method: "POST" },
           api,
           extraOptions
         );
 
         if (refreshResult.data) {
-          // Store new tokens
           const { access } = refreshResult.data as { access: string };
-          localStorage.setItem('access', access);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('access', access);
+          }
           api.dispatch(setAuth());
           result = await baseQuery(args, api, extraOptions);
         } else {
           api.dispatch(logout());
-          window.location.href = '/auth/login';
+          if (typeof window !== 'undefined') {
+            window.location.href = '/auth/login';
+          }
         }
       } finally {
         release();
@@ -59,13 +54,14 @@ const baseQueryWithReauth: BaseQueryFn<
       result = await baseQuery(args, api, extraOptions);
     }
   }
+
   return result;
 };
 
-// Define the API slice
+// Create the main API slice
 export const apiSlice = createApi({
   reducerPath: "api",
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['User', 'Auth', 'Worklog', 'Projects', 'Deliverables'], // Add 'Projects' and 'WorkTypes' here
-  endpoints: () => ({}), // Define endpoints as needed
+  tagTypes: ['User', 'Auth', 'Worklog', 'Projects', 'Deliverables'], // ✅ only needed tagTypes here
+  endpoints: () => ({}), // will be injected later
 });
