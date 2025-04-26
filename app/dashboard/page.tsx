@@ -1,3 +1,4 @@
+// app/dashboard/page.tsx
 "use client";
 
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
@@ -13,7 +14,7 @@ import {
   useGetProjectsQuery,
   useGetDeliverablesQuery,
 } from "@/redux/features/worklogApiSlice";
-import WorklogsTable from "@/components/tables/WorklogsTable";
+import WorklogsTable, { EditableWorklog } from "@/components/tables/WorklogsTable";
 
 export default function DashboardPage() {
   const {
@@ -41,15 +42,21 @@ export default function DashboardPage() {
     }
   };
 
-  const handleUpdate = async (worklog: EditableWorklog) => {
-    return updateWorklog({
-      id: worklog.id,
-      project: worklog.project,
-      deliverable: worklog.deliverable,
-      start_time: new Date(worklog.start_time).toISOString(),
-      end_time: new Date(worklog.end_time).toISOString(),
-    }).unwrap();
+  const handleUpdate = async (worklog: EditableWorklog): Promise<void> => {
+    try {
+      await updateWorklog({
+        id: worklog.id,
+        project: worklog.project,
+        deliverable: worklog.deliverable,
+        start_time: new Date(worklog.start_time).toISOString(),
+        end_time: new Date(worklog.end_time).toISOString(),
+      }).unwrap();
+      console.log("✅ Worklog updated successfully!");
+    } catch (err) {
+      console.error("❌ Failed to update worklog:", err);
+    }
   };
+  
 
   if (isUserLoading || isUserFetching) {
     return (

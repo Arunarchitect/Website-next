@@ -11,7 +11,7 @@ import {
   ChevronDownIcon,
 } from "@heroicons/react/24/outline";
 
-interface Worklog {
+export interface Worklog {
   id: number;
   project: number;
   deliverable: number;
@@ -20,7 +20,7 @@ interface Worklog {
   employee: number;
 }
 
-interface EditableWorklog extends Omit<Worklog, "start_time" | "end_time"> {
+export interface EditableWorklog extends Omit<Worklog, "start_time" | "end_time"> {
   start_time: string;
   end_time: string;
 }
@@ -56,7 +56,7 @@ export default function WorklogsTable({
   const PAGE_SIZE = 10;
 
   const sortedWorklogs = useMemo(() => {
-    let sorted = [...worklogs];
+    const sorted = [...worklogs];
     
     if (sortConfig !== null) {
       sorted.sort((a, b) => {

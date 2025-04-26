@@ -1,4 +1,5 @@
-'use client'; // This directive ensures the component is treated as client-side
+// components/forms/WorklogForm.tsx
+"use client";
 
 import { useState, ChangeEvent, FormEvent } from "react";
 import {
@@ -19,9 +20,10 @@ interface Deliverable {
 
 interface WorklogFormProps {
   userId: number;
+  onSuccess: () => void; // Added onSuccess prop
 }
 
-const WorklogForm: React.FC<WorklogFormProps> = ({ userId }) => {
+const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
   const { data: projects = [] } = useGetProjectsQuery();
   const { data: deliverables = [] } = useGetDeliverablesQuery();
   const [createWorklog, { isLoading }] = useCreateWorklogMutation();
@@ -67,6 +69,7 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId }) => {
         start_time: "",
         end_time: "",
       });
+      onSuccess(); // Trigger the onSuccess callback after successful creation
     } catch (err) {
       console.error("❌ Failed to create worklog:", err);
     }
