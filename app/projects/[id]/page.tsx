@@ -2,12 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useAppSelector } from '@/redux/hooks'; // Ensure to use the selector to get the token from Redux
-
-interface WorkType {
-  name: string;
-  duration: number; // Duration in seconds
-}
+import { useAppSelector } from '@/redux/hooks';
 
 interface Deliverable {
   name: string;
@@ -16,98 +11,100 @@ interface Deliverable {
   remarks: string;
 }
 
+interface DeliverableSummary {
+  name: string;
+  duration_seconds: number;
+}
+
 interface ProjectDetails {
   project: string;
   current_stage: string;
-  total_duration: number;
-  work_types: WorkType[];
+  total_duration_seconds: number;
   deliverables: Deliverable[];
+  deliverables_summary?: DeliverableSummary[];
 }
 
 const ProjectDetailPage = () => {
   const { id } = useParams();
-  const { token } = useAppSelector(state => state.auth); // Get token from Redux state
+  const { token } = useAppSelector(state => state.auth);
   const [projectDetails, setProjectDetails] = useState<ProjectDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('Project ID:', id); // Log the project ID from params
-    console.log('Token from Redux:', token); // Log the token to ensure it's available
-
-    // Fallback: Check localStorage if token isn't available in Redux state
-    if (!token && localStorage.getItem('access')) {
-      const tokenFromStorage = localStorage.getItem('access');
-      if (tokenFromStorage) {
-        console.log('Token from localStorage:', tokenFromStorage);
-      }
-    }
-
     if (!id || !token) {
-      console.log('Missing project ID or token. Exiting fetch.');
-      return; // If there's no ID or token, don't proceed
+      return;
     }
 
     const fetchProjectDetails = async () => {
-      console.log('Fetching project details with token:', token); // Log before making the API request
       try {
         const res = await fetch(`https://api.modelflick.com/api/projects/${id}/summary/`, {
           headers: {
-            Authorization: `Bearer ${token}`, // Pass the token in the Authorization header
+            Authorization: `Bearer ${token}`,
           },
         });
 
-        console.log('Response status:', res.status); // Log the response status
-
         if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
-          console.error('API Error Response:', errorData); // Log the error response if the status is not OK
           throw new Error(`Failed to fetch project details. Status: ${res.status}`);
         }
 
         const data: ProjectDetails = await res.json();
-        console.log('Fetched project details:', data); // Log the fetched project details
         setProjectDetails(data);
       } catch (err) {
-        console.error('Error fetching project details:', err); // Log any errors during the fetch
+        console.error('Error fetching project details:', err);
         setError('Error loading project details');
       } finally {
-        setLoading(false); // Set loading to false after fetch completes (either success or failure)
+        setLoading(false);
       }
     };
 
     fetchProjectDetails();
-  }, [id, token]); // Add token to the dependency array to ensure it's available
+  }, [id, token]);
 
   if (loading) return <p>Loading project details...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
-
   if (!projectDetails) return <p>No project details available.</p>;
+
+  const getDurationForDeliverable = (name: string) => {
+    const match = projectDetails.deliverables_summary?.find(d => d.name === name);
+    return match ? (match.duration_seconds / 3600).toFixed(2) : '—';
+  };
 
   return (
     <div className="p-6 space-y-6 text-white">
       <h1 className="text-2xl font-bold">Project: {projectDetails.project}</h1>
       <p className="text-sm text-gray-300">Current Stage: {projectDetails.current_stage}</p>
-      <p className="text-sm text-gray-400">Total Duration: {(projectDetails.total_duration / 3600).toFixed(2)} hours</p> {/* Convert total duration to hours */}
+      <p className="text-sm text-gray-400">
+        Total Duration: {(projectDetails.total_duration_seconds / 3600).toFixed(2)} hours
+      </p>
 
-      <h2 className="text-xl font-semibold mt-4">Work Types</h2>
-      <ul className="space-y-2">
-        {projectDetails.work_types.map((work, index) => (
-          <li key={index} className="text-sm">
-            {work.name}: {(work.duration / 3600).toFixed(2)} hours {/* Convert duration to hours */}
-          </li>
-        ))}
-      </ul>
-
-      <h2 className="text-xl font-semibold mt-4">Deliverables</h2>
-      <ul className="space-y-2">
-        {projectDetails.deliverables.map((deliverable, index) => (
-          <li key={index} className="text-sm">
-            <strong>{deliverable.name}</strong> (Stage: {deliverable.stage}, Status: {deliverable.status})
-            <p className="text-gray-400">Remarks: {deliverable.remarks}</p>
-          </li>
-        ))}
-      </ul>
+      <h2 className="text-xl font-semibold mt-6">Deliverables Summary</h2>
+      <div className="overflow-x-auto">
+        <table className="min-w-full border border-gray-600 text-sm">
+          <thead className="bg-gray-800 text-white">
+            <tr>
+              <th className="px-4 py-2 border-b border-gray-600 text-left">Name</th>
+              <th className="px-4 py-2 border-b border-gray-600 text-left">Stage</th>
+              <th className="px-4 py-2 border-b border-gray-600 text-left">Status</th>
+              <th className="px-4 py-2 border-b border-gray-600 text-left">Remarks</th>
+              <th className="px-4 py-2 border-b border-gray-600 text-left">Duration (hrs)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projectDetails.deliverables.map((deliverable, index) => (
+              <tr key={index} className="border-t border-gray-700 hover:bg-gray-800">
+                <td className="px-4 py-2">{deliverable.name}</td>
+                <td className="px-4 py-2">{deliverable.stage}</td>
+                <td className="px-4 py-2">{deliverable.status}</td>
+                <td className="px-4 py-2">{deliverable.remarks || '—'}</td>
+                <td className="px-4 py-2">
+                  {getDurationForDeliverable(deliverable.name)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
