@@ -1,68 +1,74 @@
-'use client';
+'use client'; // This directive ensures the component is treated as client-side
 
-import { useState } from 'react';
+import { useState, ChangeEvent, FormEvent } from "react";
 import {
   useCreateWorklogMutation,
   useGetProjectsQuery,
-  useGetWorkTypesQuery
-} from '@/redux/features/worklogApiSlice';
+  useGetDeliverablesQuery,
+} from "@/redux/features/worklogApiSlice";
 
 interface Project {
   id: number;
   name: string;
 }
 
-interface WorkType {
+interface Deliverable {
   id: number;
   name: string;
 }
 
-// Define props interface to accept userId
 interface WorklogFormProps {
   userId: number;
 }
 
-export default function WorklogForm({ userId }: WorklogFormProps) {
+const WorklogForm: React.FC<WorklogFormProps> = ({ userId }) => {
   const { data: projects = [] } = useGetProjectsQuery();
-  const { data: workTypes = [] } = useGetWorkTypesQuery();
-
+  const { data: deliverables = [] } = useGetDeliverablesQuery();
   const [createWorklog, { isLoading }] = useCreateWorklogMutation();
 
   const [formData, setFormData] = useState({
-    project: '',
-    work_type: '',
-    start_time: '',
-    end_time: '',
+    project: "",
+    deliverable: "",
+    start_time: "",
+    end_time: "",
   });
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  // Handle form data change
+  const handleChange = (
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ): void => {
     const { name, value } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Handle form submit
+  const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
-    if (!userId) return;
+
+    if (!userId) return; // Ensure userId is present
 
     const payload = {
       project: Number(formData.project),
-      work_type: Number(formData.work_type),
+      deliverable: Number(formData.deliverable),
       start_time: new Date(formData.start_time).toISOString(),
       end_time: new Date(formData.end_time).toISOString(),
-      employee: userId,
+      employee: userId, // Attach userId to worklog
     };
-
-    console.log("Submitting worklog payload:", payload);
 
     try {
       await createWorklog(payload).unwrap();
       console.log("✅ Worklog created successfully!");
-      setFormData({ project: '', work_type: '', start_time: '', end_time: '' });
+      setFormData({
+        project: "",
+        deliverable: "",
+        start_time: "",
+        end_time: "",
+      });
     } catch (err) {
-      console.error('❌ Failed to create worklog:', err);
+      console.error("❌ Failed to create worklog:", err);
     }
   };
 
@@ -78,27 +84,27 @@ export default function WorklogForm({ userId }: WorklogFormProps) {
           className="w-full px-3 py-2 border rounded-md"
         >
           <option value="">Select a project</option>
-          {projects.map((p: Project) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
+          {projects.map((project: Project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
             </option>
           ))}
         </select>
       </div>
 
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">Work Type</label>
+        <label className="block text-sm font-medium text-gray-700">Deliverable</label>
         <select
-          name="work_type"
-          value={formData.work_type}
+          name="deliverable"
+          value={formData.deliverable}
           onChange={handleChange}
           required
           className="w-full px-3 py-2 border rounded-md"
         >
-          <option value="">Select work type</option>
-          {workTypes.map((w: WorkType) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
+          <option value="">Select deliverable</option>
+          {deliverables.map((deliverable: Deliverable) => (
+            <option key={deliverable.id} value={deliverable.id}>
+              {deliverable.name}
             </option>
           ))}
         </select>
@@ -128,13 +134,15 @@ export default function WorklogForm({ userId }: WorklogFormProps) {
         />
       </div>
 
-      <button 
+      <button
         type="submit"
         disabled={isLoading}
         className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded disabled:bg-blue-300"
       >
-        {isLoading ? 'Submitting...' : 'Create Worklog'}
+        {isLoading ? "Submitting..." : "Create Worklog"}
       </button>
     </form>
   );
-}
+};
+
+export default WorklogForm;

@@ -1,9 +1,10 @@
 import { apiSlice } from "@/redux/services/apiSlice";
 
+// Define types for Worklog, Project, and Deliverable
 interface Worklog {
   id: number;
   project: number;
-  work_type: number;
+  deliverable: number;
   start_time: string;
   end_time: string;
   employee: number;
@@ -11,10 +12,10 @@ interface Worklog {
 
 interface CreateWorklogRequest {
   project: number;
-  work_type: number;
+  deliverable: number;
   start_time: string;
   end_time: string;
-  employee?: number; // Made optional since it will be added in the interceptor
+  employee?: number; // employee is optional as it'll be added from the interceptor
 }
 
 interface Project {
@@ -25,11 +26,13 @@ interface Project {
   current_stage: string;
 }
 
-interface WorkType {
+interface Deliverable {
   id: number;
   name: string;
 }
 
+// Extend the API slice with the custom tag types
+// Add 'Deliverables' to tagTypes array explicitly.
 export const worklogApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     createWorklog: builder.mutation<Worklog, Omit<CreateWorklogRequest, 'employee'>>({
@@ -39,26 +42,23 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
         body: worklog,
       }),
       transformResponse: (response: Worklog) => response,
-      transformErrorResponse: (response: { status: number, data?: any }) => {
-        return {
-          status: response.status,
-          data: response.data || 'Failed to create worklog'
-        };
-      },
-      invalidatesTags: ['Worklog'],
+      invalidatesTags: ['Worklog', 'Deliverables'],  // Invalidate both Worklog and Deliverables tags
     }),
+
     getWorklogs: builder.query<Worklog[], void>({
       query: () => "/work-logs/",
       transformResponse: (response: Worklog[]) => response,
-      providesTags: (result) => 
-        result 
+      providesTags: (result) =>
+        result
           ? [...result.map(({ id }) => ({ type: 'Worklog' as const, id })), 'Worklog']
           : ['Worklog'],
     }),
+
     getWorklogById: builder.query<Worklog, number>({
       query: (id) => `/work-logs/${id}/`,
       providesTags: (result, error, id) => [{ type: 'Worklog', id }],
     }),
+
     updateWorklog: builder.mutation<Worklog, Partial<Worklog> & Pick<Worklog, 'id'>>({
       query: ({ id, ...patch }) => ({
         url: `/work-logs/${id}/`,
@@ -67,6 +67,7 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
       }),
       invalidatesTags: (result, error, { id }) => [{ type: 'Worklog', id }],
     }),
+
     deleteWorklog: builder.mutation<{ success: boolean; id: number }, number>({
       query: (id) => ({
         url: `/work-logs/${id}/`,
@@ -75,20 +76,21 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
       invalidatesTags: (result, error, id) => [{ type: 'Worklog', id }],
     }),
 
-    // Fetch all projects
     getProjects: builder.query<Project[], void>({
       query: () => "/projects/",
       transformResponse: (response: Project[]) => response,
       providesTags: ['Projects'],
     }),
 
-    // Fetch all work types
-    getWorkTypes: builder.query<WorkType[], void>({
-      query: () => "/work-types/",
-      transformResponse: (response: WorkType[]) => response,
-      providesTags: ['WorkTypes'],
+    getDeliverables: builder.query<Deliverable[], void>({
+      query: () => "/deliverables/",
+      transformResponse: (response: Deliverable[]) => response,
+      providesTags: ['Deliverables'], // Provide the Deliverables tag for cache invalidation
     }),
   }),
+
+  // Register Deliverables tag along with other predefined tag types
+  tagTypes: ['Worklog', 'Projects', 'Deliverables', 'WorkTypes'] as const,  // Ensure 'Deliverables' is in the list
 });
 
 export const {
@@ -97,6 +99,6 @@ export const {
   useGetWorklogByIdQuery,
   useUpdateWorklogMutation,
   useDeleteWorklogMutation,
-  useGetProjectsQuery,       // Hook for fetching projects
-  useGetWorkTypesQuery,      // Hook for fetching work types
+  useGetProjectsQuery,
+  useGetDeliverablesQuery,
 } = worklogApiSlice;
