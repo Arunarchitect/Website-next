@@ -28,14 +28,51 @@ export default function useLogin() {
     login({ email, password })
       .unwrap()
       .then((data) => {
-        // Assuming data contains access token
         localStorage.setItem('access', data.access);
         dispatch(setAuth());
-        toast.success("Logged In");
-        router.push("/dashboard");
+        
+        toast.success("Logged in successfully", {
+          autoClose: 3000,
+          pauseOnHover: true,
+        });
+
+        // Add delay before routing (3 seconds to match toast duration)
+        setTimeout(() => {
+          router.push("/dashboard");
+        }, 3000);
       })
       .catch((error) => {
-        toast.error(error.data?.detail || "Failed to login");
+        const toastOptions = {
+          autoClose: 5000,
+          pauseOnHover: true,
+        };
+
+        if (error.status === 400) {
+          toast.error(
+            error.data?.detail || "Invalid request format", 
+            toastOptions
+          );
+        } else if (error.status === 401) {
+          toast.error(
+            error.data?.detail || "Invalid credentials", 
+            toastOptions
+          );
+        } else if (error.status === 500) {
+          toast.error(
+            "Server error - please try again later", 
+            toastOptions
+          );
+        } else if (error.status === 'FETCH_ERROR' || !error.status) {
+          toast.error(
+            "Network error - please check your connection", 
+            toastOptions
+          );
+        } else {
+          toast.error(
+            "Login failed - please try again", 
+            toastOptions
+          );
+        }
       });
   };
 
