@@ -1,3 +1,4 @@
+// components/forms/WorklogForm.tsx
 "use client";
 
 import { useState, ChangeEvent, FormEvent } from "react";
@@ -14,34 +15,18 @@ interface Project {
 
 interface Deliverable {
   id: number;
-  project: number;
   name: string;
-  stage: string;
-  status: string;
-  remarks: string;
-  start_date: string;
-  end_date: string;
 }
 
 interface WorklogFormProps {
   userId: number;
-  onSuccess: () => void;
+  onSuccess: () => void; // Added onSuccess prop
 }
 
 const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
-  const { 
-    data: projects = [], 
-    isLoading: isLoadingProjects,
-    error: projectsError 
-  } = useGetProjectsQuery();
-  
-  const { 
-    data: deliverables = [], 
-    isLoading: isLoadingDeliverables,
-    error: deliverablesError
-  } = useGetDeliverablesQuery();
-  
-  const [createWorklog, { isLoading: isCreatingWorklog }] = useCreateWorklogMutation();
+  const { data: projects = [] } = useGetProjectsQuery();
+  const { data: deliverables = [] } = useGetDeliverablesQuery();
+  const [createWorklog, { isLoading }] = useCreateWorklogMutation();
 
   const [formData, setFormData] = useState({
     project: "",
@@ -50,13 +35,7 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
     end_time: "",
   });
 
-  // Filter deliverables based on selected project
-  const filteredDeliverables = formData.project 
-    ? deliverables.filter((d: Deliverable) => d.project === Number(formData.project))
-    : [];
-
-  console.log('Filtered deliverables:', filteredDeliverables);
-
+  // Handle form data change
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ): void => {
@@ -64,41 +43,35 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
     setFormData((prev) => ({
       ...prev,
       [name]: value,
-      // Reset deliverable when project changes
-      ...(name === 'project' && { deliverable: "" })
     }));
   };
 
+  // Handle form submit
   const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
 
-    if (!userId) {
-      console.error('User ID is missing');
-      return;
-    }
+    if (!userId) return; // Ensure userId is present
 
     const payload = {
       project: Number(formData.project),
       deliverable: Number(formData.deliverable),
       start_time: new Date(formData.start_time).toISOString(),
       end_time: new Date(formData.end_time).toISOString(),
-      employee: userId,
+      employee: userId, // Attach userId to worklog
     };
-
-    console.log('Submitting payload:', payload);
 
     try {
       await createWorklog(payload).unwrap();
-      console.log('✅ Worklog created successfully!');
+      console.log("✅ Worklog created successfully!");
       setFormData({
         project: "",
         deliverable: "",
         start_time: "",
         end_time: "",
       });
-      onSuccess();
+      onSuccess(); // Trigger the onSuccess callback after successful creation
     } catch (err) {
-      console.error('❌ Failed to create worklog:', err);
+      console.error("❌ Failed to create worklog:", err);
     }
   };
 
@@ -112,7 +85,6 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
           onChange={handleChange}
           required
           className="w-full px-3 py-2 border rounded-md"
-          disabled={isLoadingProjects}
         >
           <option value="">Select a project</option>
           {projects.map((project: Project) => (
@@ -131,18 +103,14 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
           onChange={handleChange}
           required
           className="w-full px-3 py-2 border rounded-md"
-          disabled={isLoadingDeliverables || !formData.project}
         >
           <option value="">Select deliverable</option>
-          {filteredDeliverables.map((deliverable: Deliverable) => (
+          {deliverables.map((deliverable: Deliverable) => (
             <option key={deliverable.id} value={deliverable.id}>
-              {deliverable.name} (Stage {deliverable.stage})
+              {deliverable.name}
             </option>
           ))}
         </select>
-        {!isLoadingDeliverables && formData.project && filteredDeliverables.length === 0 && (
-          <p className="text-sm text-yellow-500">No deliverables found for selected project</p>
-        )}
       </div>
 
       <div className="space-y-2">
@@ -171,10 +139,10 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
 
       <button
         type="submit"
-        disabled={isCreatingWorklog || isLoadingProjects || isLoadingDeliverables}
+        disabled={isLoading}
         className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded disabled:bg-blue-300"
       >
-        {isCreatingWorklog ? "Submitting..." : "Create Worklog"}
+        {isLoading ? "Submitting..." : "Create Worklog"}
       </button>
     </form>
   );
