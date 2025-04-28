@@ -27,6 +27,7 @@ export interface EditableWorklog extends Omit<Worklog, "start_time" | "end_time"
 
 interface WorklogsTableProps {
   worklogs: Worklog[];
+  projects: { id: number; name: string }[];
   deliverables: { id: number; name: string }[];
   onDelete: (id: number) => void;
   onUpdate: (worklog: EditableWorklog) => Promise<void>;
@@ -38,6 +39,7 @@ type SortableField = 'start_time' | 'end_time';
 
 export default function WorklogsTable({
   worklogs,
+  projects,
   deliverables,
   onDelete,
   onUpdate,
@@ -127,6 +129,8 @@ export default function WorklogsTable({
     });
   };
 
+  const getProjectName = (id: number) =>
+    projects.find((p) => p.id === id)?.name || "Unknown";
   const getDeliverableName = (id: number) =>
     deliverables.find((d) => d.id === id)?.name || "Unknown";
 
@@ -151,6 +155,9 @@ export default function WorklogsTable({
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Project
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Deliverable
                 </th>
@@ -182,101 +189,116 @@ export default function WorklogsTable({
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {paginatedWorklogs.map((worklog) => {
-                console.log("Worklog:", worklog); // Log the entire worklog object
-                console.log("Project ID:", worklog.project); // Log the project ID
-                return (
-                  <tr key={worklog.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {editingId === worklog.id ? (
-                        <select
-                          value={editableWorklog?.deliverable || ""}
-                          onChange={(e) =>
-                            handleFieldChange(
-                              "deliverable",
-                              Number(e.target.value)
-                            )
-                          }
-                          className="border rounded p-1"
+              {paginatedWorklogs.map((worklog) => (
+                <tr key={worklog.id}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingId === worklog.id ? (
+                      <select
+                        value={editableWorklog?.project || ""}
+                        onChange={(e) =>
+                          handleFieldChange("project", Number(e.target.value))
+                        }
+                        className="border rounded p-1"
+                      >
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      getProjectName(worklog.project)
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingId === worklog.id ? (
+                      <select
+                        value={editableWorklog?.deliverable || ""}
+                        onChange={(e) =>
+                          handleFieldChange(
+                            "deliverable",
+                            Number(e.target.value)
+                          )
+                        }
+                        className="border rounded p-1"
+                      >
+                        {deliverables.map((deliverable) => (
+                          <option key={deliverable.id} value={deliverable.id}>
+                            {deliverable.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      getDeliverableName(worklog.deliverable)
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingId === worklog.id ? (
+                      <input
+                        type="datetime-local"
+                        value={editableWorklog?.start_time || ""}
+                        onChange={(e) =>
+                          handleFieldChange("start_time", e.target.value)
+                        }
+                        className="border rounded p-1"
+                      />
+                    ) : (
+                      format(parseISO(worklog.start_time), "PPpp")
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingId === worklog.id ? (
+                      <input
+                        type="datetime-local"
+                        value={editableWorklog?.end_time || ""}
+                        onChange={(e) =>
+                          handleFieldChange("end_time", e.target.value)
+                        }
+                        className="border rounded p-1"
+                      />
+                    ) : (
+                      format(parseISO(worklog.end_time), "PPpp")
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    {editingId === worklog.id ? (
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={handleSaveEdit}
+                          className="text-green-600 hover:text-green-900"
+                          title="Save"
                         >
-                          {deliverables.map((deliverable) => (
-                            <option key={deliverable.id} value={deliverable.id}>
-                              {deliverable.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        getDeliverableName(worklog.deliverable)
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {editingId === worklog.id ? (
-                        <input
-                          type="datetime-local"
-                          value={editableWorklog?.start_time || ""}
-                          onChange={(e) =>
-                            handleFieldChange("start_time", e.target.value)
-                          }
-                          className="border rounded p-1"
-                        />
-                      ) : (
-                        format(parseISO(worklog.start_time), "PPpp")
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {editingId === worklog.id ? (
-                        <input
-                          type="datetime-local"
-                          value={editableWorklog?.end_time || ""}
-                          onChange={(e) =>
-                            handleFieldChange("end_time", e.target.value)
-                          }
-                          className="border rounded p-1"
-                        />
-                      ) : (
-                        format(parseISO(worklog.end_time), "PPpp")
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      {editingId === worklog.id ? (
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={handleSaveEdit}
-                            className="text-green-600 hover:text-green-900"
-                            title="Save"
-                          >
-                            <CheckIcon className="h-5 w-5" />
-                          </button>
-                          <button
-                            onClick={handleCancelEdit}
-                            className="text-red-600 hover:text-red-900"
-                            title="Cancel"
-                          >
-                            <XMarkIcon className="h-5 w-5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleEdit(worklog)}
-                            className="text-indigo-600 hover:text-indigo-900"
-                            title="Edit"
-                          >
-                            <PencilIcon className="h-5 w-5" />
-                          </button>
-                          <button
-                            onClick={() => onDelete(worklog.id)}
-                            className="text-red-600 hover:text-red-900"
-                            title="Delete"
-                          >
-                            <TrashIcon className="h-5 w-5" />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                          <CheckIcon className="h-5 w-5" />
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          className="text-red-600 hover:text-red-900"
+                          title="Cancel"
+                        >
+                          <XMarkIcon className="h-5 w-5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => handleEdit(worklog)}
+                          className="text-indigo-600 hover:text-indigo-900"
+                          title="Edit"
+                        >
+                          <PencilIcon className="h-5 w-5" />
+                        </button>
+                        <button
+                          onClick={() => onDelete(worklog.id)}
+                          className="text-red-600 hover:text-red-900"
+                          title="Delete"
+                        >
+                          <TrashIcon className="h-5 w-5" />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           {totalPages > 1 && (
