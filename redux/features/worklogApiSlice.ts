@@ -29,7 +29,9 @@ interface Project {
 interface Deliverable {
   id: number;
   name: string;
+  project: number;  // This is required
 }
+
 
 // Extend the API slice with endpoints
 export const worklogApiSlice = apiSlice.injectEndpoints({

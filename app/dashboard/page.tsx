@@ -87,6 +87,7 @@ export default function DashboardPage() {
         </button>
       </div>
       {user?.id && <WorklogForm userId={user.id} onSuccess={refetch} />}
+      
       <WorklogsTable
         worklogs={userWorklogs}
         projects={projects}

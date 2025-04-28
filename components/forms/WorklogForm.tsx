@@ -1,7 +1,7 @@
 // components/forms/WorklogForm.tsx
 "use client";
 
-import { useState, ChangeEvent, FormEvent } from "react";
+import { useState, ChangeEvent, FormEvent, useMemo } from "react";
 import {
   useCreateWorklogMutation,
   useGetProjectsQuery,
@@ -16,16 +16,17 @@ interface Project {
 interface Deliverable {
   id: number;
   name: string;
+  project: number; // Add project field to Deliverable interface
 }
 
 interface WorklogFormProps {
   userId: number;
-  onSuccess: () => void; // Added onSuccess prop
+  onSuccess: () => void;
 }
 
 const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
   const { data: projects = [] } = useGetProjectsQuery();
-  const { data: deliverables = [] } = useGetDeliverablesQuery();
+  const { data: allDeliverables = [] } = useGetDeliverablesQuery();
   const [createWorklog, { isLoading }] = useCreateWorklogMutation();
 
   const [formData, setFormData] = useState({
@@ -35,29 +36,47 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
     end_time: "",
   });
 
+  // Filter deliverables based on selected project
+  const filteredDeliverables = useMemo(() => {
+    if (!formData.project) return [];
+    return allDeliverables.filter(
+      (deliverable: Deliverable) => deliverable.project === Number(formData.project)
+    );
+  }, [formData.project, allDeliverables]);
+
   // Handle form data change
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ): void => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+
+    // If project changes, reset the deliverable
+    if (name === "project") {
+      setFormData((prev) => ({
+        ...prev,
+        project: value,
+        deliverable: "", // Reset deliverable when project changes
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
   };
 
   // Handle form submit
   const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
 
-    if (!userId) return; // Ensure userId is present
+    if (!userId) return;
 
     const payload = {
       project: Number(formData.project),
       deliverable: Number(formData.deliverable),
       start_time: new Date(formData.start_time).toISOString(),
       end_time: new Date(formData.end_time).toISOString(),
-      employee: userId, // Attach userId to worklog
+      employee: userId,
     };
 
     try {
@@ -69,7 +88,7 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
         start_time: "",
         end_time: "",
       });
-      onSuccess(); // Trigger the onSuccess callback after successful creation
+      onSuccess();
     } catch (err) {
       console.error("❌ Failed to create worklog:", err);
     }
@@ -102,10 +121,11 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
           value={formData.deliverable}
           onChange={handleChange}
           required
+          disabled={!formData.project}
           className="w-full px-3 py-2 border rounded-md"
         >
           <option value="">Select deliverable</option>
-          {deliverables.map((deliverable: Deliverable) => (
+          {filteredDeliverables.map((deliverable: Deliverable) => (
             <option key={deliverable.id} value={deliverable.id}>
               {deliverable.name}
             </option>
