@@ -1,37 +1,48 @@
 // app/dashboard/page.tsx
 "use client";
 
-import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
-import { List, Spinner } from "@/components/common";
 import { useRouter } from "next/navigation";
-import WorklogForm from "@/components/forms/WorklogForm";
+import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
+import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
   useUpdateWorklogMutation,
-} from "@/redux/features/worklogApiSlice";
-import {
   useGetProjectsQuery,
   useGetDeliverablesQuery,
 } from "@/redux/features/worklogApiSlice";
+import WorklogForm from "@/components/forms/WorklogForm";
 import WorklogsTable, { EditableWorklog } from "@/components/tables/WorklogsTable";
+import { List, Spinner } from "@/components/common";
 
 export default function DashboardPage() {
+  const router = useRouter();
+
   const {
     data: user,
     isLoading: isUserLoading,
     isFetching: isUserFetching,
   } = useRetrieveUserQuery();
+
+  const {
+    data: memberships = [],
+    isLoading: isMembershipsLoading,
+    isFetching: isMembershipsFetching,
+  } = useGetMyMembershipsQuery();
+
   const { data: allWorklogs = [], refetch } = useGetWorklogsQuery();
   const { data: projects = [] } = useGetProjectsQuery();
   const { data: deliverables = [] } = useGetDeliverablesQuery();
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
-  const router = useRouter();
+
+  const isLoading = isUserLoading || isUserFetching || isMembershipsLoading || isMembershipsFetching;
 
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
+
+  const isAdmin = memberships.some((m) => m.role === "admin");
 
   const handleDelete = async (id: number) => {
     try {
@@ -56,9 +67,8 @@ export default function DashboardPage() {
       console.error("❌ Failed to update worklog:", err);
     }
   };
-  
 
-  if (isUserLoading || isUserFetching) {
+  if (isLoading) {
     return (
       <div className="flex justify-center my-8">
         <Spinner lg />
@@ -77,17 +87,21 @@ export default function DashboardPage() {
       <header className="bg-white shadow-sm rounded-lg p-6 mb-8">
         <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
       </header>
+
       <div className="bg-white shadow-sm rounded-lg p-6 mb-8">
         <List config={userConfig} />
-        <button
-          onClick={() => router.push("/projects")}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        >
-          View Projects
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => router.push("/projects")}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            View Projects
+          </button>
+        )}
       </div>
+
       {user?.id && <WorklogForm userId={user.id} onSuccess={refetch} />}
-      
+
       <WorklogsTable
         worklogs={userWorklogs}
         projects={projects}
