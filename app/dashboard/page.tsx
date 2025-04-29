@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -12,8 +11,13 @@ import {
   useGetDeliverablesQuery,
 } from "@/redux/features/worklogApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
-import WorklogsTable, { EditableWorklog } from "@/components/tables/WorklogsTable";
+import WorklogsTable, {
+  EditableWorklog,
+} from "@/components/tables/WorklogsTable";
 import { List, Spinner } from "@/components/common";
+
+// 🔽 Utility function to trigger CSV download
+import { downloadCSV } from "@/components/utils/CsvDownload";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -36,7 +40,11 @@ export default function DashboardPage() {
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
 
-  const isLoading = isUserLoading || isUserFetching || isMembershipsLoading || isMembershipsFetching;
+  const isLoading =
+    isUserLoading ||
+    isUserFetching ||
+    isMembershipsLoading ||
+    isMembershipsFetching;
 
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
@@ -90,13 +98,40 @@ export default function DashboardPage() {
 
       <div className="bg-white shadow-sm rounded-lg p-6 mb-8">
         <List config={userConfig} />
+
         {isAdmin && (
-          <button
-            onClick={() => router.push("/projects")}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-          >
-            View Projects
-          </button>
+          <div className="mt-4 space-y-2">
+            <button
+              onClick={() => router.push("/projects")}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              View Projects
+            </button>
+
+            <button
+              onClick={() =>
+                downloadCSV(
+                  "https://api.modelflick.com/api/work-logs/download-csv/",
+                  "worklogs.csv"
+                )
+              }
+              className="px-12 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+            >
+              Download Worklogs
+            </button>
+
+            <button
+              onClick={() =>
+                downloadCSV(
+                  "https://api.modelflick.com/api/deliverables/download-csv/",
+                  "deliverables.csv"
+                )
+              }
+              className="px-12 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Download Deliverables
+            </button>
+          </div>
         )}
       </div>
 
