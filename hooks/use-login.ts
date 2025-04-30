@@ -28,9 +28,13 @@ export default function useLogin() {
     login({ email, password })
       .unwrap()
       .then((data) => {
+        // Save access and refresh tokens to localStorage
         localStorage.setItem('access', data.access);
+        localStorage.setItem('refresh', data.refresh); // Save refresh token
+
+        // Dispatch action to update the auth state (if needed)
         dispatch(setAuth());
-        
+
         toast.success("Logged in successfully", {
           autoClose: 3000,
           pauseOnHover: true,
@@ -47,6 +51,7 @@ export default function useLogin() {
           pauseOnHover: true,
         };
 
+        // Handle errors based on the error status
         if (error.status === 400) {
           toast.error(
             error.data?.detail || "Invalid request format", 

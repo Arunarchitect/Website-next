@@ -111,7 +111,7 @@ export default function DashboardPage() {
             <button
               onClick={() =>
                 downloadCSV(
-                  "https://api.modelflick.com/api/work-logs/download-csv/",
+                  "https://api.modelflick.com/api/work-logs/download_csv/",
                   "worklogs.csv"
                 )
               }
@@ -123,7 +123,7 @@ export default function DashboardPage() {
             <button
               onClick={() =>
                 downloadCSV(
-                  "https://api.modelflick.com/api/deliverables/download-csv/",
+                  "https://api.modelflick.com/api/deliverables/download_csv/",
                   "deliverables.csv"
                 )
               }

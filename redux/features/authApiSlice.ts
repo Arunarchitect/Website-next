@@ -58,6 +58,10 @@ interface ResetPasswordConfirmArgs {
   re_new_password: string;
 }
 
+interface RefreshTokenArgs {
+  refresh: string;
+}
+
 // Define your API slice with endpoints
 const authApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
@@ -143,6 +147,15 @@ const authApiSlice = apiSlice.injectEndpoints({
         body: { uid, token, new_password, re_new_password },
       }),
     }),
+
+    // Refresh the JWT token
+    refreshToken: builder.mutation<AuthResponse, RefreshTokenArgs>({
+      query: ({ refresh }) => ({
+        url: "/jwt/refresh/",
+        method: "POST",
+        body: { refresh },
+      }),
+    }),
   }),
 });
 
@@ -157,4 +170,5 @@ export const {
   useActivationMutation,
   useResetPasswordMutation,
   useResetPasswordConfirmMutation,
+  useRefreshTokenMutation, // Add this export
 } = authApiSlice;
