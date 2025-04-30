@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useAppSelector, useAppDispatch } from '@/redux/hooks';
-import { setToken } from '@/redux/features/authSlice';
+import { setToken, logout } from '@/redux/features/authSlice';
 
 interface Project {
   id: number;
@@ -12,16 +12,9 @@ interface Project {
   client_name: string;
 }
 
-// Slightly darker color palette for better contrast with black text
 const NOTE_COLORS = [
-  '#fde047', // brighter yellow
-  '#86efac', // brighter green
-  '#93c5fd', // brighter blue
-  '#fca5a5', // brighter red
-  '#c4b5fd', // brighter purple
-  '#f9a8d4', // brighter pink
-  '#fdba74', // brighter orange
-  '#5eead4', // brighter teal
+  '#fde047', '#86efac', '#93c5fd', '#fca5a5', 
+  '#c4b5fd', '#f9a8d4', '#fdba74', '#5eead4'
 ];
 
 export default function ProjectsPage() {
@@ -31,22 +24,42 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!token && localStorage.getItem('access')) {
-      const tokenFromStorage = localStorage.getItem('access');
-      if (tokenFromStorage) {
-        dispatch(setToken(tokenFromStorage));
+  const refreshAuthToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const refreshToken = localStorage.getItem('refresh');
+      if (!refreshToken) {
+        dispatch(logout());
+        return null;
       }
-    }
 
-    if (isAuthenticated && token) {
-      fetchProjects(token);
-    } else {
-      setLoading(false);
-    }
-  }, [isAuthenticated, token, dispatch]);
+      const response = await fetch('https://api.modelflick.com/api/token/refresh/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh: refreshToken }),
+      });
 
-  const fetchProjects = async (token: string) => {
+      if (!response.ok) {
+        throw new Error('Failed to refresh token');
+      }
+
+      const data = await response.json();
+      
+      localStorage.setItem('old_refresh', refreshToken);
+      localStorage.setItem('access', data.access);
+      localStorage.setItem('refresh', data.refresh || refreshToken);
+      dispatch(setToken(data.access));
+      
+      return data.access;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      dispatch(logout());
+      return null;
+    }
+  }, [dispatch]);
+
+  const fetchProjects = useCallback(async (token: string, retry = true) => {
     try {
       const res = await fetch('https://api.modelflick.com/api/projects/', {
         headers: {
@@ -54,18 +67,52 @@ export default function ProjectsPage() {
         },
       });
 
+      if (res.status === 401 && retry) {
+        const newToken = await refreshAuthToken();
+        if (newToken) {
+          return fetchProjects(newToken, false);
+        }
+        throw new Error('Session expired. Please login again.');
+      }
+
       if (!res.ok) {
         throw new Error(`Failed to fetch projects. Status: ${res.status}`);
       }
 
       const data = await res.json();
       setProjects(data);
-    } catch (err) {
-      setError('Error loading projects');
+    } catch (error) {
+      console.error('Error:', error);
+      setError(error instanceof Error ? error.message : 'Error loading projects');
     } finally {
       setLoading(false);
     }
-  };
+  }, [refreshAuthToken]);
+
+  useEffect(() => {
+    const initializeAuth = () => {
+      const tokenFromStorage = localStorage.getItem('access');
+      const refreshTokenFromStorage = localStorage.getItem('refresh');
+      
+      if (!token && tokenFromStorage) {
+        dispatch(setToken(tokenFromStorage));
+      }
+      
+      if (!refreshTokenFromStorage && localStorage.getItem('old_refresh')) {
+        localStorage.setItem('refresh', localStorage.getItem('old_refresh')!);
+      }
+    };
+
+    initializeAuth();
+  }, [token, dispatch]);
+
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      fetchProjects(token);
+    } else {
+      setLoading(false);
+    }
+  }, [isAuthenticated, token, fetchProjects]);
 
   const getProjectColor = (index: number) => {
     return NOTE_COLORS[index % NOTE_COLORS.length];
