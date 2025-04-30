@@ -24,3 +24,33 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+
+
+.sticky-note {
+  height: 250px;
+  border-radius: 8px;
+  box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  color: #000; /* Ensures all text is black by default */
+}
+
+.sticky-note:hover {
+  transform: rotate(0deg) scale(1.05) !important;
+  box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+.sticky-note::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.1);
+  border-bottom-left-radius: 8px;
+}

@@ -12,6 +12,18 @@ interface Project {
   client_name: string;
 }
 
+// Slightly darker color palette for better contrast with black text
+const NOTE_COLORS = [
+  '#fde047', // brighter yellow
+  '#86efac', // brighter green
+  '#93c5fd', // brighter blue
+  '#fca5a5', // brighter red
+  '#c4b5fd', // brighter purple
+  '#f9a8d4', // brighter pink
+  '#fdba74', // brighter orange
+  '#5eead4', // brighter teal
+];
+
 export default function ProjectsPage() {
   const { isAuthenticated, token } = useAppSelector(state => state.auth);
   const dispatch = useAppDispatch();
@@ -20,14 +32,10 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('Auth status:', isAuthenticated);
-    console.log('Token from Redux:', token);
-
-    // Set token from localStorage if it's available and not in state
     if (!token && localStorage.getItem('access')) {
       const tokenFromStorage = localStorage.getItem('access');
       if (tokenFromStorage) {
-        dispatch(setToken(tokenFromStorage)); // Set token in Redux state
+        dispatch(setToken(tokenFromStorage));
       }
     }
 
@@ -39,8 +47,6 @@ export default function ProjectsPage() {
   }, [isAuthenticated, token, dispatch]);
 
   const fetchProjects = async (token: string) => {
-    console.log('Fetching projects with token:', token);
-
     try {
       const res = await fetch('https://api.modelflick.com/api/projects/', {
         headers: {
@@ -48,54 +54,75 @@ export default function ProjectsPage() {
         },
       });
 
-      console.log('Response status:', res.status);
-
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        console.error('API Error Response:', errorData);
         throw new Error(`Failed to fetch projects. Status: ${res.status}`);
       }
 
       const data = await res.json();
-      console.log('Fetched projects:', data);
       setProjects(data);
     } catch (err) {
-      console.error('Error fetching projects:', err);
       setError('Error loading projects');
     } finally {
       setLoading(false);
     }
   };
 
+  const getProjectColor = (index: number) => {
+    return NOTE_COLORS[index % NOTE_COLORS.length];
+  };
+
   if (!isAuthenticated) {
     return (
-      <div className="p-10 text-white flex flex-col items-center space-y-4 min-h-screen bg-black">
+      <div className="p-10 text-white flex flex-col items-center space-y-4 min-h-screen bg-gray-900">
         <h1 className="text-2xl font-bold">Please Log In to Access Projects</h1>
       </div>
     );
   }
 
-  if (loading) return <p className="p-4 text-white">Loading projects...</p>;
-  if (error) return <p className="p-4 text-red-500">{error}</p>;
+  if (loading) return (
+    <div className="min-h-screen bg-gray-900 p-10 text-white">
+      <p>Loading projects...</p>
+    </div>
+  );
+  
+  if (error) return (
+    <div className="min-h-screen bg-gray-900 p-10 text-white">
+      <p className="text-red-500">{error}</p>
+    </div>
+  );
 
   return (
-    <div className="p-6 space-y-6 text-white">
-      <h1 className="text-2xl font-bold">All Projects</h1>
+    <div className="min-h-screen bg-gray-900 p-6">
+      <h1 className="text-2xl font-bold text-white mb-8">Project Dashboard</h1>
 
       {projects.length === 0 ? (
-        <p>No projects found.</p>
+        <p className="text-white">No projects found.</p>
       ) : (
-        <ul className="space-y-4">
-          {projects.map((project) => (
-            <li key={project.id} className="border border-gray-700 p-4 rounded-md hover:bg-gray-900 transition">
-              <Link href={`/projects/${project.id}`} className="block text-xl font-semibold text-blue-400 hover:underline">
-                {project.name}
-              </Link>
-              <p className="text-sm text-gray-300">Client: {project.client_name}</p>
-              <p className="text-sm text-gray-400">Location: {project.location}</p>
-            </li>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          {projects.map((project, index) => (
+            <Link 
+              key={project.id} 
+              href={`/projects/${project.id}`}
+              className="sticky-note transform hover:scale-105 transition-transform duration-200"
+              style={{ 
+                backgroundColor: getProjectColor(index),
+                transform: `rotate(${index % 2 === 0 ? -1 : 1}deg)`,
+              }}
+            >
+              <div className="p-5 h-full flex flex-col text-gray-900">
+                <h2 className="text-xl font-bold mb-3 break-words">{project.name}</h2>
+                <div className="mb-4 flex-grow">
+                  <p className="text-sm font-semibold mb-1">Client:</p>
+                  <p className="text-sm break-words">{project.client_name}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold mb-1">Location:</p>
+                  <p className="text-sm break-words">{project.location}</p>
+                </div>
+              </div>
+            </Link>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
