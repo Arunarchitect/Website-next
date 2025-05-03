@@ -35,9 +35,31 @@ export default function Navbar() {
 		</NavLink>
 	);
 
+	const coursesLink = (isMobile: boolean) => (
+		<NavLink
+			isSelected={isSelected('/courses')}
+			isMobile={isMobile}
+			href='/courses'
+		>
+			Courses
+		</NavLink>
+	);
+
+	const modelBlogLink = (isMobile: boolean) => (
+		<NavLink
+			isSelected={isSelected('/modelblog')}
+			isMobile={isMobile}
+			href='/modelblog'
+		>
+			ModelBlog
+		</NavLink>
+	);
+
 	const authLinks = (isMobile: boolean) => (
 		<>
 			{toolsLink(isMobile)}
+			{coursesLink(isMobile)}
+			{modelBlogLink(isMobile)} {/* Add ModelBlog Link */}
 			<NavLink
 				isSelected={isSelected('/dashboard')}
 				isMobile={isMobile}
@@ -54,6 +76,8 @@ export default function Navbar() {
 	const guestLinks = (isMobile: boolean) => (
 		<>
 			{toolsLink(isMobile)}
+			{coursesLink(isMobile)}
+			{modelBlogLink(isMobile)} {/* Add ModelBlog Link */}
 			<NavLink
 				isSelected={isSelected('/auth/login')}
 				isMobile={isMobile}

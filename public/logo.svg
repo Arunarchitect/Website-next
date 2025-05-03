@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="1080"
+   height="1080"
+   viewBox="0 0 1080 1080"
+   version="1.1"
+   id="svg1"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1">
+    <linearGradient
+       id="linearGradient33">
+      <stop
+         style="stop-color:#ffffff;stop-opacity:1;"
+         offset="0"
+         id="stop33" />
+      <stop
+         style="stop-color:#ffffff;stop-opacity:0;"
+         offset="1"
+         id="stop34" />
+    </linearGradient>
+    <rect
+       x="402.96896"
+       y="393.14045"
+       width="454.07722"
+       height="406.90037"
+       id="rect31" />
+    <linearGradient
+       xlink:href="#linearGradient33"
+       id="linearGradient34"
+       x1="379.38049"
+       y1="662.41345"
+       x2="-62.869274"
+       y2="943.50891"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="translate(0,-18)" />
+  </defs>
+  <g
+     id="layer1">
+    <rect
+       style="opacity:1;fill:#3949ab;fill-opacity:1;stroke:none;stroke-width:30;stroke-dasharray:none;stroke-opacity:1"
+       id="rect32"
+       width="746.96686"
+       height="739.10406"
+       x="159.22188"
+       y="165.11899"
+       rx="62.90247"
+       ry="45.211147" />
+    <path
+       style="opacity:1;fill:url(#linearGradient34);stroke:none;stroke-width:30;stroke-dasharray:none;stroke-opacity:1"
+       d="m 161.18758,842.97759 c 0,0 152.68386,-364.2808 178.8789,-367.58632 26.19505,-3.30552 176.91321,208.36443 176.91321,208.36443 0,0 107.71637,-375.46275 133.66775,-375.44913 25.95138,0.0136 73.42155,295.38815 108.11363,304.68386 34.69208,9.29571 260.68873,-372.97451 257.50693,-367.58633 0,0 -254.33307,460.05361 -269.30115,456.04293 -14.96808,-4.01068 -43.76358,-188.73614 -94.35371,-186.74172 -50.59013,1.99442 -114.42688,312.3759 -129.73634,316.47806 -15.30946,4.10216 -102.54942,-218.19294 -161.18759,-218.19294 -58.63817,0 -200.50163,229.98716 -200.50163,229.98716 z"
+       id="path32" />
+  </g>
+</svg>

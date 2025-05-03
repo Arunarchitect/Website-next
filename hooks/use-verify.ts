@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from "react";
 import { useAppDispatch } from "@/redux/hooks";
@@ -11,15 +11,36 @@ export default function useVerify() {
   const [verify] = useVerifyMutation();
   const [refreshToken] = useRefreshTokenMutation();
   const router = useRouter();
-
-  const [hasRedirected, setHasRedirected] = useState(false); // Prevent multiple redirects
+  const [hasRedirected, setHasRedirected] = useState(false);
 
   useEffect(() => {
     const verifyToken = async () => {
       const access = localStorage.getItem("access");
       const refresh = localStorage.getItem("refresh");
 
-      // Step 1: If no tokens available, redirect to login
+      const currentPath = window.location.pathname;
+
+      // Define paths where authentication is NOT required
+      const publicPaths = [
+        "/password-reset",
+        "/auth/register",
+        "/auth/login"
+      ];
+
+      // Allow access to public pages without token verification
+      if (publicPaths.some(path => currentPath.startsWith(path))) {
+        dispatch(finishInitialLoad());
+        return;
+      }
+
+      // Redirect authenticated users away from auth pages to dashboard
+      if (access && currentPath.startsWith("/auth/") && !hasRedirected) {
+        setHasRedirected(true);
+        router.push("/dashboard");
+        return;
+      }
+
+      // If no tokens at all, redirect to login (except for public pages above)
       if (!access && !refresh && !hasRedirected) {
         setHasRedirected(true);
         dispatch(logout());
@@ -28,12 +49,12 @@ export default function useVerify() {
       }
 
       try {
-        // Step 2: If access token exists, verify it
         if (access) {
+          // Verify the access token
           await verify({ token: access }).unwrap();
           dispatch(setAuth());
         } else if (refresh) {
-          // Step 3: If no access token, try to refresh it
+          // If no access token, try refreshing it
           const response = await refreshToken({ refresh }).unwrap();
 
           if (response?.access) {
@@ -46,7 +67,7 @@ export default function useVerify() {
 
           dispatch(setAuth());
         } else {
-          // If both tokens are invalid or missing
+          // If refreshing fails
           dispatch(logout());
           if (!hasRedirected) {
             setHasRedirected(true);
@@ -56,11 +77,9 @@ export default function useVerify() {
       } catch (error) {
         console.error("Token verification or refresh error:", error);
 
-        // Safely check if error has a `status`
         if (error && typeof error === "object" && "status" in error) {
           const err = error as { status?: number | string };
-
-          if (err.status === 401 || err.status === 'FETCH_ERROR') {
+          if (err.status === 401 || err.status === "FETCH_ERROR") {
             localStorage.removeItem("access");
             localStorage.removeItem("refresh");
           }
