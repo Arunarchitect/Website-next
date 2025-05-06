@@ -31,9 +31,12 @@ export default function HomePage() {
           <div className="text-center">
             {/* Add Logo */}
             <Image
-              src="/logo.svg" // local logo from public folder
+              src="/logo.svg"
               alt="Modelflick"
-              className="mx-auto h-20 w-auto" // you can adjust h-10
+              width={80} // <- Add width
+              height={80} // <- Add height
+              className="mx-auto h-20 w-auto"
+              priority // optional: load early
             />
 
             <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl">

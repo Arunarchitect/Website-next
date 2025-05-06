@@ -24,7 +24,8 @@ export default function useVerify() {
       const publicPaths = [
         "/password-reset",
         "/auth/register",
-        "/auth/login"
+        "/auth/login",
+        "/"
       ];
 
       // Allow access to public pages without token verification

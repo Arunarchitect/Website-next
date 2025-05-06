@@ -7,8 +7,6 @@ import {
   TrashIcon,
   CheckIcon,
   XMarkIcon,
-  ChevronUpIcon,
-  ChevronDownIcon,
 } from "@heroicons/react/24/outline";
 
 interface Project {
@@ -19,7 +17,7 @@ interface Project {
 interface Deliverable {
   id: number;
   name: string;
-  project: number;  // This is required
+  project: number;
 }
 
 interface Worklog {
@@ -36,8 +34,6 @@ export interface EditableWorklog extends Omit<Worklog, "start_time" | "end_time"
   project: number;
 }
 
-
-
 interface WorklogsTableProps {
   worklogs: Worklog[];
   projects: Project[];
@@ -49,7 +45,7 @@ interface WorklogsTableProps {
 }
 
 type SortDirection = "asc" | "desc";
-type SortableField = "start_time" | "end_time";
+type SortableField = "start_time" | "end_time" | "project" | "deliverable";
 
 export default function WorklogsTable({
   worklogs,
@@ -70,31 +66,44 @@ export default function WorklogsTable({
 
   const PAGE_SIZE = 10;
 
-  const projectMap = useMemo(() => {
-    return new Map(projects.map((p) => [p.id, p]));
-  }, [projects]);
-
-  const deliverableMap = useMemo(() => {
-    return new Map(deliverables.map((d) => [d.id, d]));
-  }, [deliverables]);
+  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+  const deliverableMap = useMemo(() => new Map(deliverables.map((d) => [d.id, d])), [deliverables]);
 
   const sortedWorklogs = useMemo(() => {
     const sorted = [...worklogs];
     if (sortConfig) {
       sorted.sort((a, b) => {
-        const aValue = new Date(a[sortConfig.key]).getTime();
-        const bValue = new Date(b[sortConfig.key]).getTime();
-        return sortConfig.direction === "asc" ? aValue - bValue : bValue - aValue;
+        let aValue: string | number = "";
+        let bValue: string | number = "";
+
+        if (sortConfig.key === "project") {
+          const aDeliverable = deliverableMap.get(a.deliverable);
+          const bDeliverable = deliverableMap.get(b.deliverable);
+          aValue = aDeliverable ? (projectMap.get(aDeliverable.project)?.name || "") : "";
+          bValue = bDeliverable ? (projectMap.get(bDeliverable.project)?.name || "") : "";
+        } else if (sortConfig.key === "deliverable") {
+          aValue = deliverableMap.get(a.deliverable)?.name || "";
+          bValue = deliverableMap.get(b.deliverable)?.name || "";
+        } else {
+          aValue = new Date(a[sortConfig.key]).getTime();
+          bValue = new Date(b[sortConfig.key]).getTime();
+        }
+
+        if (typeof aValue === "string" && typeof bValue === "string") {
+          return sortConfig.direction === "asc"
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        }
+        return sortConfig.direction === "asc"
+          ? (aValue as number) - (bValue as number)
+          : (bValue as number) - (aValue as number);
       });
     }
     return sorted;
-  }, [worklogs, sortConfig]);
+  }, [worklogs, sortConfig, deliverableMap, projectMap]);
 
   const totalPages = Math.ceil(sortedWorklogs.length / PAGE_SIZE);
-  const paginatedWorklogs = sortedWorklogs.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
+  const paginatedWorklogs = sortedWorklogs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const requestSort = (key: SortableField) => {
     setSortConfig((prev) => {
@@ -136,18 +145,10 @@ export default function WorklogsTable({
 
   const handleFieldChange = (field: keyof EditableWorklog, value: string | number) => {
     if (!editableWorklog) return;
-
     if (field === "project") {
-      setEditableWorklog({
-        ...editableWorklog,
-        project: Number(value),
-        deliverable: 0,
-      });
+      setEditableWorklog({ ...editableWorklog, project: Number(value), deliverable: 0 });
     } else {
-      setEditableWorklog({
-        ...editableWorklog,
-        [field]: value,
-      });
+      setEditableWorklog({ ...editableWorklog, [field]: value });
     }
   };
 
@@ -157,12 +158,12 @@ export default function WorklogsTable({
 
   const getSortIcon = (key: SortableField) => {
     if (!sortConfig || sortConfig.key !== key) {
-      return <ChevronUpIcon className="h-4 w-4 opacity-0" />;
+      return <span className="ml-1 text-gray-300">↑</span>; // Invisible placeholder
     }
     return sortConfig.direction === "asc" ? (
-      <ChevronUpIcon className="h-4 w-4" />
+      <span className="ml-1">↑</span>
     ) : (
-      <ChevronDownIcon className="h-4 w-4" />
+      <span className="ml-1">↓</span>
     );
   };
 
@@ -182,19 +183,28 @@ export default function WorklogsTable({
         <table className="min-w-full divide-y divide-gray-300">
           <thead className="bg-gray-100">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
-                Project
+              <th
+                className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
+                onClick={() => requestSort("project")}
+              >
+                <div className="flex items-center">
+                  Project {getSortIcon("project")}
+                </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
-                Deliverable
+              <th
+                className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
+                onClick={() => requestSort("deliverable")}
+              >
+                <div className="flex items-center">
+                  Deliverable {getSortIcon("deliverable")}
+                </div>
               </th>
               <th
                 className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                 onClick={() => requestSort("start_time")}
               >
                 <div className="flex items-center">
-                  Start Time
-                  {getSortIcon("start_time")}
+                  Start Time {getSortIcon("start_time")}
                 </div>
               </th>
               <th
@@ -202,8 +212,7 @@ export default function WorklogsTable({
                 onClick={() => requestSort("end_time")}
               >
                 <div className="flex items-center">
-                  End Time
-                  {getSortIcon("end_time")}
+                  End Time {getSortIcon("end_time")}
                 </div>
               </th>
               <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
@@ -215,7 +224,6 @@ export default function WorklogsTable({
             {paginatedWorklogs.map((worklog) => {
               const deliverable = deliverableMap.get(worklog.deliverable);
               const project = deliverable ? projectMap.get(deliverable.project) : null;
-
               const isEditing = editingId === worklog.id;
 
               return (
@@ -249,13 +257,12 @@ export default function WorklogsTable({
                         className="border rounded p-1"
                       >
                         <option value="">Select Deliverable</option>
-                        {editableWorklog?.project
-                          ? getFilteredDeliverables(editableWorklog.project).map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {d.name}
-                              </option>
-                            ))
-                          : null}
+                        {editableWorklog?.project &&
+                          getFilteredDeliverables(editableWorklog.project).map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
                       </select>
                     ) : (
                       deliverable?.name || "Invalid Deliverable"
@@ -294,35 +301,19 @@ export default function WorklogsTable({
                   <td className="px-6 py-4 flex space-x-2">
                     {isEditing ? (
                       <>
-                        <button
-                          onClick={saveEditing}
-                          className="text-green-600 hover:text-green-900"
-                          title="Save"
-                        >
+                        <button onClick={saveEditing} className="text-green-600 hover:text-green-900" title="Save">
                           <CheckIcon className="h-5 w-5" />
                         </button>
-                        <button
-                          onClick={cancelEditing}
-                          className="text-gray-600 hover:text-gray-900"
-                          title="Cancel"
-                        >
+                        <button onClick={cancelEditing} className="text-gray-600 hover:text-gray-900" title="Cancel">
                           <XMarkIcon className="h-5 w-5" />
                         </button>
                       </>
                     ) : (
                       <>
-                        <button
-                          onClick={() => startEditing(worklog)}
-                          className="text-indigo-600 hover:text-indigo-900"
-                          title="Edit"
-                        >
+                        <button onClick={() => startEditing(worklog)} className="text-indigo-600 hover:text-indigo-900" title="Edit">
                           <PencilIcon className="h-5 w-5" />
                         </button>
-                        <button
-                          onClick={() => onDelete(worklog.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete"
-                        >
+                        <button onClick={() => onDelete(worklog.id)} className="text-red-600 hover:text-red-900" title="Delete">
                           <TrashIcon className="h-5 w-5" />
                         </button>
                       </>
