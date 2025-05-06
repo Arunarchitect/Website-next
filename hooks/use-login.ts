@@ -30,7 +30,7 @@ export default function useLogin() {
       .then((data) => {
         // Save access and refresh tokens to localStorage
         localStorage.setItem('access', data.access);
-        localStorage.setItem('refresh', data.refresh); // Save refresh token
+        localStorage.setItem('refresh', data.refresh);
 
         // Dispatch action to update the auth state (if needed)
         dispatch(setAuth());
@@ -40,10 +40,8 @@ export default function useLogin() {
           pauseOnHover: true,
         });
 
-        // Add delay before routing (3 seconds to match toast duration)
-        setTimeout(() => {
-          router.push("/dashboard");
-        }, 3000);
+        // Redirect to the dashboard immediately after login
+        router.push("/dashboard");
       })
       .catch((error) => {
         const toastOptions = {

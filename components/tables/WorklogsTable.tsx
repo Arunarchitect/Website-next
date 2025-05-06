@@ -28,7 +28,8 @@ interface Worklog {
   employee: number;
 }
 
-export interface EditableWorklog extends Omit<Worklog, "start_time" | "end_time"> {
+export interface EditableWorklog
+  extends Omit<Worklog, "start_time" | "end_time"> {
   start_time: string;
   end_time: string;
   project: number;
@@ -57,17 +58,27 @@ export default function WorklogsTable({
   isLoading = false,
 }: WorklogsTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
+  const [editableWorklog, setEditableWorklog] =
+    useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState<{
     key: SortableField;
     direction: SortDirection;
-  } | null>(null);
+  }>({
+    key: "start_time", // Default sort field to 'start_time'
+    direction: "desc", // Default sort direction to 'desc' for latest worklog
+  });
 
   const PAGE_SIZE = 10;
 
-  const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
-  const deliverableMap = useMemo(() => new Map(deliverables.map((d) => [d.id, d])), [deliverables]);
+  const projectMap = useMemo(
+    () => new Map(projects.map((p) => [p.id, p])),
+    [projects]
+  );
+  const deliverableMap = useMemo(
+    () => new Map(deliverables.map((d) => [d.id, d])),
+    [deliverables]
+  );
 
   const sortedWorklogs = useMemo(() => {
     const sorted = [...worklogs];
@@ -79,8 +90,12 @@ export default function WorklogsTable({
         if (sortConfig.key === "project") {
           const aDeliverable = deliverableMap.get(a.deliverable);
           const bDeliverable = deliverableMap.get(b.deliverable);
-          aValue = aDeliverable ? (projectMap.get(aDeliverable.project)?.name || "") : "";
-          bValue = bDeliverable ? (projectMap.get(bDeliverable.project)?.name || "") : "";
+          aValue = aDeliverable
+            ? projectMap.get(aDeliverable.project)?.name || ""
+            : "";
+          bValue = bDeliverable
+            ? projectMap.get(bDeliverable.project)?.name || ""
+            : "";
         } else if (sortConfig.key === "deliverable") {
           aValue = deliverableMap.get(a.deliverable)?.name || "";
           bValue = deliverableMap.get(b.deliverable)?.name || "";
@@ -103,7 +118,10 @@ export default function WorklogsTable({
   }, [worklogs, sortConfig, deliverableMap, projectMap]);
 
   const totalPages = Math.ceil(sortedWorklogs.length / PAGE_SIZE);
-  const paginatedWorklogs = sortedWorklogs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const paginatedWorklogs = sortedWorklogs.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
 
   const requestSort = (key: SortableField) => {
     setSortConfig((prev) => {
@@ -143,10 +161,17 @@ export default function WorklogsTable({
     }
   };
 
-  const handleFieldChange = (field: keyof EditableWorklog, value: string | number) => {
+  const handleFieldChange = (
+    field: keyof EditableWorklog,
+    value: string | number
+  ) => {
     if (!editableWorklog) return;
     if (field === "project") {
-      setEditableWorklog({ ...editableWorklog, project: Number(value), deliverable: 0 });
+      setEditableWorklog({
+        ...editableWorklog,
+        project: Number(value),
+        deliverable: 0,
+      });
     } else {
       setEditableWorklog({ ...editableWorklog, [field]: value });
     }
@@ -223,7 +248,9 @@ export default function WorklogsTable({
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedWorklogs.map((worklog) => {
               const deliverable = deliverableMap.get(worklog.deliverable);
-              const project = deliverable ? projectMap.get(deliverable.project) : null;
+              const project = deliverable
+                ? projectMap.get(deliverable.project)
+                : null;
               const isEditing = editingId === worklog.id;
 
               return (
@@ -233,7 +260,9 @@ export default function WorklogsTable({
                     {isEditing ? (
                       <select
                         value={editableWorklog?.project || ""}
-                        onChange={(e) => handleFieldChange("project", e.target.value)}
+                        onChange={(e) =>
+                          handleFieldChange("project", e.target.value)
+                        }
                         className="border rounded p-1"
                       >
                         <option value="">Select Project</option>
@@ -253,16 +282,19 @@ export default function WorklogsTable({
                     {isEditing ? (
                       <select
                         value={editableWorklog?.deliverable || ""}
-                        onChange={(e) => handleFieldChange("deliverable", e.target.value)}
+                        onChange={(e) =>
+                          handleFieldChange("deliverable", e.target.value)
+                        }
                         className="border rounded p-1"
                       >
                         <option value="">Select Deliverable</option>
-                        {editableWorklog?.project &&
-                          getFilteredDeliverables(editableWorklog.project).map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}
-                            </option>
-                          ))}
+                        {getFilteredDeliverables(
+                          Number(editableWorklog?.project)
+                        ).map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
                       </select>
                     ) : (
                       deliverable?.name || "Invalid Deliverable"
@@ -275,11 +307,13 @@ export default function WorklogsTable({
                       <input
                         type="datetime-local"
                         value={editableWorklog?.start_time || ""}
-                        onChange={(e) => handleFieldChange("start_time", e.target.value)}
+                        onChange={(e) =>
+                          handleFieldChange("start_time", e.target.value)
+                        }
                         className="border rounded p-1"
                       />
                     ) : (
-                      format(parseISO(worklog.start_time), "PPpp")
+                      format(parseISO(worklog.start_time), "d MMM yyyy EEE ")
                     )}
                   </td>
 
@@ -289,34 +323,48 @@ export default function WorklogsTable({
                       <input
                         type="datetime-local"
                         value={editableWorklog?.end_time || ""}
-                        onChange={(e) => handleFieldChange("end_time", e.target.value)}
+                        onChange={(e) =>
+                          handleFieldChange("end_time", e.target.value)
+                        }
                         className="border rounded p-1"
                       />
                     ) : (
-                      format(parseISO(worklog.end_time), "PPpp")
+                      format(parseISO(worklog.end_time), "d MMM yyyy EEE ")
                     )}
                   </td>
 
                   {/* Actions */}
-                  <td className="px-6 py-4 flex space-x-2">
+                  <td className="px-6 py-4 text-sm text-gray-700">
                     {isEditing ? (
-                      <>
-                        <button onClick={saveEditing} className="text-green-600 hover:text-green-900" title="Save">
-                          <CheckIcon className="h-5 w-5" />
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={saveEditing}
+                          className="text-green-600 hover:text-green-800"
+                        >
+                          <CheckIcon className="w-5 h-5" />
                         </button>
-                        <button onClick={cancelEditing} className="text-gray-600 hover:text-gray-900" title="Cancel">
-                          <XMarkIcon className="h-5 w-5" />
+                        <button
+                          onClick={cancelEditing}
+                          className="text-gray-600 hover:text-gray-800"
+                        >
+                          <XMarkIcon className="w-5 h-5" />
                         </button>
-                      </>
+                      </div>
                     ) : (
-                      <>
-                        <button onClick={() => startEditing(worklog)} className="text-indigo-600 hover:text-indigo-900" title="Edit">
-                          <PencilIcon className="h-5 w-5" />
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => startEditing(worklog)}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          <PencilIcon className="w-5 h-5" />
                         </button>
-                        <button onClick={() => onDelete(worklog.id)} className="text-red-600 hover:text-red-900" title="Delete">
-                          <TrashIcon className="h-5 w-5" />
+                        <button
+                          onClick={() => onDelete(worklog.id)}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <TrashIcon className="w-5 h-5" />
                         </button>
-                      </>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -324,27 +372,34 @@ export default function WorklogsTable({
             })}
           </tbody>
         </table>
+      </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex justify-between mt-4">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300"
-            >
-              Previous
-            </button>
-            <div>Page {currentPage} of {totalPages}</div>
-            <button
-              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300"
-            >
-              Next
-            </button>
-          </div>
-        )}
+      {/* Pagination */}
+      <div className="mt-4 flex justify-between items-center">
+        <div>
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage(currentPage - 1)}
+            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg"
+          >
+            Previous
+          </button>
+          <span className="mx-2 text-sm">{currentPage}</span>
+          <button
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage(currentPage + 1)}
+            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg"
+          >
+            Next
+          </button>
+        </div>
+        <div>
+          <span className="text-sm text-gray-500">
+            Showing {PAGE_SIZE * (currentPage - 1) + 1} to{" "}
+            {Math.min(PAGE_SIZE * currentPage, sortedWorklogs.length)} of{" "}
+            {sortedWorklogs.length} entries
+          </span>
+        </div>
       </div>
     </div>
   );

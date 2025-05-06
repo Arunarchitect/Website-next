@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from "react";
 import { useAppDispatch } from "@/redux/hooks";
 import { setAuth, finishInitialLoad, logout } from "@/redux/features/authSlice";
@@ -20,7 +18,7 @@ export default function useVerify() {
 
       const currentPath = window.location.pathname;
 
-      // Define paths where authentication is NOT required
+      // Define paths where authentication is NOT required (public pages)
       const publicPaths = [
         "/password-reset",
         "/auth/register",
@@ -28,20 +26,19 @@ export default function useVerify() {
         "/"
       ];
 
-      // Allow access to public pages without token verification
+      // If the user is on a public path, allow them to see the page regardless of authentication
       if (publicPaths.some(path => currentPath.startsWith(path))) {
         dispatch(finishInitialLoad());
+        
+        // Redirect authenticated users away from public paths to /dashboard
+        if (access && !hasRedirected) {
+          setHasRedirected(true);
+          router.push("/dashboard");
+        }
         return;
       }
 
-      // Redirect authenticated users away from auth pages to dashboard
-      if (access && currentPath.startsWith("/auth/") && !hasRedirected) {
-        setHasRedirected(true);
-        router.push("/dashboard");
-        return;
-      }
-
-      // If no tokens at all, redirect to login (except for public pages above)
+      // If no tokens at all (not a public page), redirect to login
       if (!access && !refresh && !hasRedirected) {
         setHasRedirected(true);
         dispatch(logout());
@@ -68,7 +65,7 @@ export default function useVerify() {
 
           dispatch(setAuth());
         } else {
-          // If refreshing fails
+          // If refreshing fails, log the user out and redirect to login
           dispatch(logout());
           if (!hasRedirected) {
             setHasRedirected(true);
