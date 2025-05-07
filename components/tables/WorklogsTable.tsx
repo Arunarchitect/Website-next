@@ -313,7 +313,7 @@ export default function WorklogsTable({
                         className="border rounded p-1"
                       />
                     ) : (
-                      format(parseISO(worklog.start_time), "d MMM yyyy EEE ")
+                      format(parseISO(worklog.start_time), "d MMM yyyy EEE h:mm a")
                     )}
                   </td>
 
@@ -329,7 +329,7 @@ export default function WorklogsTable({
                         className="border rounded p-1"
                       />
                     ) : (
-                      format(parseISO(worklog.end_time), "d MMM yyyy EEE ")
+                      format(parseISO(worklog.end_time), "d MMM yyyy EEE h:mm a ")
                     )}
                   </td>
 
