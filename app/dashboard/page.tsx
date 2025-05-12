@@ -12,8 +12,7 @@ import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
 import WorklogsTable, { EditableWorklog } from "@/components/tables/WorklogsTable";
-import { List, Spinner } from "@/components/common";
-import { downloadCSV } from "@/components/utils/CsvDownload";
+import { Spinner } from "@/components/common";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -90,14 +89,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDownload = async (endpoint: string, filename: string) => {
-    try {
-      await downloadCSV(endpoint, filename);
-    } catch (error) {
-      console.error(`Failed to download ${filename}:`, error);
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="flex justify-center my-8">
@@ -106,12 +97,6 @@ export default function DashboardPage() {
     );
   }
 
-  const userConfig = [
-    { label: "First Name", value: user?.first_name },
-    { label: "Last Name", value: user?.last_name },
-    { label: "Email", value: user?.email },
-  ];
-
   return (
     <div className="container mx-auto px-4 py-8">
       <header className="bg-white shadow-sm rounded-lg p-6 mb-8">
@@ -119,7 +104,15 @@ export default function DashboardPage() {
       </header>
 
       <div className="bg-white shadow-sm rounded-lg p-6 mb-8">
-        <List config={userConfig} />
+        {/* 👇 Welcome message instead of List */}
+        <p className="text-lg text-gray-700">
+          Hi {user?.first_name} {user?.last_name}, welcome onboard!
+        </p>
+
+        {/* 👇 Optionally show email under welcome text */}
+        <p className="text-sm text-gray-500 mt-1">
+          Your registered email is {user?.email}
+        </p>
 
         {isAdmin && (
           <div className="mt-4 space-x-4 flex">
@@ -128,26 +121,6 @@ export default function DashboardPage() {
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
             >
               View Projects
-            </button>
-
-            <button
-              onClick={() => handleDownload(
-                "https://api.modelflick.com/api/work-logs/download_csv/",
-                "worklogs.csv"
-              )}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-            >
-              Download Worklogs
-            </button>
-
-            <button
-              onClick={() => handleDownload(
-                "https://api.modelflick.com/api/deliverables/download_csv/",
-                "deliverables.csv"
-              )}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-            >
-              Download Deliverables
             </button>
           </div>
         )}

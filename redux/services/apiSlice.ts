@@ -7,7 +7,7 @@ const mutex = new Mutex();
 
 // Create base query with auth headers
 const baseQuery = fetchBaseQuery({
-  baseUrl: `${process.env.NEXT_PUBLIC_HOST || 'https://api.modelflick.com'}/api`,
+  baseUrl: `${process.env.NEXT_PUBLIC_HOST}/api`,
   prepareHeaders: (headers) => {
     // Only try to get token if we're in the browser environment
     if (typeof window !== 'undefined') {

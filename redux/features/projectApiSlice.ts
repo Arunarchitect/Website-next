@@ -26,6 +26,7 @@ interface Project {
   location: string;
   client_name: string;
   current_stage: string;
+  organisation: number; // <-- Add this line
 }
 
 export const projectApiSlice = apiSlice.injectEndpoints({

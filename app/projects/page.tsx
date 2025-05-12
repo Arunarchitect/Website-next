@@ -1,23 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { useAppSelector, useAppDispatch } from '@/redux/hooks';
-import { setToken, logout } from '@/redux/features/authSlice';
-
-interface Project {
-  id: number;
-  name: string;
-  location: string;
-  client_name: string;
-  organisation: number;
-}
-
-interface Membership {
-  id: number;
-  organisation: number;
-  role: string;
-}
+import { useGetProjectsQuery } from '@/redux/features/projectApiSlice';
+import { useGetMyMembershipsQuery } from '@/redux/features/membershipApiSlice';
+import { useDownloadDeliverablesCSVQuery, useDownloadWorklogsCSVQuery } from '@/redux/features/csvApiSlice';
+import { logout } from '@/redux/features/authSlice';
 
 const NOTE_COLORS = [
   '#fde047', '#86efac', '#93c5fd', '#fca5a5', 
@@ -25,136 +14,33 @@ const NOTE_COLORS = [
 ];
 
 export default function ProjectsPage() {
-  const { isAuthenticated, token } = useAppSelector(state => state.auth);
+  const { isAuthenticated } = useAppSelector(state => state.auth);
   const dispatch = useAppDispatch();
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refreshAuthToken = useCallback(async (): Promise<string | null> => {
-    try {
-      const refreshToken = localStorage.getItem('refresh');
-      if (!refreshToken) return null;
-
-      const response = await fetch('https://api.modelflick.com/api/token/refresh/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh: refreshToken }),
-      });
-
-      if (!response.ok) throw new Error('Failed to refresh token');
-
-      const data = await response.json();
-
-      localStorage.setItem('old_refresh', refreshToken);
-      localStorage.setItem('access', data.access);
-      localStorage.setItem('refresh', data.refresh || refreshToken);
-      dispatch(setToken(data.access));
-
-      return data.access;
-    } catch (error) {
-      console.error('Token refresh failed:', error);
-      return null;
-    }
-  }, [dispatch]);
-
-  const fetchProjectsAndMemberships = useCallback(async (accessToken: string, retry = true) => {
-    try {
-      const [projectsRes, membershipsRes] = await Promise.all([
-        fetch('https://api.modelflick.com/api/projects/', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }),
-        fetch('https://api.modelflick.com/api/my-memberships/', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }),
-      ]);
-
-      if ((projectsRes.status === 401 || membershipsRes.status === 401) && retry) {
-        const newToken = await refreshAuthToken();
-        if (newToken) {
-          return fetchProjectsAndMemberships(newToken, false);
-        } else {
-          dispatch(logout());
-          throw new Error('Session expired. Please login again.');
-        }
-      }
-
-      if (!projectsRes.ok || !membershipsRes.ok) {
-        throw new Error('Failed to fetch data');
-      }
-
-      const projectsData = await projectsRes.json();
-      const membershipsData = await membershipsRes.json();
-
-      setProjects(projectsData);
-      setMemberships(membershipsData);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setError(error instanceof Error ? error.message : 'Error loading data');
-    } finally {
-      setLoading(false);
-    }
-  }, [refreshAuthToken, dispatch]);
-
-  useEffect(() => {
-    const initializeAuth = () => {
-      const access = localStorage.getItem('access');
-      const refresh = localStorage.getItem('refresh');
-      const oldRefresh = localStorage.getItem('old_refresh');
-
-      if (access && !token) {
-        dispatch(setToken(access));
-      }
-      if (!refresh && oldRefresh) {
-        localStorage.setItem('refresh', oldRefresh);
-      }
-    };
-
-    initializeAuth();
-  }, [token, dispatch]);
-
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      fetchProjectsAndMemberships(token);
-    } else {
-      setLoading(false);
-    }
-  }, [isAuthenticated, token, fetchProjectsAndMemberships]);
+  const { data: projects = [], isLoading: projectsLoading, error: projectsError } = useGetProjectsQuery();
+  const { data: memberships = [], isLoading: membershipsLoading, error: membershipsError } = useGetMyMembershipsQuery();
+  const { data: deliverablesCSVData } = useDownloadDeliverablesCSVQuery();
+  const { data: worklogsCSVData } = useDownloadWorklogsCSVQuery();
 
   const getProjectColor = (index: number) => NOTE_COLORS[index % NOTE_COLORS.length];
 
-  const getAdminOrganisationIds = () => 
-    memberships.filter(m => m.role === 'admin').map(m => m.organisation);
+  const adminOrganisationIds = memberships
+    .filter(m => m.role === 'admin')
+    .map(m => m.organisation);
 
-  const adminOrganisationIds = getAdminOrganisationIds();
+  
 
-  const filteredProjects = projects.filter(project => 
+  const filteredProjects = projects.filter(project =>
     adminOrganisationIds.includes(project.organisation)
   );
 
-  const handleDownload = async (endpoint: string, filename: string) => {
-    if (!token) return;
+  console.log(projects[0]); // Log a project to see its structure
 
-    try {
-      const response = await fetch(endpoint, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!response.ok) throw new Error(`Failed to download ${filename}`);
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error(`Error downloading ${filename}:`, error);
+  useEffect(() => {
+    if (!isAuthenticated) {
+      dispatch(logout());
     }
-  };
+  }, [isAuthenticated, dispatch]);
 
   if (!isAuthenticated) {
     return (
@@ -164,7 +50,7 @@ export default function ProjectsPage() {
     );
   }
 
-  if (loading) {
+  if (projectsLoading || membershipsLoading) {
     return (
       <div className="min-h-screen bg-gray-900 p-10 text-white">
         <p>Loading projects...</p>
@@ -172,10 +58,10 @@ export default function ProjectsPage() {
     );
   }
 
-  if (error) {
+  if (projectsError || membershipsError) {
     return (
       <div className="min-h-screen bg-gray-900 p-10 text-white">
-        <p className="text-red-500">{error}</p>
+        <p className="text-red-500">Error loading projects. Please try again.</p>
       </div>
     );
   }
@@ -186,18 +72,38 @@ export default function ProjectsPage() {
         <h1 className="text-2xl font-bold text-white mb-4 md:mb-0">Project Dashboard</h1>
 
         <div className="flex space-x-4">
-          <button
-            onClick={() => handleDownload('https://api.modelflick.com/api/deliverables/download_csv/', 'deliverables.csv')}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
-          >
-            Download Deliverables
-          </button>
-          <button
-            onClick={() => handleDownload('https://api.modelflick.com/api/work-logs/download_csv/', 'worklogs.csv')}
-            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
-          >
-            Download Worklogs
-          </button>
+          {deliverablesCSVData && (
+            <button
+              onClick={() => {
+                const blob = new Blob([deliverablesCSVData], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'deliverables.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+              }}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+            >
+              Download Deliverables
+            </button>
+          )}
+          {worklogsCSVData && (
+            <button
+              onClick={() => {
+                const blob = new Blob([worklogsCSVData], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'worklogs.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+              }}
+              className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
+            >
+              Download Worklogs
+            </button>
+          )}
         </div>
       </div>
 
@@ -209,7 +115,7 @@ export default function ProjectsPage() {
             <Link key={project.id} href={`/projects/${project.id}`}>
               <div
                 className="sticky-note transform hover:scale-105 transition-transform duration-200"
-                style={{ 
+                style={{
                   backgroundColor: getProjectColor(index),
                   rotate: `${index % 2 === 0 ? '-1deg' : '1deg'}`,
                 }}
