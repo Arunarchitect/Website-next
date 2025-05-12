@@ -3,40 +3,52 @@
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
-import {
+import { 
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
-  useUpdateWorklogMutation,
-  useGetProjectsQuery,
-  useGetDeliverablesQuery,
+  useUpdateWorklogMutation
 } from "@/redux/features/worklogApiSlice";
+import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
+import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
-import WorklogsTable, {
-  EditableWorklog,
-} from "@/components/tables/WorklogsTable";
+import WorklogsTable, { EditableWorklog } from "@/components/tables/WorklogsTable";
 import { List, Spinner } from "@/components/common";
-
-// 🔽 Utility function to trigger CSV download
 import { downloadCSV } from "@/components/utils/CsvDownload";
 
 export default function DashboardPage() {
   const router = useRouter();
 
+  // User data
   const {
     data: user,
     isLoading: isUserLoading,
     isFetching: isUserFetching,
   } = useRetrieveUserQuery();
 
+  // Memberships data
   const {
     data: memberships = [],
     isLoading: isMembershipsLoading,
     isFetching: isMembershipsFetching,
   } = useGetMyMembershipsQuery();
 
-  const { data: allWorklogs = [], refetch } = useGetWorklogsQuery();
-  const { data: projects = [] } = useGetProjectsQuery();
-  const { data: deliverables = [] } = useGetDeliverablesQuery();
+  // Worklogs data
+  const { 
+    data: allWorklogs = [], 
+    refetch: refetchWorklogs 
+  } = useGetWorklogsQuery();
+  
+  // Projects data
+  const { 
+    data: projects = [] 
+  } = useGetProjectsQuery();
+  
+  // Deliverables data
+  const { 
+    data: deliverables = [] 
+  } = useGetDeliverablesQuery();
+
+  // Mutations
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
 
@@ -46,16 +58,18 @@ export default function DashboardPage() {
     isMembershipsLoading ||
     isMembershipsFetching;
 
+  // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
 
+  // Check if user is admin
   const isAdmin = memberships.some((m) => m.role === "admin");
 
   const handleDelete = async (id: number) => {
     try {
       await deleteWorklog(id).unwrap();
-      refetch();
+      refetchWorklogs();
     } catch (err) {
       console.error("Failed to delete worklog:", err);
     }
@@ -73,6 +87,14 @@ export default function DashboardPage() {
       console.log("✅ Worklog updated successfully!");
     } catch (err) {
       console.error("❌ Failed to update worklog:", err);
+    }
+  };
+
+  const handleDownload = async (endpoint: string, filename: string) => {
+    try {
+      await downloadCSV(endpoint, filename);
+    } catch (error) {
+      console.error(`Failed to download ${filename}:`, error);
     }
   };
 
@@ -100,34 +122,30 @@ export default function DashboardPage() {
         <List config={userConfig} />
 
         {isAdmin && (
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 space-x-4 flex">
             <button
               onClick={() => router.push("/projects")}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
             >
               View Projects
             </button>
 
             <button
-              onClick={() =>
-                downloadCSV(
-                  "https://api.modelflick.com/api/work-logs/download_csv/",
-                  "worklogs.csv"
-                )
-              }
-              className="px-12 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              onClick={() => handleDownload(
+                "https://api.modelflick.com/api/work-logs/download_csv/",
+                "worklogs.csv"
+              )}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
             >
               Download Worklogs
             </button>
 
             <button
-              onClick={() =>
-                downloadCSV(
-                  "https://api.modelflick.com/api/deliverables/download_csv/",
-                  "deliverables.csv"
-                )
-              }
-              className="px-12 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              onClick={() => handleDownload(
+                "https://api.modelflick.com/api/deliverables/download_csv/",
+                "deliverables.csv"
+              )}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
             >
               Download Deliverables
             </button>
@@ -135,7 +153,12 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {user?.id && <WorklogForm userId={user.id} onSuccess={refetch} />}
+      {user?.id && (
+        <WorklogForm 
+          userId={user.id} 
+          onSuccess={refetchWorklogs} 
+        />
+      )}
 
       <WorklogsTable
         worklogs={userWorklogs}
@@ -143,7 +166,7 @@ export default function DashboardPage() {
         deliverables={deliverables}
         onDelete={handleDelete}
         onUpdate={handleUpdate}
-        refetch={refetch}
+        refetch={refetchWorklogs}
       />
     </div>
   );

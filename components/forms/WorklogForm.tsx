@@ -2,12 +2,9 @@
 "use client";
 
 import { useState, ChangeEvent, FormEvent, useMemo } from "react";
-import {
-  useCreateWorklogMutation,
-  useGetProjectsQuery,
-  useGetDeliverablesQuery,
-} from "@/redux/features/worklogApiSlice";
-
+import { useCreateWorklogMutation } from "@/redux/features/worklogApiSlice";
+import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
+import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
 interface Project {
   id: number;
   name: string;
