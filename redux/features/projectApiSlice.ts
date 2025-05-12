@@ -1,5 +1,25 @@
 import { apiSlice } from "@/redux/services/apiSlice";
 
+interface Deliverable {
+  name: string;
+  stage: string;
+  status: string;
+  remarks: string;
+}
+
+interface DeliverableSummary {
+  name: string;
+  duration_seconds: number;
+}
+
+interface ProjectDetails {
+  project: string;
+  current_stage: string;
+  total_duration_seconds: number;
+  deliverables: Deliverable[];
+  deliverables_summary?: DeliverableSummary[];
+}
+
 interface Project {
   id: number;
   name: string;
@@ -14,7 +34,11 @@ export const projectApiSlice = apiSlice.injectEndpoints({
       query: () => "/projects/",
       providesTags: ['Project'],
     }),
+    getProjectSummary: builder.query<ProjectDetails, string>({
+      query: (id) => `/projects/${id}/summary/`,
+      providesTags: (result, error, id) => [{ type: 'Project', id }],
+    }),
   }),
 });
 
-export const { useGetProjectsQuery } = projectApiSlice;
+export const { useGetProjectsQuery, useGetProjectSummaryQuery } = projectApiSlice;
