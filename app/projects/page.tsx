@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAppSelector, useAppDispatch } from "@/redux/hooks";
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
-import {  useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
+import { useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useDownloadDeliverablesCSVQuery,
   useDownloadWorklogsCSVQuery,
@@ -31,10 +31,11 @@ export default function ProjectsPage() {
 
   const getProjectColor = (index: number) => NOTE_COLORS[index % NOTE_COLORS.length];
 
-  // Debugging: Log the organisations data to ensure it's correct
   useEffect(() => {
-    console.log("Organisations:", organisations);
-  }, [organisations]);
+    if (!isAuthenticated) {
+      dispatch(logout());
+    }
+  }, [isAuthenticated, dispatch]);
 
   const adminOrganisations = useMemo(() => {
     return organisations.map((org) => ({
@@ -57,12 +58,6 @@ export default function ProjectsPage() {
     return projects.filter((p) => p.organisation === filterOrgId);
   }, [projects, filterOrgId, adminOrganisationIds]);
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      dispatch(logout());
-    }
-  }, [isAuthenticated, dispatch]);
-
   if (!isAuthenticated) {
     return (
       <div className="p-10 text-white flex flex-col items-center space-y-4 min-h-screen bg-gray-900">
@@ -71,7 +66,7 @@ export default function ProjectsPage() {
     );
   }
 
-  if (projectsLoading || organisationsLoading || membershipsLoading) {
+  if (projectsLoading || organisationsLoading) {
     return (
       <div className="min-h-screen bg-gray-900 p-10 text-white">
         <p>Loading projects...</p>
@@ -79,7 +74,7 @@ export default function ProjectsPage() {
     );
   }
 
-  if (projectsError || organisationsError || membershipsError) {
+  if (projectsError || organisationsError) {
     return (
       <div className="min-h-screen bg-gray-900 p-10 text-white">
         <p className="text-red-500">Error loading projects. Please try again.</p>

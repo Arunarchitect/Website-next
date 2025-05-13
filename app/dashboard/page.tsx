@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
-import {  useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
+import { useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
@@ -29,9 +29,9 @@ export default function DashboardPage() {
 
   const {
     data: organisations = [],
-    isLoading: isOrganisationsLoading,
-    isFetching: isOrganisationsFetching,
-  } = useGetMyOrganisationsQuery();  // Fetch organizations
+    isLoading: isOrgLoading,
+    isFetching: isOrgFetching,
+  } = useGetMyOrganisationsQuery();
 
   const {
     data: allWorklogs = [],
@@ -45,13 +45,12 @@ export default function DashboardPage() {
   const [updateWorklog] = useUpdateWorklogMutation();
 
   const isLoading =
-    isUserLoading || isUserFetching || isMembershipsLoading || isMembershipsFetching || isOrganisationsLoading || isOrganisationsFetching;
+    isUserLoading || isUserFetching || isOrgLoading || isOrgFetching;
 
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
 
-  // Update to use organisations directly instead of memberships
   const adminOrgs = organisations.map((org) => ({
     id: org.id,
     name: org.name,
@@ -108,7 +107,6 @@ export default function DashboardPage() {
         <p className="text-lg text-gray-700">
           Hi {user?.first_name} {user?.last_name}, welcome onboard!
         </p>
-
         <p className="text-sm text-gray-500 mt-1">
           Your registered email is {user?.email}
         </p>
@@ -142,7 +140,6 @@ export default function DashboardPage() {
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
             <h2 className="text-lg font-semibold mb-4 text-gray-800">Select an Organization</h2>
-
             <select
               value={selectedOrgId ?? ""}
               onChange={(e) => setSelectedOrgId(Number(e.target.value))}
@@ -155,7 +152,6 @@ export default function DashboardPage() {
                 </option>
               ))}
             </select>
-
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => setIsModalOpen(false)}
