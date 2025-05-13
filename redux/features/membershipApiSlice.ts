@@ -11,6 +11,12 @@ export interface Membership {
     last_name: string;
   };
   role: "admin" | "manager" | "member";
+  organisation_name?: string; // 👈 Add this line
+}
+
+export interface Organisation {
+  id: number;
+  name: string;
 }
 
 export const membershipApiSlice = apiSlice.injectEndpoints({
@@ -19,7 +25,13 @@ export const membershipApiSlice = apiSlice.injectEndpoints({
       query: () => "/my-memberships/",
       providesTags: ["User"],
     }),
+
+    // New endpoint to get organizations
+    getMyOrganisations: builder.query<Organisation[], void>({
+      query: () => "/my-organisations/",
+      providesTags: ["User"],
+    }),
   }),
 });
 
-export const { useGetMyMembershipsQuery } = membershipApiSlice;
+export const { useGetMyMembershipsQuery, useGetMyOrganisationsQuery } = membershipApiSlice;

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
-import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
+import { useGetMyMembershipsQuery, useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
@@ -18,57 +18,50 @@ import { Spinner } from "@/components/common";
 export default function DashboardPage() {
   const router = useRouter();
 
-  // State for modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
 
-  // User data
   const {
     data: user,
     isLoading: isUserLoading,
     isFetching: isUserFetching,
   } = useRetrieveUserQuery();
 
-  // Memberships data
   const {
     data: memberships = [],
     isLoading: isMembershipsLoading,
     isFetching: isMembershipsFetching,
   } = useGetMyMembershipsQuery();
 
-  console.log("Memberships data:", memberships);
+  const {
+    data: organisations = [],
+    isLoading: isOrganisationsLoading,
+    isFetching: isOrganisationsFetching,
+  } = useGetMyOrganisationsQuery();  // Fetch organizations
 
-  // Worklogs data
   const {
     data: allWorklogs = [],
     refetch: refetchWorklogs,
   } = useGetWorklogsQuery();
 
-  // Projects data
   const { data: projects = [] } = useGetProjectsQuery();
-
-  // Deliverables data
   const { data: deliverables = [] } = useGetDeliverablesQuery();
 
-  // Mutations
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
 
   const isLoading =
-    isUserLoading || isUserFetching || isMembershipsLoading || isMembershipsFetching;
+    isUserLoading || isUserFetching || isMembershipsLoading || isMembershipsFetching || isOrganisationsLoading || isOrganisationsFetching;
 
-  // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
 
-  // Admin organisations with names
-  const adminOrgs = memberships
-    .filter((m) => m.role === "admin")
-    .map((m) => ({
-      id: m.organisation,
-      name: m.organisation_name || `Organization ${m.organisation}`,
-    }));
+  // Update to use organisations directly instead of memberships
+  const adminOrgs = organisations.map((org) => ({
+    id: org.id,
+    name: org.name,
+  }));
 
   const isAdmin = adminOrgs.length > 0;
 
@@ -151,7 +144,6 @@ export default function DashboardPage() {
         refetch={refetchWorklogs}
       />
 
-      {/* Modal for organization selection */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
