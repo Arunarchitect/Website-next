@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAppSelector, useAppDispatch } from "@/redux/hooks";
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
-import { useGetMyMembershipsQuery, useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
+import {  useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useDownloadDeliverablesCSVQuery,
   useDownloadWorklogsCSVQuery,

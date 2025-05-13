@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
-import { useGetMyMembershipsQuery, useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
+import {  useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
