@@ -25,7 +25,6 @@ export default function ProjectsPage() {
   const [filterOrgId, setFilterOrgId] = useState<number | null>(null);
 
   const { data: projects = [], isLoading: projectsLoading, error: projectsError } = useGetProjectsQuery();
-  const { data: memberships = [], isLoading: membershipsLoading, error: membershipsError } = useGetMyMembershipsQuery();
   const { data: organisations = [], isLoading: organisationsLoading, error: organisationsError } = useGetMyOrganisationsQuery();
   const { data: deliverablesCSVData } = useDownloadDeliverablesCSVQuery();
   const { data: worklogsCSVData } = useDownloadWorklogsCSVQuery();
@@ -91,7 +90,7 @@ export default function ProjectsPage() {
   if (adminOrganisations.length === 0) {
     return (
       <div className="min-h-screen bg-gray-900 p-10 text-white">
-        <p className="text-red-500">You don't have admin access to any organizations.</p>
+        <p className="text-red-500">You don&apos;t have admin access to any organizations.</p>
       </div>
     );
   }

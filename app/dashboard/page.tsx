@@ -28,12 +28,6 @@ export default function DashboardPage() {
   } = useRetrieveUserQuery();
 
   const {
-    data: memberships = [],
-    isLoading: isMembershipsLoading,
-    isFetching: isMembershipsFetching,
-  } = useGetMyMembershipsQuery();
-
-  const {
     data: organisations = [],
     isLoading: isOrganisationsLoading,
     isFetching: isOrganisationsFetching,
