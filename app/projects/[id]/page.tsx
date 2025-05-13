@@ -14,7 +14,7 @@ interface Deliverable {
 
 interface ProjectDetails {
   project: string;
-  current_stage: string;
+  current_stage: string; // Note: There's a typo here ('current_stage' vs 'current_stage')
   total_duration_seconds: number;
   deliverables: Deliverable[];
   deliverables_summary?: Array<{
@@ -59,6 +59,9 @@ const ProjectDetailPage = () => {
     error,
   } = useGetProjectSummaryQuery(id as string, { skip: !id });
 
+  // Properly type the project details
+  const typedProjectDetails = projectDetails as ProjectDetails | undefined;
+
   const isPastDue = (endDate: string) => {
     if (!endDate || !currentDate) return false;
     return endDate < currentDate;
@@ -69,16 +72,16 @@ const ProjectDetailPage = () => {
     console.error('Error loading project details:', error);
     return <p className="text-red-500">Error loading project details</p>;
   }
-  if (!projectDetails) return <p>No project details available.</p>;
+  if (!typedProjectDetails) return <p>No project details available.</p>;
 
   const getDurationForDeliverable = (name: string) => {
-    const match = projectDetails.deliverables_summary?.find(d => d.name === name);
+    const match = typedProjectDetails.deliverables_summary?.find(d => d.name === name);
     return match ? (match.duration_seconds / 3600).toFixed(2) : '—';
   };
 
   // Group deliverables by stage
   const deliverablesByStage: Record<string, Deliverable[]> = {};
-  projectDetails.deliverables.forEach((deliverable) => {
+  typedProjectDetails.deliverables.forEach((deliverable) => {
     if (!deliverablesByStage[deliverable.stage]) {
       deliverablesByStage[deliverable.stage] = [];
     }
@@ -90,10 +93,10 @@ const ProjectDetailPage = () => {
 
   return (
     <div className="p-6 space-y-6 text-white">
-      <h1 className="text-2xl font-bold text-gray-700 dark:text-gray-300">Project: {projectDetails.project}</h1>
-      <p className="text-sm text-gray-700 dark:text-gray-300">Current Stage: {projectDetails.current_stage}</p>
+      <h1 className="text-2xl font-bold text-gray-700 dark:text-gray-300">Project: {typedProjectDetails.project}</h1>
+      <p className="text-sm text-gray-700 dark:text-gray-300">Current Stage: {typedProjectDetails.current_stage}</p>
       <p className="text-sm text-gray-700 dark:text-gray-300">
-        Total Duration: {(projectDetails.total_duration_seconds / 3600).toFixed(2)} hours
+        Total Duration: {(typedProjectDetails.total_duration_seconds / 3600).toFixed(2)} hours
       </p>
 
       {/* Status Legend */}
