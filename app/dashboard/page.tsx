@@ -1,12 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
-import { 
+import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
-  useUpdateWorklogMutation
+  useUpdateWorklogMutation,
 } from "@/redux/features/worklogApiSlice";
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
@@ -16,6 +17,10 @@ import { Spinner } from "@/components/common";
 
 export default function DashboardPage() {
   const router = useRouter();
+
+  // State for modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
 
   // User data
   const {
@@ -31,39 +36,41 @@ export default function DashboardPage() {
     isFetching: isMembershipsFetching,
   } = useGetMyMembershipsQuery();
 
+  console.log("Memberships data:", memberships);
+
   // Worklogs data
-  const { 
-    data: allWorklogs = [], 
-    refetch: refetchWorklogs 
+  const {
+    data: allWorklogs = [],
+    refetch: refetchWorklogs,
   } = useGetWorklogsQuery();
-  
+
   // Projects data
-  const { 
-    data: projects = [] 
-  } = useGetProjectsQuery();
-  
+  const { data: projects = [] } = useGetProjectsQuery();
+
   // Deliverables data
-  const { 
-    data: deliverables = [] 
-  } = useGetDeliverablesQuery();
+  const { data: deliverables = [] } = useGetDeliverablesQuery();
 
   // Mutations
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
 
   const isLoading =
-    isUserLoading ||
-    isUserFetching ||
-    isMembershipsLoading ||
-    isMembershipsFetching;
+    isUserLoading || isUserFetching || isMembershipsLoading || isMembershipsFetching;
 
   // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
 
-  // Check if user is admin
-  const isAdmin = memberships.some((m) => m.role === "admin");
+  // Admin organisations with names
+  const adminOrgs = memberships
+    .filter((m) => m.role === "admin")
+    .map((m) => ({
+      id: m.organisation,
+      name: m.organisation_name || `Organization ${m.organisation}`,
+    }));
+
+  const isAdmin = adminOrgs.length > 0;
 
   const handleDelete = async (id: number) => {
     try {
@@ -89,6 +96,13 @@ export default function DashboardPage() {
     }
   };
 
+  const handleGoToProjects = () => {
+    if (selectedOrgId) {
+      setIsModalOpen(false);
+      router.push(`/projects?org=${selectedOrgId}`);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex justify-center my-8">
@@ -104,12 +118,10 @@ export default function DashboardPage() {
       </header>
 
       <div className="bg-white shadow-sm rounded-lg p-6 mb-8">
-        {/* 👇 Welcome message instead of List */}
         <p className="text-lg text-gray-700">
           Hi {user?.first_name} {user?.last_name}, welcome onboard!
         </p>
 
-        {/* 👇 Optionally show email under welcome text */}
         <p className="text-sm text-gray-500 mt-1">
           Your registered email is {user?.email}
         </p>
@@ -117,7 +129,7 @@ export default function DashboardPage() {
         {isAdmin && (
           <div className="mt-4 space-x-4 flex">
             <button
-              onClick={() => router.push("/projects")}
+              onClick={() => setIsModalOpen(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
             >
               View Projects
@@ -127,10 +139,7 @@ export default function DashboardPage() {
       </div>
 
       {user?.id && (
-        <WorklogForm 
-          userId={user.id} 
-          onSuccess={refetchWorklogs} 
-        />
+        <WorklogForm userId={user.id} onSuccess={refetchWorklogs} />
       )}
 
       <WorklogsTable
@@ -141,6 +150,44 @@ export default function DashboardPage() {
         onUpdate={handleUpdate}
         refetch={refetchWorklogs}
       />
+
+      {/* Modal for organization selection */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+            <h2 className="text-lg font-semibold mb-4 text-gray-800">Select an Organization</h2>
+
+            <select
+              value={selectedOrgId ?? ""}
+              onChange={(e) => setSelectedOrgId(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded px-3 py-2 mb-4"
+            >
+              <option value="">-- Choose an organization --</option>
+              {adminOrgs.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 text-gray-600 hover:underline"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGoToProjects}
+                disabled={!selectedOrgId}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              >
+                Go to Projects
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

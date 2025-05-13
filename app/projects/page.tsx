@@ -1,21 +1,25 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import Link from 'next/link';
-import { useAppSelector, useAppDispatch } from '@/redux/hooks';
-import { useGetProjectsQuery } from '@/redux/features/projectApiSlice';
-import { useGetMyMembershipsQuery } from '@/redux/features/membershipApiSlice';
-import { useDownloadDeliverablesCSVQuery, useDownloadWorklogsCSVQuery } from '@/redux/features/csvApiSlice';
-import { logout } from '@/redux/features/authSlice';
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useAppSelector, useAppDispatch } from "@/redux/hooks";
+import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
+import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
+import { useDownloadDeliverablesCSVQuery, useDownloadWorklogsCSVQuery } from "@/redux/features/csvApiSlice";
+import { logout } from "@/redux/features/authSlice";
 
 const NOTE_COLORS = [
-  '#fde047', '#86efac', '#93c5fd', '#fca5a5', 
-  '#c4b5fd', '#f9a8d4', '#fdba74', '#5eead4'
+  "#fde047", "#86efac", "#93c5fd", "#fca5a5",
+  "#c4b5fd", "#f9a8d4", "#fdba74", "#5eead4"
 ];
 
 export default function ProjectsPage() {
   const { isAuthenticated } = useAppSelector(state => state.auth);
   const dispatch = useAppDispatch();
+  const searchParams = useSearchParams();
+  const orgIdParam = searchParams.get("org");
+  const [filterOrgId, setFilterOrgId] = useState<number | null>(null);
 
   const { data: projects = [], isLoading: projectsLoading, error: projectsError } = useGetProjectsQuery();
   const { data: memberships = [], isLoading: membershipsLoading, error: membershipsError } = useGetMyMembershipsQuery();
@@ -24,17 +28,35 @@ export default function ProjectsPage() {
 
   const getProjectColor = (index: number) => NOTE_COLORS[index % NOTE_COLORS.length];
 
-  const adminOrganisationIds = memberships
-    .filter(m => m.role === 'admin')
-    .map(m => m.organisation);
-
-  
-
-  const filteredProjects = projects.filter(project =>
-    adminOrganisationIds.includes(project.organisation)
+  // Get admin organization IDs and names
+  const adminOrganisations = useMemo(() => 
+    memberships
+      .filter(m => m.role === "admin")
+      .map(m => ({
+        id: m.organisation,
+        name: m.organisation_name || `Organization ${m.organisation}`
+      })), 
+    [memberships]
   );
 
-  console.log(projects[0]); // Log a project to see its structure
+  const adminOrganisationIds = useMemo(() => 
+    adminOrganisations.map(org => org.id), 
+    [adminOrganisations]
+  );
+
+  // Update filter when URL param changes
+  useEffect(() => {
+    if (orgIdParam) {
+      const orgId = Number(orgIdParam);
+      setFilterOrgId(adminOrganisationIds.includes(orgId) ? orgId : null);
+    }
+  }, [orgIdParam, adminOrganisationIds]);
+
+  // Filter projects based on selected filter
+  const filteredProjects = useMemo(() => {
+    if (!filterOrgId || !adminOrganisationIds.includes(filterOrgId)) return [];
+    return projects.filter(p => p.organisation === filterOrgId);
+  }, [projects, filterOrgId, adminOrganisationIds]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -66,20 +88,47 @@ export default function ProjectsPage() {
     );
   }
 
+  if (adminOrganisations.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-900 p-10 text-white">
+        <p className="text-red-500">You don't have admin access to any organizations.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-900 p-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
-        <h1 className="text-2xl font-bold text-white mb-4 md:mb-0">Project Dashboard</h1>
+        <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-6 mb-4 md:mb-0">
+          <h1 className="text-2xl font-bold text-white">Projects</h1>
+          
+          {/* Organization filter dropdown */}
+          <div className="flex items-center space-x-2">
+            <span className="text-white">Filter by:</span>
+            <select
+              value={filterOrgId ?? ""}
+              onChange={(e) => setFilterOrgId(e.target.value ? Number(e.target.value) : null)}
+              className="bg-gray-800 text-white rounded px-3 py-2"
+            >
+              <option value="">All Organizations</option>
+              {adminOrganisations.map(org => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         <div className="flex space-x-4">
           {deliverablesCSVData && (
             <button
               onClick={() => {
-                const blob = new Blob([deliverablesCSVData], { type: 'text/csv' });
+                const blob = new Blob([deliverablesCSVData], { type: "text/csv" });
                 const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
+                const a = document.createElement("a");
                 a.href = url;
-                a.download = 'deliverables.csv';
+                a.download = "deliverables.csv";
                 a.click();
                 window.URL.revokeObjectURL(url);
               }}
@@ -91,11 +140,11 @@ export default function ProjectsPage() {
           {worklogsCSVData && (
             <button
               onClick={() => {
-                const blob = new Blob([worklogsCSVData], { type: 'text/csv' });
+                const blob = new Blob([worklogsCSVData], { type: "text/csv" });
                 const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
+                const a = document.createElement("a");
                 a.href = url;
-                a.download = 'worklogs.csv';
+                a.download = "worklogs.csv";
                 a.click();
                 window.URL.revokeObjectURL(url);
               }}
@@ -107,8 +156,19 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {/* Show organization name when filtered */}
+      {filterOrgId && (
+        <h2 className="text-xl text-white mb-6">
+          {adminOrganisations.find(o => o.id === filterOrgId)?.name}
+        </h2>
+      )}
+
       {filteredProjects.length === 0 ? (
-        <p className="text-white">No projects found.</p>
+        <div className="text-white p-4 bg-gray-800 rounded-lg">
+          {filterOrgId 
+            ? "No projects found for the selected organization." 
+            : "Please select an organization to view projects."}
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {filteredProjects.map((project, index) => (
@@ -117,7 +177,7 @@ export default function ProjectsPage() {
                 className="sticky-note transform hover:scale-105 transition-transform duration-200"
                 style={{
                   backgroundColor: getProjectColor(index),
-                  rotate: `${index % 2 === 0 ? '-1deg' : '1deg'}`,
+                  rotate: `${index % 2 === 0 ? "-1deg" : "1deg"}`,
                 }}
               >
                 <div className="p-5 h-full flex flex-col text-gray-900">
