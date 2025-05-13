@@ -12,6 +12,7 @@ interface Config {
     linkUrl: string;
   };
   required?: boolean;
+  onChange?: (event: ChangeEvent<HTMLInputElement>) => void; // Add this line
 }
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
   btnText: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  btnDisabled?: boolean; // Add this line
 }
 
 export default function Form({
@@ -28,6 +30,7 @@ export default function Form({
   btnText,
   onChange,
   onSubmit,
+  btnDisabled = false, // Add this with default value
 }: Props) {
   return (
     <form className='space-y-6' onSubmit={onSubmit}>
@@ -36,12 +39,11 @@ export default function Form({
           key={input.labelId}
           labelId={input.labelId}
           type={input.type}
-          onChange={onChange}
+          onChange={input.onChange || onChange} // Use input-specific onChange if provided
           value={input.value}
           link={input.link}
           required={input.required}
         >
-          {/* Added dark:text-gray-300 to label */}
           <span className="text-gray-700 dark:text-gray-300">
             {input.labelText}
           </span>
@@ -51,9 +53,8 @@ export default function Form({
       <div>
         <button
           type='submit'
-          // Added dark: variants to button text (kept bg-indigo-600 as-is)
-          className='flex w-full justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600'
-          disabled={isLoading}
+          className='flex w-full justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed' // Added disabled styles
+          disabled={isLoading || btnDisabled} // Combine both conditions
         >
           {isLoading ? <Spinner sm /> : `${btnText}`}
         </button>

@@ -2,6 +2,7 @@
 
 import { useRegister } from "@/hooks";
 import { Form } from "@/components/forms";
+import { useState } from "react";
 
 export default function RegisterForm() {
   const {
@@ -14,6 +15,23 @@ export default function RegisterForm() {
     onChange,
     onSubmit,
   } = useRegister();
+
+  const [promoCode, setPromoCode] = useState("");
+  const [isPromoValid, setIsPromoValid] = useState(false);
+  const HARDCODED_PROMO = "arunarchitect";
+
+  const handlePromoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setPromoCode(value);
+    setIsPromoValid(value === HARDCODED_PROMO);
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault(); // Prevent default first
+    if (isPromoValid) {
+      onSubmit(e);
+    }
+  };
 
   const config = [
     {
@@ -51,6 +69,14 @@ export default function RegisterForm() {
       value: re_password,
       required: true,
     },
+    {
+      labelText: "Promo Code",
+      labelId: "promo_code",
+      type: "text",
+      value: promoCode,
+      required: true,
+      onChange: handlePromoChange, // Use the custom handler
+    },
   ];
 
   return (
@@ -58,8 +84,9 @@ export default function RegisterForm() {
       config={config}
       isLoading={isLoading}
       btnText="Sign Up"
-      onChange={onChange}
-      onSubmit={onSubmit}
+      onChange={onChange} // Default handler for other inputs
+      onSubmit={handleSubmit}
+      btnDisabled={!isPromoValid} // Disable if promo code is invalid
     />
   );
 }

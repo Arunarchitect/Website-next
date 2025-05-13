@@ -12,7 +12,9 @@ import {
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
-import WorklogsTable, { EditableWorklog } from "@/components/tables/WorklogsTable";
+import WorklogsTable, {
+  EditableWorklog,
+} from "@/components/tables/WorklogsTable";
 import { Spinner } from "@/components/common";
 
 export default function DashboardPage() {
@@ -33,10 +35,8 @@ export default function DashboardPage() {
     isFetching: isOrgFetching,
   } = useGetMyOrganisationsQuery();
 
-  const {
-    data: allWorklogs = [],
-    refetch: refetchWorklogs,
-  } = useGetWorklogsQuery();
+  const { data: allWorklogs = [], refetch: refetchWorklogs } =
+    useGetWorklogsQuery();
 
   const { data: projects = [] } = useGetProjectsQuery();
   const { data: deliverables = [] } = useGetDeliverablesQuery();
@@ -119,13 +119,19 @@ export default function DashboardPage() {
             >
               View Projects
             </button>
+            <button
+              onClick={() => {
+                router.push("/hr");
+              }}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+            >
+              HR
+            </button>
           </div>
         )}
       </div>
 
-      {user?.id && (
-        <WorklogForm userId={user.id} onSuccess={refetchWorklogs} />
-      )}
+      {user?.id && <WorklogForm userId={user.id} onSuccess={refetchWorklogs} />}
 
       <WorklogsTable
         worklogs={userWorklogs}
@@ -139,7 +145,9 @@ export default function DashboardPage() {
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-            <h2 className="text-lg font-semibold mb-4 text-gray-800">Select an Organization</h2>
+            <h2 className="text-lg font-semibold mb-4 text-gray-800">
+              Select an Organization
+            </h2>
             <select
               value={selectedOrgId ?? ""}
               onChange={(e) => setSelectedOrgId(Number(e.target.value))}
