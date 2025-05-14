@@ -9,12 +9,14 @@ interface Deliverable {
   stage: string;
   status: string;
   end_date: string;
+  assignee: number | null;
+  assignee_name?: string | null;
   remarks?: string;
 }
 
 interface ProjectDetails {
   project: string;
-  current_stage: string; // Note: There's a typo here ('current_stage' vs 'current_stage')
+  current_stage: string;
   total_duration_seconds: number;
   deliverables: Deliverable[];
   deliverables_summary?: Array<{
@@ -45,10 +47,9 @@ const ProjectDetailPage = () => {
   const { id } = useParams();
   const [isClient, setIsClient] = useState(false);
   const [currentDate, setCurrentDate] = useState<string>('');
-  
+
   useEffect(() => {
     setIsClient(true);
-    // Set current date in YYYY-MM-DD format for comparison
     setCurrentDate(new Date().toISOString().split('T')[0]);
   }, []);
 
@@ -59,12 +60,21 @@ const ProjectDetailPage = () => {
     error,
   } = useGetProjectSummaryQuery(id as string, { skip: !id });
 
-  // Properly type the project details
   const typedProjectDetails = projectDetails as ProjectDetails | undefined;
 
   const isPastDue = (endDate: string) => {
     if (!endDate || !currentDate) return false;
     return endDate < currentDate;
+  };
+
+  const getAssigneeName = (deliverable: Deliverable) => {
+    if (!deliverable.assignee) return 'Unassigned';
+    return deliverable.assignee_name || `User #${deliverable.assignee}`;
+  };
+
+  const getDurationForDeliverable = (name: string) => {
+    const match = typedProjectDetails?.deliverables_summary?.find(d => d.name === name);
+    return match ? (match.duration_seconds / 3600).toFixed(2) : '—';
   };
 
   if (isLoading) return <p>Loading project details...</p>;
@@ -74,12 +84,6 @@ const ProjectDetailPage = () => {
   }
   if (!typedProjectDetails) return <p>No project details available.</p>;
 
-  const getDurationForDeliverable = (name: string) => {
-    const match = typedProjectDetails.deliverables_summary?.find(d => d.name === name);
-    return match ? (match.duration_seconds / 3600).toFixed(2) : '—';
-  };
-
-  // Group deliverables by stage
   const deliverablesByStage: Record<string, Deliverable[]> = {};
   typedProjectDetails.deliverables.forEach((deliverable) => {
     if (!deliverablesByStage[deliverable.stage]) {
@@ -88,7 +92,6 @@ const ProjectDetailPage = () => {
     deliverablesByStage[deliverable.stage].push(deliverable);
   });
 
-  // Get unique stages and sort them
   const stages = Object.keys(deliverablesByStage).sort();
 
   return (
@@ -124,8 +127,8 @@ const ProjectDetailPage = () => {
             <h3 className="text-lg font-semibold mb-3 text-gray-300">Stage {stage}</h3>
             <div className="space-y-3">
               {deliverablesByStage[stage].map((deliverable, index) => (
-                <div 
-                  key={`${stage}-${index}`} 
+                <div
+                  key={`${stage}-${index}`}
                   className={`border-b border-gray-700 pb-2 last:border-b-0 rounded p-2 ${
                     isPastDue(deliverable.end_date) ? 'bg-red-900/50' : ''
                   }`}
@@ -133,19 +136,21 @@ const ProjectDetailPage = () => {
                   <div className="flex justify-between items-start">
                     <p className="font-medium text-gray-200">{deliverable.name}</p>
                     {isClient && (
-                      <span 
+                      <span
                         className={`inline-block w-3 h-3 rounded-full mt-1 ${statusColors[deliverable.status]}`}
                         title={statusLabels[deliverable.status]}
                       ></span>
                     )}
                   </div>
                   <div className="flex justify-between text-sm text-gray-400">
-                    <span>{statusLabels[deliverable.status]}</span>
+                    <span>Assignee: {getAssigneeName(deliverable)}</span>
                     <span>{getDurationForDeliverable(deliverable.name)} hrs</span>
                   </div>
-                  <div className={`text-xs mt-1 ${
-                    isPastDue(deliverable.end_date) ? 'text-red-300' : 'text-gray-400'
-                  }`}>
+                  <div
+                    className={`text-xs mt-1 ${
+                      isPastDue(deliverable.end_date) ? 'text-red-300' : 'text-gray-400'
+                    }`}
+                  >
                     End Date: {deliverable.end_date}
                     {isPastDue(deliverable.end_date) && (
                       <span className="ml-2 text-red-300">(Past Due)</span>
