@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import { useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
@@ -17,46 +17,77 @@ import WorklogsTable, {
 } from "@/components/tables/WorklogsTable";
 import { Spinner } from "@/components/common";
 
+type Organisation = {
+  id: number;
+  name: string;
+  membership?: {
+    role: 'MEMBER' | 'ADMIN' | 'OWNER';
+  };
+};
+
+type AdminOrganization = {
+  id: number;
+  name: string;
+};
+
 export default function DashboardPage() {
   const router = useRouter();
-
+  const [isMounted, setIsMounted] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
 
+  // User data
   const {
     data: user,
     isLoading: isUserLoading,
     isFetching: isUserFetching,
   } = useRetrieveUserQuery();
 
+  // Organizations data
   const {
     data: organisations = [],
     isLoading: isOrgLoading,
     isFetching: isOrgFetching,
   } = useGetMyOrganisationsQuery();
 
+  // Worklogs data
   const { data: allWorklogs = [], refetch: refetchWorklogs } =
     useGetWorklogsQuery();
 
+  // Projects and deliverables data
   const { data: projects = [] } = useGetProjectsQuery();
   const { data: deliverables = [] } = useGetDeliverablesQuery();
 
+  // Mutations
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
 
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Loading states
   const isLoading =
     isUserLoading || isUserFetching || isOrgLoading || isOrgFetching;
 
+  // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
 
-  const adminOrgs = organisations.map((org) => ({
-    id: org.id,
-    name: org.name,
-  }));
+  // Safely filter organizations where user has admin/owner role
+  const adminOrganizations: AdminOrganization[] = (organisations as Organisation[])
+    .filter((org) => {
+      if (!org.membership?.role) return false;
+      const role = org.membership.role;
+      return role === 'ADMIN' || role === 'OWNER';
+    })
+    .map((org) => ({
+      id: org.id,
+      name: org.name,
+    }));
 
-  const isAdmin = adminOrgs.length > 0;
+  const isAdmin = adminOrganizations.length > 0;
 
   const handleDelete = async (id: number) => {
     try {
@@ -73,8 +104,8 @@ export default function DashboardPage() {
         id: worklog.id,
         project: worklog.project,
         deliverable: worklog.deliverable,
-        start_time: new Date(worklog.start_time).toISOString(),
-        end_time: new Date(worklog.end_time).toISOString(),
+        start_time: worklog.start_time,
+        end_time: worklog.end_time,
       }).unwrap();
       console.log("✅ Worklog updated successfully!");
     } catch (err) {
@@ -89,7 +120,7 @@ export default function DashboardPage() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || !isMounted) {
     return (
       <div className="flex justify-center my-8">
         <Spinner lg />
@@ -120,12 +151,10 @@ export default function DashboardPage() {
               View Projects
             </button>
             <button
-              onClick={() => {
-                router.push("/hr");
-              }}
+              onClick={() => router.push("/hr")}
               className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
             >
-              HR
+              HR Dashboard
             </button>
           </div>
         )}
@@ -154,7 +183,7 @@ export default function DashboardPage() {
               className="w-full border border-gray-300 rounded px-3 py-2 mb-4"
             >
               <option value="">-- Choose an organization --</option>
-              {adminOrgs.map((org) => (
+              {adminOrganizations.map((org) => (
                 <option key={org.id} value={org.id}>
                   {org.name}
                 </option>
@@ -170,7 +199,9 @@ export default function DashboardPage() {
               <button
                 onClick={handleGoToProjects}
                 disabled={!selectedOrgId}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors ${
+                  !selectedOrgId ? "opacity-50 cursor-not-allowed" : ""
+                }`}
               >
                 Go to Projects
               </button>
