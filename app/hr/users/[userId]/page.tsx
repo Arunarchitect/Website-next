@@ -22,14 +22,6 @@ interface Organisation {
   role: string;
 }
 
-interface UserDetails {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone?: string;
-}
-
 export default function UserDetailsPage() {
   const params = useParams();
   const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
@@ -53,10 +45,20 @@ export default function UserDetailsPage() {
   } = useGetUserDeliverablesQuery(userId || '', { skip: !userId });
 
   const {
-    data: worklogs = [] as WorkLog[],
+    data: worklogsData = [],
     isLoading: isWorklogsLoading,
     isError: isWorklogsError,
   } = useGetUserWorkLogsQuery(userId || '', { skip: !userId });
+
+  // Convert API response to WorkLog type
+  const worklogs: WorkLog[] = worklogsData.map(log => ({
+    id: log.id,
+    start_time: log.start_time,
+    end_time: log.end_time ?? null,
+    duration: log.duration ?? null,
+    deliverable: log.deliverable,
+    project: log.project
+  }));
 
   if (!userId || typeof userId !== 'string') {
     return <div className="p-8 text-red-500">Invalid user ID. Please check the URL.</div>;

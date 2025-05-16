@@ -1,4 +1,4 @@
-// app/hr/users/components/workTable.tsx
+// components/tables/workTable.tsx
 import { format } from "date-fns";
 
 export interface WorkLog {

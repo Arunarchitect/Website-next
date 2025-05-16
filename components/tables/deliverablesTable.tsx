@@ -1,4 +1,4 @@
-// app/hr/users/components/deliverablesTable.tsx
+// components/tables/deliverablesTable.tsx
 export interface Deliverable {
   id: number;
   name: string;
