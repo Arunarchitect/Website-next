@@ -19,6 +19,31 @@ export default function UserDetailsPage() {
     ? params.userId[0]
     : params.userId;
 
+  // Call all hooks unconditionally at the top with skip option
+  const {
+    data: user,
+    isLoading: isUserLoading,
+    isError: isUserError,
+  } = useGetUserDetailsQuery(userId || '', { skip: !userId });
+
+  const {
+    data: organisations = [],
+    isLoading: isOrgsLoading,
+    isError: isOrgsError,
+  } = useGetUserOrganisationsQuery(userId || '', { skip: !userId });
+
+  const {
+    data: deliverables = [],
+    isLoading: isDeliverablesLoading,
+    isError: isDeliverablesError,
+  } = useGetUserDeliverablesQuery(userId || '', { skip: !userId });
+
+  const {
+    data: worklogs = [],
+    isLoading: isWorklogsLoading,
+    isError: isWorklogsError,
+  } = useGetUserWorkLogsQuery(userId || '', { skip: !userId });
+
   // Guard against undefined or invalid userId
   if (!userId || typeof userId !== 'string') {
     return (
@@ -27,30 +52,6 @@ export default function UserDetailsPage() {
       </div>
     );
   }
-
-  const {
-    data: user,
-    isLoading: isUserLoading,
-    isError: isUserError,
-  } = useGetUserDetailsQuery(userId);
-
-  const {
-    data: organisations = [],
-    isLoading: isOrgsLoading,
-    isError: isOrgsError,
-  } = useGetUserOrganisationsQuery(userId);
-
-  const {
-    data: deliverables = [],
-    isLoading: isDeliverablesLoading,
-    isError: isDeliverablesError,
-  } = useGetUserDeliverablesQuery(userId);
-
-  const {
-    data: worklogs = [],
-    isLoading: isWorklogsLoading,
-    isError: isWorklogsError,
-  } = useGetUserWorkLogsQuery(userId);
 
   if (isUserLoading || isOrgsLoading || isDeliverablesLoading || isWorklogsLoading) {
     return (
