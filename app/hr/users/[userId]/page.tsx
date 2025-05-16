@@ -9,17 +9,31 @@ import {
   useGetUserWorkLogsQuery,
 } from "@/redux/features/userApiSlice";
 import { Spinner } from "@/components/common";
-import { format } from "date-fns";
+import type { WorkLog } from "@/components/tables/workTable";
+import type { Deliverable } from "@/components/tables/deliverablesTable";
+import WorkTable from "@/components/tables/workTable";
+import DeliverablesTable from "@/components/tables/deliverablesTable";
+
+interface Organisation {
+  id: number;
+  organisation: {
+    name: string;
+  };
+  role: string;
+}
+
+interface UserDetails {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+}
 
 export default function UserDetailsPage() {
   const params = useParams();
+  const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
 
-  // Safely extract userId from params
-  const userId = Array.isArray(params.userId)
-    ? params.userId[0]
-    : params.userId;
-
-  // Call all hooks unconditionally at the top with skip option
   const {
     data: user,
     isLoading: isUserLoading,
@@ -27,30 +41,25 @@ export default function UserDetailsPage() {
   } = useGetUserDetailsQuery(userId || '', { skip: !userId });
 
   const {
-    data: organisations = [],
+    data: organisations = [] as Organisation[],
     isLoading: isOrgsLoading,
     isError: isOrgsError,
   } = useGetUserOrganisationsQuery(userId || '', { skip: !userId });
 
   const {
-    data: deliverables = [],
+    data: deliverables = [] as Deliverable[],
     isLoading: isDeliverablesLoading,
     isError: isDeliverablesError,
   } = useGetUserDeliverablesQuery(userId || '', { skip: !userId });
 
   const {
-    data: worklogs = [],
+    data: worklogs = [] as WorkLog[],
     isLoading: isWorklogsLoading,
     isError: isWorklogsError,
   } = useGetUserWorkLogsQuery(userId || '', { skip: !userId });
 
-  // Guard against undefined or invalid userId
   if (!userId || typeof userId !== 'string') {
-    return (
-      <div className="p-8 text-red-500">
-        Invalid user ID. Please check the URL.
-      </div>
-    );
+    return <div className="p-8 text-red-500">Invalid user ID. Please check the URL.</div>;
   }
 
   if (isUserLoading || isOrgsLoading || isDeliverablesLoading || isWorklogsLoading) {
@@ -62,26 +71,17 @@ export default function UserDetailsPage() {
   }
 
   if (isUserError || !user) {
-    return (
-      <div className="p-8 text-red-500">
-        Error loading user details. Please try again later.
-      </div>
-    );
+    return <div className="p-8 text-red-500">Error loading user details. Please try again later.</div>;
   }
 
-  const totalHours = worklogs.reduce((sum, log) => {
-    return sum + (log.duration || 0);
-  }, 0);
+  const totalHours = worklogs.reduce((sum, log) => sum + (log.duration || 0), 0);
 
   return (
     <div className="p-8 space-y-8">
       <h1 className="text-2xl font-bold">User Details</h1>
 
-      {/* Personal Info */}
       <div className="bg-white shadow-sm rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Personal Information
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Personal Information</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <p className="text-sm text-gray-500">First Name</p>
@@ -102,11 +102,8 @@ export default function UserDetailsPage() {
         </div>
       </div>
 
-      {/* Organisation Memberships */}
       <div className="bg-white shadow-sm rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Organisation Memberships
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Organisation Memberships</h2>
         {isOrgsError ? (
           <p className="text-red-500">Error loading organisations</p>
         ) : organisations.length === 0 ? (
@@ -128,9 +125,7 @@ export default function UserDetailsPage() {
                 {organisations.map((org) => (
                   <tr key={org.id}>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {org.organisation.name}
-                      </div>
+                      <div className="text-sm text-gray-900">{org.organisation.name}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
@@ -153,137 +148,8 @@ export default function UserDetailsPage() {
         )}
       </div>
 
-      {/* Assigned Deliverables */}
-      <div className="bg-white shadow-sm rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Assigned Deliverables
-        </h2>
-        {isDeliverablesError ? (
-          <p className="text-red-500">Error loading deliverables</p>
-        ) : deliverables.length === 0 ? (
-          <p className="text-gray-500">No deliverables assigned</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Project
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Deliverable
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Stage
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {deliverables.map((deliverable) => (
-                  <tr key={deliverable.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {deliverable.project.name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {deliverable.name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {deliverable.stage_name}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          deliverable.status === "passed"
-                            ? "bg-green-100 text-green-800"
-                            : deliverable.status === "failed"
-                              ? "bg-red-100 text-red-800"
-                              : deliverable.status === "ready"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {deliverable.status_name}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Work Logs */}
-      <div className="bg-white shadow-sm rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Work Logs</h2>
-        <div className="mb-4">
-          <p className="text-sm text-gray-500">Total Hours Worked</p>
-          <p className="text-xl font-semibold text-gray-900">
-            {totalHours.toFixed(2)} hours
-          </p>
-        </div>
-        {isWorklogsError ? (
-          <p className="text-red-500">Error loading work logs</p>
-        ) : worklogs.length === 0 ? (
-          <p className="text-gray-500">No work logs found</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Deliverable
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Project
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Start Time
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    End Time
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Duration (hours)
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {worklogs.map((log) => (
-                  <tr key={log.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {format(new Date(log.start_time), "yyyy-MM-dd")}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {log.deliverable}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {log.project}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {format(new Date(log.start_time), "HH:mm")}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {log.end_time
-                        ? format(new Date(log.end_time), "HH:mm")
-                        : "In progress"}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {log.duration?.toFixed(2) ?? "N/A"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <DeliverablesTable deliverables={deliverables} isError={isDeliverablesError} />
+      <WorkTable worklogs={worklogs} isError={isWorklogsError} totalHours={totalHours} />
     </div>
   );
 }
