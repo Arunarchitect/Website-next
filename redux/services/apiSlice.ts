@@ -56,23 +56,24 @@ const baseQueryWithReauth: BaseQueryFn<
           extraOptions
         );
 
-        if (refreshResult.data) {
-          // Update stored access token with new one
-          const { access } = refreshResult.data as { access: string };
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('access', access);
-          }
-          
-          // Update auth state and retry original request
-          api.dispatch(setAuth());
-          result = await baseQuery(args, api, extraOptions);
-        } else {
+        if (!refreshResult.data) {
           // Refresh failed - logout user
           api.dispatch(logout());
           if (typeof window !== 'undefined') {
             window.location.href = '/auth/login';
           }
+          return refreshResult;
         }
+
+        // Update stored access token with new one
+        const { access } = refreshResult.data as { access: string };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('access', access);
+        }
+        
+        // Update auth state and retry original request
+        api.dispatch(setAuth());
+        result = await baseQuery(args, api, extraOptions);
       } finally {
         release();
       }
@@ -98,7 +99,10 @@ export const apiSlice = createApi({
     'Project',        // For project endpoints
     'Deliverable',    // For deliverable endpoints
     'Membership',     // For membership endpoints
-    'Organization'    // For organization endpoints
+    'Organisation',   // Corrected tag name for Organization -> Organisation
+    'OrganisationMembers', // Tag for members of an organisation
+    'OrganisationProjects',  // Tag for projects within an organisation
+    'Memberships'  ,       // Added 'Memberships' tag type
   ],
   endpoints: () => ({}), // Endpoints are injected in feature slices
 });
