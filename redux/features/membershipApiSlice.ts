@@ -30,7 +30,7 @@ export const membershipApiSlice = apiSlice.injectEndpoints({
     // Gets all organizations where the user is a member
     getMyOrganisations: builder.query<Organisation[], void>({
       query: () => "/my-organisations/",
-      providesTags: ["Organisations"],  // Changed to use "Organisations" tag
+      providesTags: ["Organisation"],  // Changed to use "Organisations" tag
     }),
 
     // Gets all members of a specific organization (for HR dashboard)
