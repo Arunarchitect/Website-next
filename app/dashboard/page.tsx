@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
-import { useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
+import { useGetMyMembershipsQuery, useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
 import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
@@ -16,19 +16,6 @@ import WorklogsTable, {
   EditableWorklog,
 } from "@/components/tables/WorklogsTable";
 import { Spinner } from "@/components/common";
-
-type Organisation = {
-  id: number;
-  name: string;
-  membership?: {
-    role: 'MEMBER' | 'ADMIN' | 'OWNER';
-  };
-};
-
-type AdminOrganization = {
-  id: number;
-  name: string;
-};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -43,7 +30,14 @@ export default function DashboardPage() {
     isFetching: isUserFetching,
   } = useRetrieveUserQuery();
 
-  // Organizations data
+  // Memberships data (contains organization info with roles)
+  const {
+    data: memberships = [],
+    isLoading: isMembershipLoading,
+    isFetching: isMembershipFetching,
+  } = useGetMyMembershipsQuery();
+
+  // Organizations data (for names)
   const {
     data: organisations = [],
     isLoading: isOrgLoading,
@@ -68,24 +62,24 @@ export default function DashboardPage() {
 
   // Loading states
   const isLoading =
-    isUserLoading || isUserFetching || isOrgLoading || isOrgFetching;
+    isUserLoading || isUserFetching || isMembershipLoading || isMembershipFetching || isOrgLoading || isOrgFetching;
 
   // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
     (worklog) => worklog.employee === user?.id
   );
 
-  // Safely filter organizations where user has admin/owner role
-  const adminOrganizations: AdminOrganization[] = (organisations as Organisation[])
-    .filter((org) => {
-      if (!org.membership?.role) return false;
-      const role = org.membership.role;
-      return role === 'ADMIN' || role === 'OWNER';
-    })
-    .map((org) => ({
-      id: org.id,
-      name: org.name,
-    }));
+  // Get admin organizations from memberships
+  const adminMemberships = memberships.filter(membership => membership.role === 'admin');
+  
+  // Create admin organizations array with names
+  const adminOrganizations = adminMemberships.map(membership => {
+    const org = organisations.find(o => o.id === membership.organisation);
+    return {
+      id: membership.organisation,
+      name: org?.name || `Organization ${membership.organisation}`
+    };
+  });
 
   const isAdmin = adminOrganizations.length > 0;
 
