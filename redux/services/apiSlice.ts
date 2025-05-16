@@ -9,7 +9,6 @@ const mutex = new Mutex();
 const baseQuery = fetchBaseQuery({
   baseUrl: `${process.env.NEXT_PUBLIC_HOST}/api`,
   prepareHeaders: (headers) => {
-    // Only try to get token if we're in the browser environment
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('access');
       if (token) {
@@ -22,22 +21,19 @@ const baseQuery = fetchBaseQuery({
 
 // Enhanced base query with re-authentication logic
 const baseQueryWithReauth: BaseQueryFn<
-  string | FetchArgs, 
-  unknown, 
+  string | FetchArgs,
+  unknown,
   FetchBaseQueryError
 > = async (args, api, extraOptions) => {
-  // Wait for any pending reauth to complete
   await mutex.waitForUnlock();
   let result = await baseQuery(args, api, extraOptions);
 
-  // If 401 error, try to refresh token
   if (result.error?.status === 401) {
     if (!mutex.isLocked()) {
       const release = await mutex.acquire();
       try {
-        // Try to get refresh token
-        const refresh = typeof window !== 'undefined' 
-          ? localStorage.getItem('refresh') 
+        const refresh = typeof window !== 'undefined'
+          ? localStorage.getItem('refresh')
           : null;
 
         if (!refresh) {
@@ -45,7 +41,6 @@ const baseQueryWithReauth: BaseQueryFn<
           return result;
         }
 
-        // Attempt to refresh the token
         const refreshResult = await baseQuery(
           {
             url: '/token/refresh/',
@@ -57,7 +52,6 @@ const baseQueryWithReauth: BaseQueryFn<
         );
 
         if (!refreshResult.data) {
-          // Refresh failed - logout user
           api.dispatch(logout());
           if (typeof window !== 'undefined') {
             window.location.href = '/auth/login';
@@ -65,20 +59,17 @@ const baseQueryWithReauth: BaseQueryFn<
           return refreshResult;
         }
 
-        // Update stored access token with new one
         const { access } = refreshResult.data as { access: string };
         if (typeof window !== 'undefined') {
           localStorage.setItem('access', access);
         }
-        
-        // Update auth state and retry original request
+
         api.dispatch(setAuth());
         result = await baseQuery(args, api, extraOptions);
       } finally {
         release();
       }
     } else {
-      // Wait for the pending reauth to complete and retry
       await mutex.waitForUnlock();
       result = await baseQuery(args, api, extraOptions);
     }
@@ -87,24 +78,28 @@ const baseQueryWithReauth: BaseQueryFn<
   return result;
 };
 
-// Create API slice with all tag types
+// ✅ Extended tagTypes to support all feature slice tags
 export const apiSlice = createApi({
   reducerPath: "api",
   baseQuery: baseQueryWithReauth,
-  // Include all tag types used across different API slices
   tagTypes: [
-    'User',           // For user-related endpoints
-    'Auth',           // For authentication state
-    'Worklog',        // For worklog endpoints
-    'Project',        // For project endpoints
-    'Deliverable',    // For deliverable endpoints
-    'Membership',     // For membership endpoints
-    'Organisation',   // Corrected tag name for Organization -> Organisation
-    'OrganisationMembers', // Tag for members of an organisation
-    'OrganisationProjects',  // Tag for projects within an organisation
-    'Memberships'  ,       // Added 'Memberships' tag type
+    'User',                 // Single user
+    'Auth',                 // Auth state
+    'Worklog',              // Worklog entries
+    'Project',              // Project data
+    'Deliverable',          // Deliverables
+    'Membership',           // Single membership
+    'Organisation',         // Organisation base data
+    'OrganisationMembers',  // Org-specific member list
+    'OrganisationProjects', // Org-specific project list
+    'Memberships',          // List of memberships
+
+    // ✅ Add these to fix the TypeScript error
+    'UserWorkLogs',         // Used in providesTags of getUserWorkLogs
+    'UserDeliverables',     // Used in providesTags of getUserDeliverables
+    'UserOrganisations',    // Used in providesTags of getUserOrganisations
   ],
-  endpoints: () => ({}), // Endpoints are injected in feature slices
+  endpoints: () => ({}),
 });
 
 export default apiSlice;

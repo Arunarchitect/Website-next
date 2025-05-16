@@ -6,8 +6,10 @@ import {
   useGetOrganisationMembersQuery 
 } from "@/redux/features/membershipApiSlice";
 import { Spinner } from "@/components/common";
+import { useRouter } from "next/navigation";
 
 export default function HRPage() {
+  const router = useRouter();
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
 
   // Get organizations the user has access to
@@ -25,6 +27,10 @@ export default function HRPage() {
   } = useGetOrganisationMembersQuery(selectedOrgId || 0, {
     skip: !selectedOrgId, // Skip query if no org selected
   });
+
+  const handleUserClick = (userId: number) => {
+    router.push(`/hr/users/${userId}`);
+  };
 
   if (isOrgsLoading) {
     return (
@@ -103,7 +109,11 @@ export default function HRPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {members.map((member) => (
-                    <tr key={member.id}>
+                    <tr 
+                      key={member.id}
+                      onClick={() => handleUserClick(member.user.id)}
+                      className="hover:bg-gray-50 cursor-pointer"
+                    >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="ml-4">
