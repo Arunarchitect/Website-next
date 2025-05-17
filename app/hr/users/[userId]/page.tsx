@@ -9,18 +9,9 @@ import {
   useGetUserWorkLogsQuery,
 } from "@/redux/features/userApiSlice";
 import { Spinner } from "@/components/common";
-import type { WorkLog } from "@/components/tables/workTable";
 import WorkTable from "@/components/tables/workTable";
 import DeliverablesTable from "@/components/tables/deliverablesTable";
 import { format, formatDistanceToNow, isToday, isYesterday, isAfter, differenceInMinutes } from "date-fns";
-
-interface Organisation {
-  id: number;
-  organisation: {
-    name: string;
-  };
-  role: string;
-}
 
 interface UserWorkLog {
   id: number;
@@ -60,7 +51,7 @@ export default function UserDetailsPage() {
   } = useGetUserWorkLogsQuery(userId || '', { skip: !userId });
 
   // Convert API response to WorkLog type
-  const worklogs: WorkLog[] = worklogsData.map((log: UserWorkLog) => ({
+  const worklogs = worklogsData.map((log: UserWorkLog) => ({
     id: log.id,
     start_time: log.start_time,
     end_time: log.end_time ?? null,
