@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   useGetMyOrganisationsQuery,
   useGetOrganisationMembersQuery 
@@ -12,20 +12,26 @@ export default function HRPage() {
   const router = useRouter();
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
 
-  // Get organizations the user has access to
   const {
     data: organisations = [],
     isLoading: isOrgsLoading,
     isError: isOrgsError,
   } = useGetMyOrganisationsQuery();
 
-  // Get members for selected organization
+  // Set default org (alphabetically first) after loading
+  useEffect(() => {
+    if (organisations.length && selectedOrgId === null) {
+      const sorted = [...organisations].sort((a, b) => a.name.localeCompare(b.name));
+      setSelectedOrgId(sorted[0].id);
+    }
+  }, [organisations, selectedOrgId]);
+
   const {
     data: members = [],
     isLoading: isMembersLoading,
     isError: isMembersError,
   } = useGetOrganisationMembersQuery(selectedOrgId || 0, {
-    skip: !selectedOrgId, // Skip query if no org selected
+    skip: !selectedOrgId,
   });
 
   const handleUserClick = (userId: number) => {
@@ -48,6 +54,9 @@ export default function HRPage() {
     );
   }
 
+  const sortedOrgs = [...organisations].sort((a, b) => a.name.localeCompare(b.name));
+  const selectedOrg = organisations.find(o => o.id === selectedOrgId);
+
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold mb-4">HR Dashboard</h1>
@@ -55,23 +64,21 @@ export default function HRPage() {
         Manage organization members and their roles.
       </p>
 
-      {/* Organization Selector */}
-      <div className="mb-6 max-w-md">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Select Organization:
-        </label>
-        <select
-          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={selectedOrgId || ""}
-          onChange={(e) => setSelectedOrgId(Number(e.target.value) || null)}
-        >
-          <option value="">-- Select an organization --</option>
-          {organisations.map((org) => (
-            <option key={org.id} value={org.id}>
-              {org.name}
-            </option>
-          ))}
-        </select>
+      {/* Organisation Filter Buttons */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {sortedOrgs.map((org) => (
+          <button
+            key={org.id}
+            onClick={() => setSelectedOrgId(org.id)}
+            className={`px-4 py-2 rounded-md border text-sm font-medium transition ${
+              selectedOrgId === org.id
+                ? "bg-blue-600 text-white"
+                : "bg-white text-gray-800 border-gray-300 hover:bg-gray-100"
+            }`}
+          >
+            {org.name}
+          </button>
+        ))}
       </div>
 
       {/* Members Table */}
@@ -79,7 +86,7 @@ export default function HRPage() {
         <div className="bg-white shadow-sm rounded-lg overflow-hidden">
           <div className="p-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-800">
-              Members of {organisations.find(o => o.id === selectedOrgId)?.name}
+              Members of {selectedOrg?.name}
             </h2>
           </div>
 
@@ -115,18 +122,12 @@ export default function HRPage() {
                       className="hover:bg-gray-50 cursor-pointer"
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {member.user.first_name} {member.user.last_name}
-                            </div>
-                          </div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {member.user.first_name} {member.user.last_name}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">
-                          {member.user.email}
-                        </div>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {member.user.email}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 

@@ -10,9 +10,9 @@ import {
 } from "@/redux/features/userApiSlice";
 import { Spinner } from "@/components/common";
 import type { WorkLog } from "@/components/tables/workTable";
-import type { Deliverable } from "@/components/tables/deliverablesTable";
 import WorkTable from "@/components/tables/workTable";
 import DeliverablesTable from "@/components/tables/deliverablesTable";
+import { format, formatDistanceToNow, isToday, isYesterday, isAfter, differenceInMinutes } from "date-fns";
 
 interface Organisation {
   id: number;
@@ -20,6 +20,15 @@ interface Organisation {
     name: string;
   };
   role: string;
+}
+
+interface UserWorkLog {
+  id: number;
+  start_time: string;
+  end_time?: string;
+  duration?: number;
+  deliverable: string;
+  project: string;
 }
 
 export default function UserDetailsPage() {
@@ -33,13 +42,13 @@ export default function UserDetailsPage() {
   } = useGetUserDetailsQuery(userId || '', { skip: !userId });
 
   const {
-    data: organisations = [] as Organisation[],
+    data: organisations = [],
     isLoading: isOrgsLoading,
     isError: isOrgsError,
   } = useGetUserOrganisationsQuery(userId || '', { skip: !userId });
 
   const {
-    data: deliverables = [] as Deliverable[],
+    data: deliverables = [],
     isLoading: isDeliverablesLoading,
     isError: isDeliverablesError,
   } = useGetUserDeliverablesQuery(userId || '', { skip: !userId });
@@ -51,7 +60,7 @@ export default function UserDetailsPage() {
   } = useGetUserWorkLogsQuery(userId || '', { skip: !userId });
 
   // Convert API response to WorkLog type
-  const worklogs: WorkLog[] = worklogsData.map(log => ({
+  const worklogs: WorkLog[] = worklogsData.map((log: UserWorkLog) => ({
     id: log.id,
     start_time: log.start_time,
     end_time: log.end_time ?? null,
@@ -59,6 +68,15 @@ export default function UserDetailsPage() {
     deliverable: log.deliverable,
     project: log.project
   }));
+
+  // Get current active work session (either null end_time or future end_time)
+  const activeWorkSession = worklogs.find(log => {
+    if (log.end_time === null) return true;
+    if (log.end_time) {
+      return isAfter(new Date(log.end_time), new Date());
+    }
+    return false;
+  });
 
   if (!userId || typeof userId !== 'string') {
     return <div className="p-8 text-red-500">Invalid user ID. Please check the URL.</div>;
@@ -76,11 +94,84 @@ export default function UserDetailsPage() {
     return <div className="p-8 text-red-500">Error loading user details. Please try again later.</div>;
   }
 
-  const totalHours = worklogs.reduce((sum, log) => sum + (log.duration || 0), 0);
+  // Calculate current session duration in hours and minutes
+  const getCurrentDuration = () => {
+    if (!activeWorkSession) return null;
+    
+    const start = new Date(activeWorkSession.start_time);
+    const end = activeWorkSession.end_time ? new Date(activeWorkSession.end_time) : new Date();
+    const totalMinutes = differenceInMinutes(end, start);
+    
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    return `${hours}h ${minutes}m`;
+  };
+
+  // Get work status message
+  const getWorkStatusMessage = () => {
+    if (activeWorkSession) {
+      const startTime = new Date(activeWorkSession.start_time);
+      const endTime = activeWorkSession.end_time ? new Date(activeWorkSession.end_time) : null;
+      
+      return (
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+          </span>
+          <p className="text-gray-600">
+            Currently working on <span className="font-semibold">{activeWorkSession.deliverable}</span> from {format(startTime, 'h:mm a')}
+            {endTime ? ` to ${format(endTime, 'h:mm a')}` : ' (ongoing)'}
+          </p>
+        </div>
+      );
+    }
+
+    if (worklogs.length === 0) {
+      return <p className="text-gray-600">No work activity recorded for this user.</p>;
+    }
+
+    // Sort worklogs by start_time (newest first)
+    const sortedLogs = [...worklogs].sort((a, b) => 
+      new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+    );
+
+    const mostRecentLog = sortedLogs[0];
+    const endTime = mostRecentLog.end_time ? new Date(mostRecentLog.end_time) : null;
+
+    if (!endTime) return null;
+
+    // Format time message
+    let timeMessage;
+    if (isToday(endTime)) {
+      timeMessage = `today at ${format(endTime, 'h:mm a')}`;
+    } else if (isYesterday(endTime)) {
+      timeMessage = `yesterday at ${format(endTime, 'h:mm a')}`;
+    } else {
+      timeMessage = `${formatDistanceToNow(endTime)} ago`;
+    }
+
+    return (
+      <p className="text-gray-600">
+        Last worked on <span className="font-semibold">{mostRecentLog.deliverable}</span> {timeMessage}.
+      </p>
+    );
+  };
 
   return (
     <div className="p-8 space-y-8">
-      <h1 className="text-2xl font-bold">User Details</h1>
+      <div className="flex justify-between items-start">
+        <h1 className="text-2xl font-bold">User Details</h1>
+        <div className="text-right space-y-1">
+          {getWorkStatusMessage()}
+          {activeWorkSession && (
+            <p className="text-gray-600">
+              Current session duration: <span className="font-semibold">{getCurrentDuration()}</span>
+            </p>
+          )}
+        </div>
+      </div>
 
       <div className="bg-white shadow-sm rounded-lg p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">Personal Information</h2>
@@ -150,8 +241,15 @@ export default function UserDetailsPage() {
         )}
       </div>
 
-      <DeliverablesTable deliverables={deliverables} isError={isDeliverablesError} />
-      <WorkTable worklogs={worklogs} isError={isWorklogsError} totalHours={totalHours} />
+      <DeliverablesTable 
+        deliverables={deliverables} 
+        isError={isDeliverablesError} 
+      />
+      <WorkTable 
+        worklogs={worklogs} 
+        isError={isWorklogsError} 
+        totalHours={worklogs.reduce((sum, log) => sum + (log.duration || 0), 0)} 
+      />
     </div>
   );
 }
