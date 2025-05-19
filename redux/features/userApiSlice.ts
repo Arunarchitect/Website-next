@@ -42,6 +42,7 @@ interface UserWorkLog {
   id: number;
   deliverable: string;
   project: string;
+  organisation: string;  // Add this line
   start_time: string;
   end_time?: string;
   duration?: number;

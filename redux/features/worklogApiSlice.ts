@@ -1,14 +1,14 @@
 import { apiSlice } from "@/redux/services/apiSlice";
 
-interface Worklog {
+interface UserWorkLog {
   id: number;
-  project: number;
-  deliverable: number;
+  deliverable: string;
+  project: string;
+  organisation: string;  // Add this line
   start_time: string;
-  end_time: string;
-  employee: number;
+  end_time?: string;
+  duration?: number;
 }
-
 interface CreateWorklogRequest {
   project: number;
   deliverable: number;
