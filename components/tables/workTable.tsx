@@ -23,6 +23,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
   const [sortKey, setSortKey] = useState<SortKey>("start_time");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [selectedOrg, setSelectedOrg] = useState<string>("all");
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
@@ -70,32 +71,54 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
   };
 
   return (
-    <div className="bg-white shadow-sm rounded-lg p-6">
-      <div className="flex justify-between items-center mb-4">
+    <div className="bg-white shadow-sm rounded-lg p-4 sm:p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
         <h2 className="text-lg font-semibold text-gray-800">Work Logs</h2>
-        <div className="flex gap-4">
-          <div>
-            <label className="sr-only">Filter by organization</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSelectedOrg("all")}
-                className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === "all" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
-              >
-                All Organizations
-              </button>
-              {organizations.map(org => (
-                <button
-                  key={org}
-                  onClick={() => setSelectedOrg(org)}
-                  className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === org ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
-                >
-                  {org}
-                </button>
-              ))}
-            </div>
-          </div>
+        
+        {/* Mobile filter toggle */}
+        <button
+          onClick={() => setShowMobileFilters(!showMobileFilters)}
+          className="sm:hidden px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"
+        >
+          {showMobileFilters ? 'Hide Filters' : 'Show Filters'}
+        </button>
+        
+        {/* Desktop filter buttons */}
+        <div className="hidden sm:flex gap-2">
+          <button
+            onClick={() => setSelectedOrg("all")}
+            className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === "all" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
+          >
+            All Organizations
+          </button>
+          {organizations.map(org => (
+            <button
+              key={org}
+              onClick={() => setSelectedOrg(org)}
+              className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === org ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
+            >
+              {org}
+            </button>
+          ))}
         </div>
       </div>
+
+      {/* Mobile filter dropdown */}
+      {showMobileFilters && (
+        <div className="sm:hidden mb-4 bg-gray-50 p-3 rounded-lg">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Organization</label>
+          <select
+            value={selectedOrg}
+            onChange={(e) => setSelectedOrg(e.target.value)}
+            className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+          >
+            <option value="all">All Organizations</option>
+            {organizations.map(org => (
+              <option key={org} value={org}>{org}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="mb-4">
         <p className="text-sm text-gray-500">Total Hours Worked</p>
@@ -119,64 +142,81 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
             <thead className="bg-gray-50">
               <tr>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort("start_time")}
                 >
-                  Start Time {renderSortArrow("start_time")}
+                  <span className="hidden sm:inline">Start Time</span>
+                  <span className="sm:hidden">Start</span> {renderSortArrow("start_time")}
                 </th>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort("project")}
                 >
                   Project {renderSortArrow("project")}
                 </th>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort("organisation")}
                 >
-                  Organization {renderSortArrow("organisation")}
+                  <span className="hidden sm:inline">Organization</span>
+                  <span className="sm:hidden">Org</span> {renderSortArrow("organisation")}
                 </th>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort("deliverable")}
                 >
-                  Deliverable {renderSortArrow("deliverable")}
+                  <span className="hidden sm:inline">Deliverable</span>
+                  <span className="sm:hidden">Deliv</span> {renderSortArrow("deliverable")}
                 </th>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort("end_time")}
                 >
-                  End Time {renderSortArrow("end_time")}
+                  <span className="hidden sm:inline">End Time</span>
+                  <span className="sm:hidden">End</span> {renderSortArrow("end_time")}
                 </th>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort("duration")}
                 >
-                  Duration (hours) {renderSortArrow("duration")}
+                  <span className="hidden sm:inline">Duration (hours)</span>
+                  <span className="sm:hidden">Hours</span> {renderSortArrow("duration")}
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {sortedLogs.map((log) => (
                 <tr key={log.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {format(new Date(log.start_time), "HH:mm EEE d MMM yyyy")}
+                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <span className="hidden sm:inline">
+                      {format(new Date(log.start_time), "HH:mm EEE d MMM yyyy")}
+                    </span>
+                    <span className="sm:hidden">
+                      {format(new Date(log.start_time), "HH:mm d MMM")}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900 truncate max-w-[100px]">
                     {log.project}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900 truncate max-w-[80px]">
                     {log.organisation}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900 truncate max-w-[80px]">
                     {log.deliverable}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {log.end_time
-                      ? format(new Date(log.end_time), "HH:mm EEE d MMM yyyy")
-                      : "In progress"}
+                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <span className="hidden sm:inline">
+                      {log.end_time
+                        ? format(new Date(log.end_time), "HH:mm EEE d MMM yyyy")
+                        : "In progress"}
+                    </span>
+                    <span className="sm:hidden">
+                      {log.end_time
+                        ? format(new Date(log.end_time), "HH:mm")
+                        : "In prog"}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {log.duration?.toFixed(2) ?? "N/A"}
                   </td>
                 </tr>
