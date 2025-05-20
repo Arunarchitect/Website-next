@@ -1,12 +1,26 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { format, parseISO } from "date-fns";
+import { 
+  format, 
+  parseISO, 
+  startOfMonth, 
+  endOfMonth, 
+  eachDayOfInterval, 
+  isSameMonth, 
+  isSameDay, 
+  addMonths, 
+  subMonths,
+  getDay,
+  addDays
+} from "date-fns";
 import {
   PencilIcon,
   TrashIcon,
   CheckIcon,
   XMarkIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "@heroicons/react/24/outline";
 
 interface Project {
@@ -65,9 +79,11 @@ export default function WorklogsTable({
     key: SortableField;
     direction: SortDirection;
   }>({
-    key: "start_time", // Default sort field to 'start_time'
-    direction: "desc", // Default sort direction to 'desc' for latest worklog
+    key: "start_time",
+    direction: "desc",
   });
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const PAGE_SIZE = 10;
 
@@ -80,8 +96,87 @@ export default function WorklogsTable({
     [deliverables]
   );
 
+  // Get unique dates with worklogs and count for current month
+  const { worklogDates, daysWithWorklogsCount } = useMemo(() => {
+    const dates = new Set<string>();
+    let count = 0;
+    
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    
+    worklogs.forEach((worklog) => {
+      const date = parseISO(worklog.start_time);
+      const dateStr = format(date, "yyyy-MM-dd");
+      dates.add(dateStr);
+      
+      if (date >= monthStart && date <= monthEnd) {
+        count++;
+      }
+    });
+    
+    return {
+      worklogDates: dates,
+      daysWithWorklogsCount: new Set(
+        Array.from(dates).filter(dateStr => {
+          const date = parseISO(dateStr);
+          return date >= monthStart && date <= monthEnd;
+        })
+      ).size
+    };
+  }, [worklogs, currentMonth]);
+
+  // Filter worklogs by selected date
+  const filteredWorklogs = useMemo(() => {
+    if (!selectedDate) return worklogs;
+    return worklogs.filter(worklog => {
+      const worklogDate = format(parseISO(worklog.start_time), "yyyy-MM-dd");
+      const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+      return worklogDate === selectedDateStr;
+    });
+  }, [worklogs, selectedDate]);
+
+  // Calendar generation with correct weekday alignment
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    
+    // Get the day of week for the first day of month (0 = Sunday, 6 = Saturday)
+    const startDay = getDay(monthStart);
+    
+    // Calculate days from previous month to show
+    const daysFromPrevMonth = startDay; // For Sunday-start week
+    
+    // Create the calendar grid including days from previous and next month
+    const startDate = addDays(monthStart, -daysFromPrevMonth);
+    const daysNeeded = 42; // 6 weeks
+    const daysInMonth = monthEnd.getDate();
+    const daysFromNextMonth = daysNeeded - daysFromPrevMonth - daysInMonth;
+    const endDate = addDays(monthEnd, daysFromNextMonth);
+    
+    return eachDayOfInterval({ start: startDate, end: endDate });
+  }, [currentMonth]);
+
+  const prevMonth = () => {
+    setCurrentMonth(subMonths(currentMonth, 1));
+    setSelectedDate(null);
+  };
+  
+  const nextMonth = () => {
+    setCurrentMonth(addMonths(currentMonth, 1));
+    setSelectedDate(null);
+  };
+
+  const handleDateClick = (day: Date) => {
+    if (isSameDay(day, selectedDate)) {
+      setSelectedDate(null);
+    } else {
+      setSelectedDate(day);
+    }
+    setCurrentPage(1);
+  };
+
   const sortedWorklogs = useMemo(() => {
-    const sorted = [...worklogs];
+    const sorted = [...(selectedDate ? filteredWorklogs : worklogs)];
     if (sortConfig) {
       sorted.sort((a, b) => {
         let aValue: string | number = "";
@@ -115,7 +210,7 @@ export default function WorklogsTable({
       });
     }
     return sorted;
-  }, [worklogs, sortConfig, deliverableMap, projectMap]);
+  }, [selectedDate, filteredWorklogs, worklogs, sortConfig, deliverableMap, projectMap]);
 
   const totalPages = Math.ceil(sortedWorklogs.length / PAGE_SIZE);
   const paginatedWorklogs = sortedWorklogs.slice(
@@ -183,7 +278,7 @@ export default function WorklogsTable({
 
   const getSortIcon = (key: SortableField) => {
     if (!sortConfig || sortConfig.key !== key) {
-      return <span className="ml-1 text-gray-300">↑</span>; // Invisible placeholder
+      return <span className="ml-1 text-gray-300">↑</span>;
     }
     return sortConfig.direction === "asc" ? (
       <span className="ml-1">↑</span>
@@ -194,7 +289,7 @@ export default function WorklogsTable({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [worklogs]);
+  }, [worklogs, selectedDate]);
 
   if (isLoading) {
     return <div>Loading...</div>;
@@ -203,6 +298,102 @@ export default function WorklogsTable({
   return (
     <div className="bg-white shadow rounded-lg p-6">
       <h2 className="text-2xl font-semibold mb-4">Worklogs</h2>
+
+      {/* Attendance Summary Section */}
+      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+        <div className="flex justify-between items-center">
+          <div>
+            <h3 className="text-lg font-medium">Monthly Attendance</h3>
+            <p className="text-sm text-gray-600">
+              {format(currentMonth, "MMMM yyyy")}
+            </p>
+          </div>
+          <div className="flex space-x-4">
+            <div className="text-center">
+              <p className="text-2xl font-bold">{daysWithWorklogsCount}</p>
+              <p className="text-sm text-gray-600">Days Worked</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold">
+                {calendarDays.filter(day => isSameMonth(day, currentMonth)).length - daysWithWorklogsCount}
+              </p>
+              <p className="text-sm text-gray-600">Days Leave</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Calendar Component */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium">
+            {format(currentMonth, "MMMM yyyy")}
+          </h3>
+          <div className="flex space-x-2">
+            <button
+              onClick={prevMonth}
+              className="p-1 rounded-full hover:bg-gray-100"
+            >
+              <ChevronLeftIcon className="w-5 h-5" />
+            </button>
+            <button
+              onClick={nextMonth}
+              className="p-1 rounded-full hover:bg-gray-100"
+            >
+              <ChevronRightIcon className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div key={day} className="text-center text-sm font-medium text-gray-500">
+              {day}
+            </div>
+          ))}
+        </div>
+        
+        <div className="grid grid-cols-7 gap-1">
+          {calendarDays.map((day) => {
+            const dateStr = format(day, "yyyy-MM-dd");
+            const hasWorklog = worklogDates.has(dateStr);
+            const isSelected = selectedDate && isSameDay(day, selectedDate);
+            const isCurrentMonth = isSameMonth(day, currentMonth);
+            
+            return (
+              <button
+                key={dateStr}
+                onClick={() => isCurrentMonth && handleDateClick(day)}
+                className={`h-10 flex items-center justify-center rounded-full text-sm
+                  ${isCurrentMonth ? "text-gray-900" : "text-gray-400"}
+                  ${hasWorklog && isCurrentMonth ? "bg-blue-100 font-medium" : ""}
+                  ${isSameDay(day, new Date()) ? "border border-blue-500" : ""}
+                  ${isSelected && isCurrentMonth ? "bg-blue-200 ring-2 ring-blue-400" : ""}
+                  ${isCurrentMonth ? "hover:bg-gray-100" : "cursor-default"}
+                  transition-colors
+                `}
+              >
+                {format(day, "d")}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Selected Date Filter Indicator */}
+      {selectedDate && (
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-sm font-medium">
+            Showing worklogs for: {format(selectedDate, "MMMM d, yyyy")}
+          </div>
+          <button
+            onClick={() => setSelectedDate(null)}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-300">
@@ -255,7 +446,6 @@ export default function WorklogsTable({
 
               return (
                 <tr key={worklog.id}>
-                  {/* Project */}
                   <td className="px-6 py-4 text-sm text-gray-700">
                     {isEditing ? (
                       <select
@@ -277,7 +467,6 @@ export default function WorklogsTable({
                     )}
                   </td>
 
-                  {/* Deliverable */}
                   <td className="px-6 py-4 text-sm text-gray-700">
                     {isEditing ? (
                       <select
@@ -301,7 +490,6 @@ export default function WorklogsTable({
                     )}
                   </td>
 
-                  {/* Start Time */}
                   <td className="px-6 py-4 text-sm text-gray-700">
                     {isEditing ? (
                       <input
@@ -317,7 +505,6 @@ export default function WorklogsTable({
                     )}
                   </td>
 
-                  {/* End Time */}
                   <td className="px-6 py-4 text-sm text-gray-700">
                     {isEditing ? (
                       <input
@@ -333,7 +520,6 @@ export default function WorklogsTable({
                     )}
                   </td>
 
-                  {/* Actions */}
                   <td className="px-6 py-4 text-sm text-gray-700">
                     {isEditing ? (
                       <div className="flex items-center space-x-2">
