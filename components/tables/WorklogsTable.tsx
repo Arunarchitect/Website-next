@@ -72,13 +72,12 @@ export default function WorklogsTable({
   isLoading = false,
 }: WorklogsTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editableWorklog, setEditableWorklog] =
-    useState<EditableWorklog | null>(null);
+  const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState<{
     key: SortableField;
     direction: SortDirection;
-  }>({
+  } | null>({
     key: "start_time",
     direction: "desc",
   });
@@ -121,7 +120,8 @@ export default function WorklogsTable({
           const date = parseISO(dateStr);
           return date >= monthStart && date <= monthEnd;
         })
-      ).size
+      ).size,
+      worklogCount: count,  // Use count here
     };
   }, [worklogs, currentMonth]);
 
@@ -167,7 +167,7 @@ export default function WorklogsTable({
   };
 
   const handleDateClick = (day: Date) => {
-    if (isSameDay(day, selectedDate)) {
+    if (selectedDate && isSameDay(day, selectedDate)) {
       setSelectedDate(null);
     } else {
       setSelectedDate(day);
@@ -333,12 +333,14 @@ export default function WorklogsTable({
             <button
               onClick={prevMonth}
               className="p-1 rounded-full hover:bg-gray-100"
+              aria-label="Previous month"
             >
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
             <button
               onClick={nextMonth}
               className="p-1 rounded-full hover:bg-gray-100"
+              aria-label="Next month"
             >
               <ChevronRightIcon className="w-5 h-5" />
             </button>
@@ -372,6 +374,7 @@ export default function WorklogsTable({
                   ${isCurrentMonth ? "hover:bg-gray-100" : "cursor-default"}
                   transition-colors
                 `}
+                aria-label={`Day ${format(day, "d")}`}
               >
                 {format(day, "d")}
               </button>
@@ -475,15 +478,17 @@ export default function WorklogsTable({
                           handleFieldChange("deliverable", e.target.value)
                         }
                         className="border rounded p-1"
+                        disabled={!editableWorklog?.project}
                       >
                         <option value="">Select Deliverable</option>
-                        {getFilteredDeliverables(
-                          Number(editableWorklog?.project)
-                        ).map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name}
-                          </option>
-                        ))}
+                        {editableWorklog?.project &&
+                          getFilteredDeliverables(
+                            editableWorklog.project
+                          ).map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
                       </select>
                     ) : (
                       deliverable?.name || "Invalid Deliverable"
@@ -526,12 +531,14 @@ export default function WorklogsTable({
                         <button
                           onClick={saveEditing}
                           className="text-green-600 hover:text-green-800"
+                          aria-label="Save changes"
                         >
                           <CheckIcon className="w-5 h-5" />
                         </button>
                         <button
                           onClick={cancelEditing}
                           className="text-gray-600 hover:text-gray-800"
+                          aria-label="Cancel editing"
                         >
                           <XMarkIcon className="w-5 h-5" />
                         </button>
@@ -541,12 +548,14 @@ export default function WorklogsTable({
                         <button
                           onClick={() => startEditing(worklog)}
                           className="text-blue-600 hover:text-blue-800"
+                          aria-label="Edit worklog"
                         >
                           <PencilIcon className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => onDelete(worklog.id)}
                           className="text-red-600 hover:text-red-800"
+                          aria-label="Delete worklog"
                         >
                           <TrashIcon className="w-5 h-5" />
                         </button>
@@ -566,15 +575,15 @@ export default function WorklogsTable({
           <button
             disabled={currentPage === 1}
             onClick={() => setCurrentPage(currentPage - 1)}
-            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg"
+            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg disabled:opacity-50"
           >
             Previous
           </button>
           <span className="mx-2 text-sm">{currentPage}</span>
           <button
-            disabled={currentPage === totalPages}
+            disabled={currentPage === totalPages || totalPages === 0}
             onClick={() => setCurrentPage(currentPage + 1)}
-            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg"
+            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg disabled:opacity-50"
           >
             Next
           </button>

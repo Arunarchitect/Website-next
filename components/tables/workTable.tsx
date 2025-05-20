@@ -55,7 +55,10 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
   };
 
   // Get unique organizations for filter button group
-  const organizations = Array.from(new Set(worklogs.map(log => log.organisation)));
+  const organizations = useMemo(() => 
+    Array.from(new Set(worklogs.map(log => log.organisation))),
+    [worklogs]
+  );
 
   // Get organization-filtered worklogs
   const orgFilteredLogs = useMemo(() => {
@@ -89,7 +92,8 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
           const date = parseISO(dateStr);
           return date >= monthStart && date <= monthEnd;
         })
-      ).size
+      ).size,
+      worklogCount: count,  // Use count here
     };
   }, [orgFilteredLogs, currentMonth]);
 
@@ -125,7 +129,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
   };
 
   const handleDateClick = (day: Date) => {
-    if (isSameDay(day, selectedDate)) {
+    if (selectedDate && isSameDay(day, selectedDate)) {
       setSelectedDate(null);
     } else {
       setSelectedDate(day);
@@ -171,8 +175,15 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
   }, [filteredLogs, sortKey, sortOrder]);
 
   // Calculate filtered total hours
-  const filteredTotalHours = filteredLogs.reduce((sum, log) => sum + (log.duration || 0), 0);
-  const orgTotalHours = orgFilteredLogs.reduce((sum, log) => sum + (log.duration || 0), 0);
+  const filteredTotalHours = useMemo(() => 
+    filteredLogs.reduce((sum, log) => sum + (log.duration || 0), 0),
+    [filteredLogs]
+  );
+
+  const orgTotalHours = useMemo(() => 
+    orgFilteredLogs.reduce((sum, log) => sum + (log.duration || 0), 0),
+    [orgFilteredLogs]
+  );
 
   const renderSortArrow = (key: SortKey) => {
     if (key !== sortKey) return <span className="ml-1 text-gray-300">↕</span>;
@@ -218,12 +229,14 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
             <button
               onClick={prevMonth}
               className="p-1 rounded-full hover:bg-gray-100"
+              aria-label="Previous month"
             >
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
             <button
               onClick={nextMonth}
               className="p-1 rounded-full hover:bg-gray-100"
+              aria-label="Next month"
             >
               <ChevronRightIcon className="w-5 h-5" />
             </button>
@@ -243,18 +256,21 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
             const dateStr = format(day, "yyyy-MM-dd");
             const hasWorklog = worklogDates.has(dateStr);
             const isSelected = selectedDate && isSameDay(day, selectedDate);
+            const isCurrentMonth = isSameMonth(day, currentMonth);
             
             return (
               <button
                 key={dateStr}
                 onClick={() => handleDateClick(day)}
                 className={`h-10 flex items-center justify-center rounded-full text-sm
-                  ${isSameMonth(day, currentMonth) ? "text-gray-900" : "text-gray-400"}
-                  ${hasWorklog ? "bg-blue-100 font-medium" : ""}
+                  ${isCurrentMonth ? "text-gray-900" : "text-gray-400"}
+                  ${hasWorklog && isCurrentMonth ? "bg-blue-100 font-medium" : ""}
                   ${isSameDay(day, new Date()) ? "border border-blue-500" : ""}
-                  ${isSelected ? "bg-blue-200 ring-2 ring-blue-400" : ""}
-                  hover:bg-gray-100 transition-colors
+                  ${isSelected && isCurrentMonth ? "bg-blue-200 ring-2 ring-blue-400" : ""}
+                  ${isCurrentMonth ? "hover:bg-gray-100" : "cursor-default"}
+                  transition-colors
                 `}
+                aria-label={`Day ${format(day, "d")}${hasWorklog ? " with worklogs" : ""}`}
               >
                 {format(day, "d")}
               </button>
@@ -273,6 +289,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
           <button
             onClick={() => setSelectedDate(null)}
             className="text-sm text-blue-600 hover:text-blue-800"
+            aria-label="Clear date filter"
           >
             Clear filter
           </button>
@@ -284,6 +301,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
         <button
           onClick={() => setShowMobileFilters(!showMobileFilters)}
           className="sm:hidden px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
         >
           {showMobileFilters ? 'Hide Filters' : 'Show Filters'}
         </button>
@@ -293,6 +311,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
           <button
             onClick={() => setSelectedOrg("all")}
             className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === "all" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
+            aria-label="Show all organizations"
           >
             All Organizations
           </button>
@@ -301,6 +320,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
               key={org}
               onClick={() => setSelectedOrg(org)}
               className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === org ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
+              aria-label={`Filter by ${org}`}
             >
               {org}
             </button>
@@ -311,11 +331,15 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
       {/* Mobile filter dropdown */}
       {showMobileFilters && (
         <div className="sm:hidden mb-4 bg-gray-50 p-3 rounded-lg">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Filter by Organization</label>
+          <label htmlFor="org-filter" className="block text-sm font-medium text-gray-700 mb-2">
+            Filter by Organization
+          </label>
           <select
+            id="org-filter"
             value={selectedOrg}
             onChange={(e) => setSelectedOrg(e.target.value)}
             className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+            aria-label="Organization filter"
           >
             <option value="all">All Organizations</option>
             {organizations.map(org => (
@@ -344,7 +368,10 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
       {isError ? (
         <p className="text-red-500">Error loading work logs</p>
       ) : sortedLogs.length === 0 ? (
-        <p className="text-gray-500">No work logs found{selectedOrg !== "all" ? ` for ${selectedOrg}` : ""}</p>
+        <p className="text-gray-500">
+          No work logs found{selectedOrg !== "all" ? ` for ${selectedOrg}` : ""}
+          {selectedDate ? ` on ${format(selectedDate, "MMMM d, yyyy")}` : ""}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -353,6 +380,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                 <th
                   className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                   onClick={() => handleSort("start_time")}
+                  aria-label="Sort by start time"
                 >
                   <div className="flex items-center">
                     Start Time {renderSortArrow("start_time")}
@@ -361,6 +389,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                 <th
                   className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                   onClick={() => handleSort("project")}
+                  aria-label="Sort by project"
                 >
                   <div className="flex items-center">
                     Project {renderSortArrow("project")}
@@ -369,6 +398,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                 <th
                   className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                   onClick={() => handleSort("organisation")}
+                  aria-label="Sort by organization"
                 >
                   <div className="flex items-center">
                     Organization {renderSortArrow("organisation")}
@@ -377,6 +407,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                 <th
                   className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                   onClick={() => handleSort("deliverable")}
+                  aria-label="Sort by deliverable"
                 >
                   <div className="flex items-center">
                     Deliverable {renderSortArrow("deliverable")}
@@ -385,6 +416,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                 <th
                   className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                   onClick={() => handleSort("end_time")}
+                  aria-label="Sort by end time"
                 >
                   <div className="flex items-center">
                     End Time {renderSortArrow("end_time")}
@@ -393,6 +425,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                 <th
                   className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
                   onClick={() => handleSort("duration")}
+                  aria-label="Sort by duration"
                 >
                   <div className="flex items-center">
                     Duration (hours) {renderSortArrow("duration")}
@@ -404,7 +437,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
               {sortedLogs.map((log) => (
                 <tr key={log.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    {format(new Date(log.start_time), "d MMM yyyy EEE h:mm a")}
+                    {format(parseISO(log.start_time), "d MMM yyyy EEE h:mm a")}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 truncate max-w-[100px]">
                     {log.project}
@@ -417,7 +450,7 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     {log.end_time
-                      ? format(new Date(log.end_time), "d MMM yyyy EEE h:mm a")
+                      ? format(parseISO(log.end_time), "d MMM yyyy EEE h:mm a")
                       : "In progress"}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
