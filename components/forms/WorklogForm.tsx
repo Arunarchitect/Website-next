@@ -1,10 +1,10 @@
-// components/forms/WorklogForm.tsx
 "use client";
 
 import { useState, ChangeEvent, FormEvent, useMemo } from "react";
 import { useCreateWorklogMutation } from "@/redux/features/worklogApiSlice";
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
+
 interface Project {
   id: number;
   name: string;
@@ -13,7 +13,7 @@ interface Project {
 interface Deliverable {
   id: number;
   name: string;
-  project: number; // Add project field to Deliverable interface
+  project: number;
 }
 
 interface WorklogFormProps {
@@ -31,9 +31,9 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
     deliverable: "",
     start_time: "",
     end_time: "",
+    remarks: "", // Added remarks field
   });
 
-  // Filter deliverables based on selected project
   const filteredDeliverables = useMemo(() => {
     if (!formData.project) return [];
     return allDeliverables.filter(
@@ -41,18 +41,16 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
     );
   }, [formData.project, allDeliverables]);
 
-  // Handle form data change
   const handleChange = (
-    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> // Added HTMLTextAreaElement
   ): void => {
     const { name, value } = e.target;
 
-    // If project changes, reset the deliverable
     if (name === "project") {
       setFormData((prev) => ({
         ...prev,
         project: value,
-        deliverable: "", // Reset deliverable when project changes
+        deliverable: "",
       }));
     } else {
       setFormData((prev) => ({
@@ -62,7 +60,6 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
     }
   };
 
-  // Handle form submit
   const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
 
@@ -74,6 +71,7 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
       start_time: new Date(formData.start_time).toISOString(),
       end_time: new Date(formData.end_time).toISOString(),
       employee: userId,
+      remarks: formData.remarks, // Added remarks to payload
     };
 
     try {
@@ -84,6 +82,7 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
         deliverable: "",
         start_time: "",
         end_time: "",
+        remarks: "", // Reset remarks
       });
       onSuccess();
     } catch (err) {
@@ -151,6 +150,19 @@ const WorklogForm: React.FC<WorklogFormProps> = ({ userId, onSuccess }) => {
           onChange={handleChange}
           required
           className="w-full px-3 py-2 border rounded-md"
+        />
+      </div>
+
+      {/* Added Remarks field */}
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-gray-700">Remarks (Optional)</label>
+        <textarea
+          name="remarks"
+          value={formData.remarks}
+          onChange={handleChange}
+          rows={3}
+          className="w-full px-3 py-2 border rounded-md"
+          placeholder="Any additional notes about this worklog..."
         />
       </div>
 

@@ -7,6 +7,7 @@ interface Worklog {
   start_time: string;
   end_time: string;
   employee: number;
+  remarks: string;
 }
 
 interface CreateWorklogRequest {

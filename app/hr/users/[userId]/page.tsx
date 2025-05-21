@@ -19,16 +19,6 @@ import {
   differenceInMinutes,
 } from "date-fns";
 
-interface UserWorkLog {
-  id: number;
-  start_time: string;
-  end_time?: string;
-  duration?: number;
-  deliverable: string;
-  project: string;
-  organisation?: string; // Add organisation to the type
-}
-
 export default function UserDetailsPage() {
   const params = useParams();
   const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
@@ -57,18 +47,17 @@ export default function UserDetailsPage() {
     isError: isWorklogsError,
   } = useGetUserWorkLogsQuery(userId || "", { skip: !userId });
 
-  // Map API response to WorkLog type, including organisation
-  const worklogs = worklogsData.map((log: UserWorkLog) => ({
+  const worklogs = worklogsData.map((log) => ({
     id: log.id,
     start_time: log.start_time,
     end_time: log.end_time ?? null,
     duration: log.duration ?? null,
     deliverable: log.deliverable,
     project: log.project,
-    organisation: log.organisation || "Unknown", // Fallback if organisation is missing
+    organisation: log.organisation,
+    remarks: log.remarks ?? null,
   }));
 
-  // Get current active work session (either null end_time or future end_time)
   const activeWorkSession = worklogs.find((log) => {
     if (log.end_time === null) return true;
     if (log.end_time) {
@@ -106,7 +95,6 @@ export default function UserDetailsPage() {
     );
   }
 
-  // Calculate current session duration in hours and minutes
   const getCurrentDuration = () => {
     if (!activeWorkSession) return null;
 
@@ -122,7 +110,6 @@ export default function UserDetailsPage() {
     return `${hours}h ${minutes}m`;
   };
 
-  // Get work status message
   const getWorkStatusMessage = () => {
     if (activeWorkSession) {
       const startTime = new Date(activeWorkSession.start_time);
@@ -156,7 +143,6 @@ export default function UserDetailsPage() {
       );
     }
 
-    // Sort worklogs by start_time (newest first)
     const sortedLogs = [...worklogs].sort(
       (a, b) =>
         new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
@@ -169,7 +155,6 @@ export default function UserDetailsPage() {
 
     if (!endTime) return null;
 
-    // Format time message
     let timeMessage;
     if (isToday(endTime)) {
       timeMessage = `today at ${format(endTime, "h:mm a")}`;
@@ -278,7 +263,11 @@ export default function UserDetailsPage() {
       </div>
 
       <DeliverablesTable deliverables={deliverables} isError={isDeliverablesError} />
-      <WorkTable worklogs={worklogs} isError={isWorklogsError} totalHours={worklogs.reduce((sum, log) => sum + (log.duration || 0), 0)} />
+      <WorkTable 
+        worklogs={worklogs} 
+        isError={isWorklogsError} 
+        totalHours={worklogs.reduce((sum, log) => sum + (log.duration || 0), 0) / 3600} 
+      />
     </div>
   );
 }

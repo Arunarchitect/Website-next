@@ -1,66 +1,13 @@
-"use client";
-
-import { useState, useMemo, useEffect } from "react";
-import { 
-  format, 
-  parseISO, 
-  startOfMonth, 
-  endOfMonth, 
-  eachDayOfInterval, 
-  isSameMonth, 
-  isSameDay, 
-  addMonths, 
-  subMonths,
-  getDay,
-  addDays
-} from "date-fns";
-import {
-  PencilIcon,
-  TrashIcon,
-  CheckIcon,
-  XMarkIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-} from "@heroicons/react/24/outline";
-
-interface Project {
-  id: number;
-  name: string;
-}
-
-interface Deliverable {
-  id: number;
-  name: string;
-  project: number;
-}
-
-interface Worklog {
-  id: number;
-  deliverable: number;
-  start_time: string;
-  end_time: string;
-  employee: number;
-}
-
-export interface EditableWorklog
-  extends Omit<Worklog, "start_time" | "end_time"> {
-  start_time: string;
-  end_time: string;
-  project: number;
-}
-
-interface WorklogsTableProps {
-  worklogs: Worklog[];
-  projects: Project[];
-  deliverables: Deliverable[];
-  onDelete: (id: number) => void;
-  onUpdate: (worklog: EditableWorklog) => Promise<void>;
-  refetch: () => void;
-  isLoading?: boolean;
-}
-
-type SortDirection = "asc" | "desc";
-type SortableField = "start_time" | "end_time" | "project" | "deliverable";
+import { useState, useMemo } from "react";
+import { WorklogsTableProps, Worklog, EditableWorklog } from "@/types/worklogs";
+import { useWorklogsSort } from "@/hooks/work/useWorklogsSort";
+import { useCalendarDays } from "@/hooks/work/useCalendarDays";
+import { CalendarView } from "@/components/Worklogs/CalendarView";
+import { WorklogRow } from "@/components/Worklogs/WorklogRow";
+import { RemarksModal } from "@/components/Worklogs/RemarksModal";
+import { AttendanceSummary } from "@/components/Worklogs/AttendanceSummary";
+import { PaginationControls } from "@/components/Worklogs/PaginationControls";
+import { format, parseISO } from "date-fns";
 
 export default function WorklogsTable({
   worklogs,
@@ -74,17 +21,23 @@ export default function WorklogsTable({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortConfig, setSortConfig] = useState<{
-    key: SortableField;
-    direction: SortDirection;
-  } | null>({
-    key: "start_time",
-    direction: "desc",
-  });
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showRemarksModal, setShowRemarksModal] = useState(false);
+  const [currentRemarks, setCurrentRemarks] = useState("");
 
   const PAGE_SIZE = 10;
+
+  const { sortedWorklogs, requestSort, getSortIcon } = useWorklogsSort();
+  const {
+    currentMonth,
+    calendarDays,
+    worklogDates,
+    daysWithWorklogsCount,
+    selectedDate,
+    prevMonth,
+    nextMonth,
+    handleDateClick,
+    setSelectedDate
+  } = useCalendarDays(worklogs);
 
   const projectMap = useMemo(
     () => new Map(projects.map((p) => [p.id, p])),
@@ -94,36 +47,6 @@ export default function WorklogsTable({
     () => new Map(deliverables.map((d) => [d.id, d])),
     [deliverables]
   );
-
-  // Get unique dates with worklogs and count for current month
-  const { worklogDates, daysWithWorklogsCount } = useMemo(() => {
-    const dates = new Set<string>();
-    let count = 0;
-    
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(currentMonth);
-    
-    worklogs.forEach((worklog) => {
-      const date = parseISO(worklog.start_time);
-      const dateStr = format(date, "yyyy-MM-dd");
-      dates.add(dateStr);
-      
-      if (date >= monthStart && date <= monthEnd) {
-        count++;
-      }
-    });
-    
-    return {
-      worklogDates: dates,
-      daysWithWorklogsCount: new Set(
-        Array.from(dates).filter(dateStr => {
-          const date = parseISO(dateStr);
-          return date >= monthStart && date <= monthEnd;
-        })
-      ).size,
-      worklogCount: count,  // Use count here
-    };
-  }, [worklogs, currentMonth]);
 
   // Filter worklogs by selected date
   const filteredWorklogs = useMemo(() => {
@@ -135,98 +58,12 @@ export default function WorklogsTable({
     });
   }, [worklogs, selectedDate]);
 
-  // Calendar generation with correct weekday alignment
-  const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(currentMonth);
-    
-    // Get the day of week for the first day of month (0 = Sunday, 6 = Saturday)
-    const startDay = getDay(monthStart);
-    
-    // Calculate days from previous month to show
-    const daysFromPrevMonth = startDay; // For Sunday-start week
-    
-    // Create the calendar grid including days from previous and next month
-    const startDate = addDays(monthStart, -daysFromPrevMonth);
-    const daysNeeded = 42; // 6 weeks
-    const daysInMonth = monthEnd.getDate();
-    const daysFromNextMonth = daysNeeded - daysFromPrevMonth - daysInMonth;
-    const endDate = addDays(monthEnd, daysFromNextMonth);
-    
-    return eachDayOfInterval({ start: startDate, end: endDate });
-  }, [currentMonth]);
-
-  const prevMonth = () => {
-    setCurrentMonth(subMonths(currentMonth, 1));
-    setSelectedDate(null);
-  };
-  
-  const nextMonth = () => {
-    setCurrentMonth(addMonths(currentMonth, 1));
-    setSelectedDate(null);
-  };
-
-  const handleDateClick = (day: Date) => {
-    if (selectedDate && isSameDay(day, selectedDate)) {
-      setSelectedDate(null);
-    } else {
-      setSelectedDate(day);
-    }
-    setCurrentPage(1);
-  };
-
-  const sortedWorklogs = useMemo(() => {
-    const sorted = [...(selectedDate ? filteredWorklogs : worklogs)];
-    if (sortConfig) {
-      sorted.sort((a, b) => {
-        let aValue: string | number = "";
-        let bValue: string | number = "";
-
-        if (sortConfig.key === "project") {
-          const aDeliverable = deliverableMap.get(a.deliverable);
-          const bDeliverable = deliverableMap.get(b.deliverable);
-          aValue = aDeliverable
-            ? projectMap.get(aDeliverable.project)?.name || ""
-            : "";
-          bValue = bDeliverable
-            ? projectMap.get(bDeliverable.project)?.name || ""
-            : "";
-        } else if (sortConfig.key === "deliverable") {
-          aValue = deliverableMap.get(a.deliverable)?.name || "";
-          bValue = deliverableMap.get(b.deliverable)?.name || "";
-        } else {
-          aValue = new Date(a[sortConfig.key]).getTime();
-          bValue = new Date(b[sortConfig.key]).getTime();
-        }
-
-        if (typeof aValue === "string" && typeof bValue === "string") {
-          return sortConfig.direction === "asc"
-            ? aValue.localeCompare(bValue)
-            : bValue.localeCompare(aValue);
-        }
-        return sortConfig.direction === "asc"
-          ? (aValue as number) - (bValue as number)
-          : (bValue as number) - (aValue as number);
-      });
-    }
-    return sorted;
-  }, [selectedDate, filteredWorklogs, worklogs, sortConfig, deliverableMap, projectMap]);
-
-  const totalPages = Math.ceil(sortedWorklogs.length / PAGE_SIZE);
-  const paginatedWorklogs = sortedWorklogs.slice(
+  const sorted = sortedWorklogs(selectedDate ? filteredWorklogs : worklogs, projectMap, deliverableMap);
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const paginatedWorklogs = sorted.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   );
-
-  const requestSort = (key: SortableField) => {
-    setSortConfig((prev) => {
-      if (prev?.key === key && prev.direction === "asc") {
-        return { key, direction: "desc" };
-      }
-      return { key, direction: "asc" };
-    });
-    setCurrentPage(1);
-  };
 
   const startEditing = (worklog: Worklog) => {
     const deliverable = deliverableMap.get(worklog.deliverable);
@@ -237,6 +74,7 @@ export default function WorklogsTable({
       start_time: format(parseISO(worklog.start_time), "yyyy-MM-dd'T'HH:mm"),
       end_time: format(parseISO(worklog.end_time), "yyyy-MM-dd'T'HH:mm"),
       project: deliverable.project,
+      remarks: worklog.remarks || "",
     });
   };
 
@@ -272,24 +110,10 @@ export default function WorklogsTable({
     }
   };
 
-  const getFilteredDeliverables = (projectId: number) => {
-    return deliverables.filter((d) => d.project === projectId);
+  const handleShowRemarks = (remarks: string) => {
+    setCurrentRemarks(remarks);
+    setShowRemarksModal(true);
   };
-
-  const getSortIcon = (key: SortableField) => {
-    if (!sortConfig || sortConfig.key !== key) {
-      return <span className="ml-1 text-gray-300">↑</span>;
-    }
-    return sortConfig.direction === "asc" ? (
-      <span className="ml-1">↑</span>
-    ) : (
-      <span className="ml-1">↓</span>
-    );
-  };
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [worklogs, selectedDate]);
 
   if (isLoading) {
     return <div>Loading...</div>;
@@ -297,93 +121,30 @@ export default function WorklogsTable({
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
-      <h2 className="text-2xl font-semibold mb-4">Worklogs</h2>
+      <RemarksModal
+        show={showRemarksModal}
+        onClose={() => setShowRemarksModal(false)}
+        remarks={currentRemarks}
+      />
 
-      {/* Attendance Summary Section */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-        <div className="flex justify-between items-center">
-          <div>
-            <h3 className="text-lg font-medium">Monthly Attendance</h3>
-            <p className="text-sm text-gray-600">
-              {format(currentMonth, "MMMM yyyy")}
-            </p>
-          </div>
-          <div className="flex space-x-4">
-            <div className="text-center">
-              <p className="text-2xl font-bold">{daysWithWorklogsCount}</p>
-              <p className="text-sm text-gray-600">Days Worked</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold">
-                {calendarDays.filter(day => isSameMonth(day, currentMonth)).length - daysWithWorklogsCount}
-              </p>
-              <p className="text-sm text-gray-600">Days Leave</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <h2 className="text-2xl text-gray-700 font-semibold mb-4">Worklogs</h2>
 
-      {/* Calendar Component */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium">
-            {format(currentMonth, "MMMM yyyy")}
-          </h3>
-          <div className="flex space-x-2">
-            <button
-              onClick={prevMonth}
-              className="p-1 rounded-full hover:bg-gray-100"
-              aria-label="Previous month"
-            >
-              <ChevronLeftIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={nextMonth}
-              className="p-1 rounded-full hover:bg-gray-100"
-              aria-label="Next month"
-            >
-              <ChevronRightIcon className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-7 gap-1 mb-2">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-            <div key={day} className="text-center text-sm font-medium text-gray-500">
-              {day}
-            </div>
-          ))}
-        </div>
-        
-        <div className="grid grid-cols-7 gap-1">
-          {calendarDays.map((day) => {
-            const dateStr = format(day, "yyyy-MM-dd");
-            const hasWorklog = worklogDates.has(dateStr);
-            const isSelected = selectedDate && isSameDay(day, selectedDate);
-            const isCurrentMonth = isSameMonth(day, currentMonth);
-            
-            return (
-              <button
-                key={dateStr}
-                onClick={() => isCurrentMonth && handleDateClick(day)}
-                className={`h-10 flex items-center justify-center rounded-full text-sm
-                  ${isCurrentMonth ? "text-gray-900" : "text-gray-400"}
-                  ${hasWorklog && isCurrentMonth ? "bg-blue-100 font-medium" : ""}
-                  ${isSameDay(day, new Date()) ? "border border-blue-500" : ""}
-                  ${isSelected && isCurrentMonth ? "bg-blue-200 ring-2 ring-blue-400" : ""}
-                  ${isCurrentMonth ? "hover:bg-gray-100" : "cursor-default"}
-                  transition-colors
-                `}
-                aria-label={`Day ${format(day, "d")}`}
-              >
-                {format(day, "d")}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <AttendanceSummary
+        currentMonth={currentMonth}
+        daysWithWorklogsCount={daysWithWorklogsCount}
+        calendarDays={calendarDays}
+      />
 
-      {/* Selected Date Filter Indicator */}
+      <CalendarView
+        currentMonth={currentMonth}
+        calendarDays={calendarDays}
+        worklogDates={worklogDates}
+        selectedDate={selectedDate}
+        prevMonth={prevMonth}
+        nextMonth={nextMonth}
+        handleDateClick={handleDateClick}
+      />
+
       {selectedDate && (
         <div className="mb-4 flex items-center justify-between">
           <div className="text-sm font-medium">
@@ -435,167 +196,43 @@ export default function WorklogsTable({
                 </div>
               </th>
               <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
+                Remarks
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {paginatedWorklogs.map((worklog) => {
-              const deliverable = deliverableMap.get(worklog.deliverable);
-              const project = deliverable
-                ? projectMap.get(deliverable.project)
-                : null;
-              const isEditing = editingId === worklog.id;
-
-              return (
-                <tr key={worklog.id}>
-                  <td className="px-6 py-4 text-sm text-gray-700">
-                    {isEditing ? (
-                      <select
-                        value={editableWorklog?.project || ""}
-                        onChange={(e) =>
-                          handleFieldChange("project", e.target.value)
-                        }
-                        className="border rounded p-1"
-                      >
-                        <option value="">Select Project</option>
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      project?.name || "Invalid Project"
-                    )}
-                  </td>
-
-                  <td className="px-6 py-4 text-sm text-gray-700">
-                    {isEditing ? (
-                      <select
-                        value={editableWorklog?.deliverable || ""}
-                        onChange={(e) =>
-                          handleFieldChange("deliverable", e.target.value)
-                        }
-                        className="border rounded p-1"
-                        disabled={!editableWorklog?.project}
-                      >
-                        <option value="">Select Deliverable</option>
-                        {editableWorklog?.project &&
-                          getFilteredDeliverables(
-                            editableWorklog.project
-                          ).map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}
-                            </option>
-                          ))}
-                      </select>
-                    ) : (
-                      deliverable?.name || "Invalid Deliverable"
-                    )}
-                  </td>
-
-                  <td className="px-6 py-4 text-sm text-gray-700">
-                    {isEditing ? (
-                      <input
-                        type="datetime-local"
-                        value={editableWorklog?.start_time || ""}
-                        onChange={(e) =>
-                          handleFieldChange("start_time", e.target.value)
-                        }
-                        className="border rounded p-1"
-                      />
-                    ) : (
-                      format(parseISO(worklog.start_time), "d MMM yyyy EEE h:mm a")
-                    )}
-                  </td>
-
-                  <td className="px-6 py-4 text-sm text-gray-700">
-                    {isEditing ? (
-                      <input
-                        type="datetime-local"
-                        value={editableWorklog?.end_time || ""}
-                        onChange={(e) =>
-                          handleFieldChange("end_time", e.target.value)
-                        }
-                        className="border rounded p-1"
-                      />
-                    ) : (
-                      format(parseISO(worklog.end_time), "d MMM yyyy EEE h:mm a ")
-                    )}
-                  </td>
-
-                  <td className="px-6 py-4 text-sm text-gray-700">
-                    {isEditing ? (
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={saveEditing}
-                          className="text-green-600 hover:text-green-800"
-                          aria-label="Save changes"
-                        >
-                          <CheckIcon className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={cancelEditing}
-                          className="text-gray-600 hover:text-gray-800"
-                          aria-label="Cancel editing"
-                        >
-                          <XMarkIcon className="w-5 h-5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => startEditing(worklog)}
-                          className="text-blue-600 hover:text-blue-800"
-                          aria-label="Edit worklog"
-                        >
-                          <PencilIcon className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => onDelete(worklog.id)}
-                          className="text-red-600 hover:text-red-800"
-                          aria-label="Delete worklog"
-                        >
-                          <TrashIcon className="w-5 h-5" />
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {paginatedWorklogs.map((worklog) => (
+              <WorklogRow
+                key={worklog.id}
+                worklog={worklog}
+                projects={projects}
+                deliverables={deliverables}
+                projectMap={projectMap}
+                deliverableMap={deliverableMap}
+                isEditing={editingId === worklog.id}
+                editableWorklog={editableWorklog}
+                handleFieldChange={handleFieldChange}
+                startEditing={startEditing}
+                onDelete={onDelete}
+                saveEditing={saveEditing}
+                cancelEditing={cancelEditing}
+                handleShowRemarks={handleShowRemarks}
+              />
+            ))}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination */}
-      <div className="mt-4 flex justify-between items-center">
-        <div>
-          <button
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(currentPage - 1)}
-            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <span className="mx-2 text-sm">{currentPage}</span>
-          <button
-            disabled={currentPage === totalPages || totalPages === 0}
-            onClick={() => setCurrentPage(currentPage + 1)}
-            className="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-        <div>
-          <span className="text-sm text-gray-500">
-            Showing {PAGE_SIZE * (currentPage - 1) + 1} to{" "}
-            {Math.min(PAGE_SIZE * currentPage, sortedWorklogs.length)} of{" "}
-            {sortedWorklogs.length} entries
-          </span>
-        </div>
-      </div>
+      <PaginationControls
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={sorted.length}
+        pageSize={PAGE_SIZE}
+        onPageChange={setCurrentPage}
+      />
     </div>
   );
 }

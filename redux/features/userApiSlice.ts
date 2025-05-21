@@ -1,6 +1,6 @@
 // @/redux/features/userApiSlice.ts
 import { apiSlice } from "@/redux/services/apiSlice";
-import type { FetchBaseQueryError } from "@reduxjs/toolkit/query";
+
 
 interface User {
   id: number;
@@ -38,14 +38,15 @@ interface UserDeliverable {
   validation_date?: string;
 }
 
-interface UserWorkLog {
+interface UserWorkLogResponse {
   id: number;
   deliverable: string;
   project: string;
-  organisation: string;  // Add this line
+  organisation: string;
   start_time: string;
   end_time?: string;
   duration?: number;
+  remarks?: string;
 }
 
 export const userApiSlice = apiSlice.injectEndpoints({
@@ -71,11 +72,11 @@ export const userApiSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    getUserWorkLogs: builder.query<UserWorkLog[], string>({
+    getUserWorkLogs: builder.query<UserWorkLogResponse[], string>({
       query: (userId) => `/users/${userId}/worklogs/`,
       providesTags: (result, error, userId) => [
         { type: 'UserWorkLogs', id: userId },
-        ...(result?.map(({ id }) => ({ type: 'Worklog' as const, id })) ?? [])
+        ...(result?.map(({ id }) => ({ type: 'UserWorklog' as const, id })) ?? [])
       ],
     }),
   }),

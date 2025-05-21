@@ -93,11 +93,10 @@ export const apiSlice = createApi({
     'OrganisationMembers',  // Org-specific member list
     'OrganisationProjects', // Org-specific project list
     'Memberships',          // List of memberships
-
-    // ✅ Add these to fix the TypeScript error
-    'UserWorkLogs',         // Used in providesTags of getUserWorkLogs
-    'UserDeliverables',     // Used in providesTags of getUserDeliverables
-    'UserOrganisations',    // Used in providesTags of getUserOrganisations
+    'UserWorkLogs',       // For the list of worklogs
+    'UserWorklog',        // For individual worklog entries (note the lowercase 'l' to match the error)
+    'UserDeliverables',
+    'UserOrganisations',
   ],
   endpoints: () => ({}),
 });

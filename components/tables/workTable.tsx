@@ -1,163 +1,124 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { 
-  format, 
-  parseISO, 
-  startOfMonth, 
-  endOfMonth, 
-  eachDayOfInterval, 
-  isSameMonth, 
-  isSameDay, 
-  addMonths, 
+import { useState, useMemo, useEffect } from "react";
+import {
+  format,
+  parseISO,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  isSameDay,
+  addMonths,
   subMonths,
   getDay,
-  addDays
+  addDays,
 } from "date-fns";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-} from "@heroicons/react/24/outline";
+import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs";
+import { CalendarView } from "@/components/Worklogs/CalendarView";
+import { RemarksModal } from "@/components/Worklogs/RemarksModal";
+import { WorkTableFilters } from "@/components/Userworklogs/WorkTableFilters";
+import { WorkTableHeader } from "@/components/Userworklogs/WorkTableHeader";
+import { WorkTableContent } from "@/components/Userworklogs/WorkTableContent";
 
-export interface WorkLog {
-  id: number;
-  start_time: string;
-  end_time: string | null;
-  duration: number | null;
-  deliverable: string;
-  project: string;
-  organisation: string;
-}
-
-interface WorkTableProps {
-  worklogs: WorkLog[];
-  isError: boolean;
-  totalHours: number;
-}
-
-type SortKey = keyof Pick<WorkLog, "start_time" | "end_time" | "duration" | "deliverable" | "project" | "organisation">;
-
-export default function WorkTable({ worklogs, isError, totalHours }: WorkTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("start_time");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+export default function WorkTable({
+  worklogs: initialWorklogs,
+  isError,
+  totalHours,
+  sortKey: initialSortKey = "start_time",
+  sortDirection: initialSortDirection = "desc",
+  onSort,
+}: WorkTableProps) {
+  const [sortKey, setSortKey] = useState<SortKey>(initialSortKey);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(initialSortDirection);
   const [selectedOrg, setSelectedOrg] = useState<string>("all");
-  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showRemarksModal, setShowRemarksModal] = useState(false);
+  const [currentRemarks, setCurrentRemarks] = useState("");
+  const [worklogs, setWorklogs] = useState<UserWorkLog[]>([]);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
-  const handleSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortOrder("asc");
-    }
-  };
+  useEffect(() => {
+    setWorklogs(
+      initialWorklogs.map((log) => ({
+        ...log,
+        end_time: log.end_time ?? "", // convert null/undefined to empty string
+        duration: log.duration ?? 0,
+        remarks: log.remarks ?? "",
+      }))
+    );
+  }, [initialWorklogs]);
 
-  // Get unique organizations for filter button group
-  const organizations = useMemo(() => 
-    Array.from(new Set(worklogs.map(log => log.organisation))),
+  const organizations = useMemo(
+    () => Array.from(new Set(worklogs.map((log) => log.organisation))),
     [worklogs]
   );
 
-  // Get organization-filtered worklogs
   const orgFilteredLogs = useMemo(() => {
-    return selectedOrg === "all" 
-      ? worklogs 
-      : worklogs.filter(log => log.organisation === selectedOrg);
+    return selectedOrg === "all"
+      ? worklogs
+      : worklogs.filter((log) => log.organisation === selectedOrg);
   }, [worklogs, selectedOrg]);
 
-  // Get unique dates with worklogs and count for current month - now organization-aware
   const { worklogDates, daysWithWorklogsCount } = useMemo(() => {
     const dates = new Set<string>();
-    let count = 0;
-    
     const monthStart = startOfMonth(currentMonth);
     const monthEnd = endOfMonth(currentMonth);
-    
-    orgFilteredLogs.forEach((worklog) => {
-      const date = parseISO(worklog.start_time);
-      const dateStr = format(date, "yyyy-MM-dd");
-      dates.add(dateStr);
-      
-      if (date >= monthStart && date <= monthEnd) {
-        count++;
+
+    orgFilteredLogs.forEach((log) => {
+      try {
+        const date = parseISO(log.start_time);
+        const formatted = format(date, "yyyy-MM-dd");
+        dates.add(formatted);
+      } catch (err) {
+        console.error("Invalid date in start_time:", log.start_time, err);
       }
     });
-    
-    return {
-      worklogDates: dates,
-      daysWithWorklogsCount: new Set(
-        Array.from(dates).filter(dateStr => {
-          const date = parseISO(dateStr);
-          return date >= monthStart && date <= monthEnd;
-        })
-      ).size,
-      worklogCount: count,  // Use count here
-    };
+
+    const count = Array.from(dates).filter((d) => {
+      try {
+        const date = parseISO(d);
+        return date >= monthStart && date <= monthEnd;
+      } catch (err) {
+        console.error("Invalid date when filtering:", d, err);
+        return false;
+      }
+    }).length;
+
+    return { worklogDates: dates, daysWithWorklogsCount: count };
   }, [orgFilteredLogs, currentMonth]);
 
-  // Calendar generation - fixed to show correct weekday alignment
   const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(currentMonth);
-    
-    // Get the day of week for the first day of month (0 = Sunday, 6 = Saturday)
-    const startDay = getDay(monthStart);
-    
-    // Calculate days from previous month to show
-    const daysFromPrevMonth = startDay; // For Sunday-start week
-    
-    // Create the calendar grid including days from previous and next month
-    const startDate = addDays(monthStart, -daysFromPrevMonth);
-    const daysNeeded = 42; // 6 weeks
-    const daysInMonth = monthEnd.getDate();
-    const daysFromNextMonth = daysNeeded - daysFromPrevMonth - daysInMonth;
-    const endDate = addDays(monthEnd, daysFromNextMonth);
-    
-    return eachDayOfInterval({ start: startDate, end: endDate });
+    const start = addDays(
+      startOfMonth(currentMonth),
+      -getDay(startOfMonth(currentMonth))
+    );
+    const end = addDays(start, 41);
+    return eachDayOfInterval({ start, end });
   }, [currentMonth]);
 
-  const prevMonth = () => {
-    setCurrentMonth(subMonths(currentMonth, 1));
-    setSelectedDate(null);
-  };
-  
-  const nextMonth = () => {
-    setCurrentMonth(addMonths(currentMonth, 1));
-    setSelectedDate(null);
-  };
-
-  const handleDateClick = (day: Date) => {
-    if (selectedDate && isSameDay(day, selectedDate)) {
-      setSelectedDate(null);
-    } else {
-      setSelectedDate(day);
-    }
-  };
-
-  // Filter worklogs by selected organization and date
   const filteredLogs = useMemo(() => {
-    let logs = orgFilteredLogs;
+    if (!selectedDate) return orgFilteredLogs;
 
-    if (selectedDate) {
-      const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
-      logs = logs.filter(log => {
-        const logDate = format(parseISO(log.start_time), "yyyy-MM-dd");
-        return logDate === selectedDateStr;
-      });
-    }
+    const target = format(selectedDate, "yyyy-MM-dd");
 
-    return logs;
+    return orgFilteredLogs.filter((log) => {
+      try {
+        return format(parseISO(log.start_time), "yyyy-MM-dd") === target;
+      } catch (err) {
+        console.error("Error parsing date when filtering:", log.start_time, err);
+        return false;
+      }
+    });
   }, [orgFilteredLogs, selectedDate]);
 
   const sortedLogs = useMemo(() => {
-    const logs = [...filteredLogs].sort((a, b) => {
+    return [...filteredLogs].sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
 
-      if (aVal === null) return 1;
-      if (bVal === null) return -1;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
 
       if (typeof aVal === "string" && typeof bVal === "string") {
         return sortOrder === "asc"
@@ -171,115 +132,76 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
 
       return 0;
     });
-    return logs;
   }, [filteredLogs, sortKey, sortOrder]);
 
-  // Calculate filtered total hours
-  const filteredTotalHours = useMemo(() => 
-    filteredLogs.reduce((sum, log) => sum + (log.duration || 0), 0),
-    [filteredLogs]
-  );
+  const filteredTotalHours = useMemo(() => {
+    return filteredLogs.reduce((acc, log) => acc + (log.duration || 0), 0);
+  }, [filteredLogs]);
 
-  const orgTotalHours = useMemo(() => 
-    orgFilteredLogs.reduce((sum, log) => sum + (log.duration || 0), 0),
-    [orgFilteredLogs]
-  );
+  const handleSort = (key: SortKey) => {
+    if (onSort) {
+      onSort(key);
+    } else {
+      if (key === sortKey) {
+        const newOrder = sortOrder === "asc" ? "desc" : "asc";
+        setSortOrder(newOrder);
+      } else {
+        setSortKey(key);
+        setSortOrder("asc");
+      }
+    }
+  };
+
+  const handleShowRemarks = (remarks: string | null) => {
+    if (!remarks) return;
+    setCurrentRemarks(remarks);
+    setShowRemarksModal(true);
+  };
+
+  const prevMonth = () => {
+    setCurrentMonth((prev) => subMonths(prev, 1));
+    setSelectedDate(null);
+  };
+
+  const nextMonth = () => {
+    setCurrentMonth((prev) => addMonths(prev, 1));
+    setSelectedDate(null);
+  };
+
+  const handleDateClick = (day: Date) => {
+    setSelectedDate((prev) => (prev && isSameDay(prev, day) ? null : day));
+  };
 
   const renderSortArrow = (key: SortKey) => {
     if (key !== sortKey) return <span className="ml-1 text-gray-300">↕</span>;
-    return sortOrder === "asc" ? <span className="ml-1">↑</span> : <span className="ml-1">↓</span>;
+    return sortOrder === "asc" ? (
+      <span className="ml-1">↑</span>
+    ) : (
+      <span className="ml-1">↓</span>
+    );
   };
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
-      <h2 className="text-2xl font-semibold mb-4">Work Logs</h2>
-
-      {/* Attendance Summary Section - now organization-aware */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-        <div className="flex justify-between items-center">
-          <div>
-            <h3 className="text-lg font-medium">Monthly Attendance</h3>
-            <p className="text-sm text-gray-600">
-              {format(currentMonth, "MMMM yyyy")}
-              {selectedOrg !== "all" && ` (${selectedOrg})`}
-            </p>
-          </div>
-          <div className="flex space-x-4">
-            <div className="text-center">
-              <p className="text-2xl font-bold">{daysWithWorklogsCount}</p>
-              <p className="text-sm text-gray-600">Days with logs</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold">
-                {calendarDays.filter(day => isSameMonth(day, currentMonth)).length - daysWithWorklogsCount}
-              </p>
-              <p className="text-sm text-gray-600">Days without logs</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Calendar Component */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-medium">
-            {format(currentMonth, "MMMM yyyy")}
-          </h3>
-          <div className="flex space-x-2">
-            <button
-              onClick={prevMonth}
-              className="p-1 rounded-full hover:bg-gray-100"
-              aria-label="Previous month"
-            >
-              <ChevronLeftIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={nextMonth}
-              className="p-1 rounded-full hover:bg-gray-100"
-              aria-label="Next month"
-            >
-              <ChevronRightIcon className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-7 gap-1 mb-2">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-            <div key={day} className="text-center text-sm font-medium text-gray-500">
-              {day}
-            </div>
-          ))}
-        </div>
-        
-        <div className="grid grid-cols-7 gap-1">
-          {calendarDays.map((day) => {
-            const dateStr = format(day, "yyyy-MM-dd");
-            const hasWorklog = worklogDates.has(dateStr);
-            const isSelected = selectedDate && isSameDay(day, selectedDate);
-            const isCurrentMonth = isSameMonth(day, currentMonth);
-            
-            return (
-              <button
-                key={dateStr}
-                onClick={() => handleDateClick(day)}
-                className={`h-10 flex items-center justify-center rounded-full text-sm
-                  ${isCurrentMonth ? "text-gray-900" : "text-gray-400"}
-                  ${hasWorklog && isCurrentMonth ? "bg-blue-100 font-medium" : ""}
-                  ${isSameDay(day, new Date()) ? "border border-blue-500" : ""}
-                  ${isSelected && isCurrentMonth ? "bg-blue-200 ring-2 ring-blue-400" : ""}
-                  ${isCurrentMonth ? "hover:bg-gray-100" : "cursor-default"}
-                  transition-colors
-                `}
-                aria-label={`Day ${format(day, "d")}${hasWorklog ? " with worklogs" : ""}`}
-              >
-                {format(day, "d")}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Selected Date Filter Indicator */}
+      <RemarksModal
+        show={showRemarksModal}
+        onClose={() => setShowRemarksModal(false)}
+        remarks={currentRemarks}
+      />
+      <WorkTableHeader
+        currentMonth={currentMonth}
+        daysWithWorklogsCount={daysWithWorklogsCount}
+        totalHours={totalHours}
+      />
+      <CalendarView
+        currentMonth={currentMonth}
+        calendarDays={calendarDays}
+        worklogDates={worklogDates}
+        selectedDate={selectedDate}
+        prevMonth={prevMonth}
+        nextMonth={nextMonth}
+        handleDateClick={handleDateClick}
+      />
       {selectedDate && (
         <div className="mb-4 flex items-center justify-between">
           <div className="text-sm font-medium">
@@ -289,178 +211,39 @@ export default function WorkTable({ worklogs, isError, totalHours }: WorkTablePr
           <button
             onClick={() => setSelectedDate(null)}
             className="text-sm text-blue-600 hover:text-blue-800"
-            aria-label="Clear date filter"
           >
             Clear filter
           </button>
         </div>
       )}
-
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
-        {/* Mobile filter toggle */}
-        <button
-          onClick={() => setShowMobileFilters(!showMobileFilters)}
-          className="sm:hidden px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"
-          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
-        >
-          {showMobileFilters ? 'Hide Filters' : 'Show Filters'}
-        </button>
-        
-        {/* Desktop filter buttons */}
-        <div className="hidden sm:flex gap-2">
-          <button
-            onClick={() => setSelectedOrg("all")}
-            className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === "all" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
-            aria-label="Show all organizations"
-          >
-            All Organizations
-          </button>
-          {organizations.map(org => (
-            <button
-              key={org}
-              onClick={() => setSelectedOrg(org)}
-              className={`px-4 py-2 rounded-lg text-sm ${selectedOrg === org ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-800"}`}
-              aria-label={`Filter by ${org}`}
-            >
-              {org}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Mobile filter dropdown */}
-      {showMobileFilters && (
-        <div className="sm:hidden mb-4 bg-gray-50 p-3 rounded-lg">
-          <label htmlFor="org-filter" className="block text-sm font-medium text-gray-700 mb-2">
-            Filter by Organization
-          </label>
-          <select
-            id="org-filter"
-            value={selectedOrg}
-            onChange={(e) => setSelectedOrg(e.target.value)}
-            className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-            aria-label="Organization filter"
-          >
-            <option value="all">All Organizations</option>
-            {organizations.map(org => (
-              <option key={org} value={org}>{org}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
+      <WorkTableFilters
+        organizations={organizations}
+        selectedOrg={selectedOrg}
+        setSelectedOrg={setSelectedOrg}
+        showMobileFilters={showMobileFilters}
+        setShowMobileFilters={setShowMobileFilters}
+      />
       <div className="mb-4">
         <p className="text-sm text-gray-500">Total Hours Worked</p>
         <p className="text-xl font-semibold text-gray-900">
           {filteredTotalHours.toFixed(2)} hours
-          {selectedOrg !== "all" ? (
-            <span className="text-sm text-gray-500 ml-2">
-              (out of {orgTotalHours.toFixed(2)} org total)
-            </span>
-          ) : (
-            <span className="text-sm text-gray-500 ml-2">
-              (out of {totalHours.toFixed(2)} total)
-            </span>
-          )}
         </p>
       </div>
-
       {isError ? (
         <p className="text-red-500">Error loading work logs</p>
       ) : sortedLogs.length === 0 ? (
         <p className="text-gray-500">
-          No work logs found{selectedOrg !== "all" ? ` for ${selectedOrg}` : ""}
-          {selectedDate ? ` on ${format(selectedDate, "MMMM d, yyyy")}` : ""}
+          No work logs found
+          {selectedOrg !== "all" && ` for ${selectedOrg}`}
+          {selectedDate && ` on ${format(selectedDate, "MMMM d, yyyy")}`}
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-100">
-              <tr>
-                <th
-                  className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
-                  onClick={() => handleSort("start_time")}
-                  aria-label="Sort by start time"
-                >
-                  <div className="flex items-center">
-                    Start Time {renderSortArrow("start_time")}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
-                  onClick={() => handleSort("project")}
-                  aria-label="Sort by project"
-                >
-                  <div className="flex items-center">
-                    Project {renderSortArrow("project")}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
-                  onClick={() => handleSort("organisation")}
-                  aria-label="Sort by organization"
-                >
-                  <div className="flex items-center">
-                    Organization {renderSortArrow("organisation")}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
-                  onClick={() => handleSort("deliverable")}
-                  aria-label="Sort by deliverable"
-                >
-                  <div className="flex items-center">
-                    Deliverable {renderSortArrow("deliverable")}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
-                  onClick={() => handleSort("end_time")}
-                  aria-label="Sort by end time"
-                >
-                  <div className="flex items-center">
-                    End Time {renderSortArrow("end_time")}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
-                  onClick={() => handleSort("duration")}
-                  aria-label="Sort by duration"
-                >
-                  <div className="flex items-center">
-                    Duration (hours) {renderSortArrow("duration")}
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sortedLogs.map((log) => (
-                <tr key={log.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    {format(parseISO(log.start_time), "d MMM yyyy EEE h:mm a")}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 truncate max-w-[100px]">
-                    {log.project}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 truncate max-w-[80px]">
-                    {log.organisation}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 truncate max-w-[80px]">
-                    {log.deliverable}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    {log.end_time
-                      ? format(parseISO(log.end_time), "d MMM yyyy EEE h:mm a")
-                      : "In progress"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    {log.duration?.toFixed(2) ?? "N/A"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <WorkTableContent
+          sortedLogs={sortedLogs}
+          handleSort={handleSort}
+          renderSortArrow={renderSortArrow}
+          handleShowRemarks={handleShowRemarks}
+        />
       )}
     </div>
   );
