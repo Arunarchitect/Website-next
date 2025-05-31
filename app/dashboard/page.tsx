@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
-import { useGetMyMembershipsQuery, useGetMyOrganisationsQuery } from "@/redux/features/membershipApiSlice";
+import {
+  useGetMyMembershipsQuery,
+  useGetMyOrganisationsQuery,
+} from "@/redux/features/membershipApiSlice";
 import {
   useGetWorklogsQuery,
   useDeleteWorklogMutation,
@@ -12,9 +15,8 @@ import {
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
-import WorklogsTable, {
-  EditableWorklog,
-} from "@/components/tables/WorklogsTable";
+import WorklogsTable from "@/components/tables/WorklogsTable";
+import { EditableWorklog } from "@/types/worklogs";
 import { Spinner } from "@/components/common";
 
 export default function DashboardPage() {
@@ -62,7 +64,12 @@ export default function DashboardPage() {
 
   // Loading states
   const isLoading =
-    isUserLoading || isUserFetching || isMembershipLoading || isMembershipFetching || isOrgLoading || isOrgFetching;
+    isUserLoading ||
+    isUserFetching ||
+    isMembershipLoading ||
+    isMembershipFetching ||
+    isOrgLoading ||
+    isOrgFetching;
 
   // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
@@ -70,14 +77,16 @@ export default function DashboardPage() {
   );
 
   // Get admin organizations from memberships
-  const adminMemberships = memberships.filter(membership => membership.role === 'admin');
-  
+  const adminMemberships = memberships.filter(
+    (membership) => membership.role === "admin"
+  );
+
   // Create admin organizations array with names
-  const adminOrganizations = adminMemberships.map(membership => {
-    const org = organisations.find(o => o.id === membership.organisation);
+  const adminOrganizations = adminMemberships.map((membership) => {
+    const org = organisations.find((o) => o.id === membership.organisation);
     return {
       id: membership.organisation,
-      name: org?.name || `Organization ${membership.organisation}`
+      name: org?.name || `Organization ${membership.organisation}`,
     };
   });
 
@@ -94,6 +103,10 @@ export default function DashboardPage() {
 
   const handleUpdate = async (worklog: EditableWorklog): Promise<void> => {
     try {
+      if (typeof worklog.id !== "number") {
+        throw new Error("Invalid worklog ID");
+      }
+
       await updateWorklog({
         id: worklog.id,
         project: worklog.project,

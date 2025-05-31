@@ -8,6 +8,11 @@ import { RemarksModal } from "@/components/Worklogs/RemarksModal";
 import { AttendanceSummary } from "@/components/Worklogs/AttendanceSummary";
 import { PaginationControls } from "@/components/Worklogs/PaginationControls";
 import { format, parseISO } from "date-fns";
+import Spinner from "@/components/common/Spinner";
+
+const getSafeRemarks = (remarks: string | null | undefined): string => {
+  return remarks ?? "";
+};
 
 export default function WorklogsTable({
   worklogs,
@@ -19,7 +24,8 @@ export default function WorklogsTable({
   isLoading = false,
 }: WorklogsTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
+  const [editableWorklog, setEditableWorklog] =
+    useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [currentRemarks, setCurrentRemarks] = useState("");
@@ -36,7 +42,7 @@ export default function WorklogsTable({
     prevMonth,
     nextMonth,
     handleDateClick,
-    setSelectedDate
+    setSelectedDate,
   } = useCalendarDays(worklogs);
 
   const projectMap = useMemo(
@@ -48,34 +54,50 @@ export default function WorklogsTable({
     [deliverables]
   );
 
-  // Filter worklogs by selected date
   const filteredWorklogs = useMemo(() => {
     if (!selectedDate) return worklogs;
-    return worklogs.filter(worklog => {
+    return worklogs.filter((worklog) => {
+      if (!worklog.start_time) return false;
       const worklogDate = format(parseISO(worklog.start_time), "yyyy-MM-dd");
       const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
       return worklogDate === selectedDateStr;
     });
   }, [worklogs, selectedDate]);
 
-  const sorted = sortedWorklogs(selectedDate ? filteredWorklogs : worklogs, projectMap, deliverableMap);
+  const sorted = sortedWorklogs(
+    selectedDate ? filteredWorklogs : worklogs,
+    projectMap,
+    deliverableMap
+  );
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const paginatedWorklogs = sorted.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   );
 
-  const startEditing = (worklog: Worklog) => {
-    const deliverable = deliverableMap.get(worklog.deliverable);
-    if (!deliverable) return;
-    setEditingId(worklog.id);
+  const handleFieldChange = <K extends keyof EditableWorklog>(
+    field: K,
+    value: EditableWorklog[K]
+  ) => {
+    if (!editableWorklog) return;
+
     setEditableWorklog({
-      ...worklog,
-      start_time: format(parseISO(worklog.start_time), "yyyy-MM-dd'T'HH:mm"),
-      end_time: format(parseISO(worklog.end_time), "yyyy-MM-dd'T'HH:mm"),
-      project: deliverable.project,
-      remarks: worklog.remarks || "",
+      ...editableWorklog,
+      [field]: value,
     });
+  };
+
+  const saveEditing = async () => {
+    if (!editableWorklog) return;
+
+    try {
+      await onUpdate(editableWorklog);
+      setEditingId(null);
+      setEditableWorklog(null);
+      refetch();
+    } catch (error) {
+      console.error("Failed to update worklog:", error);
+    }
   };
 
   const cancelEditing = () => {
@@ -83,40 +105,39 @@ export default function WorklogsTable({
     setEditableWorklog(null);
   };
 
-  const saveEditing = async () => {
-    if (!editableWorklog) return;
-    try {
-      await onUpdate(editableWorklog);
-      refetch();
-      cancelEditing();
-    } catch (error) {
-      console.error("Failed to update worklog:", error);
-    }
+  const startEditing = (worklog: Worklog) => {
+    const deliverable = deliverableMap.get(worklog.deliverable);
+    if (!deliverable) return;
+
+    const safeStartTime = worklog.start_time
+      ? parseISO(worklog.start_time)
+      : new Date();
+    const safeEndTime = worklog.end_time
+      ? parseISO(worklog.end_time)
+      : new Date();
+
+    setEditingId(worklog.id);
+    setEditableWorklog({
+      id: worklog.id,
+      start_time: format(safeStartTime, "yyyy-MM-dd'T'HH:mm"),
+      end_time: format(safeEndTime, "yyyy-MM-dd'T'HH:mm"),
+      project: deliverable.project,
+      deliverable: worklog.deliverable,
+      remarks: getSafeRemarks(worklog.remarks),
+    });
   };
 
-  const handleFieldChange = (
-    field: keyof EditableWorklog,
-    value: string | number
-  ) => {
-    if (!editableWorklog) return;
-    if (field === "project") {
-      setEditableWorklog({
-        ...editableWorklog,
-        project: Number(value),
-        deliverable: 0,
-      });
-    } else {
-      setEditableWorklog({ ...editableWorklog, [field]: value });
-    }
-  };
-
-  const handleShowRemarks = (remarks: string) => {
-    setCurrentRemarks(remarks);
+  const handleShowRemarks = (remarks: string | null | undefined) => {
+    setCurrentRemarks(getSafeRemarks(remarks));
     setShowRemarksModal(true);
   };
 
   if (isLoading) {
-    return <div>Loading...</div>;
+    return (
+      <div className="flex justify-center p-8">
+        <Spinner lg /> {/* or md/sm as needed */}
+      </div>
+    );
   }
 
   return (
@@ -127,7 +148,7 @@ export default function WorklogsTable({
         remarks={currentRemarks}
       />
 
-      <h2 className="text-2xl text-gray-700 font-semibold mb-4">Worklogs</h2>
+      <h2 className="text-2xl font-semibold text-gray-800 mb-4">Worklogs</h2>
 
       <AttendanceSummary
         currentMonth={currentMonth}
@@ -147,12 +168,12 @@ export default function WorklogsTable({
 
       {selectedDate && (
         <div className="mb-4 flex items-center justify-between">
-          <div className="text-sm font-medium">
+          <div className="text-sm font-medium text-gray-700">
             Showing worklogs for: {format(selectedDate, "MMMM d, yyyy")}
           </div>
           <button
             onClick={() => setSelectedDate(null)}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
           >
             Clear filter
           </button>
@@ -160,11 +181,11 @@ export default function WorklogsTable({
       )}
 
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-300">
-          <thead className="bg-gray-100">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
             <tr>
               <th
-                className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("project")}
               >
                 <div className="flex items-center">
@@ -172,7 +193,7 @@ export default function WorklogsTable({
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("deliverable")}
               >
                 <div className="flex items-center">
@@ -180,7 +201,7 @@ export default function WorklogsTable({
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("start_time")}
               >
                 <div className="flex items-center">
@@ -188,17 +209,17 @@ export default function WorklogsTable({
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase cursor-pointer"
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("end_time")}
               >
                 <div className="flex items-center">
                   End Time {getSortIcon("end_time")}
                 </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Remarks
               </th>
-              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
               </th>
             </tr>

@@ -11,7 +11,7 @@ import {
 } from "@/redux/features/worklogApiSlice";
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
-import { EditableWorklog } from "@/components/tables/WorklogsTable";
+import { EditableWorklog } from "@/types/worklogs";
 
 export default function useDashboardData() {
   const router = useRouter();
