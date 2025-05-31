@@ -36,7 +36,7 @@ export interface BaseWorkLog {
   id: number;
   start_time: string;  // ISO format
   end_time: string;    // ISO format
-  duration: number;    // in minutes
+  duration?: number;  // Made optional with ?
   remarks?: string | null;
   employee: number;
 }
@@ -67,7 +67,7 @@ export interface UserWorkLog {
  * Form editing type
  */
 export interface EditableWorklog {
-  id?: number;
+  id: number;
   start_time: string;  // yyyy-MM-dd'T'HH:mm
   end_time: string;    // yyyy-MM-dd'T'HH:mm
   project: number;
@@ -99,10 +99,10 @@ export interface WorklogValidationErrors {
  */
 export type SortDirection = 'asc' | 'desc';
 
-export type WorkLogSortKey = keyof Pick<
-  UserWorkLog,
-  'start_time' | 'end_time' | 'duration' | 'deliverable' | 'project' | 'organisation'
->;
+export type SortKey = keyof Pick<
+  Worklog, 
+  'start_time' | 'end_time' | 'duration'
+> | 'project' | 'deliverable';
 
 /**
  * Component props
@@ -123,9 +123,9 @@ export interface WorkTableProps {
   worklogs: UserWorkLog[];
   totalHours: number;
   isError?: boolean;
-  sortKey?: WorkLogSortKey;
+  sortKey?: SortKey;
   sortDirection?: SortDirection;
-  onSort?: (key: WorkLogSortKey) => void;
+  onSort?: (key: SortKey) => void;
   onDateSelect?: (date: Date | null) => void;
 }
 
@@ -141,4 +141,32 @@ export interface WorklogCreateResponse {
   data: Worklog;
   success: boolean;
   error?: string;
+}
+
+
+
+/**
+ * Extended types for calendar functionality
+ */
+export interface WorklogWithDuration extends Worklog {
+  startDate: Date | null;
+  endDate: Date | null;
+  duration: number;
+}
+
+export interface UseCalendarDaysReturn {
+  currentMonth: Date;
+  calendarDays: Date[];
+  worklogDates: Set<string>;
+  daysWithWorklogsCount: number;
+  leaveDaysCount: number;
+  totalHours: number;
+  selectedDate: Date | null;
+  worklogsWithDuration: WorklogWithDuration[];
+  prevMonth: () => void;
+  nextMonth: () => void;
+  handleDateClick: (day: Date) => void;
+  handleMonthChange: (month: number) => void;
+  handleYearChange: (year: number) => void;
+  setSelectedDate: (date: Date | null) => void;
 }

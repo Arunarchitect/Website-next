@@ -8,10 +8,10 @@ import {
   getDay, 
   addDays 
 } from 'date-fns';
-import { WorkLog, SortKey, SortDirection } from '@/types/worklogs';
+import { UserWorkLog, SortKey, SortDirection } from '@/types/worklogs';
 
 export const useWorkTableData = (
-  worklogs: WorkLog[],
+  worklogs: UserWorkLog[],
   selectedOrg: string,
   currentMonth: Date,
   selectedDate: Date | null,
@@ -28,8 +28,6 @@ export const useWorkTableData = (
   // Calendar data
   const { worklogDates, daysWithWorklogsCount } = useMemo(() => {
     const dates = new Set<string>();
-    let count = 0;
-
     const monthStart = startOfMonth(currentMonth);
     const monthEnd = endOfMonth(currentMonth);
 
@@ -38,27 +36,26 @@ export const useWorkTableData = (
         const date = parseISO(worklog.start_time);
         const dateStr = format(date, 'yyyy-MM-dd');
         dates.add(dateStr);
-
-        if (date >= monthStart && date <= monthEnd) {
-          count += 1;
-        }
-      } catch (error) {
-        console.error('Invalid date format in worklog:', worklog.start_time);
+      } catch {
+        // Silently handle invalid dates
       }
     });
 
+    // Calculate days with worklogs in current month
+    const daysInMonthWithWorklogs = new Set(
+      Array.from(dates).filter((dateStr) => {
+        try {
+          const date = parseISO(dateStr);
+          return date >= monthStart && date <= monthEnd;
+        } catch {
+          return false;
+        }
+      })
+    ).size;
+
     return {
       worklogDates: dates,
-      daysWithWorklogsCount: new Set(
-        Array.from(dates).filter((dateStr) => {
-          try {
-            const date = parseISO(dateStr);
-            return date >= monthStart && date <= monthEnd;
-          } catch {
-            return false;
-          }
-        })
-      ).size,
+      daysWithWorklogsCount: daysInMonthWithWorklogs,
     };
   }, [orgFilteredLogs, currentMonth]);
 
@@ -102,7 +99,7 @@ export const useWorkTableData = (
       if (aVal == null) return sortDirection === 'asc' ? 1 : -1;
       if (bVal == null) return sortDirection === 'asc' ? -1 : 1;
 
-      // Handle string values (including remarks)
+      // Handle string values
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return sortDirection === 'asc'
           ? aVal.localeCompare(bVal)

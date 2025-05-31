@@ -16,8 +16,13 @@ import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
 import WorklogsTable from "@/components/tables/WorklogsTable";
-import { EditableWorklog } from "@/types/worklogs";
+import { EditableWorklog, Worklog } from "@/types/worklogs";
 import { Spinner } from "@/components/common";
+
+interface Organization {
+  id: number;
+  name: string;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -32,14 +37,14 @@ export default function DashboardPage() {
     isFetching: isUserFetching,
   } = useRetrieveUserQuery();
 
-  // Memberships data (contains organization info with roles)
+  // Memberships data
   const {
     data: memberships = [],
     isLoading: isMembershipLoading,
     isFetching: isMembershipFetching,
   } = useGetMyMembershipsQuery();
 
-  // Organizations data (for names)
+  // Organizations data
   const {
     data: organisations = [],
     isLoading: isOrgLoading,
@@ -47,8 +52,7 @@ export default function DashboardPage() {
   } = useGetMyOrganisationsQuery();
 
   // Worklogs data
-  const { data: allWorklogs = [], refetch: refetchWorklogs } =
-    useGetWorklogsQuery();
+  const { data: allWorklogs = [], refetch: refetchWorklogs } = useGetWorklogsQuery();
 
   // Projects and deliverables data
   const { data: projects = [] } = useGetProjectsQuery();
@@ -73,7 +77,7 @@ export default function DashboardPage() {
 
   // Filter worklogs for current user
   const userWorklogs = allWorklogs.filter(
-    (worklog) => worklog.employee === user?.id
+    (worklog: Worklog) => worklog.employee === user?.id
   );
 
   // Get admin organizations from memberships
@@ -82,7 +86,7 @@ export default function DashboardPage() {
   );
 
   // Create admin organizations array with names
-  const adminOrganizations = adminMemberships.map((membership) => {
+  const adminOrganizations: Organization[] = adminMemberships.map((membership) => {
     const org = organisations.find((o) => o.id === membership.organisation);
     return {
       id: membership.organisation,
@@ -114,9 +118,9 @@ export default function DashboardPage() {
         start_time: worklog.start_time,
         end_time: worklog.end_time,
       }).unwrap();
-      console.log("✅ Worklog updated successfully!");
     } catch (err) {
-      console.error("❌ Failed to update worklog:", err);
+      console.error("Failed to update worklog:", err);
+      throw err;
     }
   };
 

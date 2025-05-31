@@ -13,7 +13,7 @@ import {
   getDay,
   addDays,
 } from "date-fns";
-import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs";
+import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs"; 
 import { CalendarView } from "@/components/Worklogs/CalendarView";
 import { RemarksModal } from "@/components/Worklogs/RemarksModal";
 import { WorkTableFilters } from "@/components/Userworklogs/WorkTableFilters";
@@ -42,15 +42,16 @@ export default function WorkTable({
     setWorklogs(
       initialWorklogs.map((log) => ({
         ...log,
-        end_time: log.end_time ?? "", // convert null/undefined to empty string
+        end_time: log.end_time ?? "",
         duration: log.duration ?? 0,
         remarks: log.remarks ?? "",
+        organisation: log.organisation ?? "",
       }))
     );
   }, [initialWorklogs]);
 
   const organizations = useMemo(
-    () => Array.from(new Set(worklogs.map((log) => log.organisation))),
+    () => Array.from(new Set(worklogs.map((log) => log.organisation).filter((org): org is string => !!org))),
     [worklogs]
   );
 
@@ -135,7 +136,7 @@ export default function WorkTable({
   }, [filteredLogs, sortKey, sortOrder]);
 
   const filteredTotalHours = useMemo(() => {
-    return filteredLogs.reduce((acc, log) => acc + (log.duration || 0), 0);
+    return filteredLogs.reduce((acc, log) => acc + (log.duration || 0), 0) / 60;
   }, [filteredLogs]);
 
   const handleSort = (key: SortKey) => {

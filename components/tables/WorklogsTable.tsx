@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useMemo } from "react";
 import { WorklogsTableProps, Worklog, EditableWorklog } from "@/types/worklogs";
 import { useWorklogsSort } from "@/hooks/work/useWorklogsSort";
@@ -7,12 +9,17 @@ import { WorklogRow } from "@/components/Worklogs/WorklogRow";
 import { RemarksModal } from "@/components/Worklogs/RemarksModal";
 import { AttendanceSummary } from "@/components/Worklogs/AttendanceSummary";
 import { PaginationControls } from "@/components/Worklogs/PaginationControls";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isSameDay, differenceInMinutes } from "date-fns";
 import Spinner from "@/components/common/Spinner";
 
 const getSafeRemarks = (remarks: string | null | undefined): string => {
   return remarks ?? "";
 };
+
+interface WorklogsTableEnhancedProps extends WorklogsTableProps {
+  selectedDate?: Date | null;
+  monthlyWorklogs?: Worklog[];
+}
 
 export default function WorklogsTable({
   worklogs,
@@ -22,10 +29,9 @@ export default function WorklogsTable({
   onUpdate,
   refetch,
   isLoading = false,
-}: WorklogsTableProps) {
+}: WorklogsTableEnhancedProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editableWorklog, setEditableWorklog] =
-    useState<EditableWorklog | null>(null);
+  const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [currentRemarks, setCurrentRemarks] = useState("");
@@ -39,11 +45,14 @@ export default function WorklogsTable({
     worklogDates,
     daysWithWorklogsCount,
     selectedDate,
+    monthlyWorklogs = [],
     prevMonth,
     nextMonth,
     handleDateClick,
+    handleMonthChange,
+    handleYearChange,
     setSelectedDate,
-  } = useCalendarDays(worklogs);
+  } = useCalendarDays({ worklogs });
 
   const projectMap = useMemo(
     () => new Map(projects.map((p) => [p.id, p])),
@@ -56,13 +65,35 @@ export default function WorklogsTable({
 
   const filteredWorklogs = useMemo(() => {
     if (!selectedDate) return worklogs;
+
     return worklogs.filter((worklog) => {
       if (!worklog.start_time) return false;
-      const worklogDate = format(parseISO(worklog.start_time), "yyyy-MM-dd");
-      const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
-      return worklogDate === selectedDateStr;
+      try {
+        const worklogDate = parseISO(worklog.start_time);
+        return isSameDay(worklogDate, selectedDate);
+      } catch {
+        return false;
+      }
     });
   }, [worklogs, selectedDate]);
+
+  const calculateTotalHours = (logs: Worklog[]): number => {
+    if (!logs || logs.length === 0) return 0;
+    
+    return logs.reduce((total, worklog) => {
+      if (!worklog.start_time || !worklog.end_time) return total;
+      
+      try {
+        const duration = differenceInMinutes(
+          parseISO(worklog.end_time),
+          parseISO(worklog.start_time)
+        ) / 60;
+        return total + duration;
+      } catch {
+        return total;
+      }
+    }, 0);
+  };
 
   const sorted = sortedWorklogs(
     selectedDate ? filteredWorklogs : worklogs,
@@ -80,7 +111,6 @@ export default function WorklogsTable({
     value: EditableWorklog[K]
   ) => {
     if (!editableWorklog) return;
-
     setEditableWorklog({
       ...editableWorklog,
       [field]: value,
@@ -89,7 +119,6 @@ export default function WorklogsTable({
 
   const saveEditing = async () => {
     if (!editableWorklog) return;
-
     try {
       await onUpdate(editableWorklog);
       setEditingId(null);
@@ -135,7 +164,7 @@ export default function WorklogsTable({
   if (isLoading) {
     return (
       <div className="flex justify-center p-8">
-        <Spinner lg /> {/* or md/sm as needed */}
+        <Spinner lg />
       </div>
     );
   }
@@ -147,13 +176,13 @@ export default function WorklogsTable({
         onClose={() => setShowRemarksModal(false)}
         remarks={currentRemarks}
       />
-
       <h2 className="text-2xl font-semibold text-gray-800 mb-4">Worklogs</h2>
 
       <AttendanceSummary
         currentMonth={currentMonth}
         daysWithWorklogsCount={daysWithWorklogsCount}
         calendarDays={calendarDays}
+        totalHours={calculateTotalHours(monthlyWorklogs)}
       />
 
       <CalendarView
@@ -164,6 +193,8 @@ export default function WorklogsTable({
         prevMonth={prevMonth}
         nextMonth={nextMonth}
         handleDateClick={handleDateClick}
+        handleMonthChange={handleMonthChange}
+        handleYearChange={handleYearChange}
       />
 
       {selectedDate && (
@@ -175,7 +206,7 @@ export default function WorklogsTable({
             onClick={() => setSelectedDate(null)}
             className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
           >
-            Clear filter
+            Clear date filter
           </button>
         </div>
       )}
@@ -185,32 +216,32 @@ export default function WorklogsTable({
           <thead className="bg-gray-50">
             <tr>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("project")}
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
               >
                 <div className="flex items-center">
                   Project {getSortIcon("project")}
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("deliverable")}
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
               >
                 <div className="flex items-center">
                   Deliverable {getSortIcon("deliverable")}
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("start_time")}
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
               >
                 <div className="flex items-center">
                   Start Time {getSortIcon("start_time")}
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => requestSort("end_time")}
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
               >
                 <div className="flex items-center">
                   End Time {getSortIcon("end_time")}

@@ -1,9 +1,9 @@
 import { format, parseISO } from "date-fns";
 import { PencilIcon, TrashIcon, CheckIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { WorkLog, EditableWorklog, Project, Deliverable } from "@/types/worklogs";
+import { Worklog, EditableWorklog, Project, Deliverable } from "@/types/worklogs";
 
 interface WorklogRowProps {
-  worklog: WorkLog;
+  worklog: Worklog;
   projects: Project[];
   deliverables: Deliverable[];
   projectMap: Map<number, Project>;
@@ -11,7 +11,7 @@ interface WorklogRowProps {
   isEditing: boolean;
   editableWorklog: EditableWorklog | null;
   handleFieldChange: (field: keyof EditableWorklog, value: string | number) => void;
-  startEditing: (worklog: WorkLog) => void;
+  startEditing: (worklog: Worklog) => void;
   onDelete: (id: number) => void;
   saveEditing: () => void;
   cancelEditing: () => void;

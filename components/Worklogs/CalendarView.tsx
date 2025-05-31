@@ -1,4 +1,14 @@
-import { format, isSameMonth, isSameDay } from "date-fns";
+// CalendarView.tsx
+import {
+  format,
+  isSameMonth,
+  isSameDay,
+  getYear,
+  getMonth,
+  eachMonthOfInterval,
+  startOfYear,
+  endOfYear,
+} from "date-fns";
 import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 
 interface CalendarViewProps {
@@ -9,6 +19,8 @@ interface CalendarViewProps {
   prevMonth: () => void;
   nextMonth: () => void;
   handleDateClick: (day: Date) => void;
+  handleMonthChange: (month: number) => void;
+  handleYearChange: (year: number) => void;
 }
 
 export const CalendarView = ({
@@ -18,14 +30,50 @@ export const CalendarView = ({
   selectedDate,
   prevMonth,
   nextMonth,
-  handleDateClick
+  handleDateClick,
+  handleMonthChange,
+  handleYearChange,
 }: CalendarViewProps) => {
+  const months = eachMonthOfInterval({
+    start: startOfYear(new Date()),
+    end: endOfYear(new Date()),
+  }).map((month) => ({
+    value: getMonth(month),
+    label: format(month, "MMMM"),
+  }));
+
+  const currentYear = getYear(currentMonth);
+  const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
+
   return (
     <div className="mb-8">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-medium text-gray-700">
-          {format(currentMonth, "MMMM yyyy")}
-        </h3>
+        <div className="flex space-x-2">
+          <select
+            value={getMonth(currentMonth)}
+            onChange={(e) => handleMonthChange(Number(e.target.value))}
+            className="p-1 border rounded"
+          >
+            {months.map((month) => (
+              <option key={month.value} value={month.value}>
+                {month.label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={currentYear}
+            onChange={(e) => handleYearChange(Number(e.target.value))}
+            className="p-1 border rounded"
+          >
+            {years.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex space-x-2">
           <button
             onClick={prevMonth}
@@ -43,7 +91,7 @@ export const CalendarView = ({
           </button>
         </div>
       </div>
-      
+
       <div className="grid grid-cols-7 gap-1 mb-2">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
           <div key={day} className="text-center text-sm font-medium text-gray-500">
@@ -51,27 +99,27 @@ export const CalendarView = ({
           </div>
         ))}
       </div>
-      
+
       <div className="grid grid-cols-7 gap-1">
         {calendarDays.map((day) => {
           const dateStr = format(day, "yyyy-MM-dd");
           const hasWorklog = worklogDates.has(dateStr);
           const isSelected = selectedDate && isSameDay(day, selectedDate);
           const isCurrentMonth = isSameMonth(day, currentMonth);
-          
+
           return (
             <button
               key={dateStr}
-              onClick={() => isCurrentMonth && handleDateClick(day)}
+              onClick={() => handleDateClick(day)}
               className={`h-10 flex items-center justify-center rounded-full text-sm
                 ${isCurrentMonth ? "text-gray-900" : "text-gray-400"}
-                ${hasWorklog && isCurrentMonth ? "bg-blue-100 font-medium" : ""}
+                ${hasWorklog ? "bg-blue-100 font-medium" : ""}
                 ${isSameDay(day, new Date()) ? "border border-blue-500" : ""}
-                ${isSelected && isCurrentMonth ? "bg-blue-200 ring-2 ring-blue-400" : ""}
-                ${isCurrentMonth ? "hover:bg-gray-100" : "cursor-default"}
+                ${isSelected ? "bg-blue-200 ring-2 ring-blue-400" : ""}
+                ${isCurrentMonth ? "hover:bg-gray-100" : "hover:bg-gray-50"}
                 transition-colors
               `}
-              aria-label={`Day ${format(day, "d")}`}
+              aria-label={`Day ${format(day, "d MMMM yyyy")}`}
             >
               {format(day, "d")}
             </button>

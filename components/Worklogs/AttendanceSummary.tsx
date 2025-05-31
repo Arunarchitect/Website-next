@@ -1,24 +1,27 @@
-import { format, isSameMonth, isBefore, isToday } from "date-fns";
+import { format, isSameMonth, isBefore, isToday, isWeekend } from "date-fns";
 
 interface AttendanceSummaryProps {
   currentMonth: Date;
   daysWithWorklogsCount: number;
   calendarDays: Date[];
+  totalHours?: number; // Now properly typed as number
 }
 
 export const AttendanceSummary = ({
   currentMonth,
   daysWithWorklogsCount,
-  calendarDays
+  calendarDays,
+  totalHours = 0 // Default to 0
 }: AttendanceSummaryProps) => {
   const today = new Date();
 
-  const pastOrTodayDaysInMonth = calendarDays.filter(day =>
+  const workingDaysInMonth = calendarDays.filter(day => 
     isSameMonth(day, currentMonth) &&
-    (isBefore(day, today) || isToday(day))
+    (isBefore(day, today) || isToday(day)) &&
+    !isWeekend(day)
   );
 
-  const leaveDays = pastOrTodayDaysInMonth.length - daysWithWorklogsCount;
+  const leaveDays = Math.max(0, workingDaysInMonth.length - daysWithWorklogsCount);
 
   return (
     <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -36,7 +39,13 @@ export const AttendanceSummary = ({
           </div>
           <div className="text-center">
             <p className="text-2xl font-bold text-gray-700">{leaveDays}</p>
-            <p className="text-sm text-gray-600">Days Leave</p>
+            <p className="text-sm text-gray-600">Leave Days</p>
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-bold text-gray-700">
+              {totalHours.toFixed(1)} {/* Format the number here */}
+            </p>
+            <p className="text-sm text-gray-600">Total Hours</p>
           </div>
         </div>
       </div>
