@@ -10,10 +10,11 @@ import {
   isSameDay,
   addMonths,
   subMonths,
-  getDay,
-  addDays,
+  startOfWeek,
+  endOfWeek,
+  isSameMonth,
 } from "date-fns";
-import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs"; 
+import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs";
 import { CalendarView } from "@/components/Worklogs/CalendarView";
 import { RemarksModal } from "@/components/Worklogs/RemarksModal";
 import { WorkTableFilters } from "@/components/Userworklogs/WorkTableFilters";
@@ -32,7 +33,9 @@ export default function WorkTable({
   showOnlyCurrentMonth = false,
 }: WorkTableProps & { showOnlyCurrentMonth?: boolean }) {
   const [sortKey, setSortKey] = useState<SortKey>(initialSortKey);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(initialSortDirection);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(
+    initialSortDirection
+  );
   const [selectedOrg, setSelectedOrg] = useState<string>("all");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -64,15 +67,16 @@ export default function WorkTable({
   }, [worklogs]);
 
   const orgFilteredLogs = useMemo(() => {
-    const logs = selectedOrg === "all"
-      ? worklogs
-      : worklogs.filter((log) => log.organisation === selectedOrg);
+    const logs =
+      selectedOrg === "all"
+        ? worklogs
+        : worklogs.filter((log) => log.organisation === selectedOrg);
 
     if (showOnlyCurrentMonth) {
       const monthStart = startOfMonth(currentMonth);
       const monthEnd = endOfMonth(currentMonth);
-      
-      return logs.filter(log => {
+
+      return logs.filter((log) => {
         try {
           const date = parseISO(log.start_time);
           return date >= monthStart && date <= monthEnd;
@@ -115,12 +119,13 @@ export default function WorkTable({
   }, [orgFilteredLogs, currentMonth]);
 
   const calendarDays = useMemo(() => {
-    const start = addDays(
-      startOfMonth(currentMonth),
-      -getDay(startOfMonth(currentMonth))
-    );
-    const end = addDays(start, 41);
-    return eachDayOfInterval({ start, end });
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+    
+    return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
   }, [currentMonth]);
 
   const filteredLogs = useMemo(() => {
@@ -159,7 +164,6 @@ export default function WorkTable({
       return 0;
     });
   }, [filteredLogs, sortKey, sortOrder]);
-
 
   const handleSort = (key: SortKey) => {
     if (onSort) {
@@ -269,8 +273,6 @@ export default function WorkTable({
         showMobileFilters={showMobileFilters}
         setShowMobileFilters={setShowMobileFilters}
       />
-
-
 
       {isError ? (
         <p className="text-red-500">Error loading work logs</p>
