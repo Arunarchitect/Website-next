@@ -48,24 +48,22 @@ export default function UserDetailsPage() {
     isError: isWorklogsError,
   } = useGetUserWorkLogsQuery(userId || "", { skip: !userId });
 
-  // Calculate duration in minutes
   const calculateDuration = (start: string, end: string): number => {
     const startDate = new Date(start);
     const endDate = new Date(end);
     return Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60));
   };
 
-  // Transform API data to UserWorkLog type
   const worklogs: UserWorkLog[] = worklogsData.map((log) => ({
     id: log.id,
     start_time: log.start_time,
-    end_time: log.end_time || log.start_time, // Fallback to start_time if null
+    end_time: log.end_time || log.start_time,
     duration: log.duration || calculateDuration(log.start_time, log.end_time || log.start_time),
     deliverable: log.deliverable?.toString() || 'Unknown',
     project: log.project?.toString() || 'Unknown',
     organisation: log.organisation?.toString(),
     remarks: log.remarks || null,
-    employee: Number(userId) // Add required employee field
+    employee: Number(userId)
   }));
 
   const activeWorkSession = worklogs.find((log) => 
@@ -215,7 +213,8 @@ export default function UserDetailsPage() {
       <WorkTable 
         worklogs={worklogs} 
         isError={isWorklogsError} 
-        totalHours={totalHours} 
+        totalHours={totalHours}
+        showOnlyCurrentMonth={true}
       />
     </div>
   );

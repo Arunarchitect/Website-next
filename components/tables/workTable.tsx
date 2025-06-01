@@ -19,15 +19,18 @@ import { RemarksModal } from "@/components/Worklogs/RemarksModal";
 import { WorkTableFilters } from "@/components/Userworklogs/WorkTableFilters";
 import { WorkTableHeader } from "@/components/Userworklogs/WorkTableHeader";
 import { WorkTableContent } from "@/components/Userworklogs/WorkTableContent";
+import Spinner from "@/components/common/Spinner";
 
 export default function WorkTable({
   worklogs: initialWorklogs,
   isError,
+  isLoading = false,
   totalHours,
   sortKey: initialSortKey = "start_time",
   sortDirection: initialSortDirection = "desc",
   onSort,
-}: WorkTableProps) {
+  showOnlyCurrentMonth = false,
+}: WorkTableProps & { showOnlyCurrentMonth?: boolean }) {
   const [sortKey, setSortKey] = useState<SortKey>(initialSortKey);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">(initialSortDirection);
   const [selectedOrg, setSelectedOrg] = useState<string>("all");
@@ -50,16 +53,38 @@ export default function WorkTable({
     );
   }, [initialWorklogs]);
 
-  const organizations = useMemo(
-    () => Array.from(new Set(worklogs.map((log) => log.organisation).filter((org): org is string => !!org))),
-    [worklogs]
-  );
+  const organizations = useMemo<string[]>(() => {
+    return Array.from(
+      new Set(
+        worklogs
+          .map((log) => log.organisation)
+          .filter((org): org is string => !!org)
+      )
+    );
+  }, [worklogs]);
 
   const orgFilteredLogs = useMemo(() => {
-    return selectedOrg === "all"
+    const logs = selectedOrg === "all"
       ? worklogs
       : worklogs.filter((log) => log.organisation === selectedOrg);
-  }, [worklogs, selectedOrg]);
+
+    if (showOnlyCurrentMonth) {
+      const monthStart = startOfMonth(currentMonth);
+      const monthEnd = endOfMonth(currentMonth);
+      
+      return logs.filter(log => {
+        try {
+          const date = parseISO(log.start_time);
+          return date >= monthStart && date <= monthEnd;
+        } catch (err) {
+          console.error("Invalid date in start_time:", log.start_time, err);
+          return false;
+        }
+      });
+    }
+
+    return logs;
+  }, [worklogs, selectedOrg, currentMonth, showOnlyCurrentMonth]);
 
   const { worklogDates, daysWithWorklogsCount } = useMemo(() => {
     const dates = new Set<string>();
@@ -135,9 +160,6 @@ export default function WorkTable({
     });
   }, [filteredLogs, sortKey, sortOrder]);
 
-  const filteredTotalHours = useMemo(() => {
-    return filteredLogs.reduce((acc, log) => acc + (log.duration || 0), 0) / 60;
-  }, [filteredLogs]);
 
   const handleSort = (key: SortKey) => {
     if (onSort) {
@@ -173,6 +195,14 @@ export default function WorkTable({
     setSelectedDate((prev) => (prev && isSameDay(prev, day) ? null : day));
   };
 
+  const handleMonthChange = (month: number) => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), month, 1));
+  };
+
+  const handleYearChange = (year: number) => {
+    setCurrentMonth(new Date(year, currentMonth.getMonth(), 1));
+  };
+
   const renderSortArrow = (key: SortKey) => {
     if (key !== sortKey) return <span className="ml-1 text-gray-300">↕</span>;
     return sortOrder === "asc" ? (
@@ -182,6 +212,14 @@ export default function WorkTable({
     );
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex justify-center p-8">
+        <Spinner lg />
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white shadow rounded-lg p-6">
       <RemarksModal
@@ -189,11 +227,13 @@ export default function WorkTable({
         onClose={() => setShowRemarksModal(false)}
         remarks={currentRemarks}
       />
+
       <WorkTableHeader
         currentMonth={currentMonth}
         daysWithWorklogsCount={daysWithWorklogsCount}
         totalHours={totalHours}
       />
+
       <CalendarView
         currentMonth={currentMonth}
         calendarDays={calendarDays}
@@ -202,21 +242,26 @@ export default function WorkTable({
         prevMonth={prevMonth}
         nextMonth={nextMonth}
         handleDateClick={handleDateClick}
+        handleMonthChange={handleMonthChange}
+        handleYearChange={handleYearChange}
+        showOnlyCurrentMonth={showOnlyCurrentMonth}
       />
+
       {selectedDate && (
         <div className="mb-4 flex items-center justify-between">
-          <div className="text-sm font-medium">
+          <div className="text-sm font-medium text-gray-700">
             Showing worklogs for: {format(selectedDate, "MMMM d, yyyy")}
             {selectedOrg !== "all" && ` (${selectedOrg})`}
           </div>
           <button
             onClick={() => setSelectedDate(null)}
-            className="text-sm text-blue-600 hover:text-blue-800"
+            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
           >
-            Clear filter
+            Clear date filter
           </button>
         </div>
       )}
+
       <WorkTableFilters
         organizations={organizations}
         selectedOrg={selectedOrg}
@@ -224,12 +269,9 @@ export default function WorkTable({
         showMobileFilters={showMobileFilters}
         setShowMobileFilters={setShowMobileFilters}
       />
-      <div className="mb-4">
-        <p className="text-sm text-gray-500">Total Hours Worked</p>
-        <p className="text-xl font-semibold text-gray-900">
-          {filteredTotalHours.toFixed(2)} hours
-        </p>
-      </div>
+
+
+
       {isError ? (
         <p className="text-red-500">Error loading work logs</p>
       ) : sortedLogs.length === 0 ? (

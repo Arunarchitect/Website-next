@@ -21,6 +21,7 @@ interface CalendarViewProps {
   handleDateClick: (day: Date) => void;
   handleMonthChange: (month: number) => void;
   handleYearChange: (year: number) => void;
+  showOnlyCurrentMonth?: boolean; // Add this prop
 }
 
 export const CalendarView = ({
@@ -33,6 +34,7 @@ export const CalendarView = ({
   handleDateClick,
   handleMonthChange,
   handleYearChange,
+  showOnlyCurrentMonth = false, // Default to false
 }: CalendarViewProps) => {
   const months = eachMonthOfInterval({
     start: startOfYear(new Date()),
@@ -44,6 +46,11 @@ export const CalendarView = ({
 
   const currentYear = getYear(currentMonth);
   const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
+
+  // Filter days to show only current month if showOnlyCurrentMonth is true
+  const displayedDays = showOnlyCurrentMonth
+    ? calendarDays.filter(day => isSameMonth(day, currentMonth))
+    : calendarDays;
 
   return (
     <div className="mb-8">
@@ -101,7 +108,7 @@ export const CalendarView = ({
       </div>
 
       <div className="grid grid-cols-7 gap-1">
-        {calendarDays.map((day) => {
+        {displayedDays.map((day) => {
           const dateStr = format(day, "yyyy-MM-dd");
           const hasWorklog = worklogDates.has(dateStr);
           const isSelected = selectedDate && isSameDay(day, selectedDate);

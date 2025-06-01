@@ -124,6 +124,7 @@ export interface WorkTableProps {
   worklogs: UserWorkLog[];
   totalHours: number;
   isError?: boolean;
+  isLoading?: boolean; 
   sortKey?: SortKey;
   sortDirection?: SortDirection;
   onSort?: (key: SortKey) => void;

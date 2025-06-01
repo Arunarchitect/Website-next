@@ -121,11 +121,6 @@ export default function WorklogsTable({
     
     const response = await onUpdate(updatedWorklog);
     console.log("API Response:", response);
-    
-    // Verify the returned data contains the updated remarks
-    if (response && response.remarks !== updatedWorklog.remarks) {
-      console.warn("Remarks mismatch in response!");
-    }
 
     setEditingId(null);
     setEditableWorklog(null);
