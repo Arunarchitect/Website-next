@@ -12,7 +12,6 @@ import {
   subMonths,
   startOfWeek,
   endOfWeek,
-  isSameMonth,
 } from "date-fns";
 import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs";
 import { CalendarView } from "@/components/Worklogs/CalendarView";
@@ -21,6 +20,7 @@ import { WorkTableFilters } from "@/components/Userworklogs/WorkTableFilters";
 import { WorkTableHeader } from "@/components/Userworklogs/WorkTableHeader";
 import { WorkTableContent } from "@/components/Userworklogs/WorkTableContent";
 import Spinner from "@/components/common/Spinner";
+import { MonthlyReportButton } from "@/components/reports/MonthlyReportButton";
 
 export default function WorkTable({
   worklogs: initialWorklogs,
@@ -121,10 +121,10 @@ export default function WorkTable({
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(currentMonth);
     const monthEnd = endOfMonth(currentMonth);
-    
+
     const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
     const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
-    
+
     return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
   }, [currentMonth]);
 
@@ -137,7 +137,11 @@ export default function WorkTable({
       try {
         return format(parseISO(log.start_time), "yyyy-MM-dd") === target;
       } catch (err) {
-        console.error("Error parsing date when filtering:", log.start_time, err);
+        console.error(
+          "Error parsing date when filtering:",
+          log.start_time,
+          err
+        );
         return false;
       }
     });
@@ -232,11 +236,19 @@ export default function WorkTable({
         remarks={currentRemarks}
       />
 
-      <WorkTableHeader
-        currentMonth={currentMonth}
-        daysWithWorklogsCount={daysWithWorklogsCount}
-        totalHours={totalHours}
-      />
+      <div className="flex justify-between items-center mb-4">
+        <WorkTableHeader
+          currentMonth={currentMonth}
+          daysWithWorklogsCount={daysWithWorklogsCount}
+          totalHours={totalHours}
+        />
+        <MonthlyReportButton 
+          worklogs={worklogs}
+          currentMonth={currentMonth}
+          selectedOrg={selectedOrg}
+          className="px-4 py-2"
+        />
+      </div>
 
       <CalendarView
         currentMonth={currentMonth}
