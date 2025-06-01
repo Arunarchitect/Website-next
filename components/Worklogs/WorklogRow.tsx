@@ -27,15 +27,11 @@ interface WorklogRowProps {
     value: EditableWorklog[K]
   ) => void;
   startEditing: (worklog: Worklog) => void;
-  onDelete: (id: number) => void;
-  saveEditing: () => void;
+  onDelete: (id: number) => Promise<void>;
+  saveEditing: () => Promise<void>;
   cancelEditing: () => void;
   handleShowRemarks: (remarks: string | null | undefined) => void;
 }
-
-const getSafeRemarks = (remarks: string | null | undefined): string => {
-  return remarks ?? "";
-};
 
 export const WorklogRow = ({
   worklog,
@@ -52,13 +48,11 @@ export const WorklogRow = ({
   cancelEditing,
   handleShowRemarks,
 }: WorklogRowProps) => {
-  // Filter deliverables based on selected project
   const filteredDeliverables = useMemo(() => {
     if (!editableWorklog?.project) return [];
     return deliverables.filter((d) => d.project === editableWorklog.project);
   }, [editableWorklog?.project, deliverables]);
 
-  // Get current deliverable and project
   const currentDeliverable = editableWorklog
     ? deliverableMap.get(editableWorklog.deliverable)
     : deliverableMap.get(worklog.deliverable);
@@ -67,25 +61,19 @@ export const WorklogRow = ({
     ? projectMap.get(currentDeliverable.project)
     : null;
 
-  const parseIfString = (input: string | Date | null | undefined): Date => {
-    if (!input) return new Date();
-    return typeof input === "string" ? parseISO(input) : input;
-  };
-
   const formatDateTime = (dateTime: string | Date): string => {
-    return format(parseIfString(dateTime), "d MMM yyyy EEE h:mm a");
+    const date = typeof dateTime === 'string' ? parseISO(dateTime) : dateTime;
+    return format(date, "d MMM yyyy EEE h:mm a");
   };
 
   return (
     <tr key={worklog.id}>
+      {/* Project Cell */}
       <td className="px-6 py-4 text-sm text-gray-700">
         {isEditing ? (
           <select
             value={editableWorklog?.project ?? ""}
-            onChange={(e) => {
-              const projectId = Number(e.target.value);
-              handleFieldChange("project", projectId);
-            }}
+            onChange={(e) => handleFieldChange("project", Number(e.target.value))}
             className="border rounded p-1 w-full"
             required
           >
@@ -101,13 +89,12 @@ export const WorklogRow = ({
         )}
       </td>
 
+      {/* Deliverable Cell */}
       <td className="px-6 py-4 text-sm text-gray-700">
         {isEditing ? (
           <select
             value={editableWorklog?.deliverable ?? ""}
-            onChange={(e) =>
-              handleFieldChange("deliverable", Number(e.target.value))
-            }
+            onChange={(e) => handleFieldChange("deliverable", Number(e.target.value))}
             className="border rounded p-1 w-full"
             disabled={!editableWorklog?.project}
             required
@@ -120,21 +107,17 @@ export const WorklogRow = ({
             ))}
           </select>
         ) : (
-          currentDeliverable?.name ||
-          worklog.deliverable_name ||
-          "Invalid Deliverable"
+          currentDeliverable?.name || "Invalid Deliverable"
         )}
       </td>
 
+      {/* Start Time Cell */}
       <td className="px-6 py-4 text-sm text-gray-700">
         {isEditing ? (
           <input
             type="datetime-local"
             value={editableWorklog?.start_time || ""}
-            onChange={(e) => {
-              console.log("Start time changed to:", e.target.value);
-              handleFieldChange("start_time", e.target.value);
-            }}
+            onChange={(e) => handleFieldChange("start_time", e.target.value)}
             className="border rounded p-1 w-full"
             required
           />
@@ -143,15 +126,13 @@ export const WorklogRow = ({
         )}
       </td>
 
+      {/* End Time Cell */}
       <td className="px-6 py-4 text-sm text-gray-700">
         {isEditing ? (
           <input
             type="datetime-local"
             value={editableWorklog?.end_time || ""}
-            onChange={(e) => {
-              console.log("End time changed to:", e.target.value);
-              handleFieldChange("end_time", e.target.value);
-            }}
+            onChange={(e) => handleFieldChange("end_time", e.target.value)}
             className="border rounded p-1 w-full"
             required
           />
@@ -160,6 +141,7 @@ export const WorklogRow = ({
         )}
       </td>
 
+      {/* Remarks Cell */}
       <td className="px-6 py-4 text-sm text-gray-700 max-w-xs">
         {isEditing ? (
           <textarea
@@ -171,7 +153,7 @@ export const WorklogRow = ({
           />
         ) : worklog.remarks ? (
           <button
-            onClick={() => handleShowRemarks(getSafeRemarks(worklog.remarks))}
+            onClick={() => handleShowRemarks(worklog.remarks)}
             className="text-left hover:text-blue-600 w-full"
           >
             {worklog.remarks.length > 50
@@ -183,48 +165,45 @@ export const WorklogRow = ({
         )}
       </td>
 
+      {/* Actions Cell */}
       <td className="px-6 py-4 text-sm text-gray-700">
-        {isEditing ? (
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={saveEditing}
-              className="text-green-600 hover:text-green-800"
-              aria-label="Save changes"
-            >
-              <CheckIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={cancelEditing}
-              className="text-gray-600 hover:text-gray-800"
-              aria-label="Cancel editing"
-            >
-              <XMarkIcon className="w-5 h-5" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => {
-                console.log("Starting to edit worklog:", worklog.id);
-                startEditing(worklog);
-              }}
-              className="text-blue-600 hover:text-blue-800"
-              aria-label="Edit worklog"
-            >
-              <PencilIcon className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => {
-                console.log("Deleting worklog:", worklog.id);
-                onDelete(worklog.id);
-              }}
-              className="text-red-600 hover:text-red-800"
-              aria-label="Delete worklog"
-            >
-              <TrashIcon className="w-5 h-5" />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center space-x-2">
+          {isEditing ? (
+            <>
+              <button
+                onClick={saveEditing}
+                className="text-green-600 hover:text-green-800"
+                aria-label="Save changes"
+              >
+                <CheckIcon className="w-5 h-5" />
+              </button>
+              <button
+                onClick={cancelEditing}
+                className="text-gray-600 hover:text-gray-800"
+                aria-label="Cancel editing"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => startEditing(worklog)}
+                className="text-blue-600 hover:text-blue-800"
+                aria-label="Edit worklog"
+              >
+                <PencilIcon className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => onDelete(worklog.id)}
+                className="text-red-600 hover:text-red-800"
+                aria-label="Delete worklog"
+              >
+                <TrashIcon className="w-5 h-5" />
+              </button>
+            </>
+          )}
+        </div>
       </td>
     </tr>
   );

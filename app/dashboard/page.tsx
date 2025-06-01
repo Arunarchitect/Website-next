@@ -117,6 +117,7 @@ export default function DashboardPage() {
         deliverable: worklog.deliverable,
         start_time: worklog.start_time,
         end_time: worklog.end_time,
+        remarks: worklog.remarks,
       }).unwrap();
     } catch (err) {
       console.error("Failed to update worklog:", err);

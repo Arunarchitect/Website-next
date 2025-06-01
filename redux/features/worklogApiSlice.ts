@@ -1,3 +1,4 @@
+// worklogApiSlice.ts
 import { apiSlice } from "@/redux/services/apiSlice";
 
 interface Worklog {
@@ -7,7 +8,7 @@ interface Worklog {
   start_time: string;
   end_time: string;
   employee: number;
-  remarks: string;
+  remarks?: string | null;
 }
 
 interface CreateWorklogRequest {
@@ -15,6 +16,11 @@ interface CreateWorklogRequest {
   deliverable: number;
   start_time: string;
   end_time: string;
+  remarks?: string | null;
+}
+
+interface UpdateWorklogRequest extends Partial<CreateWorklogRequest> {
+  id: number;
 }
 
 export const worklogApiSlice = apiSlice.injectEndpoints({
@@ -25,29 +31,32 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
         method: "POST",
         body,
       }),
-      invalidatesTags: ['Worklog'],
+      invalidatesTags: ["Worklog"],
     }),
 
     getWorklogs: builder.query<Worklog[], void>({
       query: () => "/work-logs/",
       providesTags: (result) =>
         result
-          ? [...result.map(({ id }) => ({ type: 'Worklog' as const, id })), 'Worklog']
-          : ['Worklog'],
+          ? [
+              ...result.map(({ id }) => ({ type: "Worklog" as const, id })),
+              { type: "Worklog", id: "LIST" },
+            ]
+          : [{ type: "Worklog", id: "LIST" }],
     }),
 
     getWorklogById: builder.query<Worklog, number>({
       query: (id) => `/work-logs/${id}/`,
-      providesTags: (result, error, id) => [{ type: 'Worklog', id }],
+      providesTags: (result, error, id) => [{ type: "Worklog", id }],
     }),
 
-    updateWorklog: builder.mutation<Worklog, Partial<Worklog> & Pick<Worklog, 'id'>>({
-      query: ({ id, ...patch }) => ({
+    updateWorklog: builder.mutation<Worklog, UpdateWorklogRequest>({
+      query: ({ id, ...body }) => ({
         url: `/work-logs/${id}/`,
-        method: "PATCH",
-        body: patch,
+        method: "PUT",
+        body,
       }),
-      invalidatesTags: (result, error, { id }) => [{ type: 'Worklog', id }],
+      invalidatesTags: (result, error, { id }) => [{ type: "Worklog", id }],
     }),
 
     deleteWorklog: builder.mutation<void, number>({
@@ -55,7 +64,7 @@ export const worklogApiSlice = apiSlice.injectEndpoints({
         url: `/work-logs/${id}/`,
         method: "DELETE",
       }),
-      invalidatesTags: (result, error, id) => [{ type: 'Worklog', id }],
+      invalidatesTags: (result, error, id) => [{ type: "Worklog", id }],
     }),
   }),
 });

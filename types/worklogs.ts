@@ -117,6 +117,7 @@ export interface WorklogsTableProps {
   isLoading?: boolean;
   isError?: boolean;
   selectedDate?: Date | null;
+  
 }
 
 export interface WorkTableProps {

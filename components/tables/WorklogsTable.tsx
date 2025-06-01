@@ -1,4 +1,3 @@
-// WorklogsTable.tsx
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
@@ -6,6 +5,7 @@ import {
   WorklogsTableProps,
   Worklog,
   EditableWorklog,
+  SortKey,
 } from "@/types/worklogs";
 import { useWorklogsSort } from "@/hooks/work/useWorklogsSort";
 import { useCalendarDays } from "@/hooks/work/useCalendarDays";
@@ -31,7 +31,8 @@ export default function WorklogsTable({
   isLoading = false,
 }: WorklogsTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
+  const [editableWorklog, setEditableWorklog] =
+    useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [currentRemarks, setCurrentRemarks] = useState("");
@@ -93,47 +94,47 @@ export default function WorklogsTable({
     value: EditableWorklog[K]
   ) => {
     if (!editableWorklog) return;
-    
-    // Special handling for project changes
-    if (field === 'project') {
-      setEditableWorklog({
-        ...editableWorklog,
-        project: value as number,
-        deliverable: 0, // Reset deliverable when project changes
-      });
-    } else {
-      setEditableWorklog({
-        ...editableWorklog,
-        [field]: value,
-      });
-    }
+
+    setEditableWorklog({
+      ...editableWorklog,
+      [field]: value,
+    });
   };
 
   const saveEditing = async () => {
-    if (!editableWorklog) return;
-    setError(null);
+  if (!editableWorklog) return;
+  setError(null);
 
-    try {
-      if (!editableWorklog.project || !editableWorklog.deliverable) {
-        throw new Error("Project and Deliverable are required");
-      }
-
-      const updatedWorklog = {
-        ...editableWorklog,
-        start_time: new Date(editableWorklog.start_time).toISOString(),
-        end_time: new Date(editableWorklog.end_time).toISOString(),
-      };
-
-      await onUpdate(updatedWorklog);
-      setEditingId(null);
-      setEditableWorklog(null);
-      refetch();
-    } catch (err) {
-      console.error("Failed to update worklog:", err);
-      setError(err instanceof Error ? err.message : "Failed to update worklog");
+  try {
+    if (!editableWorklog.project || !editableWorklog.deliverable) {
+      throw new Error("Project and Deliverable are required");
     }
-  };
 
+    const updatedWorklog = {
+      ...editableWorklog,
+      start_time: new Date(editableWorklog.start_time).toISOString(),
+      end_time: new Date(editableWorklog.end_time).toISOString(),
+      remarks: editableWorklog.remarks || "",
+    };
+
+    console.log("Full PUT payload:", JSON.stringify(updatedWorklog, null, 2));
+    
+    const response = await onUpdate(updatedWorklog);
+    console.log("API Response:", response);
+    
+    // Verify the returned data contains the updated remarks
+    if (response && response.remarks !== updatedWorklog.remarks) {
+      console.warn("Remarks mismatch in response!");
+    }
+
+    setEditingId(null);
+    setEditableWorklog(null);
+    refetch();
+  } catch (err) {
+    console.error("Failed to update worklog:", err);
+    setError(err instanceof Error ? err.message : "Failed to update worklog");
+  }
+};
   const cancelEditing = () => {
     setEditingId(null);
     setEditableWorklog(null);
@@ -141,28 +142,22 @@ export default function WorklogsTable({
   };
 
   const startEditing = (worklog: Worklog) => {
-    console.log("Starting to edit worklog:", worklog);
-    
     const deliverable = deliverableMap.get(worklog.deliverable);
-    console.log("Found deliverable:", deliverable);
-    
+
     if (!deliverable) {
       console.error("No deliverable found for worklog:", worklog);
       return;
     }
 
-    const safeStart = worklog.start_time;
-    const safeEnd = worklog.end_time;
-
-    const parseIfString = (input: string | Date | null | undefined) => {
+    const parseIfString = (input: string | Date | null | undefined): Date => {
       if (!input) return new Date();
       return typeof input === "string" ? parseISO(input) : input;
     };
 
-    const safeStartTime = parseIfString(safeStart);
-    const safeEndTime = parseIfString(safeEnd);
+    const safeStartTime = parseIfString(worklog.start_time);
+    const safeEndTime = parseIfString(worklog.end_time);
 
-    const initialEditableWorklog = {
+    const initialEditableWorklog: EditableWorklog = {
       id: worklog.id,
       start_time: format(safeStartTime, "yyyy-MM-dd'T'HH:mm"),
       end_time: format(safeEndTime, "yyyy-MM-dd'T'HH:mm"),
@@ -171,7 +166,6 @@ export default function WorklogsTable({
       remarks: getSafeRemarks(worklog.remarks),
     };
 
-    console.log("Initializing editable worklog:", initialEditableWorklog);
     setEditingId(worklog.id);
     setEditableWorklog(initialEditableWorklog);
   };
@@ -180,6 +174,14 @@ export default function WorklogsTable({
     setCurrentRemarks(getSafeRemarks(remarks));
     setShowRemarksModal(true);
   };
+
+  // Define sortable columns with proper typing
+  const sortableColumns: { key: SortKey; label: string }[] = [
+    { key: "project", label: "Project" },
+    { key: "deliverable", label: "Deliverable" },
+    { key: "start_time", label: "Start Time" },
+    { key: "end_time", label: "End Time" },
+  ];
 
   if (isLoading) {
     return (
@@ -198,9 +200,7 @@ export default function WorklogsTable({
       />
 
       {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded">
-          {error}
-        </div>
+        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded">{error}</div>
       )}
 
       <h2 className="text-2xl font-semibold text-gray-800 mb-4">Worklogs</h2>
@@ -241,12 +241,7 @@ export default function WorklogsTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              {[
-                { key: "project", label: "Project" },
-                { key: "deliverable", label: "Deliverable" },
-                { key: "start_time", label: "Start Time" },
-                { key: "end_time", label: "End Time" },
-              ].map(({ key, label }) => (
+              {sortableColumns.map(({ key, label }) => (
                 <th
                   key={key}
                   onClick={() => requestSort(key)}
