@@ -1,7 +1,12 @@
+// WorklogsTable.tsx
 "use client";
 
-import { useState, useMemo } from "react";
-import { WorklogsTableProps, Worklog, EditableWorklog } from "@/types/worklogs";
+import { useState, useMemo, useEffect } from "react";
+import {
+  WorklogsTableProps,
+  Worklog,
+  EditableWorklog,
+} from "@/types/worklogs";
 import { useWorklogsSort } from "@/hooks/work/useWorklogsSort";
 import { useCalendarDays } from "@/hooks/work/useCalendarDays";
 import { CalendarView } from "@/components/Worklogs/CalendarView";
@@ -9,17 +14,12 @@ import { WorklogRow } from "@/components/Worklogs/WorklogRow";
 import { RemarksModal } from "@/components/Worklogs/RemarksModal";
 import { AttendanceSummary } from "@/components/Worklogs/AttendanceSummary";
 import { PaginationControls } from "@/components/Worklogs/PaginationControls";
-import { format, parseISO, isSameDay, differenceInMinutes } from "date-fns";
+import { format, parseISO, isSameDay } from "date-fns";
 import Spinner from "@/components/common/Spinner";
 
 const getSafeRemarks = (remarks: string | null | undefined): string => {
   return remarks ?? "";
 };
-
-interface WorklogsTableEnhancedProps extends WorklogsTableProps {
-  selectedDate?: Date | null;
-  monthlyWorklogs?: Worklog[];
-}
 
 export default function WorklogsTable({
   worklogs,
@@ -29,12 +29,13 @@ export default function WorklogsTable({
   onUpdate,
   refetch,
   isLoading = false,
-}: WorklogsTableEnhancedProps) {
+}: WorklogsTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [currentRemarks, setCurrentRemarks] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const PAGE_SIZE = 10;
 
@@ -45,7 +46,8 @@ export default function WorklogsTable({
     worklogDates,
     daysWithWorklogsCount,
     selectedDate,
-    monthlyWorklogs = [],
+    monthlyWorklogs,
+    totalHours,
     prevMonth,
     nextMonth,
     handleDateClick,
@@ -64,42 +66,22 @@ export default function WorklogsTable({
   );
 
   const filteredWorklogs = useMemo(() => {
-    if (!selectedDate) return worklogs;
+    if (!selectedDate) return monthlyWorklogs;
+    return monthlyWorklogs.filter((worklog) =>
+      worklog.startDate ? isSameDay(worklog.startDate, selectedDate) : false
+    );
+  }, [monthlyWorklogs, selectedDate]);
 
-    return worklogs.filter((worklog) => {
-      if (!worklog.start_time) return false;
-      try {
-        const worklogDate = parseISO(worklog.start_time);
-        return isSameDay(worklogDate, selectedDate);
-      } catch {
-        return false;
-      }
-    });
-  }, [worklogs, selectedDate]);
-
-  const calculateTotalHours = (logs: Worklog[]): number => {
-    if (!logs || logs.length === 0) return 0;
-    
-    return logs.reduce((total, worklog) => {
-      if (!worklog.start_time || !worklog.end_time) return total;
-      
-      try {
-        const duration = differenceInMinutes(
-          parseISO(worklog.end_time),
-          parseISO(worklog.start_time)
-        ) / 60;
-        return total + duration;
-      } catch {
-        return total;
-      }
-    }, 0);
-  };
+  useEffect(() => {
+    setCurrentPage(1); // Reset pagination when selectedDate changes
+  }, [selectedDate]);
 
   const sorted = sortedWorklogs(
-    selectedDate ? filteredWorklogs : worklogs,
+    selectedDate ? filteredWorklogs : monthlyWorklogs,
     projectMap,
     deliverableMap
   );
+
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const paginatedWorklogs = sorted.slice(
     (currentPage - 1) * PAGE_SIZE,
@@ -111,49 +93,87 @@ export default function WorklogsTable({
     value: EditableWorklog[K]
   ) => {
     if (!editableWorklog) return;
-    setEditableWorklog({
-      ...editableWorklog,
-      [field]: value,
-    });
+    
+    // Special handling for project changes
+    if (field === 'project') {
+      setEditableWorklog({
+        ...editableWorklog,
+        project: value as number,
+        deliverable: 0, // Reset deliverable when project changes
+      });
+    } else {
+      setEditableWorklog({
+        ...editableWorklog,
+        [field]: value,
+      });
+    }
   };
 
   const saveEditing = async () => {
     if (!editableWorklog) return;
+    setError(null);
+
     try {
-      await onUpdate(editableWorklog);
+      if (!editableWorklog.project || !editableWorklog.deliverable) {
+        throw new Error("Project and Deliverable are required");
+      }
+
+      const updatedWorklog = {
+        ...editableWorklog,
+        start_time: new Date(editableWorklog.start_time).toISOString(),
+        end_time: new Date(editableWorklog.end_time).toISOString(),
+      };
+
+      await onUpdate(updatedWorklog);
       setEditingId(null);
       setEditableWorklog(null);
       refetch();
-    } catch (error) {
-      console.error("Failed to update worklog:", error);
+    } catch (err) {
+      console.error("Failed to update worklog:", err);
+      setError(err instanceof Error ? err.message : "Failed to update worklog");
     }
   };
 
   const cancelEditing = () => {
     setEditingId(null);
     setEditableWorklog(null);
+    setError(null);
   };
 
   const startEditing = (worklog: Worklog) => {
+    console.log("Starting to edit worklog:", worklog);
+    
     const deliverable = deliverableMap.get(worklog.deliverable);
-    if (!deliverable) return;
+    console.log("Found deliverable:", deliverable);
+    
+    if (!deliverable) {
+      console.error("No deliverable found for worklog:", worklog);
+      return;
+    }
 
-    const safeStartTime = worklog.start_time
-      ? parseISO(worklog.start_time)
-      : new Date();
-    const safeEndTime = worklog.end_time
-      ? parseISO(worklog.end_time)
-      : new Date();
+    const safeStart = worklog.start_time;
+    const safeEnd = worklog.end_time;
 
-    setEditingId(worklog.id);
-    setEditableWorklog({
+    const parseIfString = (input: string | Date | null | undefined) => {
+      if (!input) return new Date();
+      return typeof input === "string" ? parseISO(input) : input;
+    };
+
+    const safeStartTime = parseIfString(safeStart);
+    const safeEndTime = parseIfString(safeEnd);
+
+    const initialEditableWorklog = {
       id: worklog.id,
       start_time: format(safeStartTime, "yyyy-MM-dd'T'HH:mm"),
       end_time: format(safeEndTime, "yyyy-MM-dd'T'HH:mm"),
       project: deliverable.project,
       deliverable: worklog.deliverable,
       remarks: getSafeRemarks(worklog.remarks),
-    });
+    };
+
+    console.log("Initializing editable worklog:", initialEditableWorklog);
+    setEditingId(worklog.id);
+    setEditableWorklog(initialEditableWorklog);
   };
 
   const handleShowRemarks = (remarks: string | null | undefined) => {
@@ -176,13 +196,19 @@ export default function WorklogsTable({
         onClose={() => setShowRemarksModal(false)}
         remarks={currentRemarks}
       />
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 text-red-600 rounded">
+          {error}
+        </div>
+      )}
+
       <h2 className="text-2xl font-semibold text-gray-800 mb-4">Worklogs</h2>
 
       <AttendanceSummary
         currentMonth={currentMonth}
         daysWithWorklogsCount={daysWithWorklogsCount}
-        calendarDays={calendarDays}
-        totalHours={calculateTotalHours(monthlyWorklogs)}
+        totalHours={totalHours}
       />
 
       <CalendarView
@@ -215,38 +241,22 @@ export default function WorklogsTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th
-                onClick={() => requestSort("project")}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
-              >
-                <div className="flex items-center">
-                  Project {getSortIcon("project")}
-                </div>
-              </th>
-              <th
-                onClick={() => requestSort("deliverable")}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
-              >
-                <div className="flex items-center">
-                  Deliverable {getSortIcon("deliverable")}
-                </div>
-              </th>
-              <th
-                onClick={() => requestSort("start_time")}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
-              >
-                <div className="flex items-center">
-                  Start Time {getSortIcon("start_time")}
-                </div>
-              </th>
-              <th
-                onClick={() => requestSort("end_time")}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
-              >
-                <div className="flex items-center">
-                  End Time {getSortIcon("end_time")}
-                </div>
-              </th>
+              {[
+                { key: "project", label: "Project" },
+                { key: "deliverable", label: "Deliverable" },
+                { key: "start_time", label: "Start Time" },
+                { key: "end_time", label: "End Time" },
+              ].map(({ key, label }) => (
+                <th
+                  key={key}
+                  onClick={() => requestSort(key)}
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                >
+                  <div className="flex items-center">
+                    {label} {getSortIcon(key)}
+                  </div>
+                </th>
+              ))}
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Remarks
               </th>

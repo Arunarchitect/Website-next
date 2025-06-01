@@ -1,51 +1,48 @@
 import { useState, useMemo } from "react";
 import {
   format,
-  isSameDay,
   addMonths,
   subMonths,
   startOfMonth,
   endOfMonth,
   startOfWeek,
   endOfWeek,
-  addDays,
   parseISO,
   isSameMonth,
   differenceInMinutes,
   isValid,
+  eachDayOfInterval,
 } from "date-fns";
 import { Worklog, WorklogWithDuration } from "@/types/worklogs";
 
 interface UseCalendarDaysProps {
-  worklogs?: Worklog[];
-  leaveDays?: Date[];
+  worklogs?: Worklog[]; // Array of worklog data
 }
 
 interface UseCalendarDaysReturn {
-  currentMonth: Date;
-  calendarDays: Date[];
-  worklogDates: Set<string>;
-  daysWithWorklogsCount: number;
-  leaveDaysCount: number;
-  totalHours: number;
-  selectedDate: Date | null;
-  worklogsWithDuration: WorklogWithDuration[];
-  prevMonth: () => void;
-  nextMonth: () => void;
-  handleDateClick: (day: Date) => void;
-  handleMonthChange: (month: number) => void;
-  handleYearChange: (year: number) => void;
-  setSelectedDate: (date: Date | null) => void;
+  currentMonth: Date; // Currently displayed month
+  calendarDays: Date[]; // All days to display in calendar (including surrounding weeks)
+  worklogDates: Set<string>; // Dates that have worklogs (formatted as 'yyyy-MM-dd')
+  daysWithWorklogsCount: number; // Number of days with worklogs in current month
+  totalHours: number; // Total hours worked in current month
+  selectedDate: Date | null; // Currently selected date
+  worklogsWithDuration: WorklogWithDuration[]; // Worklogs with calculated duration
+  monthlyWorklogs: WorklogWithDuration[]; // Worklogs filtered to current month
+  prevMonth: () => void; // Go to previous month
+  nextMonth: () => void; // Go to next month
+  handleDateClick: (day: Date) => void; // Handle date selection
+  handleMonthChange: (month: number) => void; // Handle month change
+  handleYearChange: (year: number) => void; // Handle year change
+  setSelectedDate: (date: Date | null) => void; // Set selected date directly
 }
 
 export const useCalendarDays = ({ 
   worklogs = [], 
-  leaveDays = [] 
 }: UseCalendarDaysProps = {}): UseCalendarDaysReturn => {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  // Safely track dates with worklogs
+  // Create a Set of dates that have worklogs (formatted as 'yyyy-MM-dd')
   const worklogDates = useMemo(() => {
     const dates = new Set<string>();
     worklogs.forEach((worklog) => {
@@ -63,20 +60,24 @@ export const useCalendarDays = ({
     return dates;
   }, [worklogs]);
 
-  // Process worklogs with duration
+  // Process worklogs to include duration calculation with proper null checks
   const worklogsWithDuration = useMemo<WorklogWithDuration[]>(() => {
     return worklogs.map((worklog) => {
       try {
         const start = worklog.start_time ? parseISO(worklog.start_time) : null;
         const end = worklog.end_time ? parseISO(worklog.end_time) : null;
         
+        // Only calculate duration if both dates are valid
+        let duration = 0;
+        if (start && end && isValid(start) && isValid(end)) {
+          duration = differenceInMinutes(end, start) / 60;
+        }
+
         return {
           ...worklog,
-          startDate: isValid(start) ? start : null,
-          endDate: isValid(end) ? end : null,
-          duration: isValid(start) && isValid(end) 
-            ? differenceInMinutes(end, start) / 60 
-            : 0
+          startDate: start && isValid(start) ? start : null,
+          endDate: end && isValid(end) ? end : null,
+          duration,
         };
       } catch (error) {
         console.warn('Invalid worklog format:', worklog, error);
@@ -84,59 +85,42 @@ export const useCalendarDays = ({
           ...worklog,
           startDate: null,
           endDate: null,
-          duration: 0
+          duration: 0,
         };
       }
     });
   }, [worklogs]);
 
-  // Days with worklogs (current month only)
-  const daysWithWorklogsCount = useMemo(() => {
-    let count = 0;
-    worklogDates.forEach(dateStr => {
-      try {
-        const date = parseISO(dateStr);
-        if (isValid(date) && isSameMonth(date, currentMonth)) {
-          count++;
-        }
-      } catch (error) {
-        console.warn('Invalid date in worklogDates:', dateStr, error);
-      }
-    });
-    return count;
-  }, [worklogDates, currentMonth]);
-
-  // Leave days count (current month only)
-  const leaveDaysCount = useMemo(() => {
-    return leaveDays.filter(leaveDate => 
-      leaveDate && isSameMonth(leaveDate, currentMonth)
-    ).length;
-  }, [leaveDays, currentMonth]);
-
-  // Total hours worked (current month only)
-  const totalHours = useMemo(() => {
-    return worklogsWithDuration
-      .filter(worklog => worklog.startDate && isSameMonth(worklog.startDate, currentMonth))
-      .reduce((sum, worklog) => sum + (worklog.duration || 0), 0);
+  // Filter worklogs to only those in the current month with null checks
+  const monthlyWorklogs = useMemo(() => {
+    return worklogsWithDuration.filter(worklog => 
+      worklog.startDate && isSameMonth(worklog.startDate, currentMonth)
+    );
   }, [worklogsWithDuration, currentMonth]);
 
-  // Calendar grid generation
+  // Generate calendar grid with proper typing
   const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(currentMonth);
-    const startDate = startOfWeek(monthStart);
-    const endDate = endOfWeek(monthEnd);
-
-    const days: Date[] = [];
-    let current = startDate;
-    
-    while (current <= endDate) {
-      days.push(current);
-      current = addDays(current, 1);
-    }
-    
-    return days;
+    const startDate = startOfWeek(startOfMonth(currentMonth));
+    const endDate = endOfWeek(endOfMonth(currentMonth));
+    return eachDayOfInterval({ start: startDate, end: endDate });
   }, [currentMonth]);
+
+  // Count days with worklogs in current month with null checks
+  const daysWithWorklogsCount = useMemo(() => {
+    return Array.from(worklogDates).filter(dateStr => {
+      try {
+        const date = parseISO(dateStr);
+        return isValid(date) && isSameMonth(date, currentMonth);
+      } catch {
+        return false;
+      }
+    }).length;
+  }, [worklogDates, currentMonth]);
+
+  // Calculate total hours with null checks
+  const totalHours = useMemo(() => {
+    return monthlyWorklogs.reduce((sum, worklog) => sum + (worklog.duration || 0), 0);
+  }, [monthlyWorklogs]);
 
   // Navigation handlers
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
@@ -160,10 +144,10 @@ export const useCalendarDays = ({
     calendarDays,
     worklogDates,
     daysWithWorklogsCount,
-    leaveDaysCount,
     totalHours,
     selectedDate,
     worklogsWithDuration,
+    monthlyWorklogs,
     prevMonth,
     nextMonth,
     handleDateClick,

@@ -46,6 +46,7 @@ export interface BaseWorkLog {
  */
 export interface Worklog extends BaseWorkLog {
   deliverable: number;
+  deliverable_name?: string; // Added to match API response
 }
 
 /**
@@ -71,10 +72,9 @@ export interface EditableWorklog {
   start_time: string;  // yyyy-MM-dd'T'HH:mm
   end_time: string;    // yyyy-MM-dd'T'HH:mm
   project: number;
-  deliverable?: number;
+  deliverable: number; // Changed from optional to required
   remarks: string;
 }
-
 
 /**
  * New worklog creation type
@@ -142,8 +142,6 @@ export interface WorklogCreateResponse {
   success: boolean;
   error?: string;
 }
-
-
 
 /**
  * Extended types for calendar functionality

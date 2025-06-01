@@ -1,6 +1,18 @@
+// WorklogRow.tsx
 import { format, parseISO } from "date-fns";
-import { PencilIcon, TrashIcon, CheckIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { Worklog, EditableWorklog, Project, Deliverable } from "@/types/worklogs";
+import {
+  PencilIcon,
+  TrashIcon,
+  CheckIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
+import {
+  Worklog,
+  EditableWorklog,
+  Project,
+  Deliverable,
+} from "@/types/worklogs";
+import { useMemo } from "react";
 
 interface WorklogRowProps {
   worklog: Worklog;
@@ -10,13 +22,20 @@ interface WorklogRowProps {
   deliverableMap: Map<number, Deliverable>;
   isEditing: boolean;
   editableWorklog: EditableWorklog | null;
-  handleFieldChange: (field: keyof EditableWorklog, value: string | number) => void;
+  handleFieldChange: <K extends keyof EditableWorklog>(
+    field: K,
+    value: EditableWorklog[K]
+  ) => void;
   startEditing: (worklog: Worklog) => void;
   onDelete: (id: number) => void;
   saveEditing: () => void;
   cancelEditing: () => void;
-  handleShowRemarks: (remarks: string) => void;
+  handleShowRemarks: (remarks: string | null | undefined) => void;
 }
+
+const getSafeRemarks = (remarks: string | null | undefined): string => {
+  return remarks ?? "";
+};
 
 export const WorklogRow = ({
   worklog,
@@ -31,13 +50,30 @@ export const WorklogRow = ({
   onDelete,
   saveEditing,
   cancelEditing,
-  handleShowRemarks
+  handleShowRemarks,
 }: WorklogRowProps) => {
-  const deliverable = deliverableMap.get(worklog.deliverable);
-  const project = deliverable ? projectMap.get(deliverable.project) : null;
+  // Filter deliverables based on selected project
+  const filteredDeliverables = useMemo(() => {
+    if (!editableWorklog?.project) return [];
+    return deliverables.filter((d) => d.project === editableWorklog.project);
+  }, [editableWorklog?.project, deliverables]);
 
-  const getFilteredDeliverables = (projectId: number) => {
-    return deliverables.filter((d) => d.project === projectId);
+  // Get current deliverable and project
+  const currentDeliverable = editableWorklog
+    ? deliverableMap.get(editableWorklog.deliverable)
+    : deliverableMap.get(worklog.deliverable);
+
+  const currentProject = currentDeliverable
+    ? projectMap.get(currentDeliverable.project)
+    : null;
+
+  const parseIfString = (input: string | Date | null | undefined): Date => {
+    if (!input) return new Date();
+    return typeof input === "string" ? parseISO(input) : input;
+  };
+
+  const formatDateTime = (dateTime: string | Date): string => {
+    return format(parseIfString(dateTime), "d MMM yyyy EEE h:mm a");
   };
 
   return (
@@ -45,9 +81,13 @@ export const WorklogRow = ({
       <td className="px-6 py-4 text-sm text-gray-700">
         {isEditing ? (
           <select
-            value={editableWorklog?.project || ""}
-            onChange={(e) => handleFieldChange("project", e.target.value)}
-            className="border rounded p-1"
+            value={editableWorklog?.project ?? ""}
+            onChange={(e) => {
+              const projectId = Number(e.target.value);
+              handleFieldChange("project", projectId);
+            }}
+            className="border rounded p-1 w-full"
+            required
           >
             <option value="">Select Project</option>
             {projects.map((p) => (
@@ -57,28 +97,32 @@ export const WorklogRow = ({
             ))}
           </select>
         ) : (
-          project?.name || "Invalid Project"
+          currentProject?.name || "Invalid Project"
         )}
       </td>
 
       <td className="px-6 py-4 text-sm text-gray-700">
         {isEditing ? (
           <select
-            value={editableWorklog?.deliverable || ""}
-            onChange={(e) => handleFieldChange("deliverable", e.target.value)}
-            className="border rounded p-1"
+            value={editableWorklog?.deliverable ?? ""}
+            onChange={(e) =>
+              handleFieldChange("deliverable", Number(e.target.value))
+            }
+            className="border rounded p-1 w-full"
             disabled={!editableWorklog?.project}
+            required
           >
             <option value="">Select Deliverable</option>
-            {editableWorklog?.project &&
-              getFilteredDeliverables(editableWorklog.project).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
+            {filteredDeliverables.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
           </select>
         ) : (
-          deliverable?.name || "Invalid Deliverable"
+          currentDeliverable?.name ||
+          worklog.deliverable_name ||
+          "Invalid Deliverable"
         )}
       </td>
 
@@ -87,11 +131,15 @@ export const WorklogRow = ({
           <input
             type="datetime-local"
             value={editableWorklog?.start_time || ""}
-            onChange={(e) => handleFieldChange("start_time", e.target.value)}
-            className="border rounded p-1"
+            onChange={(e) => {
+              console.log("Start time changed to:", e.target.value);
+              handleFieldChange("start_time", e.target.value);
+            }}
+            className="border rounded p-1 w-full"
+            required
           />
         ) : (
-          format(parseISO(worklog.start_time), "d MMM yyyy EEE h:mm a")
+          formatDateTime(worklog.start_time)
         )}
       </td>
 
@@ -100,11 +148,15 @@ export const WorklogRow = ({
           <input
             type="datetime-local"
             value={editableWorklog?.end_time || ""}
-            onChange={(e) => handleFieldChange("end_time", e.target.value)}
-            className="border rounded p-1"
+            onChange={(e) => {
+              console.log("End time changed to:", e.target.value);
+              handleFieldChange("end_time", e.target.value);
+            }}
+            className="border rounded p-1 w-full"
+            required
           />
         ) : (
-          format(parseISO(worklog.end_time), "d MMM yyyy EEE h:mm a ")
+          formatDateTime(worklog.end_time)
         )}
       </td>
 
@@ -119,8 +171,8 @@ export const WorklogRow = ({
           />
         ) : worklog.remarks ? (
           <button
-            onClick={() => handleShowRemarks(worklog.remarks || "")}
-            className="text-left hover:text-blue-600"
+            onClick={() => handleShowRemarks(getSafeRemarks(worklog.remarks))}
+            className="text-left hover:text-blue-600 w-full"
           >
             {worklog.remarks.length > 50
               ? `${worklog.remarks.substring(0, 50)}...`
@@ -152,14 +204,20 @@ export const WorklogRow = ({
         ) : (
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => startEditing(worklog)}
+              onClick={() => {
+                console.log("Starting to edit worklog:", worklog.id);
+                startEditing(worklog);
+              }}
               className="text-blue-600 hover:text-blue-800"
               aria-label="Edit worklog"
             >
               <PencilIcon className="w-5 h-5" />
             </button>
             <button
-              onClick={() => onDelete(worklog.id)}
+              onClick={() => {
+                console.log("Deleting worklog:", worklog.id);
+                onDelete(worklog.id);
+              }}
               className="text-red-600 hover:text-red-800"
               aria-label="Delete worklog"
             >
