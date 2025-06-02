@@ -12,6 +12,7 @@ import {
   subMonths,
   startOfWeek,
   endOfWeek,
+  differenceInMinutes,
 } from "date-fns";
 import { WorkTableProps, SortKey, UserWorkLog } from "@/types/worklogs";
 import { CalendarView } from "@/components/Worklogs/CalendarView";
@@ -22,11 +23,32 @@ import { WorkTableContent } from "@/components/Userworklogs/WorkTableContent";
 import Spinner from "@/components/common/Spinner";
 import { MonthlyReportButton } from "@/components/reports/MonthlyReportButton";
 
+// Improved duration formatting helper
+const formatDuration = (minutes: number | undefined): string => {
+  if (minutes === undefined || isNaN(minutes)) return "0h 0m";
+  const absMinutes = Math.abs(minutes);
+  const hours = Math.floor(absMinutes / 60);
+  const mins = Math.round(absMinutes % 60);
+  return minutes < 0 ? `-${hours}h ${mins}m` : `${hours}h ${mins}m`;
+};
+
+// Function to calculate duration in minutes between two timestamps
+const calculateDuration = (startTime: string, endTime: string): number => {
+  try {
+    if (!startTime || !endTime) return 0;
+    const start = parseISO(startTime);
+    const end = parseISO(endTime);
+    return differenceInMinutes(end, start);
+  } catch (error) {
+    console.error("Error calculating duration:", error);
+    return 0;
+  }
+};
+
 export default function WorkTable({
   worklogs: initialWorklogs,
   isError,
   isLoading = false,
-  totalHours,
   sortKey: initialSortKey = "start_time",
   sortDirection: initialSortDirection = "desc",
   onSort,
@@ -45,16 +67,31 @@ export default function WorkTable({
   const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   useEffect(() => {
-    setWorklogs(
-      initialWorklogs.map((log) => ({
+  setWorklogs(
+    initialWorklogs.map((log) => {
+      // IGNORE log.duration, always calculate from timestamps
+      const duration = calculateDuration(log.start_time, log.end_time ?? "");
+
+      // Log calculation details for debugging
+      console.log(
+        `Worklog ID: ${log.id || 'N/A'}`,
+        `| Start: ${log.start_time}`,
+        `| End: ${log.end_time || 'N/A'}`,
+        `| Calculated Duration: ${duration} mins (${formatDuration(duration)})`
+      );
+
+      return {
         ...log,
         end_time: log.end_time ?? "",
-        duration: log.duration ?? 0,
+        duration, // Override with calculated value
         remarks: log.remarks ?? "",
         organisation: log.organisation ?? "",
-      }))
-    );
-  }, [initialWorklogs]);
+        formattedDuration: formatDuration(duration),
+      };
+    })
+  );
+}, [initialWorklogs]);
+
 
   const organizations = useMemo<string[]>(() => {
     return Array.from(
@@ -86,7 +123,6 @@ export default function WorkTable({
         }
       });
     }
-
     return logs;
   }, [worklogs, selectedOrg, currentMonth, showOnlyCurrentMonth]);
 
@@ -121,18 +157,14 @@ export default function WorkTable({
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(currentMonth);
     const monthEnd = endOfMonth(currentMonth);
-
     const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
     const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
-
     return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
   }, [currentMonth]);
 
   const filteredLogs = useMemo(() => {
     if (!selectedDate) return orgFilteredLogs;
-
     const target = format(selectedDate, "yyyy-MM-dd");
-
     return orgFilteredLogs.filter((log) => {
       try {
         return format(parseISO(log.start_time), "yyyy-MM-dd") === target;
@@ -240,9 +272,8 @@ export default function WorkTable({
         <WorkTableHeader
           currentMonth={currentMonth}
           daysWithWorklogsCount={daysWithWorklogsCount}
-          totalHours={totalHours}
         />
-        <MonthlyReportButton 
+        <MonthlyReportButton
           worklogs={worklogs}
           currentMonth={currentMonth}
           selectedOrg={selectedOrg}

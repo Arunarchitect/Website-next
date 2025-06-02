@@ -38,19 +38,19 @@ export function WorkTableContent({
     console.groupEnd();
   }, [sortedLogs]);
 
-  const formatDuration = (duration: number | undefined) => {
-    // Handle undefined case
+  const formatDurationDisplay = (duration: number | undefined) => {
     if (duration === undefined) {
       return <span className="text-gray-400">N/A</span>;
     }
 
-    const absDuration = Math.abs(duration);
-    const formatted = absDuration.toFixed(2);
+    const hours = Math.floor(Math.abs(duration) / 60);
+    const mins = Math.round(Math.abs(duration) % 60);
+    const formatted = `${hours}h ${mins}m`;
 
     if (duration < 0) {
       return (
         <span className="inline-flex items-center">
-          {formatted}
+          -{formatted}
           <span className="ml-1 text-red-500" title="Negative duration">
             ⚠
           </span>
@@ -93,7 +93,7 @@ export function WorkTableContent({
               onClick={() => handleSort("duration")}
               className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
             >
-              Duration (hrs) {renderSortArrow("duration")}
+              Duration {renderSortArrow("duration")}
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Remarks
@@ -124,7 +124,7 @@ export function WorkTableContent({
                 )}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                {formatDuration(log.duration)}
+                {formatDurationDisplay(log.duration)}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                 {hasValidRemarks(log.remarks) ? (

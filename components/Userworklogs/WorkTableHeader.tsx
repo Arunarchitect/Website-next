@@ -1,9 +1,9 @@
 import { format } from "date-fns";
 
+// Option 2: Change the prop type to string if you want formatted duration
 interface WorkTableHeaderProps {
   currentMonth: Date;
   daysWithWorklogsCount?: number;
-  totalHours: number; // This line is the key change
 }
 
 export function WorkTableHeader({
