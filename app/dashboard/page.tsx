@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { format, subDays } from "date-fns";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import {
   useGetMyMembershipsQuery,
@@ -14,9 +15,22 @@ import {
 } from "@/redux/features/worklogApiSlice";
 import { useGetProjectsQuery } from "@/redux/features/projectApiSlice";
 import { useGetDeliverablesQuery } from "@/redux/features/deliverableApiSlice";
+import {
+  useGetExpensesQuery,
+  useDeleteExpenseMutation,
+  useUpdateExpenseMutation,
+  useCreateExpenseMutation,
+} from "@/redux/features/expenseApiSlice";
 import WorklogForm from "@/components/forms/WorklogForm";
+import ExpenseForm from "@/components/forms/ExpenseForm";
 import WorklogsTable from "@/components/tables/WorklogsTable";
+import ExpensesTable from "@/components/tables/ExpensesTable";
 import { EditableWorklog, Worklog } from "@/types/worklogs";
+import {
+  Expense,
+  CreateExpenseRequest,
+  EditableExpense,
+} from "@/types/expenses";
 import { Spinner } from "@/components/common";
 
 interface Organization {
@@ -29,6 +43,10 @@ export default function DashboardPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: subDays(new Date(), 30),
+    to: new Date(),
+  });
 
   // User data
   const {
@@ -52,15 +70,30 @@ export default function DashboardPage() {
   } = useGetMyOrganisationsQuery();
 
   // Worklogs data
-  const { data: allWorklogs = [], refetch: refetchWorklogs } = useGetWorklogsQuery();
+  const { data: allWorklogs = [], refetch: refetchWorklogs } =
+    useGetWorklogsQuery();
 
   // Projects and deliverables data
   const { data: projects = [] } = useGetProjectsQuery();
   const { data: deliverables = [] } = useGetDeliverablesQuery();
 
+  const {
+    data: expenses = [],
+    refetch: refetchExpenses,
+    isLoading: isExpensesLoading,
+  } = useGetExpensesQuery({
+    start_date: dateRange?.from
+      ? format(dateRange.from, "yyyy-MM-dd")
+      : undefined,
+    end_date: dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined,
+  });
+
   // Mutations
   const [deleteWorklog] = useDeleteWorklogMutation();
   const [updateWorklog] = useUpdateWorklogMutation();
+  const [deleteExpense] = useDeleteExpenseMutation();
+  const [updateExpense] = useUpdateExpenseMutation();
+  const [createExpense] = useCreateExpenseMutation();
 
   useEffect(() => {
     setIsMounted(true);
@@ -86,13 +119,15 @@ export default function DashboardPage() {
   );
 
   // Create admin organizations array with names
-  const adminOrganizations: Organization[] = adminMemberships.map((membership) => {
-    const org = organisations.find((o) => o.id === membership.organisation);
-    return {
-      id: membership.organisation,
-      name: org?.name || `Organization ${membership.organisation}`,
-    };
-  });
+  const adminOrganizations: Organization[] = adminMemberships.map(
+    (membership) => {
+      const org = organisations.find((o) => o.id === membership.organisation);
+      return {
+        id: membership.organisation,
+        name: org?.name || `Organization ${membership.organisation}`,
+      };
+    }
+  );
 
   const isAdmin = adminOrganizations.length > 0;
 
@@ -140,6 +175,62 @@ export default function DashboardPage() {
     );
   }
 
+  const handleDeleteExpense = async (id: number) => {
+    try {
+      await deleteExpense(id).unwrap();
+      refetchExpenses();
+    } catch (err) {
+      console.error("Failed to delete expense:", err);
+    }
+  };
+
+  const handleUpdateExpense = async (
+    expense: EditableExpense
+  ): Promise<void> => {
+    try {
+      if (typeof expense.id !== "number") {
+        throw new Error("Invalid expense ID");
+      }
+
+      // Format the data to match backend expectations
+      const updateData = {
+        project_id:
+          typeof expense.project === "object"
+            ? expense.project.id
+            : expense.project_id, // Changed from 'project' to 'project_id'
+        amount: parseFloat(expense.amount.toString()),
+        category: expense.category,
+        date: new Date(expense.date).toISOString().split("T")[0],
+        remarks: expense.remarks || "",
+      };
+
+      console.log("Sending update:", updateData);
+
+      await updateExpense({
+        id: expense.id,
+        ...updateData,
+      }).unwrap();
+
+      refetchExpenses();
+    } catch (err) {
+      console.error("Failed to update expense - details:", {
+        error: err,
+        requestData: expense,
+      });
+      throw err;
+    }
+  };
+  // Add this handler function to your component
+  const handleCreateExpense = async (expenseData: CreateExpenseRequest) => {
+    try {
+      await createExpense(expenseData).unwrap();
+      refetchExpenses();
+    } catch (err) {
+      console.error("Failed to create expense:", err);
+      throw err;
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <header className="bg-white shadow-sm rounded-lg p-6 mb-8">
@@ -172,7 +263,24 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {user?.id && <WorklogForm userId={user.id} onSuccess={refetchWorklogs} />}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div className="bg-white shadow-sm rounded-lg p-6">
+          <h2 className="text-xl font-semibold mb-4">Add Worklog</h2>
+          {user?.id && (
+            <WorklogForm userId={user.id} onSuccess={refetchWorklogs} />
+          )}
+        </div>
+
+        <div className="bg-white shadow-sm rounded-lg p-6">
+          <h2 className="text-xl font-semibold mb-4">Add Expense</h2>
+          <ExpenseForm
+            projects={projects}
+            onSuccess={() => refetchExpenses()}
+            onSubmit={handleCreateExpense}
+            onCancel={() => {}}
+          />
+        </div>
+      </div>
 
       <WorklogsTable
         worklogs={userWorklogs}
@@ -181,6 +289,64 @@ export default function DashboardPage() {
         onDelete={handleDelete}
         onUpdate={handleUpdate}
         refetch={refetchWorklogs}
+      />
+
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-semibold">Expenses</h2>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <label htmlFor="start-date">From:</label>
+            <input
+              type="date"
+              id="start-date"
+              value={
+                dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : ""
+              }
+              onChange={(e) =>
+                setDateRange({
+                  ...dateRange,
+                  from: e.target.value ? new Date(e.target.value) : undefined,
+                })
+              }
+              className="border rounded px-2 py-1"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <label htmlFor="end-date">To:</label>
+            <input
+              type="date"
+              id="end-date"
+              value={dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : ""}
+              onChange={(e) =>
+                setDateRange({
+                  ...dateRange,
+                  to: e.target.value ? new Date(e.target.value) : undefined,
+                })
+              }
+              className="border rounded px-2 py-1"
+              min={
+                dateRange?.from
+                  ? format(dateRange.from, "yyyy-MM-dd")
+                  : undefined
+              }
+            />
+          </div>
+          <button
+            onClick={() => refetchExpenses()}
+            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+
+      <ExpensesTable
+        expenses={expenses}
+        projects={projects}
+        onDelete={handleDeleteExpense}
+        onUpdate={handleUpdateExpense}
+        refetch={refetchExpenses}
+        isLoading={isExpensesLoading}
       />
 
       {isModalOpen && (

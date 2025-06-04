@@ -97,6 +97,7 @@ export const apiSlice = createApi({
     'UserWorklog',        // For individual worklog entries (note the lowercase 'l' to match the error)
     'UserDeliverables',
     'UserOrganisations',
+    'Expense'
   ],
   endpoints: () => ({}),
 });
