@@ -1,3 +1,4 @@
+// components/tables/WorklogsTable.tsx
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
@@ -8,11 +9,8 @@ import {
   SortKey,
 } from "@/types/worklogs";
 import { useWorklogsSort } from "@/hooks/work/useWorklogsSort";
-import { useCalendarDays } from "@/hooks/work/useCalendarDays";
-import { CalendarView } from "@/components/Worklogs/CalendarView";
 import { WorklogRow } from "@/components/Worklogs/WorklogRow";
 import { RemarksModal } from "@/components/Worklogs/RemarksModal";
-import { AttendanceSummary } from "@/components/Worklogs/AttendanceSummary";
 import { PaginationControls } from "@/components/Worklogs/PaginationControls";
 import { format, parseISO, isSameDay } from "date-fns";
 import Spinner from "@/components/common/Spinner";
@@ -29,10 +27,10 @@ export default function WorklogsTable({
   onUpdate,
   refetch,
   isLoading = false,
+  selectedDate,
 }: WorklogsTableProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editableWorklog, setEditableWorklog] =
-    useState<EditableWorklog | null>(null);
+  const [editableWorklog, setEditableWorklog] = useState<EditableWorklog | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [currentRemarks, setCurrentRemarks] = useState("");
@@ -41,21 +39,6 @@ export default function WorklogsTable({
   const PAGE_SIZE = 10;
 
   const { sortedWorklogs, requestSort, getSortIcon } = useWorklogsSort();
-  const {
-    currentMonth,
-    calendarDays,
-    worklogDates,
-    daysWithWorklogsCount,
-    selectedDate,
-    monthlyWorklogs,
-    totalHours,
-    prevMonth,
-    nextMonth,
-    handleDateClick,
-    handleMonthChange,
-    handleYearChange,
-    setSelectedDate,
-  } = useCalendarDays({ worklogs });
 
   const projectMap = useMemo(
     () => new Map(projects.map((p) => [p.id, p])),
@@ -66,23 +49,26 @@ export default function WorklogsTable({
     [deliverables]
   );
 
+  // Filter worklogs by selected date if provided
   const filteredWorklogs = useMemo(() => {
-    if (!selectedDate) return monthlyWorklogs;
-    return monthlyWorklogs.filter((worklog) =>
-      worklog.startDate ? isSameDay(worklog.startDate, selectedDate) : false
-    );
-  }, [monthlyWorklogs, selectedDate]);
+    if (selectedDate) {
+      return worklogs.filter((worklog) => {
+        try {
+          const date = worklog.start_time ? parseISO(worklog.start_time) : null;
+          return date && isSameDay(date, selectedDate);
+        } catch {
+          return false;
+        }
+      });
+    }
+    return worklogs; // Month filtering is already done in the parent component
+  }, [worklogs, selectedDate]);
 
   useEffect(() => {
-    setCurrentPage(1); // Reset pagination when selectedDate changes
-  }, [selectedDate]);
+    setCurrentPage(1); // Reset pagination when filtering changes
+  }, [filteredWorklogs]);
 
-  const sorted = sortedWorklogs(
-    selectedDate ? filteredWorklogs : monthlyWorklogs,
-    projectMap,
-    deliverableMap
-  );
-
+  const sorted = sortedWorklogs(filteredWorklogs, projectMap, deliverableMap);
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const paginatedWorklogs = sorted.slice(
     (currentPage - 1) * PAGE_SIZE,
@@ -94,7 +80,6 @@ export default function WorklogsTable({
     value: EditableWorklog[K]
   ) => {
     if (!editableWorklog) return;
-
     setEditableWorklog({
       ...editableWorklog,
       [field]: value,
@@ -102,34 +87,31 @@ export default function WorklogsTable({
   };
 
   const saveEditing = async () => {
-  if (!editableWorklog) return;
-  setError(null);
+    if (!editableWorklog) return;
+    setError(null);
 
-  try {
-    if (!editableWorklog.project || !editableWorklog.deliverable) {
-      throw new Error("Project and Deliverable are required");
+    try {
+      if (!editableWorklog.project || !editableWorklog.deliverable) {
+        throw new Error("Project and Deliverable are required");
+      }
+
+      const updatedWorklog = {
+        ...editableWorklog,
+        start_time: new Date(editableWorklog.start_time).toISOString(),
+        end_time: new Date(editableWorklog.end_time).toISOString(),
+        remarks: editableWorklog.remarks || "",
+      };
+
+      await onUpdate(updatedWorklog);
+      setEditingId(null);
+      setEditableWorklog(null);
+      refetch();
+    } catch (err) {
+      console.error("Failed to update worklog:", err);
+      setError(err instanceof Error ? err.message : "Failed to update worklog");
     }
+  };
 
-    const updatedWorklog = {
-      ...editableWorklog,
-      start_time: new Date(editableWorklog.start_time).toISOString(),
-      end_time: new Date(editableWorklog.end_time).toISOString(),
-      remarks: editableWorklog.remarks || "",
-    };
-
-    console.log("Full PUT payload:", JSON.stringify(updatedWorklog, null, 2));
-    
-    const response = await onUpdate(updatedWorklog);
-    console.log("API Response:", response);
-
-    setEditingId(null);
-    setEditableWorklog(null);
-    refetch();
-  } catch (err) {
-    console.error("Failed to update worklog:", err);
-    setError(err instanceof Error ? err.message : "Failed to update worklog");
-  }
-};
   const cancelEditing = () => {
     setEditingId(null);
     setEditableWorklog(null);
@@ -170,7 +152,7 @@ export default function WorklogsTable({
     setShowRemarksModal(true);
   };
 
-  // Define sortable columns with proper typing
+  // Define sortable columns
   const sortableColumns: { key: SortKey; label: string }[] = [
     { key: "project", label: "Project" },
     { key: "deliverable", label: "Deliverable" },
@@ -187,7 +169,7 @@ export default function WorklogsTable({
   }
 
   return (
-    <div className="bg-white shadow rounded-lg p-6">
+     <div className="bg-white shadow rounded-lg p-6 mb-8">
       <RemarksModal
         show={showRemarksModal}
         onClose={() => setShowRemarksModal(false)}
@@ -200,35 +182,21 @@ export default function WorklogsTable({
 
       <h2 className="text-2xl font-semibold text-gray-800 mb-4">Worklogs</h2>
 
-      <AttendanceSummary
-        currentMonth={currentMonth}
-        daysWithWorklogsCount={daysWithWorklogsCount}
-        totalHours={totalHours}
-      />
-
-      <CalendarView
-        currentMonth={currentMonth}
-        calendarDays={calendarDays}
-        worklogDates={worklogDates}
-        selectedDate={selectedDate}
-        prevMonth={prevMonth}
-        nextMonth={nextMonth}
-        handleDateClick={handleDateClick}
-        handleMonthChange={handleMonthChange}
-        handleYearChange={handleYearChange}
-      />
-
-      {selectedDate && (
+      {selectedDate ? (
         <div className="mb-4 flex items-center justify-between">
           <div className="text-sm font-medium text-gray-700">
             Showing worklogs for: {format(selectedDate, "MMMM d, yyyy")}
           </div>
           <button
-            onClick={() => setSelectedDate(null)}
+            onClick={() => refetch()}
             className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
           >
-            Clear date filter
+            Refresh
           </button>
+        </div>
+      ) : (
+        <div className="mb-4 text-sm font-medium text-gray-700">
+          Showing all worklogs for the current month
         </div>
       )}
 

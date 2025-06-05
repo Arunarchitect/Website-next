@@ -1,19 +1,21 @@
 // components/tables/ExpensesTable.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Expense, EditableExpense, Project } from "@/types/expenses";
-import { format } from "date-fns";
+import { format, isSameDay, isWithinInterval, parseISO } from "date-fns";
 import { PencilIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Spinner } from "@/components/common";
 
 interface Props {
   expenses: Expense[];
-  projects: Project[];  // Changed from any[] to Project[]
+  projects: Project[];
   onDelete: (id: number) => void;
   onUpdate: (expense: EditableExpense) => Promise<void>;
   refetch: () => void;
   isLoading?: boolean;
+  selectedDate?: Date | null;
+  monthRange?: { start: Date; end: Date };
 }
 
 export default function ExpensesTable({
@@ -23,11 +25,39 @@ export default function ExpensesTable({
   onUpdate,
   refetch,
   isLoading = false,
+  selectedDate,
+  monthRange,
 }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editableExpense, setEditableExpense] = useState<EditableExpense | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Filter expenses based on selected date or month range
+  const filteredExpenses = useMemo(() => {
+    if (selectedDate) {
+      return expenses.filter((expense) => {
+        try {
+          const expenseDate = expense.date ? parseISO(expense.date) : null;
+          return expenseDate && isSameDay(expenseDate, selectedDate);
+        } catch {
+          return false;
+        }
+      });
+    } else if (monthRange) {
+      return expenses.filter((expense) => {
+        try {
+          const expenseDate = expense.date ? parseISO(expense.date) : null;
+          return expenseDate && isWithinInterval(expenseDate, { 
+            start: monthRange.start, 
+            end: monthRange.end 
+          });
+        } catch {
+          return false;
+        }
+      });
+    }
+    return expenses;
+  }, [expenses, selectedDate, monthRange]);
 
   const handleEdit = (expense: Expense) => {
     setEditingId(expense.id);
@@ -65,15 +95,7 @@ export default function ExpensesTable({
         throw new Error("Please enter a valid amount");
       }
 
-      // Create the update payload
-      const updatePayload: EditableExpense = {
-        ...editableExpense,
-        amount: editableExpense.amount, // Keep as string if your API expects string
-        // Or convert to number if needed:
-        // amount: Number(editableExpense.amount),
-      };
-
-      await onUpdate(updatePayload);
+      await onUpdate(editableExpense);
       setEditingId(null);
       setEditableExpense(null);
       refetch();
@@ -98,13 +120,24 @@ export default function ExpensesTable({
   }
 
   return (
-    <div className="mt-8">
+    <div className="bg-white shadow rounded-lg p-6">
       {error && (
         <div className="mb-4 p-4 bg-red-50 text-red-600 rounded">{error}</div>
       )}
 
+      {selectedDate ? (
+        <div className="mb-4 text-sm text-gray-600">
+          Showing expenses for: {format(selectedDate, "MMMM d, yyyy")}
+        </div>
+      ) : monthRange && (
+        <div className="mb-4 text-sm text-gray-600">
+          Showing expenses from {format(monthRange.start, "MMM d")} to {format(monthRange.end, "MMM d, yyyy")}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
+          {/* Table headers and rows remain the same as before */}
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -128,8 +161,9 @@ export default function ExpensesTable({
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {expenses.map((expense) => (
+            {filteredExpenses.map((expense) => (
               <tr key={expense.id}>
+                {/* Table cells remain the same as before */}
                 <td className="px-6 py-4 whitespace-nowrap">
                   {editingId === expense.id ? (
                     <select

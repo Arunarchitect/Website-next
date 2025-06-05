@@ -1,8 +1,14 @@
+// app/dashboard/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { format, subDays } from "date-fns";
+import {
+  format,
+  parseISO,
+  isSameDay,
+  isWithinInterval,
+} from "date-fns";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import {
   useGetMyMembershipsQuery,
@@ -26,27 +32,23 @@ import ExpenseForm from "@/components/forms/ExpenseForm";
 import WorklogsTable from "@/components/tables/WorklogsTable";
 import ExpensesTable from "@/components/tables/ExpensesTable";
 import { EditableWorklog, Worklog } from "@/types/worklogs";
-import {
-  Expense,
-  CreateExpenseRequest,
-  EditableExpense,
-} from "@/types/expenses";
+import { CreateExpenseRequest, EditableExpense } from "@/types/expenses";
 import { Spinner } from "@/components/common";
+import { useSharedCalendar } from "@/hooks/calendar/useSharedCalendar";
+import { SharedCalendar } from "@/components/common/SharedCalendar";
 
 interface Organization {
   id: number;
   name: string;
 }
 
+
 export default function DashboardPage() {
   const router = useRouter();
   const [isMounted, setIsMounted] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: subDays(new Date(), 30),
-    to: new Date(),
-  });
+
 
   // User data
   const {
@@ -77,15 +79,24 @@ export default function DashboardPage() {
   const { data: projects = [] } = useGetProjectsQuery();
   const { data: deliverables = [] } = useGetDeliverablesQuery();
 
+  // Expenses data
   const {
     data: expenses = [],
     refetch: refetchExpenses,
     isLoading: isExpensesLoading,
-  } = useGetExpensesQuery({
-    start_date: dateRange?.from
-      ? format(dateRange.from, "yyyy-MM-dd")
-      : undefined,
-    end_date: dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined,
+  } = useGetExpensesQuery({});
+
+  const {
+    currentMonth,
+    monthRange,
+    worklogDates,
+    expenseDates,
+    selectedDate,
+    setSelectedDate,
+    handleMonthChange,
+  } = useSharedCalendar({
+    worklogs: allWorklogs,
+    expenses,
   });
 
   // Mutations
@@ -108,10 +119,42 @@ export default function DashboardPage() {
     isOrgLoading ||
     isOrgFetching;
 
-  // Filter worklogs for current user
-  const userWorklogs = allWorklogs.filter(
-    (worklog: Worklog) => worklog.employee === user?.id
-  );
+  // Filter worklogs for current user and selected date
+  const userWorklogs = useMemo(() => {
+    let filtered = allWorklogs.filter(
+      (worklog: Worklog) => worklog.employee === user?.id
+    );
+
+    if (selectedDate) {
+      filtered = filtered.filter((worklog) => {
+        try {
+          const date = worklog.start_time ? parseISO(worklog.start_time) : null;
+          return date && isSameDay(date, selectedDate);
+        } catch {
+          return false;
+        }
+      });
+    } else {
+      // Apply month filter when no specific date is selected
+      filtered = filtered.filter((worklog) => {
+        try {
+          const date = worklog.start_time ? parseISO(worklog.start_time) : null;
+          return (
+            date &&
+            isWithinInterval(date, {
+              start: monthRange.start,
+              end: monthRange.end,
+            })
+          );
+        } catch {
+          return false;
+        }
+      });
+    }
+
+    return filtered;
+  }, [allWorklogs, user?.id, selectedDate, monthRange]);
+
 
   // Get admin organizations from memberships
   const adminMemberships = memberships.filter(
@@ -193,10 +236,10 @@ export default function DashboardPage() {
       }
 
       const updateData = {
-        project_id: expense.project_id, // Use project_id
-        amount: Number(expense.amount), // Ensure number
+        project_id: expense.project_id,
+        amount: Number(expense.amount),
         category: expense.category,
-        date: new Date(expense.date).toISOString().split("T")[0], // Format date
+        date: new Date(expense.date).toISOString().split("T")[0],
         remarks: expense.remarks || "",
       };
 
@@ -212,11 +255,10 @@ export default function DashboardPage() {
     }
   };
 
-  // Add this handler function to your component
   const handleCreateExpense = async (expenseData: CreateExpenseRequest) => {
     try {
       const payload = {
-        project_id: expenseData.project_id, // Make sure this matches API expectations
+        project_id: expenseData.project_id,
         amount: Number(expenseData.amount),
         category: expenseData.category,
         date: expenseData.date,
@@ -263,6 +305,8 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Shared Calendar Section */}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white shadow-sm rounded-lg p-6">
           <h2 className="text-xl font-semibold mb-4">Add Worklog</h2>
@@ -281,6 +325,31 @@ export default function DashboardPage() {
           />
         </div>
       </div>
+      <div className="bg-white shadow-sm rounded-lg p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">Calendar</h2>
+        <SharedCalendar
+          currentDate={currentMonth}
+          worklogDates={worklogDates}
+          expenseDates={expenseDates}
+          selectedDate={selectedDate}
+          onDateChange={setSelectedDate}
+          onMonthChange={handleMonthChange}
+        />
+
+        {selectedDate && (
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm font-medium text-gray-700">
+              Showing data for: {format(selectedDate, "MMMM d, yyyy")}
+            </div>
+            <button
+              onClick={() => setSelectedDate(null)}
+              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+            >
+              Clear date filter
+            </button>
+          </div>
+        )}
+      </div>
 
       <WorklogsTable
         worklogs={userWorklogs}
@@ -289,20 +358,22 @@ export default function DashboardPage() {
         onDelete={handleDelete}
         onUpdate={handleUpdate}
         refetch={refetchWorklogs}
+        selectedDate={selectedDate}
       />
 
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Expenses</h2>
+      <div className="mt-8">
+        <h2 className="text-xl font-semibold mb-4">Expenses</h2>
+        <ExpensesTable
+          expenses={expenses}
+          projects={projects}
+          onDelete={handleDeleteExpense}
+          onUpdate={handleUpdateExpense}
+          refetch={refetchExpenses}
+          isLoading={isExpensesLoading}
+          selectedDate={selectedDate}
+          monthRange={selectedDate ? undefined : monthRange}
+        />
       </div>
-
-      <ExpensesTable
-        expenses={expenses}
-        projects={projects}
-        onDelete={handleDeleteExpense}
-        onUpdate={handleUpdateExpense}
-        refetch={refetchExpenses}
-        isLoading={isExpensesLoading}
-      />
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
