@@ -7,9 +7,11 @@ import {
   useGetUserDeliverablesQuery,
   useGetUserWorkLogsQuery,
 } from "@/redux/features/userApiSlice";
+import { useGetExpensesQuery } from "@/redux/features/expenseApiSlice";
 import { Spinner } from "@/components/common";
 import WorkTable from "@/components/tables/workTable";
 import DeliverablesTable from "@/components/tables/deliverablesTable";
+import AdminExpensesTable from "@/components/tables/AdminExpensesTable";
 import {
   format,
   formatDistanceToNow,
@@ -17,12 +19,30 @@ import {
   isYesterday,
   isAfter,
   differenceInMinutes,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  addMonths,
 } from "date-fns";
 import { UserWorkLog } from "@/types/worklogs";
+import { useState, useMemo } from "react";
 
 export default function UserDetailsPage() {
   const params = useParams();
-  const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
+  const userId = Array.isArray(params.userId)
+    ? params.userId[0]
+    : params.userId;
+
+  // State for date range with better handling
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  
+
+  const monthRange = useMemo(() => ({
+    start: startOfMonth(currentMonth),
+    end: endOfMonth(currentMonth),
+  }), [currentMonth]);
 
   const {
     data: user,
@@ -48,6 +68,25 @@ export default function UserDetailsPage() {
     isError: isWorklogsError,
   } = useGetUserWorkLogsQuery(userId || "", { skip: !userId });
 
+  // Get expenses for the current month range
+  const {
+    data: allExpenses = [],
+    isLoading: isExpensesLoading,
+    isError: isExpensesError,
+  } = useGetExpensesQuery(
+    {
+      start_date: format(monthRange.start, "yyyy-MM-dd"),
+      end_date: format(monthRange.end, "yyyy-MM-dd"),
+    },
+    { skip: !userId }
+  );
+
+  // Filter expenses by user ID client-side
+  const expenses = useMemo(() => {
+    if (!userId || !allExpenses) return [];
+    return allExpenses.filter((expense) => expense.user?.id === Number(userId));
+  }, [allExpenses, userId]);
+
   const calculateDuration = (start: string, end: string): number => {
     const startDate = new Date(start);
     const endDate = new Date(end);
@@ -58,24 +97,36 @@ export default function UserDetailsPage() {
     id: log.id,
     start_time: log.start_time,
     end_time: log.end_time || log.start_time,
-    duration: log.duration || calculateDuration(log.start_time, log.end_time || log.start_time),
-    deliverable: log.deliverable?.toString() || 'Unknown',
-    project: log.project?.toString() || 'Unknown',
+    duration:
+      log.duration ||
+      calculateDuration(log.start_time, log.end_time || log.start_time),
+    deliverable: log.deliverable?.toString() || "Unknown",
+    project: log.project?.toString() || "Unknown",
     organisation: log.organisation?.toString(),
     remarks: log.remarks || null,
-    employee: Number(userId)
+    employee: Number(userId),
   }));
 
-  const activeWorkSession = worklogs.find((log) => 
-    !log.end_time || isAfter(new Date(log.end_time), new Date())
+  const activeWorkSession = worklogs.find(
+    (log) => !log.end_time || isAfter(new Date(log.end_time), new Date())
   );
 
   if (!userId || typeof userId !== "string") {
     return <div className="p-8 text-red-500">Invalid user ID</div>;
   }
 
-  if (isUserLoading || isOrgsLoading || isDeliverablesLoading || isWorklogsLoading) {
-    return <div className="flex justify-center my-8"><Spinner lg /></div>;
+  if (
+    isUserLoading ||
+    isOrgsLoading ||
+    isDeliverablesLoading ||
+    isWorklogsLoading ||
+    isExpensesLoading
+  ) {
+    return (
+      <div className="flex justify-center my-8">
+        <Spinner lg />
+      </div>
+    );
   }
 
   if (isUserError || !user) {
@@ -85,7 +136,9 @@ export default function UserDetailsPage() {
   const getCurrentDuration = () => {
     if (!activeWorkSession) return null;
     const start = new Date(activeWorkSession.start_time);
-    const end = activeWorkSession.end_time ? new Date(activeWorkSession.end_time) : new Date();
+    const end = activeWorkSession.end_time
+      ? new Date(activeWorkSession.end_time)
+      : new Date();
     const minutes = differenceInMinutes(end, start);
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   };
@@ -100,23 +153,28 @@ export default function UserDetailsPage() {
             <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
           </span>
           <p className="text-gray-600">
-            Working on <span className="font-semibold">{activeWorkSession.deliverable}</span>
-            {' '}since {format(startTime, "h:mm a")}
+            Working on{" "}
+            <span className="font-semibold">
+              {activeWorkSession.deliverable}
+            </span>{" "}
+            since {format(startTime, "h:mm a")}
           </p>
         </div>
       );
     }
 
-    if (worklogs.length === 0) return <p className="text-gray-600">No work activity</p>;
+    if (worklogs.length === 0)
+      return <p className="text-gray-600">No work activity</p>;
 
-    const mostRecentLog = [...worklogs].sort((a, b) => 
-      new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+    const mostRecentLog = [...worklogs].sort(
+      (a, b) =>
+        new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
     )[0];
 
     if (!mostRecentLog.end_time) return null;
     const endTime = new Date(mostRecentLog.end_time);
 
-    const timeMessage = isToday(endTime) 
+    const timeMessage = isToday(endTime)
       ? `today at ${format(endTime, "h:mm a")}`
       : isYesterday(endTime)
       ? `yesterday at ${format(endTime, "h:mm a")}`
@@ -124,7 +182,9 @@ export default function UserDetailsPage() {
 
     return (
       <p className="text-gray-600">
-        Last worked on <span className="font-semibold">{mostRecentLog.deliverable}</span> {timeMessage}
+        Last worked on{" "}
+        <span className="font-semibold">{mostRecentLog.deliverable}</span>{" "}
+        {timeMessage}
       </p>
     );
   };
@@ -139,14 +199,17 @@ export default function UserDetailsPage() {
           {getWorkStatusMessage()}
           {activeWorkSession && (
             <p className="text-gray-600">
-              Current session: <span className="font-semibold">{getCurrentDuration()}</span>
+              Current session:{" "}
+              <span className="font-semibold">{getCurrentDuration()}</span>
             </p>
           )}
         </div>
       </div>
 
       <div className="bg-white shadow-sm rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Personal Information</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Personal Information
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <p className="text-sm text-gray-500">First Name</p>
@@ -168,7 +231,9 @@ export default function UserDetailsPage() {
       </div>
 
       <div className="bg-white shadow-sm rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Organisation Memberships</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Organisation Memberships
+        </h2>
         {isOrgsError ? (
           <p className="text-red-500">Error loading organisations</p>
         ) : organisations.length === 0 ? (
@@ -190,14 +255,20 @@ export default function UserDetailsPage() {
                 {organisations.map((org) => (
                   <tr key={org.id}>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{org.organisation.name}</div>
+                      <div className="text-sm text-gray-900">
+                        {org.organisation.name}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        org.role === "admin" ? "bg-purple-100 text-purple-800" :
-                        org.role === "manager" ? "bg-blue-100 text-blue-800" :
-                        "bg-green-100 text-green-800"
-                      }`}>
+                      <span
+                        className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          org.role === "admin"
+                            ? "bg-purple-100 text-purple-800"
+                            : org.role === "manager"
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                      >
                         {org.role}
                       </span>
                     </td>
@@ -209,13 +280,51 @@ export default function UserDetailsPage() {
         )}
       </div>
 
-      <DeliverablesTable deliverables={deliverables} isError={isDeliverablesError} />
-      <WorkTable 
-        worklogs={worklogs} 
-        isError={isWorklogsError} 
+      <DeliverablesTable
+        deliverables={deliverables}
+        isError={isDeliverablesError}
+      />
+      <WorkTable
+        worklogs={worklogs}
+        isError={isWorklogsError}
         totalHours={totalHours}
         showOnlyCurrentMonth={true}
       />
+
+      <div className="bg-white shadow-sm rounded-lg p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold text-gray-800">
+            Expense Reports
+          </h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+              className="px-3 py-1 bg-gray-100 rounded-md text-sm"
+            >
+              Previous
+            </button>
+            <span className="px-3 py-1 text-sm">
+              {format(currentMonth, "MMMM yyyy")}
+            </span>
+            <button
+              onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+              className="px-3 py-1 bg-gray-100 rounded-md text-sm"
+              disabled={isAfter(currentMonth, new Date())}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+        <AdminExpensesTable
+          expenses={expenses}
+          projects={[]}
+          isLoading={isExpensesLoading}
+          isError={isExpensesError}
+          monthRange={monthRange}
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate} // pass the setter
+        />
+      </div>
     </div>
   );
 }
