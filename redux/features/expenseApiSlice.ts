@@ -29,7 +29,7 @@ export interface Expense {
 }
 
 interface CreateExpenseRequest {
-  project: number;
+  project_id: number;  // Change from 'project' to 'project_id'
   amount: number;
   category: string;
   date: string;
@@ -38,6 +38,20 @@ interface CreateExpenseRequest {
 
 interface UpdateExpenseRequest extends Partial<CreateExpenseRequest> {
   id: number;
+}
+
+interface UserBreakdownItem {
+  user_id: number;
+  user_name: string;
+  total_amount: number;
+  percentage: number;
+}
+
+interface CategoryBreakdownItem {
+  category: string;
+  category_name: string;
+  total_amount: number;
+  percentage: number;
 }
 
 export const expenseApiSlice = apiSlice.injectEndpoints({
@@ -91,8 +105,8 @@ export const expenseApiSlice = apiSlice.injectEndpoints({
       {
         total_expenses: number;
         expense_count: number;
-        user_breakdown: any[];
-        category_breakdown: any[];
+        user_breakdown: UserBreakdownItem[];
+        category_breakdown: CategoryBreakdownItem[];
       },
       { start_date?: string; end_date?: string }
     >({

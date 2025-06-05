@@ -1,15 +1,15 @@
 // components/tables/ExpensesTable.tsx
 "use client";
 
-import { useState, useMemo } from "react";
-import { Expense, EditableExpense } from "@/types/expenses";
+import { useState } from "react";
+import { Expense, EditableExpense, Project } from "@/types/expenses";
 import { format } from "date-fns";
 import { PencilIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Spinner } from "@/components/common";
 
 interface Props {
   expenses: Expense[];
-  projects: any[];
+  projects: Project[];  // Changed from any[] to Project[]
   onDelete: (id: number) => void;
   onUpdate: (expense: EditableExpense) => Promise<void>;
   refetch: () => void;
@@ -28,10 +28,6 @@ export default function ExpensesTable({
   const [editableExpense, setEditableExpense] = useState<EditableExpense | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const projectMap = useMemo(
-    () => new Map(projects.map((p) => [p.id, p])),
-    [projects]
-  );
 
   const handleEdit = (expense: Expense) => {
     setEditingId(expense.id);

@@ -192,19 +192,13 @@ export default function DashboardPage() {
         throw new Error("Invalid expense ID");
       }
 
-      // Format the data to match backend expectations
       const updateData = {
-        project_id:
-          typeof expense.project === "object"
-            ? expense.project.id
-            : expense.project_id, // Changed from 'project' to 'project_id'
-        amount: parseFloat(expense.amount.toString()),
+        project_id: expense.project_id, // Use project_id
+        amount: Number(expense.amount), // Ensure number
         category: expense.category,
-        date: new Date(expense.date).toISOString().split("T")[0],
+        date: new Date(expense.date).toISOString().split("T")[0], // Format date
         remarks: expense.remarks || "",
       };
-
-      console.log("Sending update:", updateData);
 
       await updateExpense({
         id: expense.id,
@@ -213,17 +207,23 @@ export default function DashboardPage() {
 
       refetchExpenses();
     } catch (err) {
-      console.error("Failed to update expense - details:", {
-        error: err,
-        requestData: expense,
-      });
+      console.error("Failed to update expense:", err);
       throw err;
     }
   };
+
   // Add this handler function to your component
   const handleCreateExpense = async (expenseData: CreateExpenseRequest) => {
     try {
-      await createExpense(expenseData).unwrap();
+      const payload = {
+        project_id: expenseData.project_id, // Make sure this matches API expectations
+        amount: Number(expenseData.amount),
+        category: expenseData.category,
+        date: expenseData.date,
+        remarks: expenseData.remarks || "",
+      };
+
+      await createExpense(payload).unwrap();
       refetchExpenses();
     } catch (err) {
       console.error("Failed to create expense:", err);
@@ -293,51 +293,6 @@ export default function DashboardPage() {
 
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-semibold">Expenses</h2>
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <label htmlFor="start-date">From:</label>
-            <input
-              type="date"
-              id="start-date"
-              value={
-                dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : ""
-              }
-              onChange={(e) =>
-                setDateRange({
-                  ...dateRange,
-                  from: e.target.value ? new Date(e.target.value) : undefined,
-                })
-              }
-              className="border rounded px-2 py-1"
-            />
-          </div>
-          <div className="flex items-center space-x-2">
-            <label htmlFor="end-date">To:</label>
-            <input
-              type="date"
-              id="end-date"
-              value={dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : ""}
-              onChange={(e) =>
-                setDateRange({
-                  ...dateRange,
-                  to: e.target.value ? new Date(e.target.value) : undefined,
-                })
-              }
-              className="border rounded px-2 py-1"
-              min={
-                dateRange?.from
-                  ? format(dateRange.from, "yyyy-MM-dd")
-                  : undefined
-              }
-            />
-          </div>
-          <button
-            onClick={() => refetchExpenses()}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Apply
-          </button>
-        </div>
       </div>
 
       <ExpensesTable

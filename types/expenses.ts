@@ -22,20 +22,28 @@ export interface Expense {
   created_at: string;
 }
 
+// types/expenses.ts
 export interface CreateExpenseRequest {
   project_id: number;
   amount: number;
   category: string;
   date: string;
-  remarks: string;
+  remarks?: string;
 }
 
-// Add a new type for editable expense
 export interface EditableExpense {
   id: number;
-  project_id: number;  // Changed from project to project_id
+  project_id: number;
   amount: number | string;
   category: string;
   date: string;
   remarks?: string;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  location: string;
+  client_name: string;
+  current_stage: string;
 }

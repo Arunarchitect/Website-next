@@ -1,16 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Expense, CreateExpenseRequest } from "@/types/expenses";
+import { Expense, CreateExpenseRequest, Project } from "@/types/expenses";
 
 interface Props {
   initialData?: Expense;
-  projects: any[];
+  projects: Project[]; // Changed from any[] to Project[]
   onSuccess: () => void;
   onSubmit: (expenseData: CreateExpenseRequest) => Promise<void>;
   onCancel: () => void;
 }
-
 
 const expenseCategories = [
   { value: "travel", label: "Travel" },
