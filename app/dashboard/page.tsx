@@ -3,12 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import {
-  format,
-  parseISO,
-  isSameDay,
-  isWithinInterval,
-} from "date-fns";
+import { format, parseISO, isSameDay, isWithinInterval } from "date-fns";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import {
   useGetMyMembershipsQuery,
@@ -36,19 +31,18 @@ import { CreateExpenseRequest, EditableExpense } from "@/types/expenses";
 import { Spinner } from "@/components/common";
 import { useSharedCalendar } from "@/hooks/calendar/useSharedCalendar";
 import { SharedCalendar } from "@/components/common/SharedCalendar";
+import { Expense } from "@/redux/features/expenseApiSlice";
 
 interface Organization {
   id: number;
   name: string;
 }
 
-
 export default function DashboardPage() {
   const router = useRouter();
   const [isMounted, setIsMounted] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
-
 
   // User data
   const {
@@ -81,11 +75,19 @@ export default function DashboardPage() {
 
   // Expenses data
   const {
-    data: expenses = [],
+    data: allExpenses = [],
     refetch: refetchExpenses,
     isLoading: isExpensesLoading,
   } = useGetExpensesQuery({});
 
+  // Your existing userExpenses filter remains the same
+  const userExpenses = useMemo(() => {
+    return allExpenses.filter(
+      (expense: Expense) => expense.user.id === user?.id
+    );
+  }, [allExpenses, user?.id]);
+
+  // In your component body, update the useSharedCalendar hook:
   const {
     currentMonth,
     monthRange,
@@ -96,7 +98,7 @@ export default function DashboardPage() {
     handleMonthChange,
   } = useSharedCalendar({
     worklogs: allWorklogs,
-    expenses,
+    expenses: userExpenses, // Use the filtered expenses here
   });
 
   // Mutations
@@ -154,7 +156,6 @@ export default function DashboardPage() {
 
     return filtered;
   }, [allWorklogs, user?.id, selectedDate, monthRange]);
-
 
   // Get admin organizations from memberships
   const adminMemberships = memberships.filter(
@@ -364,7 +365,7 @@ export default function DashboardPage() {
       <div className="mt-8">
         <h2 className="text-xl font-semibold mb-4">Expenses</h2>
         <ExpensesTable
-          expenses={expenses}
+          expenses={userExpenses} // Use the filtered expenses here
           projects={projects}
           onDelete={handleDeleteExpense}
           onUpdate={handleUpdateExpense}
