@@ -213,7 +213,7 @@ export default function ExpensesTable({
                       <option value="stationery">Stationery</option>
                       <option value="food">Food</option>
                       <option value="accommodation">Accommodation</option>
-                      <option value="other">Other</option>
+                      <option value="others">Others</option>
                     </select>
                   ) : (
                     expense.category_name

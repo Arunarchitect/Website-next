@@ -16,7 +16,7 @@ const expenseCategories = [
   { value: "stationery", label: "Stationery" },
   { value: "food", label: "Food" },
   { value: "accommodation", label: "Accommodation" },
-  { value: "other", label: "Other" },
+  { value: "others", label: "Others" },
 ];
 
 export default function ExpenseForm({ 
