@@ -77,32 +77,21 @@ export function MonthlyReportButton({
   );
 
   const allExpenses: Expense[] = expensesQuery.data || [];
+
+  // Filter expenses by user ID
   const expenses = allExpenses.filter(
     (expense) => expense.user?.id === Number(userId)
   );
 
   const generateMonthlyReport = (): void => {
     const monthName = format(currentMonth, "MMMM yyyy");
-    const userName = selectedUser
-      ? `${selectedUser.first_name} ${selectedUser.last_name}`
-      : "User";
 
-    // Create PDF
-    const doc = new jsPDF() as JsPDFWithAutoTable;
-
-    // Title and metadata
-    doc.setFontSize(14);
-    doc.text(`Monthly Work Summary - ${monthName}`, 14, 15);
-    doc.setFontSize(12);
-    doc.text(`Report for: ${userName}`, 14, 22);
-    doc.text(`Organization: ${selectedOrg === "all" ? "All" : selectedOrg}`, 14, 29);
-
-    // Filter worklogs for selected month and organization
     const monthlyWorklogs = worklogs.filter((log) => {
       try {
         const date = parseISO(log.start_time);
         const isInMonth = date >= monthStart && date <= monthEnd;
-        const isOrgMatch = selectedOrg === "all" || log.organisation === selectedOrg;
+        const isOrgMatch =
+          selectedOrg === "all" || log.organisation === selectedOrg;
         return isInMonth && isOrgMatch;
       } catch (err) {
         console.error("Invalid date in start_time:", log.start_time, err);
@@ -110,68 +99,127 @@ export function MonthlyReportButton({
       }
     });
 
-    // Initialize summary variables with default 0 values
-    let uniqueWorkDays = 0;
-    let totalMinutes = 0;
+    if (monthlyWorklogs.length === 0 && expenses.length === 0) {
+      alert(`No worklogs or expenses found for ${monthName}`);
+      return;
+    }
+
+    const userName = selectedUser
+      ? `${selectedUser.first_name} ${selectedUser.last_name}`
+      : "User";
+
+    // Organize worklog data by date first
+    const dailyData: Record<string, DailySummary> = {};
+    const orgData: Record<string, OrgSummary> = {};
+
+    monthlyWorklogs.forEach((log) => {
+      const date = parseISO(log.start_time);
+      const dateStr = format(date, "yyyy-MM-dd");
+      const orgName = log.organisation || "Uncategorized";
+      const projectName = log.project || "Uncategorized";
+      const deliverableName = log.deliverable || "Uncategorized";
+      const minutes = log.duration || 0;
+
+      // Update daily summary
+      if (!dailyData[dateStr]) {
+        dailyData[dateStr] = {
+          date: dateStr,
+          minutes: 0,
+        };
+      }
+      dailyData[dateStr].minutes += minutes;
+
+      // Update organization/project/deliverable summary
+      if (!orgData[orgName]) {
+        orgData[orgName] = {
+          name: orgName,
+          minutes: 0,
+          projects: [],
+        };
+      }
+
+      let project = orgData[orgName].projects.find(
+        (p) => p.name === projectName
+      );
+      if (!project) {
+        project = {
+          name: projectName,
+          minutes: 0,
+          deliverables: [],
+        };
+        orgData[orgName].projects.push(project);
+      }
+
+      let deliverable = project.deliverables.find(
+        (d) => d.name === deliverableName
+      );
+      if (!deliverable) {
+        deliverable = {
+          name: deliverableName,
+          minutes: 0,
+        };
+        project.deliverables.push(deliverable);
+      }
+
+      deliverable.minutes += minutes;
+      project.minutes += minutes;
+      orgData[orgName].minutes += minutes;
+    });
+
+    // Sort data
+    const sortedDays = Object.values(dailyData).sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    const sortedOrgs = Object.values(orgData).sort(
+      (a, b) => b.minutes - a.minutes
+    );
+    sortedOrgs.forEach((org) => {
+      org.projects.sort((a, b) => b.minutes - a.minutes);
+      org.projects.forEach((project) => {
+        project.deliverables.sort((a, b) => b.minutes - a.minutes);
+      });
+    });
+
+    const uniqueWorkDays = Object.keys(dailyData).length;
+    const totalMinutes = sortedOrgs.reduce((sum, org) => sum + org.minutes, 0);
+    const totalHours = totalMinutes / 60;
+
+    // New effective days calculation logic
     let fullDaysCount = 0;
     let halfDaysCount = 0;
-    let roundedExtraDays = 0;
-    let effectiveDays = 0;
-    let hoursPerDay = 0;
+    let lessTimeHours = 0;
+    let overtimeHours = 0;
 
-    // Only calculate if there are worklogs
-    if (monthlyWorklogs.length > 0) {
-      const { worklogDates, daysWithWorklogsCount } = monthlyWorklogs.reduce(
-        (acc, log) => {
-          try {
-            const date = parseISO(log.start_time);
-            const dateStr = format(date, "yyyy-MM-dd");
-            acc.worklogDates.add(dateStr);
-            return acc;
-          } catch (err) {
-            console.error("Invalid date in start_time:", log.start_time, err);
-            return acc;
-          }
-        },
-        { worklogDates: new Set<string>(), daysWithWorklogsCount: 0 }
-      );
+    // And replace it with this simpler version:
+    sortedDays.forEach((day) => {
+      const hours = day.minutes / 60;
 
-      uniqueWorkDays = worklogDates.size;
-      totalMinutes = monthlyWorklogs.reduce((sum, log) => sum + (log.duration || 0), 0);
+      if (hours >= 7.5 && hours <= 8) {
+        fullDaysCount += 1;
+      } else if (hours >= 3.5 && hours <= 4) {
+        halfDaysCount += 1;
+      } else if (hours < 7.5) {
+        lessTimeHours += hours;
+      } else {
+        const overtime = hours - 8;
+        overtimeHours += overtime;
+        fullDaysCount += 1;
+      }
+    });
 
-      // Calculate day types
-      const dailySummaries: Record<string, DailySummary> = {};
-      monthlyWorklogs.forEach((log) => {
-        try {
-          const dateStr = format(parseISO(log.start_time), "yyyy-MM-dd");
-          if (!dailySummaries[dateStr]) {
-            dailySummaries[dateStr] = { date: dateStr, minutes: 0 };
-          }
-          dailySummaries[dateStr].minutes += log.duration || 0;
-        } catch (err) {
-          console.error("Invalid date in start_time:", log.start_time, err);
-        }
-      });
+    // Calculate effective days from less time and overtime
+    const totalExtraHours = lessTimeHours + overtimeHours;
+    const extraDays = (totalExtraHours / 4) * 0.5; // Convert extra hours to days
 
-      Object.values(dailySummaries).forEach((day) => {
-        const hours = day.minutes / 60;
-        if (hours >= 7.5 && hours <= 8) {
-          fullDaysCount += 1;
-        } else if (hours >= 3.5 && hours <= 4) {
-          halfDaysCount += 1;
-        } else if (hours < 7.5) {
-          const lessTimeHours = hours;
-          roundedExtraDays += Math.floor((lessTimeHours / 4) * 2) / 2;
-        } else {
-          const overtime = hours - 8;
-          roundedExtraDays += Math.floor((overtime / 4) * 2) / 2;
-          fullDaysCount += 1;
-        }
-      });
+    // Round down to nearest 0.5
+    const roundedExtraDays = Math.floor(extraDays * 2) / 2;
 
-      effectiveDays = fullDaysCount + halfDaysCount * 0.5 + roundedExtraDays;
-      hoursPerDay = uniqueWorkDays > 0 ? totalMinutes / 60 / uniqueWorkDays : 0;
-    }
+    // Total effective days (full days + half days + converted extra time)
+    const effectiveDays =
+      fullDaysCount + halfDaysCount * 0.5 + roundedExtraDays;
+
+    const hoursPerDay = totalHours / uniqueWorkDays;
 
     // Calculate total expenses
     const totalExpenses = expenses.reduce((sum, expense) => {
@@ -184,6 +232,15 @@ export function MonthlyReportButton({
     const salary = baseFeeValue * effectiveDays;
     const totalAmountToPay = salary + totalExpenses;
 
+    // Create PDF
+    const doc = new jsPDF() as JsPDFWithAutoTable;
+
+    // Title and metadata
+    doc.setFontSize(14);
+    doc.text(`Monthly Work Summary - ${monthName}`, 14, 15);
+    doc.setFontSize(12);
+    doc.text(`Report for: ${userName}`, 14, 22);
+
     // Create summary table
     const summaryData = [
       ["Filter", selectedOrg === "all" ? "All Organizations" : selectedOrg],
@@ -193,7 +250,7 @@ export function MonthlyReportButton({
       ["Half Days", halfDaysCount],
       ["Extra Time Days", roundedExtraDays.toFixed(1)],
       ["Effective Days", effectiveDays.toFixed(1)],
-      ["Total Hours", monthlyWorklogs.length > 0 ? formatDuration(totalMinutes) : "0h 0m"],
+      ["Total Hours", formatDuration(totalMinutes)],
       ["Total Expenses", `Rs.${totalExpenses.toFixed(2)}`],
     ];
 
@@ -204,10 +261,15 @@ export function MonthlyReportButton({
         "Total Amount to Pay",
         `Rs.${totalAmountToPay.toFixed(2)}`,
       ]);
+    } else {
+      summaryData.push([
+        "Total Amount to Pay",
+        `Rs.${totalExpenses.toFixed(2)}`,
+      ]);
     }
 
     autoTable(doc, {
-      startY: 40,
+      startY: 30,
       head: [["Summary", "Value"]],
       body: summaryData,
       theme: "grid",
@@ -222,18 +284,35 @@ export function MonthlyReportButton({
       bodyStyles: {
         fontSize: 10,
       },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.column.index === 0) {
+          if (data.cell.raw === "Effective Days") {
+            data.cell.styles.fontStyle = "bold";
+          }
+        }
+        if (data.section === "body" && data.column.index === 1) {
+          if (data.row.index === 2) {
+            // Hours per day row
+            data.cell.styles.fontStyle = "italic";
+          }
+          if (data.row.index === 6) {
+            // Effective days row
+            data.cell.styles.fontStyle = "bold";
+          }
+        }
+      },
       margin: { left: 20 },
     } as UserOptions);
 
-    let currentY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 15 : 60;
+    let startY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 15 : 60;
 
-    // Add expenses section
-    doc.setFontSize(12);
-    doc.setTextColor(41, 128, 185);
-    doc.text("Monthly Expenses", 14, currentY);
-    currentY += 7;
-
+    // Add expenses table if there are expenses
     if (expenses.length > 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(41, 128, 185);
+      doc.text("Monthly Expenses", 14, startY);
+      startY += 7;
+
       const expenseTableData = expenses.map((expense) => {
         const formattedDate = format(new Date(expense.date), "MMM dd, yyyy");
         const amount = parseFloat(expense.amount) || 0;
@@ -257,7 +336,7 @@ export function MonthlyReportButton({
       ]);
 
       autoTable(doc, {
-        startY: currentY,
+        startY,
         head: [["Date", "Project", "Category", "Amount"]],
         body: expenseTableData,
         theme: "grid",
@@ -282,38 +361,17 @@ export function MonthlyReportButton({
         margin: { left: 20 },
       } as UserOptions);
 
-      currentY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 10 : currentY + 20;
-    } else {
-      doc.setFontSize(10);
-      doc.setTextColor(255, 0, 0);
-      doc.text("No expenses found for selected month", 20, currentY);
-      currentY += 10;
+      startY = doc.lastAutoTable?.finalY
+        ? doc.lastAutoTable.finalY + 10
+        : startY + 20;
     }
 
-    // Add worklogs section
-    doc.setFontSize(12);
-    doc.setTextColor(41, 128, 185);
-    doc.text("Work Summary", 14, currentY);
-    currentY += 7;
-
+    // Add daily summary table if there are worklogs
     if (monthlyWorklogs.length > 0) {
-      // Daily summary table
-      const dailySummaries: Record<string, DailySummary> = {};
-      monthlyWorklogs.forEach((log) => {
-        try {
-          const dateStr = format(parseISO(log.start_time), "yyyy-MM-dd");
-          if (!dailySummaries[dateStr]) {
-            dailySummaries[dateStr] = { date: dateStr, minutes: 0 };
-          }
-          dailySummaries[dateStr].minutes += log.duration || 0;
-        } catch (err) {
-          console.error("Invalid date in start_time:", log.start_time, err);
-        }
-      });
-
-      const sortedDays = Object.values(dailySummaries).sort(
-        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-      );
+      doc.setFontSize(12);
+      doc.setTextColor(41, 128, 185);
+      doc.text("Daily Work Summary", 14, startY);
+      startY += 7;
 
       const dailyTableData = sortedDays.map((day) => {
         const formattedDate = format(new Date(day.date), "MMM dd, yyyy (EEEE)");
@@ -340,7 +398,7 @@ export function MonthlyReportButton({
       });
 
       autoTable(doc, {
-        startY: currentY,
+        startY,
         head: [["Date", "Hours Worked", "Day Type"]],
         body: dailyTableData.map((day) => [
           day.date,
@@ -357,65 +415,37 @@ export function MonthlyReportButton({
           textColor: [0, 0, 0],
           fontSize: 9,
         },
+        didParseCell: (data) => {
+          if (data.section === "body" && data.column.index === 1) {
+            const rowIndex = data.row.index;
+            const hours = dailyTableData[rowIndex].preciseHours;
+
+            if (hours < 3.5) {
+              data.cell.styles.textColor = [255, 0, 0]; // Red for very short days
+            } else if (hours >= 3.5 && hours <= 4) {
+              data.cell.styles.textColor = [0, 100, 0]; // Green for proper half days
+            } else if (hours >= 7.5 && hours <= 8) {
+              data.cell.styles.textColor = [0, 200, 0]; // Green for proper full days
+            } else if (hours > 8) {
+              data.cell.styles.textColor = [0, 0, 255]; // Blue for overtime
+            }
+          }
+        },
         margin: { left: 20 },
       } as UserOptions);
 
-      currentY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 15 : currentY + 20;
+      startY = doc.lastAutoTable?.finalY
+        ? doc.lastAutoTable.finalY + 10
+        : startY + 20;
 
-      // Organization/project breakdown
-      const orgData: Record<string, OrgSummary> = {};
-
-      monthlyWorklogs.forEach((log) => {
-        const orgName = log.organisation || "Uncategorized";
-        const projectName = log.project || "Uncategorized";
-        const deliverableName = log.deliverable || "Uncategorized";
-        const minutes = log.duration || 0;
-
-        if (!orgData[orgName]) {
-          orgData[orgName] = {
-            name: orgName,
-            minutes: 0,
-            projects: [],
-          };
-        }
-
-        let project = orgData[orgName].projects.find(
-          (p) => p.name === projectName
-        );
-        if (!project) {
-          project = {
-            name: projectName,
-            minutes: 0,
-            deliverables: [],
-          };
-          orgData[orgName].projects.push(project);
-        }
-
-        let deliverable = project.deliverables.find(
-          (d) => d.name === deliverableName
-        );
-        if (!deliverable) {
-          deliverable = {
-            name: deliverableName,
-            minutes: 0,
-          };
-          project.deliverables.push(deliverable);
-        }
-
-        deliverable.minutes += minutes;
-        project.minutes += minutes;
-        orgData[orgName].minutes += minutes;
-      });
-
-      const sortedOrgs = Object.values(orgData).sort(
-        (a, b) => b.minutes - a.minutes
-      );
-
+      // Generate organization/project tables
       sortedOrgs.forEach((org) => {
         doc.setFontSize(12);
         doc.setTextColor(41, 128, 185);
-        doc.text(`${org.name} - ${formatDuration(org.minutes)}`, 14, currentY);
-        currentY += 7;
+        doc.text(`${org.name} - ${formatDuration(org.minutes)}`, 14, startY);
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        startY += 7;
 
         const projectData = org.projects.map((project) => [
           project.name,
@@ -423,7 +453,7 @@ export function MonthlyReportButton({
         ]);
 
         autoTable(doc, {
-          startY: currentY,
+          startY,
           head: [["Project", "Total Time"]],
           body: projectData,
           theme: "grid",
@@ -441,13 +471,17 @@ export function MonthlyReportButton({
           margin: { left: 20 },
         } as UserOptions);
 
-        currentY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 7 : currentY + 15;
+        startY = doc.lastAutoTable?.finalY
+          ? doc.lastAutoTable.finalY + 7
+          : startY + 15;
 
         org.projects.forEach((project) => {
           doc.setFontSize(10);
           doc.setTextColor(41, 128, 185);
-          doc.text(`${project.name} Deliverables`, 25, currentY);
-          currentY += 5;
+          doc.text(`${project.name} Deliverables`, 25, startY);
+          doc.setFontSize(9);
+          doc.setTextColor(0, 0, 0);
+          startY += 5;
 
           const deliverableData = project.deliverables.map((deliverable) => [
             deliverable.name,
@@ -455,7 +489,7 @@ export function MonthlyReportButton({
           ]);
 
           autoTable(doc, {
-            startY: currentY,
+            startY,
             head: [["Deliverable", "Time"]],
             body: deliverableData,
             theme: "grid",
@@ -470,20 +504,20 @@ export function MonthlyReportButton({
             margin: { left: 25 },
           } as UserOptions);
 
-          currentY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 5 : currentY + 10;
+          startY = doc.lastAutoTable?.finalY
+            ? doc.lastAutoTable.finalY + 5
+            : startY + 10;
         });
 
-        currentY += 5;
+        startY += 5;
       });
-    } else {
-      doc.setFontSize(10);
-      doc.setTextColor(255, 0, 0);
-      doc.text("No worklogs found for selected month/filter", 20, currentY);
-      currentY += 10;
     }
 
     doc.save(
-      `Work_Summary_${monthName.replace(" ", "_")}_${userName.replace(" ", "_")}.pdf`
+      `Work_Summary_${monthName.replace(" ", "_")}_${userName.replace(
+        " ",
+        "_"
+      )}.pdf`
     );
   };
 
