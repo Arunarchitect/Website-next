@@ -97,8 +97,10 @@ export default function DashboardPage() {
     setSelectedDate,
     handleMonthChange,
   } = useSharedCalendar({
-    worklogs: allWorklogs,
-    expenses: userExpenses, // Use the filtered expenses here
+    worklogs: allWorklogs.filter(
+      (worklog: Worklog) => worklog.employee === user?.id
+    ), // Filter by current user
+    expenses: userExpenses,
   });
 
   // Mutations
