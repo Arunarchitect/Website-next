@@ -3,18 +3,35 @@
 import { jsPDF } from "jspdf";
 import autoTable, { UserOptions } from "jspdf-autotable";
 import { UserWorkLog } from "@/types/worklogs";
-import { format, parseISO, startOfMonth, endOfMonth } from "date-fns";
+import {
+  format,
+  parseISO,
+  startOfMonth,
+  endOfMonth,
+  isSameDay,
+  isWithinInterval,
+} from "date-fns";
 import { useParams } from "next/navigation";
 import { useGetUserDetailsQuery } from "@/redux/features/userApiSlice";
 import { useGetExpensesQuery } from "@/redux/features/expenseApiSlice";
 import { Expense } from "@/types/expenses";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { Dispatch, SetStateAction } from "react";
 
 interface MonthlyReportButtonProps {
   worklogs: UserWorkLog[];
   currentMonth: Date;
   selectedOrg: string;
   className?: string;
+  // WorkTable filter props
+  worklogsSelectedDate?: Date | null;
+  worklogsMonthRange?: { start: Date; end: Date };
+  worklogsShowOnlyCurrentMonth?: boolean;
+  // AdminExpensesTable filter props
+  expensesSelectedDate?: Date | null;
+  expensesMonthRange?: { start: Date; end: Date };
+  expensesShowOnlyCurrentMonth?: boolean;
+  setExpensesSelectedDate?: Dispatch<SetStateAction<Date | null>>;
 }
 
 interface ProjectSummary {
@@ -54,6 +71,14 @@ export function MonthlyReportButton({
   currentMonth,
   selectedOrg,
   className = "",
+  // WorkTable filter props
+  worklogsSelectedDate,
+  worklogsMonthRange,
+  worklogsShowOnlyCurrentMonth = false,
+  // AdminExpensesTable filter props
+  expensesSelectedDate,
+  expensesMonthRange,
+  expensesShowOnlyCurrentMonth = false,
 }: MonthlyReportButtonProps): React.JSX.Element {
   const [baseFee, setBaseFee] = useState<string>("");
   const params = useParams();
@@ -65,41 +90,136 @@ export function MonthlyReportButton({
     skip: !userId,
   });
 
-  // Get expenses for the current month
-  const monthStart = startOfMonth(currentMonth);
-  const monthEnd = endOfMonth(currentMonth);
+  // Get all expenses (we'll filter them client-side based on AdminExpensesTable filters)
   const expensesQuery = useGetExpensesQuery(
-    {
-      start_date: format(monthStart, "yyyy-MM-dd"),
-      end_date: format(monthEnd, "yyyy-MM-dd"),
-    },
+    {}, // Empty params since we'll filter client-side
     { skip: !userId }
   );
 
   const allExpenses: Expense[] = expensesQuery.data || [];
 
-  // Filter expenses by user ID
-  const expenses = allExpenses.filter(
+  // Determine the worklogs display range (same logic as WorkTable)
+  const worklogsDisplayRange = useMemo(() => {
+    if (worklogsSelectedDate) return null;
+    if (worklogsMonthRange) return worklogsMonthRange;
+    if (worklogsShowOnlyCurrentMonth) {
+      return {
+        start: startOfMonth(currentMonth),
+        end: endOfMonth(currentMonth),
+      };
+    }
+    return null;
+  }, [
+    worklogsSelectedDate,
+    worklogsMonthRange,
+    worklogsShowOnlyCurrentMonth,
+    currentMonth,
+  ]);
+
+  // Determine the expenses display range (same logic as AdminExpensesTable)
+  const expensesDisplayRange = useMemo(() => {
+    if (expensesSelectedDate) return null;
+    if (expensesMonthRange) return expensesMonthRange;
+    if (expensesShowOnlyCurrentMonth) {
+      return {
+        start: startOfMonth(currentMonth),
+        end: endOfMonth(currentMonth),
+      };
+    }
+    return null;
+  }, [
+    expensesSelectedDate,
+    expensesMonthRange,
+    expensesShowOnlyCurrentMonth,
+    currentMonth,
+  ]);
+
+  // Filter worklogs based on WorkTable filters
+  const filteredWorklogs = useMemo(() => {
+    let result = [...worklogs];
+
+    // Apply organization filter
+    result = result.filter(
+      (log) => selectedOrg === "all" || log.organisation === selectedOrg
+    );
+
+    // Apply date filters
+    if (worklogsSelectedDate) {
+      result = result.filter((log) => {
+        try {
+          const logDate = parseISO(log.start_time);
+          return isSameDay(logDate, worklogsSelectedDate);
+        } catch {
+          return false;
+        }
+      });
+    } else if (worklogsDisplayRange) {
+      result = result.filter((log) => {
+        try {
+          const logDate = parseISO(log.start_time);
+          return isWithinInterval(logDate, {
+            start: worklogsDisplayRange.start,
+            end: worklogsDisplayRange.end,
+          });
+        } catch {
+          return false;
+        }
+      });
+    }
+
+    return result;
+  }, [worklogs, selectedOrg, worklogsSelectedDate, worklogsDisplayRange]);
+
+  // Filter expenses based on AdminExpensesTable filters
+  const filteredExpenses = useMemo(() => {
+  console.log('All expenses:', allExpenses); // Debug raw data
+  console.log('Filter params:', { 
+    userId,
+    expensesSelectedDate, 
+    expensesDisplayRange
+  });
+
+  let result = allExpenses.filter(
     (expense) => expense.user?.id === Number(userId)
   );
+  
+  console.log('After user filter:', result); // Debug after user filter
+
+  if (expensesSelectedDate) {
+    result = result.filter((expense) => {
+      if (!expense.date) return false;
+      try {
+        const expenseDate = parseISO(expense.date);
+        return isSameDay(expenseDate, expensesSelectedDate);
+      } catch {
+        return false;
+      }
+    });
+    console.log('After date filter:', result); // Debug after date filter
+  } else if (expensesDisplayRange) {
+    result = result.filter((expense) => {
+      if (!expense.date) return false;
+      try {
+        const expenseDate = parseISO(expense.date);
+        return isWithinInterval(expenseDate, {
+          start: expensesDisplayRange.start,
+          end: expensesDisplayRange.end
+        });
+      } catch {
+        return false;
+      }
+    });
+    console.log('After range filter:', result); // Debug after range filter
+  }
+  
+  return result;
+}, [allExpenses, userId, expensesSelectedDate, expensesDisplayRange]);
 
   const generateMonthlyReport = (): void => {
     const monthName = format(currentMonth, "MMMM yyyy");
 
-    const monthlyWorklogs = worklogs.filter((log) => {
-      try {
-        const date = parseISO(log.start_time);
-        const isInMonth = date >= monthStart && date <= monthEnd;
-        const isOrgMatch =
-          selectedOrg === "all" || log.organisation === selectedOrg;
-        return isInMonth && isOrgMatch;
-      } catch (err) {
-        console.error("Invalid date in start_time:", log.start_time, err);
-        return false;
-      }
-    });
-
-    if (monthlyWorklogs.length === 0 && expenses.length === 0) {
+    // Use filteredWorklogs instead of monthlyWorklogs
+    if (filteredWorklogs.length === 0 && filteredExpenses.length === 0) {
       alert(`No worklogs or expenses found for ${monthName}`);
       return;
     }
@@ -112,7 +232,8 @@ export function MonthlyReportButton({
     const dailyData: Record<string, DailySummary> = {};
     const orgData: Record<string, OrgSummary> = {};
 
-    monthlyWorklogs.forEach((log) => {
+    // Use filteredWorklogs here
+    filteredWorklogs.forEach((log) => {
       const date = parseISO(log.start_time);
       const dateStr = format(date, "yyyy-MM-dd");
       const orgName = log.organisation || "Uncategorized";
@@ -185,13 +306,12 @@ export function MonthlyReportButton({
     const totalMinutes = sortedOrgs.reduce((sum, org) => sum + org.minutes, 0);
     const totalHours = totalMinutes / 60;
 
-    // New effective days calculation logic
+    // Effective days calculation logic
     let fullDaysCount = 0;
     let halfDaysCount = 0;
     let lessTimeHours = 0;
     let overtimeHours = 0;
 
-    // And replace it with this simpler version:
     sortedDays.forEach((day) => {
       const hours = day.minutes / 60;
 
@@ -210,19 +330,16 @@ export function MonthlyReportButton({
 
     // Calculate effective days from less time and overtime
     const totalExtraHours = lessTimeHours + overtimeHours;
-    const extraDays = (totalExtraHours / 4) * 0.5; // Convert extra hours to days
-
-    // Round down to nearest 0.5
+    const extraDays = (totalExtraHours / 4) * 0.5;
     const roundedExtraDays = Math.floor(extraDays * 2) / 2;
 
     // Total effective days (full days + half days + converted extra time)
     const effectiveDays =
       fullDaysCount + halfDaysCount * 0.5 + roundedExtraDays;
-
     const hoursPerDay = totalHours / uniqueWorkDays;
 
     // Calculate total expenses
-    const totalExpenses = expenses.reduce((sum, expense) => {
+    const totalExpenses = filteredExpenses.reduce((sum, expense) => {
       const amount = parseFloat(expense.amount) || 0;
       return sum + amount;
     }, 0);
@@ -292,11 +409,9 @@ export function MonthlyReportButton({
         }
         if (data.section === "body" && data.column.index === 1) {
           if (data.row.index === 2) {
-            // Hours per day row
             data.cell.styles.fontStyle = "italic";
           }
           if (data.row.index === 6) {
-            // Effective days row
             data.cell.styles.fontStyle = "bold";
           }
         }
@@ -307,13 +422,13 @@ export function MonthlyReportButton({
     let startY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 15 : 60;
 
     // Add expenses table if there are expenses
-    if (expenses.length > 0) {
+    if (filteredExpenses.length > 0) {
       doc.setFontSize(12);
       doc.setTextColor(41, 128, 185);
       doc.text("Monthly Expenses", 14, startY);
       startY += 7;
 
-      const expenseTableData = expenses.map((expense) => {
+      const expenseTableData = filteredExpenses.map((expense) => {
         const formattedDate = format(new Date(expense.date), "MMM dd, yyyy");
         const amount = parseFloat(expense.amount) || 0;
         const projectName = expense.project?.name || "Uncategorized";
@@ -353,7 +468,7 @@ export function MonthlyReportButton({
           fontSize: 9,
         },
         didParseCell: (data) => {
-          if (data.section === "body" && data.row.index === expenses.length) {
+          if (data.section === "body" && data.row.index === filteredExpenses.length) {
             data.cell.styles.fontStyle = "bold";
             data.cell.styles.fillColor = [220, 220, 220];
           }
@@ -367,7 +482,7 @@ export function MonthlyReportButton({
     }
 
     // Add daily summary table if there are worklogs
-    if (monthlyWorklogs.length > 0) {
+    if (filteredWorklogs.length > 0) {
       doc.setFontSize(12);
       doc.setTextColor(41, 128, 185);
       doc.text("Daily Work Summary", 14, startY);
@@ -421,13 +536,13 @@ export function MonthlyReportButton({
             const hours = dailyTableData[rowIndex].preciseHours;
 
             if (hours < 3.5) {
-              data.cell.styles.textColor = [255, 0, 0]; // Red for very short days
+              data.cell.styles.textColor = [255, 0, 0];
             } else if (hours >= 3.5 && hours <= 4) {
-              data.cell.styles.textColor = [0, 100, 0]; // Green for proper half days
+              data.cell.styles.textColor = [0, 100, 0];
             } else if (hours >= 7.5 && hours <= 8) {
-              data.cell.styles.textColor = [0, 200, 0]; // Green for proper full days
+              data.cell.styles.textColor = [0, 200, 0];
             } else if (hours > 8) {
-              data.cell.styles.textColor = [0, 0, 255]; // Blue for overtime
+              data.cell.styles.textColor = [0, 0, 255];
             }
           }
         },

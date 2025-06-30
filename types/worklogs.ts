@@ -129,6 +129,7 @@ export interface WorkTableProps {
   sortDirection?: SortDirection;
   onSort?: (key: SortKey) => void;
   onDateSelect?: (date: Date | null) => void;
+  showOnlyCurrentMonth?: boolean; // Add this
 }
 
 /**

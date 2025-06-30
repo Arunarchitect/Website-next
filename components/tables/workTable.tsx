@@ -65,15 +65,21 @@ export default function WorkTable({
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
 
+  // Expense filter states
+  const [expensesMonthRange, setExpensesMonthRange] = useState({
+    start: startOfMonth(new Date()),
+    end: endOfMonth(new Date()),
+  });
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth <= 768);
     };
 
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       handleResize();
-      window.addEventListener('resize', handleResize);
-      return () => window.removeEventListener('resize', handleResize);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
     }
   }, []);
 
@@ -91,7 +97,6 @@ export default function WorkTable({
         };
       })
     );
-    // Reset to first page when worklogs change
     setCurrentPage(1);
   }, [initialWorklogs]);
 
@@ -199,7 +204,6 @@ export default function WorkTable({
     });
   }, [filteredLogs, sortKey, sortOrder]);
 
-  // Pagination logic
   const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
   const paginatedLogs = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -222,7 +226,6 @@ export default function WorkTable({
         setSortOrder("asc");
       }
     }
-    // Reset to first page when sorting changes
     setCurrentPage(1);
   };
 
@@ -233,15 +236,25 @@ export default function WorkTable({
   };
 
   const prevMonth = () => {
-    setCurrentMonth((prev) => subMonths(prev, 1));
+    const newMonth = subMonths(currentMonth, 1);
+    setCurrentMonth(newMonth);
     setSelectedDate(null);
     setCurrentPage(1);
+    setExpensesMonthRange({
+      start: startOfMonth(newMonth),
+      end: endOfMonth(newMonth),
+    });
   };
 
   const nextMonth = () => {
-    setCurrentMonth((prev) => addMonths(prev, 1));
+    const newMonth = addMonths(currentMonth, 1);
+    setCurrentMonth(newMonth);
     setSelectedDate(null);
     setCurrentPage(1);
+    setExpensesMonthRange({
+      start: startOfMonth(newMonth),
+      end: endOfMonth(newMonth),
+    });
   };
 
   const handleDateClick = (day: Date) => {
@@ -250,13 +263,23 @@ export default function WorkTable({
   };
 
   const handleMonthChange = (month: number) => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), month, 1));
+    const newMonth = new Date(currentMonth.getFullYear(), month, 1);
+    setCurrentMonth(newMonth);
     setCurrentPage(1);
+    setExpensesMonthRange({
+      start: startOfMonth(newMonth),
+      end: endOfMonth(newMonth),
+    });
   };
 
   const handleYearChange = (year: number) => {
-    setCurrentMonth(new Date(year, currentMonth.getMonth(), 1));
+    const newMonth = new Date(year, currentMonth.getMonth(), 1);
+    setCurrentMonth(newMonth);
     setCurrentPage(1);
+    setExpensesMonthRange({
+      start: startOfMonth(newMonth),
+      end: endOfMonth(newMonth),
+    });
   };
 
   const renderSortArrow = (key: SortKey) => {
@@ -266,6 +289,21 @@ export default function WorkTable({
     ) : (
       <span className="ml-1">↓</span>
     );
+  };
+
+  const monthlyReportButtonProps = {
+    worklogs,
+    currentMonth,
+    selectedOrg,
+    worklogsSelectedDate: selectedDate,
+    worklogsMonthRange: {
+      start: startOfMonth(currentMonth),
+      end: endOfMonth(currentMonth),
+    },
+    showOnlyCurrentMonth,
+    expensesSelectedDate: null,
+    expensesMonthRange,
+    expensesShowOnlyCurrentMonth: true,
   };
 
   if (isLoading) {
@@ -290,14 +328,15 @@ export default function WorkTable({
           daysWithWorklogsCount={daysWithWorklogsCount}
         />
         {!isMobile && (
-          <MonthlyReportButton
-            worklogs={worklogs}
-            currentMonth={currentMonth}
-            selectedOrg={selectedOrg}
-            className="px-2 py-2"
-          />
+          <MonthlyReportButton {...monthlyReportButtonProps} className="px-2 py-2" />
         )}
       </div>
+
+      {isMobile && (
+        <div className="mb-4">
+          <MonthlyReportButton {...monthlyReportButtonProps} className="w-full py-2" />
+        </div>
+      )}
 
       <CalendarView
         currentMonth={currentMonth}
@@ -345,37 +384,29 @@ export default function WorkTable({
         </p>
       ) : (
         <div className="relative">
-          {isMobile && (
-            <div className="mb-4">
-              <MonthlyReportButton
-                worklogs={worklogs}
-                currentMonth={currentMonth}
-                selectedOrg={selectedOrg}
-                className="w-full py-2"
-              />
-            </div>
-          )}
           <WorkTableContent
             sortedLogs={paginatedLogs}
             handleSort={handleSort}
             renderSortArrow={renderSortArrow}
             handleShowRemarks={handleShowRemarks}
           />
-          
-          {/* Pagination controls */}
+
           {totalPages > 1 && (
             <div className="flex justify-between items-center mt-4">
               <button
                 onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
-                className={`px-4 py-2 rounded-md ${currentPage === 1 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                className={`px-4 py-2 rounded-md ${
+                  currentPage === 1
+                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-500 text-white hover:bg-blue-600"
+                }`}
               >
                 Previous
               </button>
-              
+
               <div className="flex items-center space-x-2">
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  // Show pages around current page
                   let pageNum;
                   if (totalPages <= 5) {
                     pageNum = i + 1;
@@ -386,36 +417,50 @@ export default function WorkTable({
                   } else {
                     pageNum = currentPage - 2 + i;
                   }
-                  
+
                   return (
                     <button
                       key={pageNum}
                       onClick={() => handlePageChange(pageNum)}
-                      className={`px-3 py-1 rounded-md ${currentPage === pageNum ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                      className={`px-3 py-1 rounded-md ${
+                        currentPage === pageNum
+                          ? "bg-blue-500 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
                     >
                       {pageNum}
                     </button>
                   );
                 })}
-                
+
                 {totalPages > 5 && currentPage < totalPages - 2 && (
                   <span className="px-2">...</span>
                 )}
-                
+
                 {totalPages > 5 && currentPage < totalPages - 2 && (
                   <button
                     onClick={() => handlePageChange(totalPages)}
-                    className={`px-3 py-1 rounded-md ${currentPage === totalPages ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                    className={`px-3 py-1 rounded-md ${
+                      currentPage === totalPages
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
                   >
                     {totalPages}
                   </button>
                 )}
               </div>
-              
+
               <button
-                onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                onClick={() =>
+                  handlePageChange(Math.min(totalPages, currentPage + 1))
+                }
                 disabled={currentPage === totalPages}
-                className={`px-4 py-2 rounded-md ${currentPage === totalPages ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                className={`px-4 py-2 rounded-md ${
+                  currentPage === totalPages
+                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-500 text-white hover:bg-blue-600"
+                }`}
               >
                 Next
               </button>

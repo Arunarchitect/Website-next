@@ -38,6 +38,13 @@ export default function AdminExpensesTable({
     return null;
   }, [selectedDate, monthRange, showOnlyCurrentMonth]);
 
+  console.log('AdminExpensesTable - Selected Date Range:', {
+    selectedDate,
+    monthRange,
+    showOnlyCurrentMonth,
+    displayRange
+  });
+
   // Filter expenses based on selected date or month range
   const filteredExpenses = useMemo(() => {
     if (isError) return [];
@@ -69,6 +76,12 @@ export default function AdminExpensesTable({
         }
       });
     }
+    
+    console.log('AdminExpensesTable - Filtered Expenses:', {
+      count: result.length,
+      firstExpense: result[0]?.date,
+      lastExpense: result[result.length - 1]?.date
+    });
     
     return result;
   }, [expenses, selectedDate, displayRange, isLoading, isError]);
