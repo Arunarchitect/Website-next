@@ -23,7 +23,6 @@ import { WorkTableContent } from "@/components/Userworklogs/WorkTableContent";
 import Spinner from "@/components/common/Spinner";
 import { MonthlyReportButton } from "@/components/reports/MonthlyReportButton";
 
-// Improved duration formatting helper
 const formatDuration = (minutes: number | undefined): string => {
   if (minutes === undefined || isNaN(minutes)) return "0h 0m";
   const absMinutes = Math.abs(minutes);
@@ -32,7 +31,6 @@ const formatDuration = (minutes: number | undefined): string => {
   return minutes < 0 ? `-${hours}h ${mins}m` : `${hours}h ${mins}m`;
 };
 
-// Function to calculate duration in minutes between two timestamps
 const calculateDuration = (startTime: string, endTime: string): number => {
   try {
     if (!startTime || !endTime) return 0;
@@ -55,9 +53,7 @@ export default function WorkTable({
   showOnlyCurrentMonth = false,
 }: WorkTableProps & { showOnlyCurrentMonth?: boolean }) {
   const [sortKey, setSortKey] = useState<SortKey>(initialSortKey);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(
-    initialSortDirection
-  );
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(initialSortDirection);
   const [selectedOrg, setSelectedOrg] = useState<string>("all");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -65,33 +61,39 @@ export default function WorkTable({
   const [currentRemarks, setCurrentRemarks] = useState("");
   const [worklogs, setWorklogs] = useState<UserWorkLog[]>([]);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
 
   useEffect(() => {
-  setWorklogs(
-    initialWorklogs.map((log) => {
-      // IGNORE log.duration, always calculate from timestamps
-      const duration = calculateDuration(log.start_time, log.end_time ?? "");
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
 
-      // Log calculation details for debugging
-      console.log(
-        `Worklog ID: ${log.id || 'N/A'}`,
-        `| Start: ${log.start_time}`,
-        `| End: ${log.end_time || 'N/A'}`,
-        `| Calculated Duration: ${duration} mins (${formatDuration(duration)})`
-      );
+    if (typeof window !== 'undefined') {
+      handleResize();
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, []);
 
-      return {
-        ...log,
-        end_time: log.end_time ?? "",
-        duration, // Override with calculated value
-        remarks: log.remarks ?? "",
-        organisation: log.organisation ?? "",
-        formattedDuration: formatDuration(duration),
-      };
-    })
-  );
-}, [initialWorklogs]);
-
+  useEffect(() => {
+    setWorklogs(
+      initialWorklogs.map((log) => {
+        const duration = calculateDuration(log.start_time, log.end_time ?? "");
+        return {
+          ...log,
+          end_time: log.end_time ?? "",
+          duration,
+          remarks: log.remarks ?? "",
+          organisation: log.organisation ?? "",
+          formattedDuration: formatDuration(duration),
+        };
+      })
+    );
+    // Reset to first page when worklogs change
+    setCurrentPage(1);
+  }, [initialWorklogs]);
 
   const organizations = useMemo<string[]>(() => {
     return Array.from(
@@ -169,11 +171,7 @@ export default function WorkTable({
       try {
         return format(parseISO(log.start_time), "yyyy-MM-dd") === target;
       } catch (err) {
-        console.error(
-          "Error parsing date when filtering:",
-          log.start_time,
-          err
-        );
+        console.error("Error parsing date when filtering:", log.start_time, err);
         return false;
       }
     });
@@ -201,6 +199,17 @@ export default function WorkTable({
     });
   }, [filteredLogs, sortKey, sortOrder]);
 
+  // Pagination logic
+  const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
+  const paginatedLogs = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return sortedLogs.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedLogs, currentPage]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
   const handleSort = (key: SortKey) => {
     if (onSort) {
       onSort(key);
@@ -213,6 +222,8 @@ export default function WorkTable({
         setSortOrder("asc");
       }
     }
+    // Reset to first page when sorting changes
+    setCurrentPage(1);
   };
 
   const handleShowRemarks = (remarks: string | null) => {
@@ -224,23 +235,28 @@ export default function WorkTable({
   const prevMonth = () => {
     setCurrentMonth((prev) => subMonths(prev, 1));
     setSelectedDate(null);
+    setCurrentPage(1);
   };
 
   const nextMonth = () => {
     setCurrentMonth((prev) => addMonths(prev, 1));
     setSelectedDate(null);
+    setCurrentPage(1);
   };
 
   const handleDateClick = (day: Date) => {
     setSelectedDate((prev) => (prev && isSameDay(prev, day) ? null : day));
+    setCurrentPage(1);
   };
 
   const handleMonthChange = (month: number) => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), month, 1));
+    setCurrentPage(1);
   };
 
   const handleYearChange = (year: number) => {
     setCurrentMonth(new Date(year, currentMonth.getMonth(), 1));
+    setCurrentPage(1);
   };
 
   const renderSortArrow = (key: SortKey) => {
@@ -273,12 +289,14 @@ export default function WorkTable({
           currentMonth={currentMonth}
           daysWithWorklogsCount={daysWithWorklogsCount}
         />
-        <MonthlyReportButton
-          worklogs={worklogs}
-          currentMonth={currentMonth}
-          selectedOrg={selectedOrg}
-          className="px-4 py-2"
-        />
+        {!isMobile && (
+          <MonthlyReportButton
+            worklogs={worklogs}
+            currentMonth={currentMonth}
+            selectedOrg={selectedOrg}
+            className="px-2 py-2"
+          />
+        )}
       </div>
 
       <CalendarView
@@ -326,12 +344,84 @@ export default function WorkTable({
           {selectedDate && ` on ${format(selectedDate, "MMMM d, yyyy")}`}
         </p>
       ) : (
-        <WorkTableContent
-          sortedLogs={sortedLogs}
-          handleSort={handleSort}
-          renderSortArrow={renderSortArrow}
-          handleShowRemarks={handleShowRemarks}
-        />
+        <div className="relative">
+          {isMobile && (
+            <div className="mb-4">
+              <MonthlyReportButton
+                worklogs={worklogs}
+                currentMonth={currentMonth}
+                selectedOrg={selectedOrg}
+                className="w-full py-2"
+              />
+            </div>
+          )}
+          <WorkTableContent
+            sortedLogs={paginatedLogs}
+            handleSort={handleSort}
+            renderSortArrow={renderSortArrow}
+            handleShowRemarks={handleShowRemarks}
+          />
+          
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div className="flex justify-between items-center mt-4">
+              <button
+                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className={`px-4 py-2 rounded-md ${currentPage === 1 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+              >
+                Previous
+              </button>
+              
+              <div className="flex items-center space-x-2">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  // Show pages around current page
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => handlePageChange(pageNum)}
+                      className={`px-3 py-1 rounded-md ${currentPage === pageNum ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                
+                {totalPages > 5 && currentPage < totalPages - 2 && (
+                  <span className="px-2">...</span>
+                )}
+                
+                {totalPages > 5 && currentPage < totalPages - 2 && (
+                  <button
+                    onClick={() => handlePageChange(totalPages)}
+                    className={`px-3 py-1 rounded-md ${currentPage === totalPages ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    {totalPages}
+                  </button>
+                )}
+              </div>
+              
+              <button
+                onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                className={`px-4 py-2 rounded-md ${currentPage === totalPages ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
