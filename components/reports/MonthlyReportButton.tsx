@@ -96,7 +96,12 @@ export function MonthlyReportButton({
     { skip: !userId }
   );
 
-  const allExpenses: Expense[] = expensesQuery.data || [];
+
+  // With this:
+  const allExpenses: Expense[] = useMemo(
+    () => expensesQuery.data || [],
+    [expensesQuery.data]
+  );
 
   // Determine the worklogs display range (same logic as WorkTable)
   const worklogsDisplayRange = useMemo(() => {
@@ -172,48 +177,48 @@ export function MonthlyReportButton({
 
   // Filter expenses based on AdminExpensesTable filters
   const filteredExpenses = useMemo(() => {
-  console.log('All expenses:', allExpenses); // Debug raw data
-  console.log('Filter params:', { 
-    userId,
-    expensesSelectedDate, 
-    expensesDisplayRange
-  });
-
-  let result = allExpenses.filter(
-    (expense) => expense.user?.id === Number(userId)
-  );
-  
-  console.log('After user filter:', result); // Debug after user filter
-
-  if (expensesSelectedDate) {
-    result = result.filter((expense) => {
-      if (!expense.date) return false;
-      try {
-        const expenseDate = parseISO(expense.date);
-        return isSameDay(expenseDate, expensesSelectedDate);
-      } catch {
-        return false;
-      }
+    console.log("All expenses:", allExpenses); // Debug raw data
+    console.log("Filter params:", {
+      userId,
+      expensesSelectedDate,
+      expensesDisplayRange,
     });
-    console.log('After date filter:', result); // Debug after date filter
-  } else if (expensesDisplayRange) {
-    result = result.filter((expense) => {
-      if (!expense.date) return false;
-      try {
-        const expenseDate = parseISO(expense.date);
-        return isWithinInterval(expenseDate, {
-          start: expensesDisplayRange.start,
-          end: expensesDisplayRange.end
-        });
-      } catch {
-        return false;
-      }
-    });
-    console.log('After range filter:', result); // Debug after range filter
-  }
-  
-  return result;
-}, [allExpenses, userId, expensesSelectedDate, expensesDisplayRange]);
+
+    let result = allExpenses.filter(
+      (expense) => expense.user?.id === Number(userId)
+    );
+
+    console.log("After user filter:", result); // Debug after user filter
+
+    if (expensesSelectedDate) {
+      result = result.filter((expense) => {
+        if (!expense.date) return false;
+        try {
+          const expenseDate = parseISO(expense.date);
+          return isSameDay(expenseDate, expensesSelectedDate);
+        } catch {
+          return false;
+        }
+      });
+      console.log("After date filter:", result); // Debug after date filter
+    } else if (expensesDisplayRange) {
+      result = result.filter((expense) => {
+        if (!expense.date) return false;
+        try {
+          const expenseDate = parseISO(expense.date);
+          return isWithinInterval(expenseDate, {
+            start: expensesDisplayRange.start,
+            end: expensesDisplayRange.end,
+          });
+        } catch {
+          return false;
+        }
+      });
+      console.log("After range filter:", result); // Debug after range filter
+    }
+
+    return result;
+  }, [allExpenses, userId, expensesSelectedDate, expensesDisplayRange]);
 
   const generateMonthlyReport = (): void => {
     const monthName = format(currentMonth, "MMMM yyyy");
@@ -468,7 +473,10 @@ export function MonthlyReportButton({
           fontSize: 9,
         },
         didParseCell: (data) => {
-          if (data.section === "body" && data.row.index === filteredExpenses.length) {
+          if (
+            data.section === "body" &&
+            data.row.index === filteredExpenses.length
+          ) {
             data.cell.styles.fontStyle = "bold";
             data.cell.styles.fillColor = [220, 220, 220];
           }
