@@ -15,9 +15,6 @@ interface ComponentHierarchy {
   [key: string]: number;
 }
 
-interface FeePercentages {
-  [key: string]: number;
-}
 
 interface ComponentDescriptions {
   [key: string]: string;
@@ -162,14 +159,48 @@ const BudgetCalculator: React.FC = () => {
         year: "numeric",
       });
 
-      // Header
-      let y = 60;
+      // ========== Professional Header ==========
+      // Logo or Header Image (you can add this if you have one)
+      // pdf.addImage(logoData, 'JPEG', 50, 20, 50, 50);
+
+      // Your professional information
+      pdf
+        .setFontSize(14)
+        .setTextColor(...secondaryColor)
+        .setFont("helvetica", "bold")
+        .text("Arun Ravikumar (B.Arch, M.Plan)", 50, 40);
+
+      pdf
+        .setFontSize(10)
+        .setTextColor(100, 100, 100)
+        .setFont("helvetica", "normal")
+        .text("Licensed Architect and Planner", 50, 60);
+
+      pdf
+        .setFontSize(10)
+        .setTextColor(...primaryColor)
+        .setFont("helvetica", "normal")
+        .text("www.arunarchitect.in", pdf.internal.pageSize.width - 50, 60, {
+          align: "right",
+        });
+
+      // Divider line after header
+      pdf
+        .setDrawColor(...lightGray)
+        .setLineWidth(0.5)
+        .line(50, 70, pdf.internal.pageSize.width - 50, 70);
+
+      // ========== Main Content ==========
+      let y = 100; // Starting Y position after header
+
+      // Main Title
       pdf
         .setFontSize(22)
         .setTextColor(...primaryColor)
         .setFont("helvetica", "bold")
         .text(`Design Fee Proposal for ${clientName}`, 50, y);
 
+      // Date on same line as title
       pdf
         .setFontSize(12)
         .setTextColor(100, 100, 100)
@@ -191,7 +222,7 @@ const BudgetCalculator: React.FC = () => {
         .text(`Rs. ${result?.toLocaleString()}`, 200, y);
       y += 30;
 
-      // Divider
+      // Divider after basic info
       pdf
         .setDrawColor(...lightGray)
         .setLineWidth(0.5)
@@ -214,11 +245,10 @@ const BudgetCalculator: React.FC = () => {
       // Create services table
       autoTable(pdf, {
         startY: y,
-        head: [["Service", "Percentage", "Fee (Rs.)"]],
+        head: [["Service", "Fee (Rs.)"]], // Removed "Percentage" from headers
         body: selectedServices.map((service) => [
           service,
-          `${(feePercentages as FeePercentages)[service]}%`,
-          `Rs. ${Math.round(serviceFees[service]).toLocaleString()}`,
+          `Rs. ${Math.round(serviceFees[service]).toLocaleString()}`, // Removed percentage value
         ]),
         headStyles: {
           fillColor: secondaryColor,
@@ -232,8 +262,7 @@ const BudgetCalculator: React.FC = () => {
         },
         columnStyles: {
           0: { cellWidth: "auto" },
-          1: { cellWidth: "auto", halign: "center" },
-          2: { cellWidth: "auto", halign: "right" },
+          1: { cellWidth: "auto", halign: "right" }, // Adjusted column index since we removed a column
         },
         margin: { left: 50, right: 50 },
         styles: {
@@ -284,7 +313,7 @@ const BudgetCalculator: React.FC = () => {
         .text("Terms and Conditions", 50, currentY);
       currentY += 15;
 
-      const disclaimerText = `The advance amount is payable at the time of the site visit. A detailed breakdown of deliverables and the payment schedule will be provided following the site visit. All quoted amounts are subject to revision based on changes in the approximate square footage. This quote remains valid for 10 days from the date of generation or until a formal contract is executed, whichever comes first.`;
+      const disclaimerText = `The advance amount is payable at the time of the site visit. A detailed breakdown of deliverables and the payment schedule will be provided following the site visit. All quoted amounts are subject to revision based on changes in the approximate square footage. This quote remains valid for 10 days from the date of generation or until a formal contract is executed, whichever comes first. If any legal or property-related discrepancies are identified during the initial sketch design stage, a project halt report shall be issued, and the advance amount paid shall be non-refundable.`;
 
       pdf.setFontSize(10).setFont("helvetica", "normal");
       const splitDisclaimer = pdf.splitTextToSize(disclaimerText, 495);
