@@ -82,7 +82,7 @@ export const useCalculator = () => {
 
     try {
       const res = await fetch(
-        `http://localhost:8000/fees/fees/?promo_code=${encodeURIComponent(
+        `https://api.modelflick.com/fees/fees/?promo_code=${encodeURIComponent(
           promoCode
         )}`
       );
