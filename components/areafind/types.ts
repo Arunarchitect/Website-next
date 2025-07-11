@@ -2,6 +2,7 @@ export interface SpaceType {
   name: string;
   defaultArea: number;
   description?: string;
+  isCustom?: boolean; // Add this optional property
 }
 
 export interface SelectedSpace {

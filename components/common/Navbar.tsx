@@ -27,9 +27,9 @@ export default function Navbar() {
 
 	const toolsLink = (isMobile: boolean) => (
 		<NavLink
-			isSelected={isSelected('/tools/fee')}
+			isSelected={isSelected('/tools')}
 			isMobile={isMobile}
-			href='/tools/fee'
+			href='/tools'
 		>
 			Tools
 		</NavLink>

@@ -1,9 +1,10 @@
 import React from "react";
 import { FaTrash, FaChevronDown, FaChevronUp } from "react-icons/fa";
 import { SpaceType, SelectedSpace } from "./types";
-import { spaceTypes } from "./constants";
+
 
 interface SpaceListProps {
+  spaceTypes: SpaceType[];
   selectedSpaces: SelectedSpace[];
   showSpaceList: boolean;
   onToggleSpaceList: () => void;
@@ -12,6 +13,7 @@ interface SpaceListProps {
 }
 
 const SpaceList: React.FC<SpaceListProps> = ({
+  spaceTypes,
   selectedSpaces,
   showSpaceList,
   onToggleSpaceList,
@@ -37,7 +39,7 @@ const SpaceList: React.FC<SpaceListProps> = ({
           </button>
         )}
       </div>
-      
+
       <button
         onClick={onToggleSpaceList}
         className="w-full p-2 mb-4 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center justify-between"
@@ -55,7 +57,9 @@ const SpaceList: React.FC<SpaceListProps> = ({
               className="w-full p-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded text-left flex justify-between items-center"
             >
               <span>{space.name}</span>
-              <span className="text-xs text-gray-500">{space.defaultArea} sqft</span>
+              <span className="text-xs text-gray-500">
+                {space.defaultArea} sqft
+              </span>
             </button>
           ))}
         </div>
@@ -68,7 +72,10 @@ const SpaceList: React.FC<SpaceListProps> = ({
         ) : (
           <ul className="space-y-2">
             {Object.entries(spaceCounts).map(([name, count]) => (
-              <li key={name} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+              <li
+                key={name}
+                className="flex justify-between items-center p-2 bg-gray-50 rounded"
+              >
                 <span>{name}</span>
                 <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
                   {count}

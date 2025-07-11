@@ -182,6 +182,7 @@ const AreaCalculator: React.FC = () => {
         {/* Space Selection and Display */}
         <div className="flex flex-col md:flex-row gap-6 mb-6">
           <SpaceList
+            spaceTypes={spaceTypes} // Add this prop
             selectedSpaces={selectedSpaces}
             showSpaceList={showSpaceList}
             onToggleSpaceList={() => setShowSpaceList(!showSpaceList)}
