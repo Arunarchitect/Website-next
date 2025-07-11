@@ -25,7 +25,9 @@ export default function useVerify() {
         "/password-reset",
         "/auth/register",
         "/auth/login",
-        "/tools/fee"
+        "/tools/fee",
+        "/tools/area",
+        "/tools"
       ];
 
       // Allow access to public pages without token verification

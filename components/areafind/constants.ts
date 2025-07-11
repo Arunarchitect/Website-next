@@ -1,0 +1,10 @@
+import { SpaceType } from "./types";
+
+export const spaceTypes: SpaceType[] = [
+  { name: "Living Room", defaultArea: 200 },
+  { name: "Bedroom", defaultArea: 150 },
+  { name: "Kitchen", defaultArea: 100 },
+  { name: "Bathroom", defaultArea: 50 },
+  { name: "Dining Room", defaultArea: 120 },
+  { name: "Home Office", defaultArea: 80 },
+];
