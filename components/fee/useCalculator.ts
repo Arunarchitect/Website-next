@@ -17,6 +17,12 @@ export const useCalculator = () => {
   const [selectedComponents, setSelectedComponents] = useState(
     initialSelectedComponents
   );
+  const [consultantData, setConsultantData] = useState<{
+    consultant: string;
+    designation: string;
+    education: string;
+    url: string;
+  } | null>(null);
 
   const handleCheckboxChange = (service: string) => {
     setSelectedComponents((prev) => {
@@ -52,19 +58,17 @@ export const useCalculator = () => {
 
   const handleCalculate = async () => {
     setError(null);
+    setConsultantData(null);
 
     if (!clientName.trim()) {
       setError("Please enter client name");
-      return;
-    }
-    if (!promoCode.trim()) {
-      setError("Please enter promo code");
       return;
     }
     if (!area || area <= 0) {
       setError("Please enter a valid area");
       return;
     }
+
     const selected = Object.entries(selectedComponents).filter(
       ([, val]) => val
     );
@@ -78,16 +82,31 @@ export const useCalculator = () => {
 
     try {
       const res = await fetch(
-        `https://api.modelflick.com/fees/fee/?promo_code=${promoCode}`
+        `http://localhost:8000/fees/fees/?promo_code=${encodeURIComponent(
+          promoCode
+        )}`
       );
+
+      if (!res.ok) {
+        throw new Error("Failed to fetch fee data");
+      }
+
       const data = await res.json();
 
-      if (data?.error) {
+      if (data.error) {
         setError(data.error);
         return;
       }
 
-      const designFee = data?.base_fee_per_sqft;
+      // Store consultant data from API
+      setConsultantData({
+        consultant: data.consultant,
+        designation: data.designation,
+        education: data.education,
+        url: data.url,
+      });
+
+      const designFee = parseFloat(data.base_fee_per_sqft);
       const areaValue = Number(area);
 
       const calculatedFees: Record<string, number> = {};
@@ -104,8 +123,12 @@ export const useCalculator = () => {
       setServiceFees(calculatedFees);
       setResult(totalFee);
     } catch (err) {
-      console.error("Error fetching fee:", err);
-      setError("Failed to fetch fee. Please try again.");
+      console.error("Calculation error:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to calculate. Please try again."
+      );
     }
   };
 
@@ -121,6 +144,7 @@ export const useCalculator = () => {
     selectAll,
     error,
     selectedComponents,
+    consultantData,
     handleCheckboxChange,
     handleSelectAllChange,
     handleCalculate,

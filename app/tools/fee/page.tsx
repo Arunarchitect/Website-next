@@ -1,10 +1,9 @@
 "use client";
-
-import React from "react";
+import React, { useState } from "react";
 import { useCalculator } from "@/components/fee/useCalculator";
 import { generatePDF } from "@/components/fee/PDFGenerator";
 import { FormFields } from "@/components/fee/FormFields";
-import ServicesChecklist from "@/components/fee/ServicesChecklist";
+import { ServicesChecklist } from "@/components/fee/ServicesChecklist";
 import { ResultsDisplay } from "@/components/fee/ResultsDisplay";
 import { serviceComponents } from "@/components/fee/constants";
 
@@ -21,14 +20,29 @@ const BudgetCalculator: React.FC = () => {
     selectAll,
     error,
     selectedComponents,
+    consultantData,
     handleCheckboxChange,
     handleSelectAllChange,
     handleCalculate,
   } = useCalculator();
 
+  const [isLoading, setIsLoading] = useState(false);
+
   const handleGeneratePDF = () => {
-    if (result) {
-      generatePDF(clientName, selectedComponents, serviceFees, result, area);
+    setIsLoading(true);
+    try {
+      if (result) {
+        generatePDF(
+          clientName,
+          selectedComponents,
+          serviceFees,
+          result,
+          area,
+          consultantData
+        );
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -51,7 +65,7 @@ const BudgetCalculator: React.FC = () => {
         />
 
         <ServicesChecklist
-          services={serviceComponents} // Passing serviceComponents as services prop
+          services={serviceComponents}
           selectedComponents={selectedComponents}
           handleCheckboxChange={handleCheckboxChange}
         />
@@ -66,7 +80,10 @@ const BudgetCalculator: React.FC = () => {
         <ResultsDisplay
           result={result}
           error={error}
+          serviceFees={serviceFees}
+          selectedComponents={selectedComponents}
           generatePDF={handleGeneratePDF}
+          isLoading={isLoading}
         />
       </div>
     </div>

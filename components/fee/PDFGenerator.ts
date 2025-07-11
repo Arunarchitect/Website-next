@@ -3,12 +3,20 @@ import autoTable, { UserOptions } from "jspdf-autotable";
 import { JSPDFWithAutoTable } from "./types";
 import { componentDescriptions } from "./constants";
 
+interface ConsultantData {
+  consultant: string;
+  designation: string;
+  education: string;
+  url?: string;
+}
+
 export const generatePDF = (
   clientName: string,
   selectedComponents: Record<string, boolean>,
   serviceFees: Record<string, number>,
   result: number,
-  area: number | ""
+  area: number | "",
+  consultantData: ConsultantData | null
 ): void => {
   const doc = new jsPDF({
     orientation: "portrait",
@@ -30,65 +38,174 @@ export const generatePDF = (
     year: "numeric",
   });
 
-  // Header
-  doc.setFontSize(14)
+  // Enhanced consultant data handling with fallbacks
+  const consultantName = consultantData?.consultant || "Design Consultant";
+  const designation = consultantData?.designation || "Architectural Designer";
+  const education = consultantData?.education || "";
+
+  // Robust URL handling
+  let websiteUrl = "";
+  let displayUrl = "";
+
+  if (consultantData?.url) {
+    try {
+      const rawUrl = consultantData.url.trim();
+      websiteUrl = rawUrl.includes("://") ? rawUrl : `https://${rawUrl}`;
+      displayUrl = websiteUrl
+        .replace(/^https?:\/\/(www\.)?/, "")
+        .replace(/\/$/, "");
+    } catch {
+      // Silently handle URL processing errors by keeping empty strings
+    }
+  }
+
+  // Header with dynamic consultant data
+  doc
+    .setFontSize(14)
     .setTextColor(...secondaryColor)
     .setFont("helvetica", "bold")
-    .text("Arun Ravikumar (B.Arch, M.Plan)", 50, 40);
+    .text(consultantName, 50, 40);
 
-  doc.setFontSize(10)
+  if (education) {
+    const nameWidth = doc.getTextWidth(consultantName);
+    doc
+      .setFontSize(10)
+      .setTextColor(100, 100, 100)
+      .setFont("helvetica", "italic")
+      .text(` ${education}`, 50 + nameWidth + 2, 40);
+  }
+
+  doc
+    .setFontSize(10)
     .setTextColor(100, 100, 100)
     .setFont("helvetica", "normal")
-    .text("Licensed Architect and Planner", 50, 60);
+    .text(designation, 50, 60);
 
-  doc.setFontSize(10)
-    .setTextColor(...primaryColor)
+  if (websiteUrl) {
+    doc
+      .setFontSize(10)
+      .setTextColor(...primaryColor)
+      .setFont("helvetica", "normal")
+      .textWithLink(displayUrl, doc.internal.pageSize.width - 50, 60, {
+        align: "right",
+        url: websiteUrl,
+      });
+  }
+
+  // Header with dynamic consultant data
+  doc
+    .setFontSize(14)
+    .setTextColor(...secondaryColor)
+    .setFont("helvetica", "bold")
+    .text(consultantName, 50, 40);
+
+  if (education) {
+    const nameWidth = doc.getTextWidth(consultantName);
+    doc
+      .setFontSize(10)
+      .setTextColor(100, 100, 100)
+      .setFont("helvetica", "italic")
+      .text(` ${education}`, 50 + nameWidth + 2, 40);
+  }
+
+  doc
+    .setFontSize(10)
+    .setTextColor(100, 100, 100)
     .setFont("helvetica", "normal")
-    .text("www.arunarchitect.in", doc.internal.pageSize.width - 50, 60, {
-      align: "right",
-    });
+    .text(designation, 50, 60);
+
+  if (websiteUrl) {
+    doc
+      .setFontSize(10)
+      .setTextColor(...primaryColor)
+      .setFont("helvetica", "normal")
+      .textWithLink(displayUrl, doc.internal.pageSize.width - 50, 60, {
+        align: "right",
+        url: websiteUrl,
+      });
+  }
 
   // Divider line
-  doc.setDrawColor(...lightGray)
+  doc
+    .setDrawColor(...lightGray)
     .setLineWidth(0.5)
-    .line(50, 70, doc.internal.pageSize.width - 50, 70);
+    .line(50, 90, doc.internal.pageSize.width - 50, 90);
 
   // Main Content
-  let y = 100;
+  let y = 120;
 
   // Title
-  doc.setFontSize(22)
+  doc
+    .setFontSize(22)
     .setTextColor(...primaryColor)
     .setFont("helvetica", "bold")
-    .text(`Design Fee Proposal for ${clientName}`, 50, y);
+    .text(`Design Fee Proposal`, 50, y);
 
-  doc.setFontSize(12)
+  doc
+    .setFontSize(12)
     .setTextColor(100, 100, 100)
     .setFont("helvetica", "italic")
     .text(`Date: ${formattedDate}`, doc.internal.pageSize.width - 50, y, {
       align: "right",
     });
 
-  // Basic info
+  // Basic info - Friendly letter format
   y += 40;
   doc.setFontSize(12).setTextColor(0, 0, 0).setFont("helvetica", "normal");
-  doc.text(`Client: ${clientName}`, 50, y);
+
+  // Greeting
+  const greetingText = `Dear ${clientName || "Valued Client"},`;
+  doc.text(greetingText, 50, y);
   y += 20;
-  doc.text(`Area: ${area} sq.ft`, 50, y);
-  y += 20;
-  doc.text("Total Design Fee:", 50, y);
-  doc.setFont("helvetica", "bold")
-    .text(`Rs. ${result.toLocaleString()}`, 200, y);
+
+  // Main message
+  const mainMessage = [
+    `Thank you for considering our design services. We're delighted to work with you on your project.`,
+    `Based on the approximate area of ${
+      area || "___"
+    } sq.ft, the estimated design fee is:`,
+  ];
+
+  mainMessage.forEach((line, i) => {
+    if (y > 750) {
+      doc.addPage();
+      y = 60;
+    }
+    doc.text(line, 50, y + i * 20);
+  });
+  y += mainMessage.length * 20;
+
+  // Fee display
+  doc
+    .setFont("helvetica", "bold")
+    .text(`Rs. ${result?.toLocaleString() || "0"}`, 50, y);
   y += 30;
 
+  // Closing note
+  const closingNote = [
+    "Please don't hesitate to reach out if you have any questions or need clarification.",
+    "We're happy to discuss any aspect of this proposal at your convenience.",
+  ];
+
+  closingNote.forEach((line, i) => {
+    if (y > 750) {
+      doc.addPage();
+      y = 60;
+    }
+    doc.setFont("helvetica", "normal").text(line, 50, y + i * 20);
+  });
+  y += closingNote.length * 20 + 10;
+
   // Divider
-  doc.setDrawColor(...lightGray)
+  doc
+    .setDrawColor(...lightGray)
     .setLineWidth(0.5)
     .line(50, y, doc.internal.pageSize.width - 50, y);
   y += 20;
 
   // Selected Services
-  doc.setFontSize(14)
+  doc
+    .setFontSize(14)
     .setTextColor(...primaryColor)
     .setFont("helvetica", "bold")
     .text("Selected Services", 50, y);
@@ -104,7 +221,7 @@ export const generatePDF = (
     head: [["Service", "Fee (Rs.)"]],
     body: selectedServices.map((service) => [
       service,
-      `Rs. ${Math.round(serviceFees[service]).toLocaleString()}`,
+      `Rs. ${Math.round(serviceFees[service] || 0).toLocaleString()}`,
     ]),
     headStyles: {
       fillColor: secondaryColor,
@@ -130,7 +247,8 @@ export const generatePDF = (
   y = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 20 : y + 20;
 
   // Service Descriptions
-  doc.setFontSize(14)
+  doc
+    .setFontSize(14)
     .setTextColor(...primaryColor)
     .setFont("helvetica", "bold")
     .text("Service Descriptions", 50, y);
@@ -148,9 +266,7 @@ export const generatePDF = (
     }
 
     const splitText = doc.splitTextToSize(text, 495);
-    doc.setFontSize(10)
-      .setTextColor(0, 0, 0)
-      .setFont("helvetica", "normal");
+    doc.setFontSize(10).setTextColor(0, 0, 0).setFont("helvetica", "normal");
     doc.text(splitText, 50, currentY);
     currentY += splitText.length * 12 + 8;
   });
@@ -158,7 +274,8 @@ export const generatePDF = (
   currentY += 10;
 
   // Disclaimer
-  doc.setFontSize(12)
+  doc
+    .setFontSize(12)
     .setTextColor(0, 0, 0)
     .setFont("helvetica", "bold")
     .text("Terms and Conditions", 50, currentY);
@@ -171,7 +288,9 @@ export const generatePDF = (
   doc.text(splitDisclaimer, 50, currentY);
 
   // Save PDF
-  doc.save(
-    `Design-Fee-Proposal-${clientName.replace(/\s+/g, "-")}-${formattedDate.replace(/\//g, "-")}.pdf`
-  );
+  const fileName = `Design-Fee-Proposal-${(clientName || "Client").replace(
+    /\s+/g,
+    "-"
+  )}-${formattedDate.replace(/\//g, "-")}.pdf`;
+  doc.save(fileName);
 };
