@@ -7,6 +7,7 @@ interface SpaceDetailsProps {
   onRemoveSpace: (id: string) => void;
   onDuplicateSpace: (id: string) => void;
   onAreaChange: (id: string, area: number) => void;
+  onNameChange: (id: string, name: string) => void; // New prop
 }
 
 const SpaceDetails: React.FC<SpaceDetailsProps> = ({
@@ -14,9 +15,9 @@ const SpaceDetails: React.FC<SpaceDetailsProps> = ({
   onRemoveSpace,
   onDuplicateSpace,
   onAreaChange,
+  onNameChange
 }) => {
   const handleAreaChange = (id: string, area: number) => {
-    // Ensure area is never negative
     const validatedArea = Math.max(0, area);
     onAreaChange(id, validatedArea);
   };
@@ -38,6 +39,7 @@ const SpaceDetails: React.FC<SpaceDetailsProps> = ({
               onRemove={onRemoveSpace}
               onDuplicate={onDuplicateSpace}
               onAreaChange={handleAreaChange}
+              onNameChange={onNameChange}
             />
           ))}
         </div>

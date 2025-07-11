@@ -7,4 +7,5 @@ export const spaceTypes: SpaceType[] = [
   { name: "Bathroom", defaultArea: 50 },
   { name: "Dining Room", defaultArea: 120 },
   { name: "Home Office", defaultArea: 80 },
+  { name: "Custom Space", defaultArea: 50, isCustom: true } // Added custom space
 ];

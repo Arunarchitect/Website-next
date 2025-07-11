@@ -12,7 +12,8 @@ const AreaCalculator: React.FC = () => {
   const [selectedSpaces, setSelectedSpaces] = useState<SelectedSpace[]>([]);
   const [clientName, setClientName] = useState<string>("");
   const [wallPercentage, setWallPercentage] = useState<number>(10);
-  const [circulationPercentage, setCirculationPercentage] = useState<number>(10);
+  const [circulationPercentage, setCirculationPercentage] =
+    useState<number>(10);
   const [error, setError] = useState<string | null>(null);
   const [showSpaceList, setShowSpaceList] = useState<boolean>(false);
 
@@ -27,6 +28,22 @@ const AreaCalculator: React.FC = () => {
     ]);
     setShowSpaceList(false);
     setError(null); // Clear error when adding a space
+  };
+
+  const handleNameChange = (id: string, newName: string) => {
+    setSelectedSpaces((prev) =>
+      prev.map((space) =>
+        space.id === id
+          ? {
+              ...space,
+              type: {
+                ...space.type,
+                name: newName,
+              },
+            }
+          : space
+      )
+    );
   };
 
   const handleDuplicateSpace = (id: string) => {
@@ -177,6 +194,7 @@ const AreaCalculator: React.FC = () => {
             onRemoveSpace={handleRemoveSpace}
             onDuplicateSpace={handleDuplicateSpace}
             onAreaChange={updateCustomArea}
+            onNameChange={handleNameChange}
           />
         </div>
 
