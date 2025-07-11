@@ -23,6 +23,10 @@ interface ComponentDescriptions {
   [key: string]: string;
 }
 
+interface ServiceFees {
+  [key: string]: number;
+}
+
 interface JSPDFWithAutoTable extends jsPDF {
   lastAutoTable?: {
     finalY: number;
@@ -34,6 +38,7 @@ const BudgetCalculator: React.FC = () => {
   const [clientName, setClientName] = useState<string>("");
   const [promoCode, setPromoCode] = useState<string>("");
   const [result, setResult] = useState<number | null>(null);
+  const [serviceFees, setServiceFees] = useState<ServiceFees>({});
   const [selectAll, setSelectAll] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedComponents, setSelectedComponents] = useState<
@@ -77,22 +82,19 @@ const BudgetCalculator: React.FC = () => {
   const handleCalculate = async () => {
     setError(null);
 
-    // Validate required fields
+    // Validate required fields (unchanged)
     if (!clientName.trim()) {
       setError("Please enter client name");
       return;
     }
-
     if (!promoCode.trim()) {
       setError("Please enter promo code");
       return;
     }
-
     if (!area || area <= 0) {
       setError("Please enter a valid area");
       return;
     }
-
     const selected = Object.entries(selectedComponents).filter(
       ([, val]) => val
     );
@@ -100,9 +102,7 @@ const BudgetCalculator: React.FC = () => {
       selected.length === 1 &&
       selected[0][0] === "Advance Payment and Site Visit"
     ) {
-      setError(
-        "Please select at least one more service in addition to Advance Payment."
-      );
+      setError("Please select at least one more service.");
       return;
     }
 
@@ -118,16 +118,22 @@ const BudgetCalculator: React.FC = () => {
       }
 
       const designFee = data?.base_fee_per_sqft;
+      const areaValue = Number(area);
 
-      let total = 0;
+      // Calculate individual fees
+      const calculatedFees: ServiceFees = {};
+      let totalFee = 0;
+
       Object.keys(selectedComponents).forEach((service) => {
         if (selectedComponents[service]) {
-          const percent = (feePercentages as FeePercentages)[service] / 100;
-          total += designFee * percent * Number(area);
+          const fee = designFee * (feePercentages[service] / 100) * areaValue;
+          calculatedFees[service] = fee;
+          totalFee += fee;
         }
       });
 
-      setResult(total);
+      setServiceFees(calculatedFees);
+      setResult(totalFee);
     } catch (err) {
       console.error("Error fetching fee:", err);
       setError("Failed to fetch fee. Please try again.");
@@ -148,7 +154,7 @@ const BudgetCalculator: React.FC = () => {
       const secondaryColor: [number, number, number] = [51, 51, 51];
       const lightGray: [number, number, number] = [220, 220, 220];
 
-      // Get current date in DD/MM/YYYY format
+      // Get current date
       const today = new Date();
       const formattedDate = today.toLocaleDateString("en-GB", {
         day: "2-digit",
@@ -156,7 +162,7 @@ const BudgetCalculator: React.FC = () => {
         year: "numeric",
       });
 
-      // Header with client name and date
+      // Header
       let y = 60;
       pdf
         .setFontSize(22)
@@ -164,7 +170,6 @@ const BudgetCalculator: React.FC = () => {
         .setFont("helvetica", "bold")
         .text(`Design Fee Proposal for ${clientName}`, 50, y);
 
-      // Add date on the right side
       pdf
         .setFontSize(12)
         .setTextColor(100, 100, 100)
@@ -209,13 +214,11 @@ const BudgetCalculator: React.FC = () => {
       // Create services table
       autoTable(pdf, {
         startY: y,
-        head: [["Service", "Fee (Rs.)"]],
+        head: [["Service", "Percentage", "Fee (Rs.)"]],
         body: selectedServices.map((service) => [
           service,
-          `Rs. ${(
-            (result || 0) *
-            ((feePercentages as FeePercentages)[service] / 100)
-          ).toLocaleString()}`,
+          `${(feePercentages as FeePercentages)[service]}%`,
+          `Rs. ${Math.round(serviceFees[service]).toLocaleString()}`,
         ]),
         headStyles: {
           fillColor: secondaryColor,
@@ -229,7 +232,8 @@ const BudgetCalculator: React.FC = () => {
         },
         columnStyles: {
           0: { cellWidth: "auto" },
-          1: { cellWidth: "auto", halign: "right" },
+          1: { cellWidth: "auto", halign: "center" },
+          2: { cellWidth: "auto", halign: "right" },
         },
         margin: { left: 50, right: 50 },
         styles: {
