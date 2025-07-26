@@ -55,11 +55,33 @@ export default function Navbar() {
 		</NavLink>
 	);
 
+	const donateLink = (isMobile: boolean) => (
+		<NavLink
+			isSelected={isSelected('/donate')}
+			isMobile={isMobile}
+			href='/donate'
+		>
+			Donate
+		</NavLink>
+	);
+
+	const aboutLink = (isMobile: boolean) => (
+		<NavLink
+			isSelected={isSelected('/donate')}
+			isMobile={isMobile}
+			href='/about'
+		>
+			About
+		</NavLink>
+	);
+
 	const authLinks = (isMobile: boolean) => (
 		<>
 			{toolsLink(isMobile)}
 			{coursesLink(isMobile)}
 			{modelBlogLink(isMobile)} {/* Add ModelBlog Link */}
+			{donateLink(isMobile)}
+			{aboutLink(isMobile)}
 			<NavLink
 				isSelected={isSelected('/dashboard')}
 				isMobile={isMobile}
@@ -78,6 +100,8 @@ export default function Navbar() {
 			{toolsLink(isMobile)}
 			{coursesLink(isMobile)}
 			{modelBlogLink(isMobile)} {/* Add ModelBlog Link */}
+			{donateLink(isMobile)}
+			{aboutLink(isMobile)}
 			<NavLink
 				isSelected={isSelected('/auth/login')}
 				isMobile={isMobile}

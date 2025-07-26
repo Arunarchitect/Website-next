@@ -27,7 +27,8 @@ export default function useVerify() {
         "/auth/login",
         "/tools/fee",
         "/tools/area",
-        "/tools"
+        "/tools/quiz",
+        "/donate"
       ];
 
       // Allow access to public pages without token verification

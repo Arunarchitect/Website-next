@@ -42,19 +42,19 @@ export default function QuizPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const correctAnswers = questions.filter(
       (q) => answers[q.id] === q.correct_option
     ).length;
-    
+
     const wrongAnswers = questions.filter(
       (q) => answers[q.id] && answers[q.id] !== q.correct_option
     ).length;
 
     const unanswered = questions.length - correctAnswers - wrongAnswers;
-    
+
     // PSC style negative marking (1/3 deduction for wrong answers)
-    const netScore = correctAnswers - (wrongAnswers / 3);
+    const netScore = correctAnswers - wrongAnswers / 3;
     const percentage = (netScore / questions.length) * 100;
 
     setScore({
@@ -63,7 +63,7 @@ export default function QuizPage() {
       unanswered,
       total: questions.length,
       percentage,
-      netScore
+      netScore,
     });
   };
 
@@ -104,6 +104,27 @@ export default function QuizPage() {
     );
   }
 
+  // Check if user has access (user_id 1 or 2)
+  const hasAccess = user && [1, 2].includes(user.id);
+
+  if (!hasAccess) {
+    return (
+      <div className="container mx-auto p-4 max-w-4xl">
+        <div className="p-8 text-center bg-white dark:bg-gray-800 rounded-lg shadow">
+          <h1 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
+            Access Restricted
+          </h1>
+          <p className="mb-4 text-gray-700 dark:text-gray-300">
+            You have limited access to this feature.
+          </p>
+          <p className="text-gray-600 dark:text-gray-400">
+            Please contact support if you believe this is an error.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Handle quiz loading errors
   if (isQuizError) {
     return (
@@ -123,41 +144,45 @@ export default function QuizPage() {
 
   return (
     <div className="container mx-auto p-4 max-w-4xl">
-      {/* Header Section */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {user ? `Welcome, ${user.first_name}` : "OMR Quiz"}
-        </h1>
-        <div className="flex gap-4">
+      {/* Header Section - Stacked on mobile */}
+      <div className="mb-6">
+        <div className="flex justify-between items-start sm:items-center flex-col sm:flex-row gap-4">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            {user ? `Welcome, ${user.first_name}` : "OMR Quiz"}
+          </h1>
           <button
             onClick={handleReload}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-md transition-colors text-gray-800 dark:text-white"
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-md transition-colors text-gray-800 dark:text-white self-end sm:self-auto"
           >
             Reload Quiz
           </button>
-          {score !== null && (
-            <div className="flex items-center gap-2">
-              <div className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900 rounded-md text-gray-800 dark:text-white text-center">
-                <div className="font-bold text-sm">Net Score</div>
-                <div>{score.netScore.toFixed(2)}/{score.total}</div>
-                <div className="text-xs">({score.percentage.toFixed(2)}%)</div>
-              </div>
-              <div className="px-3 py-1.5 bg-green-100 dark:bg-green-900 rounded-md text-gray-800 dark:text-white text-center">
-                <div className="font-bold text-sm">Correct</div>
-                <div>{score.correct}</div>
-              </div>
-              <div className="px-3 py-1.5 bg-red-100 dark:bg-red-900 rounded-md text-gray-800 dark:text-white text-center">
-                <div className="font-bold text-sm">Wrong</div>
-                <div>{score.wrong}</div>
-                <div className="text-xs">(-{score.wrong}/3)</div>
-              </div>
-              <div className="px-3 py-1.5 bg-yellow-100 dark:bg-yellow-900 rounded-md text-gray-800 dark:text-white text-center">
-                <div className="font-bold text-sm">Unanswered</div>
-                <div>{score.unanswered}</div>
-              </div>
-            </div>
-          )}
         </div>
+
+        {/* Score cards - full width below welcome on mobile */}
+        {score !== null && (
+          <div className="mt-4 w-full grid grid-cols-4 gap-2 sm:gap-3">
+            <div className="px-3 py-2 bg-blue-100 dark:bg-blue-900 rounded-md text-gray-800 dark:text-white text-center">
+              <div className="font-bold text-xs sm:text-sm">Net Score</div>
+              <div className="text-sm sm:text-base">
+                {score.netScore.toFixed(2)}/{score.total}
+              </div>
+              <div className="text-xs">({score.percentage.toFixed(2)}%)</div>
+            </div>
+            <div className="px-3 py-2 bg-green-100 dark:bg-green-900 rounded-md text-gray-800 dark:text-white text-center">
+              <div className="font-bold text-xs sm:text-sm">Correct</div>
+              <div className="text-sm sm:text-base">{score.correct}</div>
+            </div>
+            <div className="px-3 py-2 bg-red-100 dark:bg-red-900 rounded-md text-gray-800 dark:text-white text-center">
+              <div className="font-bold text-xs sm:text-sm">Wrong</div>
+              <div className="text-sm sm:text-base">{score.wrong}</div>
+              <div className="text-xs">(-{score.wrong}/3)</div>
+            </div>
+            <div className="px-3 py-2 bg-yellow-100 dark:bg-yellow-900 rounded-md text-gray-800 dark:text-white text-center">
+              <div className="font-bold text-xs sm:text-sm">Unanswered</div>
+              <div className="text-sm sm:text-base">{score.unanswered}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quiz Content */}

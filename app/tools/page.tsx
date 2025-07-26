@@ -1,15 +1,15 @@
 import Link from "next/link";
-import { FaCalculator, FaRulerCombined, FaArrowRight } from "react-icons/fa";
+import { FaCalculator, FaRulerCombined, FaArrowRight, FaQuestionCircle } from "react-icons/fa";
 
 export default function ToolsPage() {
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-3xl font-bold text-center mb-8 text-gray-800">
-          Design Tools
+          Tools
         </h1>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Fee Calculator Card */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
             <div className="p-6">
@@ -55,6 +55,29 @@ export default function ToolsPage() {
               </Link>
             </div>
           </div>
+
+          {/* Quiz Card */}
+          <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="p-3 rounded-full bg-purple-100 text-purple-600 mr-4">
+                  <FaQuestionCircle size={24} />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-800">
+                  Quiz
+                </h2>
+              </div>
+              <p className="text-gray-600 mb-6">
+                Test your knowledge of architectural principles and planning concepts with our interactive quiz.
+              </p>
+              <Link
+                href="/tools/quiz"
+                className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+              >
+                Take Quiz <FaArrowRight className="ml-2" />
+              </Link>
+            </div>
+          </div>
         </div>
 
         {/* Additional Information */}
@@ -63,12 +86,12 @@ export default function ToolsPage() {
             About These Tools
           </h2>
           <p className="text-gray-600 mb-4">
-            These professional design tools help architects and clients quickly estimate project parameters.
+            These professional tools help architects and clients with various aspects of the design process.
           </p>
           <ul className="list-disc pl-5 text-gray-600 space-y-2">
-            <li>Both calculators generate printable PDF reports</li>
+            <li>Generate printable PDF reports</li>
             <li>Mobile-friendly interfaces for on-site use</li>
-            <li>Customizable inputs for accurate estimates</li>
+            <li>Customizable inputs for accurate results</li>
             <li>Professional formatting for client presentations</li>
           </ul>
         </div>
