@@ -1,56 +1,13 @@
-// app/donate/page.tsx
 "use client";
 import { useState, useEffect } from "react";
+import type {
+  RazorpayOptions
+} from "@/types/razorpay";
 
-interface PaymentDetails {
+interface DonationState {
   id: string;
   amount: string;
   email: string;
-}
-
-interface RazorpayOptions {
-  key: string;
-  amount: number;
-  currency: string;
-  name: string;
-  description: string;
-  handler: (response: RazorpayResponse) => void;
-  prefill: {
-    name: string;
-    email: string;
-  };
-  theme: {
-    color: string;
-  };
-}
-
-interface RazorpayResponse {
-  razorpay_payment_id: string;
-  razorpay_order_id: string;
-  razorpay_signature: string;
-}
-
-interface PaymentFailedResponse {
-  error: {
-    code: string;
-    description: string;
-    source: string;
-    step: string;
-    reason: string;
-    metadata: {
-      order_id: string;
-      payment_id: string;
-    };
-  };
-}
-
-declare global {
-  interface Window {
-    Razorpay: new (options: RazorpayOptions) => {
-      open: () => void;
-      on: (event: 'payment.failed', callback: (response: PaymentFailedResponse) => void) => void;
-    };
-  }
 }
 
 export default function DonatePage() {
@@ -60,40 +17,42 @@ export default function DonatePage() {
   const [loading, setLoading] = useState(false);
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [paymentDetails, setPaymentDetails] = useState<PaymentDetails>({
+  const [paymentDetails, setPaymentDetails] = useState<DonationState>({
     id: "",
     amount: "",
     email: "",
   });
 
   useEffect(() => {
-    const loadRazorpay = () => {
-      if (typeof window !== "undefined" && !window.Razorpay) {
-        const script = document.createElement("script");
-        script.src = "https://checkout.razorpay.com/v1/checkout.js";
-        script.async = true;
-        script.onload = () => setRazorpayLoaded(true);
-        script.onerror = () => {
-          console.error("Failed to load Razorpay script");
-          setRazorpayLoaded(false);
-        };
-        document.body.appendChild(script);
-      } else {
-        setRazorpayLoaded(true);
-      }
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => setRazorpayLoaded(true);
+    script.onerror = () => {
+      console.error("Razorpay script failed to load");
+      setRazorpayLoaded(false);
     };
 
-    loadRazorpay();
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
   }, []);
 
   const handlePayment = () => {
     if (!razorpayLoaded) {
-      alert("Payment gateway is still loading. Please try again in a moment.");
+      alert("Payment gateway is loading. Please wait...");
       return;
     }
 
     if (!process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID) {
-      alert("Payment gateway configuration error");
+      alert("Payment configuration error");
+      return;
+    }
+
+    if (!name || !email) {
+      alert("Please fill all required fields");
       return;
     }
 
@@ -125,10 +84,12 @@ export default function DonatePage() {
 
     try {
       const rzp = new window.Razorpay(options);
-      rzp.on("payment.failed", (response: PaymentFailedResponse) => {
+      
+      rzp.on("payment.failed", (response) => {
         alert(`Payment failed: ${response.error.description}`);
         setLoading(false);
       });
+
       rzp.open();
     } catch (error) {
       console.error("Payment error:", error);
@@ -137,7 +98,7 @@ export default function DonatePage() {
     }
   };
 
-  const handleNewDonation = () => {
+  const resetForm = () => {
     setPaymentSuccess(false);
     setAmount("100");
     setName("");
@@ -148,24 +109,18 @@ export default function DonatePage() {
     return (
       <div className="max-w-md mx-auto p-4 text-center">
         <div className="bg-green-100 text-green-800 p-6 rounded-lg mb-6">
-          <h2 className="text-2xl font-bold mb-4">Thank You For Your Donation!</h2>
+          <h2 className="text-2xl font-bold mb-4">Thank You!</h2>
           <div className="text-left space-y-2 bg-white p-4 rounded">
-            <p>
-              <span className="font-semibold">Amount:</span> ₹{paymentDetails.amount}
-            </p>
-            <p>
-              <span className="font-semibold">Payment ID:</span> {paymentDetails.id}
-            </p>
-            <p>
-              <span className="font-semibold">Email:</span> {paymentDetails.email}
-            </p>
+            <p><span className="font-semibold">Amount:</span> ₹{paymentDetails.amount}</p>
+            <p><span className="font-semibold">Payment ID:</span> {paymentDetails.id}</p>
+            <p><span className="font-semibold">Email:</span> {paymentDetails.email}</p>
           </div>
         </div>
         <button
-          onClick={handleNewDonation}
+          onClick={resetForm}
           className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors"
         >
-          Make Another Donation
+          Donate Again
         </button>
       </div>
     );
@@ -173,59 +128,47 @@ export default function DonatePage() {
 
   return (
     <div className="max-w-md mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">Make a Donation</h1>
-
-      <div className="space-y-5">
+      <h1 className="text-2xl font-bold mb-6">Donate</h1>
+      <div className="space-y-4">
         <div>
-          <label className="block mb-2 font-medium">Amount (₹)</label>
+          <label className="block mb-2">Amount (₹)</label>
           <input
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="w-full p-3 border border-gray-300 rounded-lg"
+            className="w-full p-2 border rounded"
             min="10"
-            required
           />
         </div>
-
         <div>
-          <label className="block mb-2 font-medium">Your Name</label>
+          <label className="block mb-2">Name</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full p-3 border border-gray-300 rounded-lg"
+            className="w-full p-2 border rounded"
             required
           />
         </div>
-
         <div>
-          <label className="block mb-2 font-medium">Email Address</label>
+          <label className="block mb-2">Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full p-3 border border-gray-300 rounded-lg"
+            className="w-full p-2 border rounded"
             required
           />
         </div>
-
         <button
           onClick={handlePayment}
           disabled={loading || !razorpayLoaded}
-          className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`w-full py-2 rounded text-white ${loading || !razorpayLoaded ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'}`}
         >
-          {loading ? "Processing Payment..." : `Donate ₹${amount}`}
+          {loading ? "Processing..." : `Donate ₹${amount}`}
         </button>
+        {!razorpayLoaded && <p className="text-yellow-600 text-sm">Loading payment gateway...</p>}
       </div>
-
-      {!razorpayLoaded && (
-        <p className="mt-2 text-sm text-yellow-600">Payment gateway loading...</p>
-      )}
-
-      <p className="mt-4 text-sm text-gray-600">
-        Note: This is a test payment. No actual money will be transferred.
-      </p>
     </div>
   );
 }

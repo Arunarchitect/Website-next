@@ -1,5 +1,5 @@
 // types/razorpay.d.ts
-interface RazorpayOptions {
+export interface RazorpayOptions {
   key: string;
   amount: number;
   currency: string;
@@ -15,13 +15,13 @@ interface RazorpayOptions {
   };
 }
 
-interface RazorpayResponse {
+export interface RazorpayResponse {
   razorpay_payment_id: string;
   razorpay_order_id?: string;
   razorpay_signature?: string;
 }
 
-interface PaymentFailedResponse {
+export interface PaymentFailedResponse {
   error: {
     description: string;
     code?: string;
@@ -31,7 +31,7 @@ interface PaymentFailedResponse {
   };
 }
 
-interface RazorpayInstance {
+export interface RazorpayInstance {
   on: (event: 'payment.failed', callback: (response: PaymentFailedResponse) => void) => void;
   open: () => void;
 }
@@ -41,5 +41,3 @@ declare global {
     Razorpay: new (options: RazorpayOptions) => RazorpayInstance;
   }
 }
-
-export {};
