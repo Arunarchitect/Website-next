@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useGetQuizQuestionsQuery } from "@/redux/features/quizApiSlice";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import { Spinner } from "@/components/common";
@@ -13,6 +13,10 @@ interface Question {
   option_3: string;
   correct_option: string;
   explanation?: string;
+}
+
+interface QuizQuestion extends Question {
+  shuffledOptions: string[];
 }
 
 export default function QuizPage() {
@@ -39,32 +43,110 @@ export default function QuizPage() {
     percentage: number;
     netScore: number;
   } | null>(null);
+  const [quizStarted, setQuizStarted] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [totalTime, setTotalTime] = useState(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Shuffle questions only once when questions change
+  const shuffledQuestions = useMemo<QuizQuestion[]>(() => {
+    if (!questions.length) return [];
+    
+    return questions.map((q: Question) => {
+      const allOptions = [
+        q.option_1,
+        q.option_2,
+        q.option_3,
+        q.correct_option
+      ].filter(Boolean) as string[];
+      
+      // Fisher-Yates shuffle algorithm
+      const shuffledOptions = [...allOptions];
+      for (let i = shuffledOptions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledOptions[i], shuffledOptions[j]] = [shuffledOptions[j], shuffledOptions[i]];
+      }
 
-    const correctAnswers = questions.filter(
-      (q) => answers[q.id] === q.correct_option
+      return {
+        ...q,
+        shuffledOptions
+      };
+    });
+  }, [questions]); // Removed unnecessary quizStarted dependency
+
+  // Memoize handleSubmit to prevent recreation on every render
+  const handleSubmit = useCallback((e?: React.FormEvent) => {
+    e?.preventDefault();
+
+    if (!quizStarted) return;
+
+    // Stop the timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+
+    const correctAnswers = shuffledQuestions.filter(
+      (q: QuizQuestion) => answers[q.id] === q.correct_option
     ).length;
 
-    const wrongAnswers = questions.filter(
-      (q) => answers[q.id] && answers[q.id] !== q.correct_option
+    const wrongAnswers = shuffledQuestions.filter(
+      (q: QuizQuestion) => answers[q.id] && answers[q.id] !== q.correct_option
     ).length;
 
-    const unanswered = questions.length - correctAnswers - wrongAnswers;
+    const unanswered = shuffledQuestions.length - correctAnswers - wrongAnswers;
 
     // PSC style negative marking (1/3 deduction for wrong answers)
     const netScore = correctAnswers - wrongAnswers / 3;
-    const percentage = (netScore / questions.length) * 100;
+    const percentage = (netScore / shuffledQuestions.length) * 100;
 
     setScore({
       correct: correctAnswers,
       wrong: wrongAnswers,
       unanswered,
-      total: questions.length,
+      total: shuffledQuestions.length,
       percentage,
       netScore,
     });
+
+    setQuizStarted(false);
+  }, [answers, quizStarted, shuffledQuestions]);
+
+  // Calculate total time needed (30 seconds per question)
+  useEffect(() => {
+    if (questions.length > 0) {
+      setTotalTime(questions.length * 30);
+    }
+  }, [questions]);
+
+  // Timer effect
+  useEffect(() => {
+    if (quizStarted && timeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0 && quizStarted) {
+      handleSubmit(); // Auto-submit when time runs out
+      setQuizStarted(false);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [quizStarted, timeLeft, handleSubmit]); // Added handleSubmit to dependencies
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  const handleStartQuiz = () => {
+    setQuizStarted(true);
+    setTimeLeft(totalTime);
+    setAnswers({});
+    setScore(null);
   };
 
   const handleAnswerChange = (qid: number, value: string) => {
@@ -76,6 +158,8 @@ export default function QuizPage() {
       await refetch();
       setAnswers({});
       setScore(null);
+      setQuizStarted(false);
+      setTimeLeft(0);
     } catch (error) {
       console.error("Error reloading quiz:", error);
     }
@@ -150,12 +234,19 @@ export default function QuizPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             {user ? `Welcome, ${user.first_name}` : "OMR Quiz"}
           </h1>
-          <button
-            onClick={handleReload}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-md transition-colors text-gray-800 dark:text-white self-end sm:self-auto"
-          >
-            Reload Quiz
-          </button>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            {quizStarted && (
+              <div className="px-3 py-1 bg-red-100 dark:bg-red-900 rounded-md text-red-800 dark:text-red-200 font-medium">
+                Time Left: {formatTime(timeLeft)}
+              </div>
+            )}
+            <button
+              onClick={handleReload}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-md transition-colors text-gray-800 dark:text-white"
+            >
+              Reload Quiz
+            </button>
+          </div>
         </div>
 
         {/* Score cards - full width below welcome on mobile */}
@@ -186,20 +277,26 @@ export default function QuizPage() {
       </div>
 
       {/* Quiz Content */}
-      {questions.length === 0 ? (
+      {shuffledQuestions.length === 0 ? (
         <div className="p-6 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-center text-gray-800 dark:text-gray-200">
           <p>No questions available. Please try reloading.</p>
         </div>
+      ) : !quizStarted && score === null ? (
+        <div className="text-center py-10">
+          <h2 className="text-xl font-bold mb-4">Ready to Start the Quiz?</h2>
+          <p className="mb-6">
+            You`&apos;`ll have {formatTime(totalTime)} ({shuffledQuestions.length} questions × 30 seconds each) to complete the quiz.
+          </p>
+          <button
+            onClick={handleStartQuiz}
+            className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors dark:bg-green-700 dark:hover:bg-green-800 text-lg"
+          >
+            Start Quiz
+          </button>
+        </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
-          {questions.map((q, index) => {
-            const options = [
-              q.option_1,
-              q.option_2,
-              q.option_3,
-              q.correct_option,
-            ].filter(Boolean) as string[];
-
+          {shuffledQuestions.map((q: QuizQuestion, index: number) => {
             const questionFeedback =
               score !== null
                 ? {
@@ -224,7 +321,7 @@ export default function QuizPage() {
                 </p>
 
                 <div className="space-y-2">
-                  {options.map((opt, i) => (
+                  {q.shuffledOptions.map((opt: string, i: number) => (
                     <label
                       key={i}
                       className="flex items-center space-x-3 cursor-pointer"
@@ -273,8 +370,11 @@ export default function QuizPage() {
             );
           })}
 
-          {questions.length > 0 && score === null && (
-            <div className="text-center pt-4">
+          {quizStarted && (
+            <div className="flex justify-between items-center pt-4">
+              <div className="text-red-600 dark:text-red-400 font-medium">
+                Time Remaining: {formatTime(timeLeft)}
+              </div>
               <button
                 type="submit"
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors dark:bg-blue-700 dark:hover:bg-blue-800"
