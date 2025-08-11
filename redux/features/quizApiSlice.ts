@@ -1,4 +1,4 @@
-// quizApiSlice.ts
+// redux/features/quizApiSlice.ts
 import { apiSlice } from "@/redux/services/apiSlice";
 
 interface Question {
@@ -9,20 +9,54 @@ interface Question {
   option_3: string;
   correct_option: string;
   explanation?: string;
+  exam?: number;
+  category?: number;
+}
+
+interface QuizParams {
+  count?: number;
+  exam?: number;
+  category?: number;
+}
+
+interface EvaluationResponse {
+  score: number;
+  total: number;
+  percentage: number;
+  explanations: Array<{
+    id: number;
+    question: string;
+    selected: string;
+    correct: string;
+    explanation: string;
+    is_correct: boolean;
+  }>;
 }
 
 export const quizApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    // Only endpoint - get quiz questions
-    getQuizQuestions: builder.query<Question[], void>({
-      query: () => "/get-quiz/",
-      // Optional: Add tags if you want to invalidate cache later
-      providesTags: [{ type: "Quiz", id: "LIST" }],
+    getQuizQuestions: builder.query<Question[], QuizParams>({
+      query: (params) => ({
+        url: "/get-quiz/",
+        method: "POST",
+        body: params,
+      }),
+      providesTags: ["Quiz"],
     }),
     
-    // No other endpoints needed since submission/scoring is frontend-only
+    evaluateQuiz: builder.mutation<EvaluationResponse, Record<string, string>>({
+      query: (answers) => ({
+        url: "/evaluate/",
+        method: "POST",
+        body: answers,
+      }),
+      invalidatesTags: ["Quiz"],
+    }),
   }),
 });
 
-// Export the auto-generated hook
-export const { useGetQuizQuestionsQuery } = quizApiSlice;
+export const {
+  useGetQuizQuestionsQuery,
+  useLazyGetQuizQuestionsQuery,
+  useEvaluateQuizMutation,
+} = quizApiSlice;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useGetQuizQuestionsQuery } from "@/redux/features/quizApiSlice";
+import { useLazyGetQuizQuestionsQuery, useEvaluateQuizMutation } from "@/redux/features/quizApiSlice";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import { Spinner } from "@/components/common";
 
@@ -13,27 +13,43 @@ interface Question {
   option_3: string;
   correct_option: string;
   explanation?: string;
+  exam?: number;
+  category?: number;
 }
 
 interface QuizQuestion extends Question {
   shuffledOptions: string[];
 }
 
+interface QuizParams {
+  count: number;
+  exam?: number;
+  category?: number;
+}
+
 export default function QuizPage() {
-  // Fetch user data first
+  // User authentication
   const {
     data: user,
     isLoading: isUserLoading,
     isError: isUserError,
   } = useRetrieveUserQuery();
 
-  const {
-    data: questions = [] as Question[],
-    isLoading: isQuizLoading,
-    isError: isQuizError,
-    refetch,
-  } = useGetQuizQuestionsQuery(undefined, { skip: !user });
+  // Quiz questions
+  const [
+    getQuizQuestions,
+    { 
+      data: questions = [], 
+      isLoading: isQuizLoading, 
+      isError: isQuizError, 
+      refetch 
+    }
+  ] = useLazyGetQuizQuestionsQuery();
 
+  // Quiz evaluation
+  const [evaluateQuiz, { isLoading: isEvaluationLoading }] = useEvaluateQuizMutation();
+
+  // Component state
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [score, setScore] = useState<{
     correct: number;
@@ -42,13 +58,26 @@ export default function QuizPage() {
     total: number;
     percentage: number;
     netScore: number;
+    explanations: Array<{
+      id: number;
+      question: string;
+      selected: string;
+      correct: string;
+      explanation: string;
+      is_correct: boolean;
+    }>;
   } | null>(null);
   const [quizStarted, setQuizStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
   const [totalTime, setTotalTime] = useState(0);
+  const [quizParams, setQuizParams] = useState<QuizParams>({
+    count: 7,
+    exam: undefined,
+    category: undefined
+  });
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Shuffle questions only once when questions change
+  // Shuffle questions and options
   const shuffledQuestions = useMemo<QuizQuestion[]>(() => {
     if (!questions.length) return [];
     
@@ -72,60 +101,92 @@ export default function QuizPage() {
         shuffledOptions
       };
     });
-  }, [questions]); // Removed unnecessary quizStarted dependency
+  }, [questions]);
 
-  // Memoize handleSubmit to prevent recreation on every render
-  const handleSubmit = useCallback((e?: React.FormEvent) => {
+  // Handle quiz submission
+  const handleSubmit = useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
-
     if (!quizStarted) return;
 
-    // Stop the timer
+    // Stop timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
 
-    const correctAnswers = shuffledQuestions.filter(
-      (q: QuizQuestion) => answers[q.id] === q.correct_option
-    ).length;
+    try {
+      // Format answers for backend
+      const answersPayload = Object.entries(answers).reduce((acc, [qid, answer]) => {
+        acc[`question_${qid}`] = answer;
+        return acc;
+      }, {} as Record<string, string>);
 
-    const wrongAnswers = shuffledQuestions.filter(
-      (q: QuizQuestion) => answers[q.id] && answers[q.id] !== q.correct_option
-    ).length;
+      // Evaluate with backend
+      const result = await evaluateQuiz(answersPayload).unwrap();
 
-    const unanswered = shuffledQuestions.length - correctAnswers - wrongAnswers;
+      // Calculate score
+      const correctAnswers = result.score;
+      const wrongAnswers = result.total - correctAnswers;
+      const unanswered = shuffledQuestions.length - Object.keys(answers).length;
+      const netScore = correctAnswers - wrongAnswers / 3;
 
-    // PSC style negative marking (1/3 deduction for wrong answers)
-    const netScore = correctAnswers - wrongAnswers / 3;
-    const percentage = (netScore / shuffledQuestions.length) * 100;
+      setScore({
+        correct: correctAnswers,
+        wrong: wrongAnswers,
+        unanswered,
+        total: result.total,
+        percentage: result.percentage,
+        netScore,
+        explanations: result.explanations
+      });
+    } catch (error) {
+      console.error("Evaluation error:", error);
+      // Fallback to client-side evaluation
+      const correctAnswers = shuffledQuestions.filter(
+        (q) => answers[q.id] === q.correct_option
+      ).length;
+      const wrongAnswers = shuffledQuestions.filter(
+        (q) => answers[q.id] && answers[q.id] !== q.correct_option
+      ).length;
+      const unanswered = shuffledQuestions.length - correctAnswers - wrongAnswers;
+      const netScore = correctAnswers - wrongAnswers / 3;
+      const percentage = (netScore / shuffledQuestions.length) * 100;
 
-    setScore({
-      correct: correctAnswers,
-      wrong: wrongAnswers,
-      unanswered,
-      total: shuffledQuestions.length,
-      percentage,
-      netScore,
-    });
+      setScore({
+        correct: correctAnswers,
+        wrong: wrongAnswers,
+        unanswered,
+        total: shuffledQuestions.length,
+        percentage,
+        netScore,
+        explanations: shuffledQuestions.map(q => ({
+          id: q.id,
+          question: q.question_text,
+          selected: answers[q.id] || '',
+          correct: q.correct_option,
+          explanation: q.explanation || 'No explanation available',
+          is_correct: answers[q.id] === q.correct_option
+        }))
+      });
+    }
 
     setQuizStarted(false);
-  }, [answers, quizStarted, shuffledQuestions]);
+  }, [answers, quizStarted, shuffledQuestions, evaluateQuiz]);
 
-  // Calculate total time needed (30 seconds per question)
+  // Set total time when questions load
   useEffect(() => {
     if (questions.length > 0) {
       setTotalTime(questions.length * 30);
     }
   }, [questions]);
 
-  // Timer effect
+  // Timer logic
   useEffect(() => {
     if (quizStarted && timeLeft > 0) {
       timerRef.current = setInterval(() => {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (timeLeft === 0 && quizStarted) {
-      handleSubmit(); // Auto-submit when time runs out
+      handleSubmit();
       setQuizStarted(false);
     }
 
@@ -134,19 +195,30 @@ export default function QuizPage() {
         clearInterval(timerRef.current);
       }
     };
-  }, [quizStarted, timeLeft, handleSubmit]); // Added handleSubmit to dependencies
+  }, [quizStarted, timeLeft, handleSubmit]);
 
+  // Helper functions
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const handleStartQuiz = () => {
-    setQuizStarted(true);
-    setTimeLeft(totalTime);
-    setAnswers({});
-    setScore(null);
+  const handleStartQuiz = async () => {
+    try {
+      await getQuizQuestions({
+        count: quizParams.count,
+        exam: quizParams.exam,
+        category: quizParams.category
+      }).unwrap();
+      
+      setQuizStarted(true);
+      setTimeLeft(quizParams.count * 30);
+      setAnswers({});
+      setScore(null);
+    } catch (error) {
+      console.error("Error starting quiz:", error);
+    }
   };
 
   const handleAnswerChange = (qid: number, value: string) => {
@@ -165,8 +237,15 @@ export default function QuizPage() {
     }
   };
 
-  // Combined loading states
-  if (isUserLoading || isQuizLoading) {
+  const handleParamChange = (key: keyof QuizParams, value: number | undefined) => {
+    setQuizParams(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  // Loading states
+  if (isUserLoading || isQuizLoading || isEvaluationLoading) {
     return (
       <div className="flex justify-center my-8">
         <Spinner lg />
@@ -174,7 +253,7 @@ export default function QuizPage() {
     );
   }
 
-  // Handle authentication errors
+  // Authentication error
   if (isUserError) {
     return (
       <div className="p-8 text-center bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -188,9 +267,8 @@ export default function QuizPage() {
     );
   }
 
-  // Check if user has access (user_id 1 or 2)
+  // Access control
   const hasAccess = user && [1, 2].includes(user.id);
-
   if (!hasAccess) {
     return (
       <div className="container mx-auto p-4 max-w-4xl">
@@ -199,17 +277,14 @@ export default function QuizPage() {
             Access Restricted
           </h1>
           <p className="mb-4 text-gray-700 dark:text-gray-300">
-            You have limited access to this feature.
-          </p>
-          <p className="text-gray-600 dark:text-gray-400">
-            Please contact support if you believe this is an error.
+            You don't have access to this feature
           </p>
         </div>
       </div>
     );
   }
 
-  // Handle quiz loading errors
+  // Quiz error
   if (isQuizError) {
     return (
       <div className="p-8 text-center bg-white dark:bg-gray-800 rounded-lg shadow">
@@ -228,11 +303,11 @@ export default function QuizPage() {
 
   return (
     <div className="container mx-auto p-4 max-w-4xl">
-      {/* Header Section - Stacked on mobile */}
+      {/* Header */}
       <div className="mb-6">
         <div className="flex justify-between items-start sm:items-center flex-col sm:flex-row gap-4">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {user ? `Welcome, ${user.first_name}` : "OMR Quiz"}
+            {user ? `Welcome, ${user.first_name}` : "Quiz App"}
           </h1>
           <div className="flex items-center gap-2 self-end sm:self-auto">
             {quizStarted && (
@@ -249,7 +324,7 @@ export default function QuizPage() {
           </div>
         </div>
 
-        {/* Score cards - full width below welcome on mobile */}
+        {/* Score display */}
         {score !== null && (
           <div className="mt-4 w-full grid grid-cols-4 gap-2 sm:gap-3">
             <div className="px-3 py-2 bg-blue-100 dark:bg-blue-900 rounded-md text-gray-800 dark:text-white text-center">
@@ -276,16 +351,57 @@ export default function QuizPage() {
         )}
       </div>
 
-      {/* Quiz Content */}
-      {shuffledQuestions.length === 0 ? (
-        <div className="p-6 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-center text-gray-800 dark:text-gray-200">
-          <p>No questions available. Please try reloading.</p>
-        </div>
-      ) : !quizStarted && score === null ? (
+      {/* Quiz content */}
+      {!quizStarted && score === null ? (
         <div className="text-center py-10">
-          <h2 className="text-xl font-bold mb-4">Ready to Start the Quiz?</h2>
+          <h2 className="text-xl font-bold mb-4">Quiz Settings</h2>
+          
+          <div className="mb-6 max-w-md mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Number of Questions:
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={quizParams.count}
+                onChange={(e) => handleParamChange('count', parseInt(e.target.value) || 7)}
+                className="w-20 px-3 py-2 border rounded-md"
+              />
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Exam (optional):
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={quizParams.exam || ''}
+                onChange={(e) => handleParamChange('exam', parseInt(e.target.value) || undefined)}
+                className="w-20 px-3 py-2 border rounded-md"
+                placeholder="Exam ID"
+              />
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Category (optional):
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={quizParams.category || ''}
+                onChange={(e) => handleParamChange('category', parseInt(e.target.value) || undefined)}
+                className="w-20 px-3 py-2 border rounded-md"
+                placeholder="Category ID"
+              />
+            </div>
+          </div>
+
           <p className="mb-6">
-            You`&apos;`ll have {formatTime(totalTime)} ({shuffledQuestions.length} questions × 30 seconds each) to complete the quiz.
+            You'll have {formatTime(quizParams.count * 30)} ({quizParams.count} questions × 30 seconds each)
           </p>
           <button
             onClick={handleStartQuiz}
@@ -294,23 +410,23 @@ export default function QuizPage() {
             Start Quiz
           </button>
         </div>
+      ) : shuffledQuestions.length === 0 ? (
+        <div className="p-6 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-center text-gray-800 dark:text-gray-200">
+          <p>No questions available. Please try reloading.</p>
+        </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
           {shuffledQuestions.map((q: QuizQuestion, index: number) => {
-            const questionFeedback =
-              score !== null
-                ? {
-                    isCorrect: answers[q.id] === q.correct_option,
-                    explanation: q.explanation || "No explanation provided.",
-                  }
-                : null;
+            const questionExplanation = score?.explanations.find(exp => exp.id === q.id);
+            const isAnswered = answers[q.id] !== undefined;
+            const isCorrect = questionExplanation?.is_correct;
 
             return (
               <div
                 key={q.id}
                 className={`p-4 border rounded-lg transition-colors ${
-                  questionFeedback
-                    ? questionFeedback.isCorrect
+                  score !== null
+                    ? isCorrect
                       ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20"
                       : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20"
                     : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
@@ -335,22 +451,16 @@ export default function QuizPage() {
                         disabled={score !== null}
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800"
                       />
-                      <span
-                        className={`flex-1 ${
-                          score !== null
-                            ? ""
-                            : "text-gray-800 dark:text-gray-200"
-                        }`}
-                      >
+                      <span className="flex-1 text-gray-800 dark:text-gray-200">
                         {opt}
-                        {questionFeedback && q.correct_option === opt && (
+                        {score !== null && q.correct_option === opt && (
                           <span className="ml-2 text-green-600 dark:text-green-400">
                             ✓ Correct
                           </span>
                         )}
-                        {questionFeedback &&
+                        {score !== null &&
                           answers[q.id] === opt &&
-                          !questionFeedback.isCorrect && (
+                          !isCorrect && (
                             <span className="ml-2 text-red-600 dark:text-red-400">
                               ✗ Your Answer
                             </span>
@@ -360,10 +470,10 @@ export default function QuizPage() {
                   ))}
                 </div>
 
-                {questionFeedback && (
+                {score !== null && questionExplanation && (
                   <div className="mt-3 p-3 bg-white dark:bg-gray-700 rounded text-sm text-gray-800 dark:text-gray-200">
                     <p className="font-medium">Explanation:</p>
-                    <p>{questionFeedback.explanation}</p>
+                    <p>{questionExplanation.explanation}</p>
                   </div>
                 )}
               </div>
