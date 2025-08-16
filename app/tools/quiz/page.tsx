@@ -1,215 +1,159 @@
-// app/tools/quiz/page.tsx
-'use client';
+// pages/QuizPage.tsx
+"use client";
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
-import { useLazyGetQuizQuestionsQuery, useEvaluateQuizMutation } from '@/redux/features/quizApiSlice';
-import { useRetrieveUserQuery } from '@/redux/features/authApiSlice';
-import { Spinner } from '@/components/common';
-import { useQuiz } from './hooks/useQuiz';
-import { useTimer } from './hooks/useTimer';
-import type { QuizParams, QuizQuestion, QuizScore } from './types/quizTypes';
-import QuizHeader from './components/QuizHeader';
-import QuizSettings from './components/QuizSettings';
-import QuestionCard from './components/QuestionCard';
-import ScoreDisplay from './components/ScoreDisplay';
-import ErrorDisplay from './components/ErrorDisplay';
-import { formatTime } from './utils/quizUtils';
-
-const DEFAULT_QUIZ_PARAMS: QuizParams = {
-  count: 7,
-  exam: undefined,
-  category: undefined
-};
+import { useState, useEffect } from "react";
+import { useGetExamsQuery } from "@/redux/features/quizApiSlice";
+import QuizSettings from "./components/QuizSettings";
+import QuestionCard from "./components/QuestionCard";
+import ScoreDisplay from "./components/ScoreDisplay";
+import ErrorDisplay from "./components/ErrorDisplay";
+import QuizHeader from "./components/QuizHeader";
+import { useQuiz } from "./hooks/useQuiz";
 
 export default function QuizPage() {
-  // User authentication
+  const { data: exams = [] } = useGetExamsQuery();
   const {
-    data: user,
-    isLoading: isUserLoading,
-    isError: isUserError,
-  } = useRetrieveUserQuery();
-
-  // Quiz state management
-  const [
-    getQuizQuestions,
-    { 
-      data: questions = [], 
-      isLoading: isQuizLoading, 
-      isError: isQuizError, 
-      refetch 
-    }
-  ] = useLazyGetQuizQuestionsQuery();
-
-  const [evaluateQuiz, { isLoading: isEvaluationLoading }] = useEvaluateQuizMutation();
-
-  const {
+    questions,
     answers,
-    score,
-    quizParams,
-    shuffledQuestions,
-    setScore,
-    handleAnswerChange,
-    handleParamChange,
-    resetQuiz
-  } = useQuiz(questions);
+    results,
+    error,
+    categories,
+    isQuestionsLoading,
+    isEvaluationLoading,
+    isCategoriesLoading,
+    fetchQuestions,
+    submitAnswers,
+    handleAnswerSelect,
+    resetQuiz,
+    quizState,
+    currentExam,
+    currentCategory,
+    handleExamChange, // Make sure to destructure this from useQuiz
+  } = useQuiz();
 
-  const [quizStarted, setQuizStarted] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-
-  const handleSubmit = useCallback(async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!quizStarted) return;
-
-    try {
-      const answersPayload = Object.entries(answers).reduce((acc, [qid, answer]) => {
-        acc[`question_${qid}`] = answer;
-        return acc;
-      }, {} as Record<string, string>);
-
-      const result = await evaluateQuiz(answersPayload).unwrap();
-
-      const correctAnswers = result.score;
-      const wrongAnswers = result.total - correctAnswers;
-      const unanswered = shuffledQuestions.length - Object.keys(answers).length;
-      const netScore = correctAnswers - wrongAnswers / 3;
-
-      setScore({
-        correct: correctAnswers,
-        wrong: wrongAnswers,
-        unanswered,
-        total: result.total,
-        percentage: result.percentage,
-        netScore,
-        explanations: result.explanations
-      } as QuizScore);
-    } catch (error) {
-      console.error("Evaluation error:", error);
-      const correctAnswers = shuffledQuestions.filter(
-        (q) => answers[q.id] === q.correct_option
-      ).length;
-      const wrongAnswers = shuffledQuestions.filter(
-        (q) => answers[q.id] && answers[q.id] !== q.correct_option
-      ).length;
-      const unanswered = shuffledQuestions.length - correctAnswers - wrongAnswers;
-      const netScore = correctAnswers - wrongAnswers / 3;
-      const percentage = (netScore / shuffledQuestions.length) * 100;
-
-      setScore({
-        correct: correctAnswers,
-        wrong: wrongAnswers,
-        unanswered,
-        total: shuffledQuestions.length,
-        percentage,
-        netScore,
-        explanations: shuffledQuestions.map(q => ({
-          id: q.id,
-          question: q.question_text,
-          selected: answers[q.id] || '',
-          correct: q.correct_option,
-          explanation: q.explanation || 'No explanation available',
-          is_correct: answers[q.id] === q.correct_option
-        }))
-      } as QuizScore);
-    }
-
-    setQuizStarted(false);
-    setSubmitted(true);
-  }, [answers, quizStarted, shuffledQuestions, evaluateQuiz, setScore]);
-
-  const { timeLeft, resetTimer } = useTimer(0, handleSubmit);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
-    if (questions.length > 0 && quizStarted) {
-      resetTimer(questions.length * 30);
+    if (questions.length > 0) {
+      setCurrentQuestionIndex(0);
     }
-  }, [questions, quizStarted, resetTimer]);
+  }, [questions]);
 
-  const handleStartQuiz = async () => {
-    try {
-      await getQuizQuestions(quizParams).unwrap();
-      setQuizStarted(true);
-      setSubmitted(false);
-      resetQuiz();
-    } catch (error) {
-      console.error("Error starting quiz:", error);
+  const handleStartQuiz = (params: { count: number; exam?: number; category?: number }) => {
+    fetchQuestions(params);
+  };
+
+  const handleNextQuestion = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
     }
   };
 
-  const handleReload = async () => {
-    try {
-      await refetch();
-      resetQuiz();
-      setQuizStarted(false);
-      setSubmitted(false);
-    } catch (error) {
-      console.error("Error reloading quiz:", error);
+  const handlePreviousQuestion = () => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(currentQuestionIndex - 1);
     }
   };
 
-  // Loading state
-  if (isUserLoading || isQuizLoading || isEvaluationLoading) {
+  const handleSubmitQuiz = () => {
+    submitAnswers();
+  };
+
+  const handleQuitQuiz = () => {
+    resetQuiz();
+  };
+
+  const handleRetry = () => {
+    resetQuiz();
+  };
+
+  if (quizState === "settings") {
     return (
-      <div className="flex justify-center my-8">
-        <Spinner lg />
+      <div className="max-w-md mx-auto mt-10">
+        {error && <ErrorDisplay error={error} onRetry={handleRetry} />}
+        <QuizSettings
+          exams={exams}
+          categories={categories}
+          onStartQuiz={handleStartQuiz}
+          isLoading={isQuestionsLoading}
+          isCategoriesLoading={isCategoriesLoading}
+          currentExam={currentExam}
+          currentCategory={currentCategory}
+          handleExamChange={handleExamChange} // Pass the function here
+        />
       </div>
     );
   }
 
-  // Error states
-  if (isUserError) return <ErrorDisplay title="Authentication Required" message="Please login to access the quiz" />;
-  if (!user || ![1, 2].includes(user.id)) return <ErrorDisplay title="Access Restricted" message="You don't have access to this feature" />;
-  if (isQuizError) return <ErrorDisplay title="Error loading questions" action={<button onClick={handleReload}>Try Again</button>} />;
+  if (quizState === "results" && results) {
+    return (
+      <div className="max-w-md mx-auto mt-10">
+        <ScoreDisplay
+          results={results}
+          onRetry={handleRetry}
+        />
+      </div>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="max-w-md mx-auto mt-10">
+        <ErrorDisplay error="No questions available. Please try different settings." />
+        <button
+          onClick={handleQuitQuiz}
+          className="mt-4 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+        >
+          Back to Settings
+        </button>
+      </div>
+    );
+  }
+
+  const currentQuestion = questions[currentQuestionIndex];
+  const selectedAnswer = answers[`question_${currentQuestion.id}`] || null;
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl">
-      <Suspense fallback={<Spinner />}>
-        <QuizHeader 
-          userName={user?.first_name} 
-          timeLeft={quizStarted ? timeLeft : undefined} 
-          onReload={handleReload} 
-        />
-        
-        {score && <ScoreDisplay score={score} />}
+    <div className="max-w-2xl mx-auto mt-6 p-4">
+      <QuizHeader
+        currentQuestion={currentQuestionIndex + 1}
+        totalQuestions={questions.length}
+        onQuit={handleQuitQuiz}
+      />
 
-        {!quizStarted && !submitted ? (
-          <QuizSettings 
-            params={quizParams}
-            onParamChange={handleParamChange}
-            onStart={handleStartQuiz}
-          />
-        ) : shuffledQuestions.length === 0 ? (
-          <div className="p-6 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-center">
-            <p>No questions available. Please try reloading.</p>
-          </div>
+      <QuestionCard
+        question={currentQuestion}
+        selectedAnswer={selectedAnswer}
+        onAnswerSelect={(option) => handleAnswerSelect(currentQuestion.id, option)}
+      />
+
+      <div className="flex justify-between mt-6">
+        <button
+          onClick={handlePreviousQuestion}
+          disabled={currentQuestionIndex === 0}
+          className="bg-gray-200 text-gray-800 py-2 px-4 rounded hover:bg-gray-300 disabled:opacity-50"
+        >
+          Previous
+        </button>
+
+        {currentQuestionIndex < questions.length - 1 ? (
+          <button
+            onClick={handleNextQuestion}
+            disabled={!selectedAnswer}
+            className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:bg-gray-400"
+          >
+            Next
+          </button>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {shuffledQuestions.map((q: QuizQuestion, index: number) => (
-              <QuestionCard
-                key={q.id}
-                question={q}
-                index={index}
-                answer={answers[q.id]}
-                showResult={score !== null}
-                onChange={(value) => handleAnswerChange(q.id, value)}
-              />
-            ))}
-
-            {quizStarted && (
-              <div className="flex justify-between items-center pt-4">
-                <div className="text-red-600 dark:text-red-400 font-medium">
-                  Time Remaining: {formatTime(timeLeft)}
-                </div>
-                <button
-                  type="submit"
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors dark:bg-blue-700 dark:hover:bg-blue-800"
-                >
-                  Submit Quiz
-                </button>
-              </div>
-            )}
-          </form>
+          <button
+            onClick={handleSubmitQuiz}
+            disabled={!selectedAnswer || isEvaluationLoading}
+            className="bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 disabled:bg-gray-400"
+          >
+            {isEvaluationLoading ? "Submitting..." : "Submit Quiz"}
+          </button>
         )}
-      </Suspense>
+      </div>
     </div>
   );
 }

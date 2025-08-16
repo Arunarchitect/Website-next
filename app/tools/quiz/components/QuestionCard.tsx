@@ -1,78 +1,69 @@
-// app/tools/quiz/components/QuestionCard.tsx
-'use client';
-
-import type { QuizQuestion } from '../types/quizTypes';
+// components/QuestionCard.tsx
+import { Question } from '../types/quiztypes';
 
 interface QuestionCardProps {
-  question: QuizQuestion;
-  index: number;
-  answer?: string;
-  showResult: boolean;
-  onChange: (value: string) => void;
+  question: Question;
+  selectedAnswer: string | null;
+  onAnswerSelect: (option: string) => void;
+  showResult?: boolean;
+  correctAnswer?: string;
 }
 
 export default function QuestionCard({
   question,
-  index,
-  answer,
-  showResult,
-  onChange,
+  selectedAnswer,
+  onAnswerSelect,
+  showResult = false,
+  correctAnswer
 }: QuestionCardProps) {
-  const questionExplanation = showResult
-    ? question.explanation || 'No explanation available'
-    : null;
+  // Include all four options (three regular + correct option)
+  const options = [
+    { id: 'option_1', value: question.option_1 },
+    { id: 'option_2', value: question.option_2 },
+    { id: 'option_3', value: question.option_3 },
+    { id: 'correct_option', value: question.correct_option }
+  ];
 
-  const isCorrect = showResult && answer === question.correct_option;
+  // Remove duplicate options (in case correct_option matches one of the others)
+  const uniqueOptions = options.filter(
+    (option, index, self) => 
+      index === self.findIndex((o) => o.value === option.value)
+  );
+
+  const getOptionClass = (option: string) => {
+    if (!showResult) {
+      return selectedAnswer === option 
+        ? 'bg-blue-100 border-blue-500' 
+        : 'hover:bg-gray-50';
+    }
+
+    if (option === correctAnswer) {
+      return 'bg-green-100 border-green-500';
+    }
+    if (selectedAnswer === option && option !== correctAnswer) {
+      return 'bg-red-100 border-red-500';
+    }
+    return '';
+  };
 
   return (
-    <div
-      className={`p-4 border rounded-lg transition-colors ${
-        showResult
-          ? isCorrect
-            ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
-            : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
-          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
-      }`}
-    >
-      <p className="font-bold text-lg mb-3 text-gray-900 dark:text-white">
-        Q{index + 1}: {question.question_text}
-      </p>
-
+    <div className="mb-6 p-4 border rounded-lg bg-white">
+      <h3 className="text-lg font-medium mb-3">{question.question_text}</h3>
       <div className="space-y-2">
-        {question.shuffledOptions.map((option, i) => (
-          <label key={i} className="flex items-center space-x-3 cursor-pointer">
-            <input
-              type="radio"
-              name={`question_${question.id}`}
-              value={option}
-              checked={answer === option}
-              onChange={() => onChange(option)}
-              disabled={showResult}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800"
-            />
-            <span className="flex-1 text-gray-800 dark:text-gray-200">
-              {option}
-              {showResult && question.correct_option === option && (
-                <span className="ml-2 text-green-600 dark:text-green-400">
-                  ✓ Correct
-                </span>
-              )}
-              {showResult &&
-                answer === option &&
-                answer !== question.correct_option && (
-                  <span className="ml-2 text-red-600 dark:text-red-400">
-                    ✗ Your Answer
-                  </span>
-                )}
-            </span>
-          </label>
+        {uniqueOptions.map((opt) => (
+          <div
+            key={opt.id}
+            onClick={() => !showResult && onAnswerSelect(opt.value)}
+            className={`p-3 border rounded cursor-pointer ${getOptionClass(opt.value)}`}
+          >
+            {opt.value}
+          </div>
         ))}
       </div>
-
-      {showResult && questionExplanation && (
-        <div className="mt-3 p-3 bg-white dark:bg-gray-700 rounded text-sm text-gray-800 dark:text-gray-200">
+      {showResult && question.explanation && (
+        <div className="mt-3 p-3 bg-gray-50 rounded text-sm">
           <p className="font-medium">Explanation:</p>
-          <p>{questionExplanation}</p>
+          <p>{question.explanation}</p>
         </div>
       )}
     </div>

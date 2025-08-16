@@ -1,31 +1,28 @@
-// app/tools/quiz/components/ErrorDisplay.tsx
-'use client';
-
-import { ReactNode } from 'react';
-
 interface ErrorDisplayProps {
-  title: string;
-  message?: string;
-  action?: ReactNode;
+  error: string;
+  onRetry?: () => void;
 }
 
-export default function ErrorDisplay({ title, message, action }: ErrorDisplayProps) {
+export default function ErrorDisplay({ error, onRetry }: ErrorDisplayProps) {
   return (
-    <div className="container mx-auto p-4 max-w-4xl">
-      <div className="p-8 text-center bg-white dark:bg-gray-800 rounded-lg shadow">
-        <h1 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
-          {title}
-        </h1>
-        {message && (
-          <p className="mb-4 text-gray-700 dark:text-gray-300">
-            {message}
-          </p>
-        )}
-        {action && (
-          <div className="mt-4">
-            {action}
-          </div>
-        )}
+    <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+      <div className="flex">
+        <div className="flex-shrink-0">
+          <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <div className="ml-3">
+          <p className="text-sm text-red-700">{error}</p>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="mt-2 text-sm font-medium text-red-700 hover:text-red-600"
+            >
+              Try again
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

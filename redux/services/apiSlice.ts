@@ -98,7 +98,9 @@ export const apiSlice = createApi({
     'UserDeliverables',
     'UserOrganisations',
     'Expense',
-    'Quiz'
+    'Quiz',
+    'Exams',
+    'Categories'
   ],
   endpoints: () => ({}),
 });
