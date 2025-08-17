@@ -62,3 +62,39 @@ export interface EvaluationResponse {
 }
 
 export type QuizState = 'settings' | 'in-progress' | 'results';
+
+// Add these to your existing types in quiztypes.ts
+
+export interface ScoreStats {
+  average_score: number;
+  highest_score: number;
+  lowest_score: number;
+  total_attempts: number;
+  last_attempt?: string;
+}
+
+export interface ExamScoreBreakdown {
+  exam_id: number;
+  exam_name: string;
+  average_score: number;
+  attempt_count: number;
+  highest_score: number;
+  lowest_score: number;
+}
+
+export interface CategoryScoreBreakdown {
+  category_id: number;
+  category_name: string;
+  average_score: number;
+  attempt_count: number;
+  highest_score: number;
+  lowest_score: number;
+}
+
+export interface ScoreRecord {
+  id: number;
+  score: number;
+  date: string;
+  exam?: Exam;
+  category?: Category;
+}

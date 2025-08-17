@@ -100,7 +100,8 @@ export const apiSlice = createApi({
     'Expense',
     'Quiz',
     'Exams',
-    'Categories'
+    'Categories',
+    'Scores'
   ],
   endpoints: () => ({}),
 });
