@@ -24,6 +24,7 @@ const authSlice = createSlice({
       state.token = null; // Reset the token on logout
       // Clear tokens from storage
       localStorage.removeItem('access');
+      localStorage.removeItem('refresh');
     },
     setToken: (state, action: PayloadAction<string>) => {
       state.token = action.payload; // Store the token in the state
