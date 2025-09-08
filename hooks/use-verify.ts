@@ -28,6 +28,7 @@ export default function useVerify() {
         "/tools/area",
         "/tools/quiz",
         "/donate",
+        "/tools/panorama",
         "/"
       ];
 
