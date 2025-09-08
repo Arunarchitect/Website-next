@@ -4,12 +4,32 @@ import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import 'pannellum/build/pannellum.css';
 import 'pannellum/build/pannellum.js';
 
-declare const pannellum: any;
+// Type definitions for pannellum
+declare const pannellum: {
+  viewer: (
+    container: HTMLDivElement,
+    config: {
+      type: 'equirectangular';
+      panorama: string;
+      autoLoad?: boolean;
+      showZoomCtrl?: boolean;
+      mouseZoom?: boolean;
+      draggable?: boolean;
+      compass?: boolean;
+    }
+  ) => PannellumViewer;
+};
+
+interface PannellumViewer {
+  setYaw: (yaw: number) => void;
+  setPitch: (pitch: number) => void;
+  setHfov: (hfov: number) => void;
+}
 
 export default function PanoramaViewer() {
   const [image, setImage] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
-  const viewerInstance = useRef<any>(null); // Store the viewer instance
+  const viewerInstance = useRef<PannellumViewer | null>(null); // ✅ properly typed
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -23,12 +43,11 @@ export default function PanoramaViewer() {
     reader.readAsDataURL(file);
   };
 
-  // Reset the camera/view
   const resetView = () => {
     if (viewerInstance.current) {
       viewerInstance.current.setYaw(0);
       viewerInstance.current.setPitch(0);
-      viewerInstance.current.setHfov(100); // Optional: reset zoom
+      viewerInstance.current.setHfov(100);
     }
   };
 
@@ -44,7 +63,6 @@ export default function PanoramaViewer() {
   useEffect(() => {
     if (!image || !viewerRef.current) return;
 
-    // Initialize viewer and store instance
     viewerInstance.current = pannellum.viewer(viewerRef.current, {
       type: 'equirectangular',
       panorama: image,
@@ -65,19 +83,21 @@ export default function PanoramaViewer() {
       {/* File Upload */}
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '20px' }}>
         <input type="file" accept="image/*" onChange={handleFileUpload} id="upload" style={{ display: 'none' }} />
-        <label htmlFor="upload" style={{
-          padding: '12px 30px',
-          backgroundColor: '#4CAF50',
-          color: 'white',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          fontWeight: 'bold',
-          fontSize: '16px',
-          boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-          transition: 'background-color 0.2s ease'
-        }}
-        onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#45a049')}
-        onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#4CAF50')}
+        <label
+          htmlFor="upload"
+          style={{
+            padding: '12px 30px',
+            backgroundColor: '#4CAF50',
+            color: 'white',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '16px',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+            transition: 'background-color 0.2s ease',
+          }}
+          onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#45a049')}
+          onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#4CAF50')}
         >
           Upload 360° Image
         </label>
@@ -97,7 +117,7 @@ export default function PanoramaViewer() {
               cursor: 'pointer',
               fontWeight: 'bold',
               boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-              transition: 'background-color 0.2s ease'
+              transition: 'background-color 0.2s ease',
             }}
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#1976D2')}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#2196F3')}
@@ -116,7 +136,7 @@ export default function PanoramaViewer() {
               cursor: 'pointer',
               fontWeight: 'bold',
               boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-              transition: 'background-color 0.2s ease'
+              transition: 'background-color 0.2s ease',
             }}
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#FB8C00')}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#FF9800')}
@@ -136,20 +156,22 @@ export default function PanoramaViewer() {
           boxShadow: '0 6px 12px rgba(0,0,0,0.1)',
           border: '1px solid #ccc',
           overflow: 'hidden',
-          backgroundColor: '#000'
+          backgroundColor: '#000',
         }}
       >
         {!image && (
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            height: '100%',
-            color: '#999',
-            textAlign: 'center',
-            fontSize: '16px',
-            padding: '10px'
-          }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              height: '100%',
+              color: '#999',
+              textAlign: 'center',
+              fontSize: '16px',
+              padding: '10px',
+            }}
+          >
             Upload a 360° image to start viewing
           </div>
         )}

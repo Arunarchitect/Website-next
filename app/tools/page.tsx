@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FaCalculator, FaRulerCombined, FaArrowRight, FaQuestionCircle } from "react-icons/fa";
+import { FaCalculator, FaRulerCombined, FaArrowRight, FaQuestionCircle, FaEye } from "react-icons/fa";
 
 export default function ToolsPage() {
   return (
@@ -75,6 +75,29 @@ export default function ToolsPage() {
                 className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
               >
                 Take Quiz <FaArrowRight className="ml-2" />
+              </Link>
+            </div>
+          </div>
+
+          {/* 360 Viewer Tool Card */}
+          <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="p-3 rounded-full bg-yellow-100 text-yellow-600 mr-4">
+                  <FaEye size={24} />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-800">
+                  360 Viewer
+                </h2>
+              </div>
+              <p className="text-gray-600 mb-6">
+                Explore architectural designs and spaces interactively with our immersive 360-degree viewer.
+              </p>
+              <Link
+                href="/tools/panorama"
+                className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors"
+              >
+                Open Viewer <FaArrowRight className="ml-2" />
               </Link>
             </div>
           </div>
