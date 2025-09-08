@@ -67,7 +67,7 @@ export default function Navbar() {
 
 	const aboutLink = (isMobile: boolean) => (
 		<NavLink
-			isSelected={isSelected('/donate')}
+			isSelected={isSelected('/about')}
 			isMobile={isMobile}
 			href='/about'
 		>
