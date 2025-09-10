@@ -16,8 +16,10 @@ import ErrorDisplay from "./components/ErrorDisplay";
 import QuizHeader from "./components/QuizHeader";
 import { useQuiz } from "./hooks/useQuiz";
 import ScoreDetailsModal from "./components/ScoreDetailsModal";
+import { useRouter } from "next/navigation";
 
 export default function QuizPage() {
+  const router = useRouter();
   const { data: user, isLoading: userLoading, error: userError } = useRetrieveUserQuery();
   const { data: exams = [] } = useGetExamsQuery();
   const {
@@ -99,6 +101,75 @@ export default function QuizPage() {
       setShowScoreDetails(false);
     }
   };
+
+  const handleLoginRedirect = () => {
+    router.push("/auth/login");
+  };
+
+  // If user is not logged in (401 error) or user data is not available, show authorization message
+  const isUnauthorized = (!userLoading && !user) || 
+  (userError && 'status' in userError && userError.status === 401);
+  
+  if (isUnauthorized) {
+    return (
+      <div className="max-w-md mx-auto mt-10 px-4 sm:px-6 lg:px-8 relative">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div className="text-center">
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900">
+              <svg className="h-6 w-6 text-red-600 dark:text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">Sorry</h3>
+            <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              <p>You are not authorized to access this tool.</p>
+              <p>Please log in and return to continue. If you are unregistered, this is a test phase, for more info you can write to modelflick@gmail.com</p>
+            </div>
+            <div className="mt-6">
+              <button
+                onClick={handleLoginRedirect}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800"
+              >
+                Login
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if user is authorized (only user IDs 1 or 2)
+  const isAuthorizedUser = user && (user.id === 1 || user.id === 2);
+  
+  if (!isAuthorizedUser) {
+    return (
+      <div className="max-w-md mx-auto mt-10 px-4 sm:px-6 lg:px-8 relative">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div className="text-center">
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900">
+              <svg className="h-6 w-6 text-red-600 dark:text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">Access Denied</h3>
+            <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              <p>You are not authorized to access this page.</p>
+              <p>Only specific users can use this tool. If you are unregistered, this is a test phase, for more info you can write to modelflick@gmail.com</p>
+            </div>
+            <div className="mt-6">
+              <button
+                onClick={() => router.push("/")}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800"
+              >
+                Go Back Home
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const totalPages = Math.ceil(questions.length / questionsPerPage);
   const startIndex = (currentPage - 1) * questionsPerPage;
@@ -189,7 +260,7 @@ export default function QuizPage() {
     return (
       <div className="max-w-2xl mx-auto mt-10 px-4 sm:px-6 text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 dark:border-blue-400 mx-auto"></div>
-        <p className="mt-4 text-gray-600 dark:text-gray-300">
+        <p className="mt-4 text-gray-60 dark:text-gray-300">
           Preparing your quiz{user ? `, ${user.first_name}` : ''}...
         </p>
         <button 
