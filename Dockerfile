@@ -1,11 +1,9 @@
-# syntax=docker/dockerfile:1.4
-
 # -------- BUILD STAGE --------
 FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install system tools and pnpm
+# Install system deps for debugging & build
 RUN apt-get update && apt-get install -y bash curl nano \
     && npm install -g pnpm \
     && rm -rf /var/lib/apt/lists/*
@@ -13,35 +11,32 @@ RUN apt-get update && apt-get install -y bash curl nano \
 # Copy dependency files
 COPY pnpm-lock.yaml package.json ./
 
-# Install dependencies using pnpm with cache
-RUN --mount=type=cache,target=/root/.pnpm-store \
-    pnpm install
+# Install all dependencies using pnpm
+RUN pnpm install --frozen-lockfile
 
-# Copy app source code
+# Copy app source
 COPY . .
 
-# Build Next.js app (skip lint/type check)
-RUN pnpm run build --no-lint --no-typecheck --verbose || (echo "❌ Build failed! Dropping into shell..." && bash)
-
+# Build Next.js app using pnpm
+RUN pnpm run build || (echo "❌ Build failed! Dropping into shell..." && bash)
 
 # -------- RUNTIME STAGE --------
 FROM node:20-slim AS runner
 
 WORKDIR /app
 
-# Install pnpm (runtime doesn't install anything, but just in case)
+# Install pnpm globally
 RUN npm install -g pnpm
 
-# Copy dependency manifest (for transparency)
+# Copy dependency files
 COPY package.json pnpm-lock.yaml ./
 
-# Copy production node_modules and built app
+# Copy production node_modules and built app from builder
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.* ./
 
-
-# Expose port and start the app
+# Expose port and start the app using pnpm
 EXPOSE 3000
 CMD ["pnpm", "start"]
