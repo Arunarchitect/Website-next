@@ -1,4 +1,13 @@
 // app/about/page.tsx
+// app/about/page.tsx
+import { generateMetadata } from '@/lib/generateMetadata';
+
+export const metadata = generateMetadata({
+  title: 'About',
+  description: 'Learn more about Modelflick',
+  imageText: 'About',
+});
+
 export default function AboutPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
