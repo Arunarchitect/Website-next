@@ -3,14 +3,14 @@ export interface Video {
   id: string;
   title: string;
   category: string;
-  type: string;
+  type: 'video' | 'reel';
   youtubeUrl: string;
   thumbnail: string;
-  instagramUrl?: string; // Add optional Instagram URL
+  instagramUrl?: string;
+  playlists: string[]; // ✅ new field
 }
 
 export interface Playlist {
   id: string;
   title: string;
-  videos: string[];
 }
