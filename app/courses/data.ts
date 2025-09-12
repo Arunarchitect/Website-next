@@ -9,7 +9,7 @@ export const videoData: Video[] = [
     youtubeUrl: 'https://youtube.com/shorts/Oz7wdg5fxcg',
     thumbnail: 'https://img.youtube.com/vi/Oz7wdg5fxcg/hqdefault.jpg',
     instagramUrl: 'https://www.instagram.com/reel/DN99rXsDL2C/?utm_source=ig_web_button_share_sheet',
-    playlists: ['all', 'featured', 'reels']
+    playlists: ['all', 'openbim', 'reels']
   },
   {
     id: 'QqAvLkQwaek',
@@ -39,13 +39,13 @@ export const videoData: Video[] = [
     youtubeUrl: 'https://youtu.be/ixMdxWLG-Lc',
     thumbnail: 'https://img.youtube.com/vi/ixMdxWLG-Lc/hqdefault.jpg',
     instagramUrl: '',
-    playlists: ['all', 'featured', 'courses']
+    playlists: ['all', 'openbim', 'courses']
   }
 ];
 
 export const playlists: Playlist[] = [
   { id: 'all', title: 'All Videos' },
-  { id: 'featured', title: 'Featured' },
+  { id: 'openbim', title: 'OpenBIM' },
   { id: 'courses', title: 'Courses' },
   { id: 'reels', title: 'Reels' }
 ];
