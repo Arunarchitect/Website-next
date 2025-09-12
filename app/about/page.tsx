@@ -4,7 +4,7 @@ import { generateMetadata } from '@/lib/generateMetadata';
 
 export const metadata = generateMetadata({
   title: 'About',
-  description: 'Learn more about Modelflick',
+  description: 'ModelFlick is a platform exploring new approaches to planning and architectural design.We re developing tools to help communities better understand and engage with their built environments, with a focus on accessibility and collaboration.',
   imageText: 'About',
 });
 
