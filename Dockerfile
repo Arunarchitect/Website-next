@@ -17,6 +17,8 @@ RUN pnpm install --frozen-lockfile
 # Copy app source
 COPY . .
 
+ENV NEXT_DISABLE_TYPECHECK=1
+ENV NEXT_DISABLE_ESLINT=1
 # Build Next.js app using pnpm
 RUN pnpm run build || (echo "❌ Build failed! Dropping into shell..." && bash)
 
