@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y bash curl nano \
 COPY pnpm-lock.yaml package.json ./
 
 # Install all dependencies using pnpm
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Copy app source
 COPY . .
