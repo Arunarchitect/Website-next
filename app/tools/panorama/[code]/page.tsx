@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, ChangeEvent, useCallback } from 'react';
 import 'pannellum/build/pannellum.css';
 import 'pannellum/build/pannellum.js';
+import { useParams } from 'next/navigation';
 
 // Type definitions for pannellum
 declare const pannellum: {
@@ -24,7 +25,6 @@ interface PannellumViewer {
   setYaw: (yaw: number) => void;
   setPitch: (pitch: number) => void;
   setHfov: (hfov: number) => void;
-  destroy: () => void;
 }
 
 interface ViewerData {
@@ -40,7 +40,10 @@ interface ProjectData {
   views: ViewerData[];
 }
 
-export default function PanoramaViewer() {
+export default function PanoramaViewerWithCode() {
+  const params = useParams();
+  const code = params.code as string;
+  
   const [accessKey, setAccessKey] = useState<string>('');
   const [projectData, setProjectData] = useState<ProjectData | null>(null);
   const [selectedView, setSelectedView] = useState<ViewerData | null>(null);
@@ -50,6 +53,14 @@ export default function PanoramaViewer() {
   const [activeTab, setActiveTab] = useState<'accessKey' | 'upload'>('accessKey');
   const viewerRef = useRef<HTMLDivElement>(null);
   const viewerInstance = useRef<PannellumViewer | null>(null);
+
+  // Extract access key from URL
+  useEffect(() => {
+    if (code) {
+      setAccessKey(code);
+      fetchProjectData(code);
+    }
+  }, [code]);
 
   // Fetch project data when access key is submitted
   const fetchProjectData = async (key: string) => {
@@ -146,17 +157,10 @@ export default function PanoramaViewer() {
     if (!currentImage || !viewerRef.current) return;
 
     // Destroy existing viewer if it exists
-    if (viewerInstance.current) {
-      viewerInstance.current.destroy();
-      viewerInstance.current = null;
-    }
-
-    // Clear the container
-    if (viewerRef.current) {
+    if (viewerInstance.current && viewerRef.current) {
       viewerRef.current.innerHTML = '';
     }
 
-    // Create new viewer
     viewerInstance.current = pannellum.viewer(viewerRef.current, {
       type: 'equirectangular',
       panorama: currentImage,
@@ -166,14 +170,6 @@ export default function PanoramaViewer() {
       draggable: true,
       compass: false,
     });
-
-    // Cleanup function
-    return () => {
-      if (viewerInstance.current) {
-        viewerInstance.current.destroy();
-        viewerInstance.current = null;
-      }
-    };
   }, [getCurrentImage]);
 
   return (
