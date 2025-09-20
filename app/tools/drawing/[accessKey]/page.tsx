@@ -6,7 +6,7 @@ import "svg2pdf.js";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import NextImage from "next/image";
 
-// Interfaces
+// Interfaces (unchanged)
 export interface User {
   id: string;
   name: string;
@@ -88,6 +88,10 @@ export default function SvgViewerWithZoomPan() {
   const [usePngForMobile, setUsePngForMobile] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+
+  // PNG cache to store converted images
+  const [pngCache, setPngCache] = useState<Record<string, string>>({});
 
   // Transform state for pan & zoom
   const [scale, setScale] = useState(1);
@@ -114,7 +118,6 @@ export default function SvgViewerWithZoomPan() {
     };
 
     setIsMobile(checkIfMobile());
-    setUsePngForMobile(checkIfMobile());
   }, []);
 
   // Convert SVG to PNG
@@ -197,28 +200,19 @@ export default function SvgViewerWithZoomPan() {
         setSvgElement(svg.cloneNode(true) as SVGSVGElement);
         setSvgContent(text);
         setFileName(file.viewName || file.title);
+        setActiveFileId(file.id);
         setScale(1);
         setOffset({ x: 0, y: 0 });
         setActiveTab(index);
-
-        // Convert to PNG for mobile devices
-        if (isMobile) {
-          setIsConverting(true);
-          try {
-            const pngUrl = await convertSvgToPng(text);
-            setPngDataUrl(pngUrl);
-          } catch (err) {
-            console.error("Failed to convert SVG to PNG:", err);
-          } finally {
-            setIsConverting(false);
-          }
-        }
+        
+        // Reset PNG view when switching files
+        setUsePngForMobile(false);
       } catch (err) {
         console.error("Failed to load SVG:", err);
         alert("Failed to load SVG: " + (err as Error).message);
       }
     },
-    [isMobile, convertSvgToPng]
+    []
   );
 
   // Fetch drawings from backend using access key
@@ -288,26 +282,15 @@ export default function SvgViewerWithZoomPan() {
       setSvgElement(svg.cloneNode(true) as SVGSVGElement);
       setSvgContent(text);
       setFileName(fileNameParam);
+      setActiveFileId("uploaded-file");
       setScale(1);
       setOffset({ x: 0, y: 0 });
-
-      // Convert to PNG for mobile devices
-      if (isMobile) {
-        setIsConverting(true);
-        try {
-          const pngUrl = await convertSvgToPng(text);
-          setPngDataUrl(pngUrl);
-        } catch (err) {
-          console.error("Failed to convert SVG to PNG:", err);
-        } finally {
-          setIsConverting(false);
-        }
-      }
+      setUsePngForMobile(false);
     } catch (err) {
       console.error("Failed to load uploaded SVG:", err);
       alert("Failed to load SVG: " + (err as Error).message);
     }
-  }, [fileUrl, fileNameParam, isMobile, convertSvgToPng]);
+  }, [fileUrl, fileNameParam]);
 
   // Initialize based on route type
   useEffect(() => {
@@ -530,29 +513,19 @@ export default function SvgViewerWithZoomPan() {
 
   // Download PNG
   const downloadPng = async () => {
-    if (!pngDataUrl && !svgContent) return alert("No image loaded");
+    if (!svgContent) return alert("No SVG loaded");
 
     setIsConverting(true);
 
     try {
-      // If we already have a PNG data URL, use it directly
-      if (pngDataUrl) {
-        const link = document.createElement("a");
-        link.download = `${fileName}.png`;
-        link.href = pngDataUrl;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else if (svgContent) {
-        // Convert SVG to PNG for download
-        const pngUrl = await convertSvgToPng(svgContent);
-        const link = document.createElement("a");
-        link.download = `${fileName}.png`;
-        link.href = pngUrl;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
+      // Convert SVG to PNG for download
+      const pngUrl = await convertSvgToPng(svgContent);
+      const link = document.createElement("a");
+      link.download = `${fileName}.png`;
+      link.href = pngUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (e) {
       console.error("Error exporting PNG:", e);
       alert("Error exporting PNG: " + (e as Error).message);
@@ -562,26 +535,33 @@ export default function SvgViewerWithZoomPan() {
   };
 
   // Toggle between SVG and PNG view
-  const toggleViewMode = () => {
+  const toggleViewMode = async () => {
     if (usePngForMobile) {
+      // Switch back to SVG view
       setUsePngForMobile(false);
     } else {
-      // Convert to PNG if we haven't already
-      if (!pngDataUrl && svgContent) {
-        setIsConverting(true);
-        convertSvgToPng(svgContent)
-          .then((url) => {
-            setPngDataUrl(url);
-            setUsePngForMobile(true);
-          })
-          .catch((err) => {
-            console.error("Failed to convert SVG to PNG:", err);
-          })
-          .finally(() => {
-            setIsConverting(false);
-          });
-      } else {
+      // Check if we have this file in cache
+      if (activeFileId && pngCache[activeFileId]) {
+        setPngDataUrl(pngCache[activeFileId]);
         setUsePngForMobile(true);
+      } else {
+        // Convert to PNG
+        setIsConverting(true);
+        try {
+          const pngUrl = await convertSvgToPng(svgContent);
+          setPngDataUrl(pngUrl);
+          setUsePngForMobile(true);
+          
+          // Add to cache if we have a file ID
+          if (activeFileId) {
+            setPngCache(prev => ({ ...prev, [activeFileId]: pngUrl }));
+          }
+        } catch (err) {
+          console.error("Failed to convert SVG to PNG:", err);
+          alert("Failed to convert to PNG: " + (err as Error).message);
+        } finally {
+          setIsConverting(false);
+        }
       }
     }
   };
@@ -773,17 +753,50 @@ export default function SvgViewerWithZoomPan() {
               <button
                 onClick={toggleViewMode}
                 disabled={isConverting}
-                className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-sm font-medium disabled:opacity-50"
+                className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-sm font-medium disabled:opacity-50 flex items-center gap-1"
               >
-                {usePngForMobile ? "View as SVG" : "View as PNG (Faster)"}
+                {usePngForMobile ? (
+                  <>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                      />
+                    </svg>
+                    View as SVG
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                    View as PNG
+                  </>
+                )}
               </button>
             )}
 
             <div className="ml-auto flex gap-2">
               <button
                 onClick={downloadPdf}
-                disabled={isConverting}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
               >
                 <svg
                   className="w-4 h-4"
@@ -828,7 +841,10 @@ export default function SvgViewerWithZoomPan() {
         {/* Loading indicators */}
         {isLoading && (
           <div className="flex justify-center items-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            <div className="flex flex-col items-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-3"></div>
+              <span className="text-gray-600">Loading drawings...</span>
+            </div>
           </div>
         )}
 
@@ -836,7 +852,7 @@ export default function SvgViewerWithZoomPan() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-3">
             <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500"></div>
             <span className="text-blue-700">
-              Converting image for better performance...
+              Converting to PNG for better mobile performance...
             </span>
           </div>
         )}
@@ -907,8 +923,9 @@ export default function SvgViewerWithZoomPan() {
 
         {isMobile && (
           <div className="mt-4 text-sm text-gray-500 text-center">
-            Using {usePngForMobile ? "PNG" : "SVG"} view - PNG provides better
-            performance on mobile devices
+            {usePngForMobile 
+              ? "Using PNG view for better performance" 
+              : "Using SVG view - Switch to PNG for better performance on mobile devices"}
           </div>
         )}
       </main>
