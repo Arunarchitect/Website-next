@@ -35,9 +35,15 @@ interface ViewerData {
 }
 
 interface ProjectData {
-  project: string;
-  organisation: string;
-  views: ViewerData[];
+  project: {
+    id: number;
+    name: string;
+  };
+  organisation: {
+    id: number;
+    name: string;
+  };
+  "360_images": ViewerData[];
 }
 
 export default function PanoramaViewer() {
@@ -62,7 +68,7 @@ export default function PanoramaViewer() {
     setError('');
     
     try {
-      const response = await fetch(`https://api.modelflick.com/api/viewer/public/${key}/`);
+      const response = await fetch(`https://api.modelflick.com/api/viewer/public/360-images/${key}/`);
       
       if (!response.ok) {
         if (response.status === 401) {
@@ -75,8 +81,8 @@ export default function PanoramaViewer() {
       setProjectData(data);
       
       // Automatically select the first view if available
-      if (data.views.length > 0) {
-        setSelectedView(data.views[0]);
+      if (data["360_images"].length > 0) {
+        setSelectedView(data["360_images"][0]);
         setUploadedImage(null); // Clear any uploaded image
       }
     } catch (err) {
@@ -222,7 +228,7 @@ export default function PanoramaViewer() {
               type="text"
               value={accessKey}
               onChange={(e) => setAccessKey(e.target.value)}
-              placeholder="Enter access key (e.g., 1234)"
+              placeholder="Enter access key (e.g., anil)"
               style={{
                 padding: '10px',
                 border: '1px solid #ccc',
@@ -251,7 +257,7 @@ export default function PanoramaViewer() {
           
           {/* Example access key hint */}
           <p style={{ textAlign: 'center', color: '#666', fontSize: '14px', marginTop: '8px' }}>
-            Example: Try access key &quot;1234&quot; to load sample project
+            Example: Try access key &quot;anil&quot; to load sample project
           </p>
         </div>
       )}
@@ -296,19 +302,19 @@ export default function PanoramaViewer() {
       {/* Project Info */}
       {projectData && (
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <h2 style={{ color: '#333', margin: '0' }}>{projectData.project}</h2>
+          <h2 style={{ color: '#333', margin: '0' }}>{projectData.project.name}</h2>
           <p style={{ color: '#666', margin: '5px 0 15px 0' }}>
-            Organization: {projectData.organisation}
+            Organization: {projectData.organisation.name}
           </p>
         </div>
       )}
 
       {/* Views Selection */}
-      {projectData && projectData.views.length > 0 && (
+      {projectData && projectData["360_images"].length > 0 && (
         <div style={{ marginBottom: '20px' }}>
           <h3 style={{ marginBottom: '10px', color: '#333', textAlign: 'center' }}>Select a View:</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center' }}>
-            {projectData.views.map((view) => (
+            {projectData["360_images"].map((view) => (
               <button
                 key={view.id}
                 onClick={() => handleViewSelect(view)}
