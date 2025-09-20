@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 
-// Interfaces (same as before)
+// Interfaces
 export interface User {
   id: string;
   name: string;
@@ -78,11 +78,14 @@ export default function SvgViewerWithZoomPan() {
   
   const [svgElement, setSvgElement] = useState<SVGSVGElement | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
+  const [pngDataUrl, setPngDataUrl] = useState<string>("");
   const [fileName, setFileName] = useState<string>("file");
   const [unlockedDrawings, setUnlockedDrawings] = useState<ViewerFile[]>([]);
   const [isConverting, setIsConverting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [usePngForMobile, setUsePngForMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   // Transform state for pan & zoom
   const [scale, setScale] = useState(1);
@@ -100,6 +103,55 @@ export default function SvgViewerWithZoomPan() {
   const fileUrl = searchParams.get("file");
   const fileNameParam = searchParams.get("name");
 
+  // Check if device is mobile
+  useEffect(() => {
+    const checkIfMobile = () => {
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    };
+    
+    setIsMobile(checkIfMobile());
+    setUsePngForMobile(checkIfMobile());
+  }, []);
+
+  // Convert SVG to PNG
+  const convertSvgToPng = useCallback(async (svgContent: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const svgBlob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+        
+        // Draw white background first
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw the SVG
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/png');
+        URL.revokeObjectURL(url);
+        resolve(dataUrl);
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load SVG image'));
+      };
+      
+      img.src = url;
+    });
+  }, []);
+
   // Load SVG from file
   const loadSvg = useCallback(async (file: ViewerFile) => {
     try {
@@ -112,7 +164,7 @@ export default function SvgViewerWithZoomPan() {
         text = await res.text();
       } else {
         // For backend files, use the full URL from the backend response
-        const fileUrl = file.file; // This should be the full URL like "http://localhost:8000/media/..."
+        const fileUrl = file.file;
         const res = await fetch(fileUrl);
 
         if (!res.ok) {
@@ -124,36 +176,35 @@ export default function SvgViewerWithZoomPan() {
         text = await res.text();
       }
 
-      // Optimize SVG for mobile if it's too large
-      const optimizedSvgText = optimizeSvgForMobile(text);
-      
       const parser = new DOMParser();
-      const doc = parser.parseFromString(optimizedSvgText, "image/svg+xml");
+      const doc = parser.parseFromString(text, "image/svg+xml");
       const svg = doc.querySelector("svg");
       if (!svg) return alert("Invalid SVG file");
 
       // Store both the element and the original content
       setSvgElement(svg.cloneNode(true) as SVGSVGElement);
-      setSvgContent(optimizedSvgText);
+      setSvgContent(text);
       setFileName(file.viewName || file.title);
       setScale(1);
       setOffset({ x: 0, y: 0 });
+      
+      // Convert to PNG for mobile devices
+      if (isMobile) {
+        setIsConverting(true);
+        try {
+          const pngUrl = await convertSvgToPng(text);
+          setPngDataUrl(pngUrl);
+        } catch (err) {
+          console.error("Failed to convert SVG to PNG:", err);
+        } finally {
+          setIsConverting(false);
+        }
+      }
     } catch (err) {
       console.error("Failed to load SVG:", err);
       alert("Failed to load SVG: " + (err as Error).message);
     }
-  }, []);
-
-  // Simple SVG optimization for mobile
-  const optimizeSvgForMobile = (svgText: string): string => {
-    // For very large SVGs, we might need to simplify them
-    // This is a basic implementation - you might want to expand it
-    if (svgText.length > 500000) { // If SVG is larger than 500KB
-      console.warn("Large SVG detected, consider optimizing it for better mobile performance");
-    }
-    
-    return svgText;
-  };
+  }, [isMobile, convertSvgToPng]);
 
   // Fetch drawings from backend using access key
   const fetchDrawings = useCallback(async (key: string) => {
@@ -211,24 +262,34 @@ export default function SvgViewerWithZoomPan() {
       const res = await fetch(fileUrl);
       const text = await res.text();
       
-      // Optimize SVG for mobile
-      const optimizedSvgText = optimizeSvgForMobile(text);
-      
       const parser = new DOMParser();
-      const doc = parser.parseFromString(optimizedSvgText, "image/svg+xml");
+      const doc = parser.parseFromString(text, "image/svg+xml");
       const svg = doc.querySelector("svg");
       if (!svg) return alert("Invalid SVG file");
 
       setSvgElement(svg.cloneNode(true) as SVGSVGElement);
-      setSvgContent(optimizedSvgText);
+      setSvgContent(text);
       setFileName(fileNameParam);
       setScale(1);
       setOffset({ x: 0, y: 0 });
+      
+      // Convert to PNG for mobile devices
+      if (isMobile) {
+        setIsConverting(true);
+        try {
+          const pngUrl = await convertSvgToPng(text);
+          setPngDataUrl(pngUrl);
+        } catch (err) {
+          console.error("Failed to convert SVG to PNG:", err);
+        } finally {
+          setIsConverting(false);
+        }
+      }
     } catch (err) {
       console.error("Failed to load uploaded SVG:", err);
       alert("Failed to load SVG: " + (err as Error).message);
     }
-  }, [fileUrl, fileNameParam]);
+  }, [fileUrl, fileNameParam, isMobile, convertSvgToPng]);
 
   // Initialize based on route type
   useEffect(() => {
@@ -254,7 +315,6 @@ export default function SvgViewerWithZoomPan() {
     const zoomFactor = 1.1;
     const delta = e.deltaY < 0 ? zoomFactor : 1 / zoomFactor;
     
-    // Use requestAnimationFrame for smoother zooming
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
@@ -273,7 +333,6 @@ export default function SvgViewerWithZoomPan() {
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!dragging.current) return;
     
-    // Use requestAnimationFrame for smoother panning
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
@@ -293,11 +352,9 @@ export default function SvgViewerWithZoomPan() {
   // Touch pan handlers - optimized for mobile
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
-      // Single finger touch for panning
       dragging.current = true;
       lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
-      // Two finger touch for pinch-to-zoom
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       initialDistance.current = Math.sqrt(dx * dx + dy * dy);
@@ -307,20 +364,17 @@ export default function SvgViewerWithZoomPan() {
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Use requestAnimationFrame for smoother performance on mobile
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
     
     animationFrameRef.current = requestAnimationFrame(() => {
       if (e.touches.length === 1 && dragging.current) {
-        // Single finger panning
         const dx = e.touches[0].clientX - lastPos.current.x;
         const dy = e.touches[0].clientY - lastPos.current.y;
         lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
       } else if (e.touches.length === 2) {
-        // Two finger pinch-to-zoom
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
@@ -373,18 +427,16 @@ export default function SvgViewerWithZoomPan() {
     };
   }, []);
 
-  // Download PDF (fixed text distortion)
+  // Download PDF (using original SVG for vector quality)
   const downloadPdf = async () => {
-    if (!svgElement || !svgContent) return alert("No SVG loaded");
+    if (!svgContent) return alert("No SVG loaded");
 
     try {
-      // Create a new SVG element from the original content
       const parser = new DOMParser();
       const doc = parser.parseFromString(svgContent, "image/svg+xml");
       const originalSvg = doc.querySelector("svg");
       if (!originalSvg) return;
 
-      // Get dimensions
       let width = parseFloat(originalSvg.getAttribute("width") || "210");
       let height = parseFloat(originalSvg.getAttribute("height") || "297");
 
@@ -393,14 +445,12 @@ export default function SvgViewerWithZoomPan() {
         height = originalSvg.viewBox.baseVal.height || height;
       }
 
-      // Create PDF
       const pdf = new jsPDF({
         unit: "pt",
         format: [width, height],
         orientation: width > height ? "landscape" : "portrait",
       });
 
-      // Add SVG to PDF (using original, untransformed SVG)
       await pdf.svg(originalSvg, {
         x: 0,
         y: 0,
@@ -414,53 +464,61 @@ export default function SvgViewerWithZoomPan() {
     }
   };
 
-  // Download PNG directly
+  // Download PNG
   const downloadPng = async () => {
-    if (!svgElement || !svgContent) return alert("No SVG loaded");
+    if (!pngDataUrl && !svgContent) return alert("No image loaded");
 
     setIsConverting(true);
 
     try {
-      // Create an image from the SVG data
-      const svgBlob = new Blob([svgContent], {
-        type: "image/svg+xml;charset=utf-8",
-      });
-      const url = URL.createObjectURL(svgBlob);
-
-      // Wait for image to load
-      const img = new Image();
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = url;
-      });
-
-      URL.revokeObjectURL(url);
-
-      // Create a canvas with the correct dimensions
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Could not get canvas context");
-
-      // Set canvas dimensions to match the image
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      // Draw the image on canvas
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      // Create download link
-      const link = document.createElement("a");
-      link.download = `${fileName}.png`;
-      link.href = canvas.toDataURL("image/png");
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // If we already have a PNG data URL, use it directly
+      if (pngDataUrl) {
+        const link = document.createElement("a");
+        link.download = `${fileName}.png`;
+        link.href = pngDataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else if (svgContent) {
+        // Convert SVG to PNG for download
+        const pngUrl = await convertSvgToPng(svgContent);
+        const link = document.createElement("a");
+        link.download = `${fileName}.png`;
+        link.href = pngUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     } catch (e) {
       console.error("Error exporting PNG:", e);
       alert("Error exporting PNG: " + (e as Error).message);
     } finally {
       setIsConverting(false);
+    }
+  };
+
+  // Toggle between SVG and PNG view
+  const toggleViewMode = () => {
+    if (usePngForMobile) {
+      setUsePngForMobile(false);
+    } else {
+      // Convert to PNG if we haven't already
+      if (!pngDataUrl && svgContent) {
+        setIsConverting(true);
+        convertSvgToPng(svgContent)
+          .then(url => {
+            setPngDataUrl(url);
+            setUsePngForMobile(true);
+          })
+          .catch(err => {
+            console.error("Failed to convert SVG to PNG:", err);
+          })
+          .finally(() => {
+            setIsConverting(false);
+          });
+      } else {
+        setUsePngForMobile(true);
+      }
     }
   };
 
@@ -475,7 +533,7 @@ export default function SvgViewerWithZoomPan() {
           ← Back to Main
         </button>
         <h2 style={{ margin: 0 }}>SVG Viewer - {fileName}</h2>
-        <div style={{ width: "100px" }}></div> {/* Spacer for alignment */}
+        <div style={{ width: "100px" }}></div>
       </div>
 
       {/* Available drawings list (only for access key routes) */}
@@ -500,7 +558,7 @@ export default function SvgViewerWithZoomPan() {
       )}
 
       {/* Controls */}
-      {svgElement && (
+      {svgContent && (
         <div style={{ marginBottom: 10 }}>
           <button onClick={() => setScale((s) => Math.min(s + 0.1, 10))}>
             Zoom In
@@ -512,11 +570,17 @@ export default function SvgViewerWithZoomPan() {
           <button onClick={toggleFullscreen}>
             {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           </button>
+          {isMobile && (
+            <button onClick={toggleViewMode} disabled={isConverting}>
+              {usePngForMobile ? "View as SVG" : "View as PNG (Faster)"}
+            </button>
+          )}
         </div>
       )}
 
       {/* Loading indicator */}
       {isLoading && <p>Loading drawings...</p>}
+      {isConverting && <p>Converting image for better performance...</p>}
 
       {/* Viewer */}
       <div
@@ -555,18 +619,29 @@ export default function SvgViewerWithZoomPan() {
             userSelect: "none",
             touchAction: "none",
             backgroundColor: "#f9f9f9",
-            // Force GPU acceleration for smoother performance
             transform: "translateZ(0)",
             willChange: "transform",
           }}
         >
-          {svgElement && (
+          {usePngForMobile && pngDataUrl ? (
+            <img
+              src={pngDataUrl}
+              alt={fileName}
+              style={{
+                transformOrigin: "0 0",
+                transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+                display: "block",
+                willChange: "transform",
+                maxWidth: "100%",
+                height: "auto",
+              }}
+            />
+          ) : svgElement && (
             <div
               style={{
                 transformOrigin: "0 0",
                 transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
                 display: "inline-block",
-                // Force GPU acceleration for smoother performance
                 willChange: "transform",
               }}
               ref={(el) => {
@@ -580,7 +655,7 @@ export default function SvgViewerWithZoomPan() {
         </div>
       </div>
 
-      {svgElement && (
+      {svgContent && (
         <div style={{ marginTop: 20 }}>
           <button
             onClick={downloadPdf}
@@ -604,6 +679,12 @@ export default function SvgViewerWithZoomPan() {
           >
             {isConverting ? "Converting..." : "Download as PNG"}
           </button>
+        </div>
+      )}
+
+      {isMobile && (
+        <div style={{ marginTop: 10, fontSize: "0.9rem", color: "#666" }}>
+          <p>Using {usePngForMobile ? "PNG" : "SVG"} view - PNG provides better performance on mobile devices</p>
         </div>
       )}
     </div>
