@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 
-// Interfaces
+// Interfaces (same as before)
 export interface User {
   id: string;
   name: string;
@@ -93,6 +93,7 @@ export default function SvgViewerWithZoomPan() {
   const initialScale = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number>(0);
 
   // Check if this is an uploaded file (ID starts with "uploaded-")
   const isUploadedFile = accessKey.startsWith("uploaded-");
@@ -123,14 +124,17 @@ export default function SvgViewerWithZoomPan() {
         text = await res.text();
       }
 
+      // Optimize SVG for mobile if it's too large
+      const optimizedSvgText = optimizeSvgForMobile(text);
+      
       const parser = new DOMParser();
-      const doc = parser.parseFromString(text, "image/svg+xml");
+      const doc = parser.parseFromString(optimizedSvgText, "image/svg+xml");
       const svg = doc.querySelector("svg");
       if (!svg) return alert("Invalid SVG file");
 
       // Store both the element and the original content
       setSvgElement(svg.cloneNode(true) as SVGSVGElement);
-      setSvgContent(text);
+      setSvgContent(optimizedSvgText);
       setFileName(file.viewName || file.title);
       setScale(1);
       setOffset({ x: 0, y: 0 });
@@ -139,6 +143,17 @@ export default function SvgViewerWithZoomPan() {
       alert("Failed to load SVG: " + (err as Error).message);
     }
   }, []);
+
+  // Simple SVG optimization for mobile
+  const optimizeSvgForMobile = (svgText: string): string => {
+    // For very large SVGs, we might need to simplify them
+    // This is a basic implementation - you might want to expand it
+    if (svgText.length > 500000) { // If SVG is larger than 500KB
+      console.warn("Large SVG detected, consider optimizing it for better mobile performance");
+    }
+    
+    return svgText;
+  };
 
   // Fetch drawings from backend using access key
   const fetchDrawings = useCallback(async (key: string) => {
@@ -196,13 +211,16 @@ export default function SvgViewerWithZoomPan() {
       const res = await fetch(fileUrl);
       const text = await res.text();
       
+      // Optimize SVG for mobile
+      const optimizedSvgText = optimizeSvgForMobile(text);
+      
       const parser = new DOMParser();
-      const doc = parser.parseFromString(text, "image/svg+xml");
+      const doc = parser.parseFromString(optimizedSvgText, "image/svg+xml");
       const svg = doc.querySelector("svg");
       if (!svg) return alert("Invalid SVG file");
 
       setSvgElement(svg.cloneNode(true) as SVGSVGElement);
-      setSvgContent(text);
+      setSvgContent(optimizedSvgText);
       setFileName(fileNameParam);
       setScale(1);
       setOffset({ x: 0, y: 0 });
@@ -221,12 +239,29 @@ export default function SvgViewerWithZoomPan() {
     }
   }, [accessKey, isUploadedFile, loadUploadedFile, fetchDrawings]);
 
+  // Clean up animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
   // Zoom handlers
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = 1.1;
     const delta = e.deltaY < 0 ? zoomFactor : 1 / zoomFactor;
-    setScale((prev) => Math.min(Math.max(prev * delta, 0.1), 10));
+    
+    // Use requestAnimationFrame for smoother zooming
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(() => {
+      setScale((prev) => Math.min(Math.max(prev * delta, 0.1), 10));
+    });
   };
 
   // Mouse pan handlers
@@ -237,17 +272,25 @@ export default function SvgViewerWithZoomPan() {
   
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!dragging.current) return;
-    const dx = e.clientX - lastPos.current.x;
-    const dy = e.clientY - lastPos.current.y;
-    lastPos.current = { x: e.clientX, y: e.clientY };
-    setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+    
+    // Use requestAnimationFrame for smoother panning
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(() => {
+      const dx = e.clientX - lastPos.current.x;
+      const dy = e.clientY - lastPos.current.y;
+      lastPos.current = { x: e.clientX, y: e.clientY };
+      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+    });
   };
   
   const handleMouseUp = () => {
     dragging.current = false;
   };
 
-  // Touch pan handlers
+  // Touch pan handlers - optimized for mobile
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       // Single finger touch for panning
@@ -264,23 +307,31 @@ export default function SvgViewerWithZoomPan() {
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 1 && dragging.current) {
-      // Single finger panning
-      const dx = e.touches[0].clientX - lastPos.current.x;
-      const dy = e.touches[0].clientY - lastPos.current.y;
-      lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-    } else if (e.touches.length === 2) {
-      // Two finger pinch-to-zoom
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const currentDistance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (initialDistance.current) {
-        const zoomFactor = currentDistance / initialDistance.current;
-        setScale(initialScale.current * zoomFactor);
-      }
+    // Use requestAnimationFrame for smoother performance on mobile
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
     }
+    
+    animationFrameRef.current = requestAnimationFrame(() => {
+      if (e.touches.length === 1 && dragging.current) {
+        // Single finger panning
+        const dx = e.touches[0].clientX - lastPos.current.x;
+        const dy = e.touches[0].clientY - lastPos.current.y;
+        lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      } else if (e.touches.length === 2) {
+        // Two finger pinch-to-zoom
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const currentDistance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (initialDistance.current) {
+          const zoomFactor = currentDistance / initialDistance.current;
+          setScale(initialScale.current * zoomFactor);
+        }
+      }
+    });
+    
     e.preventDefault();
   };
 
@@ -504,6 +555,9 @@ export default function SvgViewerWithZoomPan() {
             userSelect: "none",
             touchAction: "none",
             backgroundColor: "#f9f9f9",
+            // Force GPU acceleration for smoother performance
+            transform: "translateZ(0)",
+            willChange: "transform",
           }}
         >
           {svgElement && (
@@ -512,6 +566,8 @@ export default function SvgViewerWithZoomPan() {
                 transformOrigin: "0 0",
                 transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
                 display: "inline-block",
+                // Force GPU acceleration for smoother performance
+                willChange: "transform",
               }}
               ref={(el) => {
                 if (el) {
