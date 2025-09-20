@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
+import NextImage from "next/image";
 
 // Interfaces
 export interface User {
@@ -75,7 +76,7 @@ export default function SvgViewerWithZoomPan() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const accessKey = params.accessKey as string;
-  
+
   const [svgElement, setSvgElement] = useState<SVGSVGElement | null>(null);
   const [svgContent, setSvgContent] = useState<string>("");
   const [pngDataUrl, setPngDataUrl] = useState<string>("");
@@ -86,6 +87,7 @@ export default function SvgViewerWithZoomPan() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [usePngForMobile, setUsePngForMobile] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
 
   // Transform state for pan & zoom
   const [scale, setScale] = useState(1);
@@ -106,162 +108,178 @@ export default function SvgViewerWithZoomPan() {
   // Check if device is mobile
   useEffect(() => {
     const checkIfMobile = () => {
-      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
     };
-    
+
     setIsMobile(checkIfMobile());
     setUsePngForMobile(checkIfMobile());
   }, []);
 
   // Convert SVG to PNG
-  const convertSvgToPng = useCallback(async (svgContent: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const svgBlob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(svgBlob);
-      
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Could not get canvas context'));
-          return;
-        }
-        
-        // Draw white background first
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw the SVG
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        
-        const dataUrl = canvas.toDataURL('image/png');
-        URL.revokeObjectURL(url);
-        resolve(dataUrl);
-      };
-      
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error('Failed to load SVG image'));
-      };
-      
-      img.src = url;
-    });
-  }, []);
+  const convertSvgToPng = useCallback(
+    async (svgContent: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const svgBlob = new Blob([svgContent], {
+          type: "image/svg+xml;charset=utf-8",
+        });
+        const url = URL.createObjectURL(svgBlob);
+
+        // Use window.Image instead of Image to avoid conflict with Next.js Image component
+        const img = new window.Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            URL.revokeObjectURL(url);
+            reject(new Error("Could not get canvas context"));
+            return;
+          }
+
+          // Draw white background first
+          ctx.fillStyle = "white";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Draw the SVG
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          const dataUrl = canvas.toDataURL("image/png");
+          URL.revokeObjectURL(url);
+          resolve(dataUrl);
+        };
+
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("Failed to load SVG image"));
+        };
+
+        img.src = url;
+      });
+    },
+    []
+  );
 
   // Load SVG from file
-  const loadSvg = useCallback(async (file: ViewerFile) => {
-    try {
-      let text: string;
+  const loadSvg = useCallback(
+    async (file: ViewerFile, index: number = 0) => {
+      try {
+        let text: string;
 
-      // Check if it's an uploaded file (has blob URL)
-      if (file.file.startsWith("blob:") || file.file.startsWith("data:")) {
-        // For uploaded files, fetch from blob URL
-        const res = await fetch(file.file);
-        text = await res.text();
-      } else {
-        // For backend files, use the full URL from the backend response
-        const fileUrl = file.file;
-        const res = await fetch(fileUrl);
+        // Check if it's an uploaded file (has blob URL)
+        if (file.file.startsWith("blob:") || file.file.startsWith("data:")) {
+          // For uploaded files, fetch from blob URL
+          const res = await fetch(file.file);
+          text = await res.text();
+        } else {
+          // For backend files, use the full URL from the backend response
+          const fileUrl = file.file;
+          const res = await fetch(fileUrl);
 
-        if (!res.ok) {
-          throw new Error(
-            `Failed to fetch SVG: ${res.status} ${res.statusText}`
-          );
+          if (!res.ok) {
+            throw new Error(
+              `Failed to fetch SVG: ${res.status} ${res.statusText}`
+            );
+          }
+
+          text = await res.text();
         }
 
-        text = await res.text();
-      }
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, "image/svg+xml");
+        const svg = doc.querySelector("svg");
+        if (!svg) return alert("Invalid SVG file");
 
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(text, "image/svg+xml");
-      const svg = doc.querySelector("svg");
-      if (!svg) return alert("Invalid SVG file");
+        // Store both the element and the original content
+        setSvgElement(svg.cloneNode(true) as SVGSVGElement);
+        setSvgContent(text);
+        setFileName(file.viewName || file.title);
+        setScale(1);
+        setOffset({ x: 0, y: 0 });
+        setActiveTab(index);
 
-      // Store both the element and the original content
-      setSvgElement(svg.cloneNode(true) as SVGSVGElement);
-      setSvgContent(text);
-      setFileName(file.viewName || file.title);
-      setScale(1);
-      setOffset({ x: 0, y: 0 });
-      
-      // Convert to PNG for mobile devices
-      if (isMobile) {
-        setIsConverting(true);
-        try {
-          const pngUrl = await convertSvgToPng(text);
-          setPngDataUrl(pngUrl);
-        } catch (err) {
-          console.error("Failed to convert SVG to PNG:", err);
-        } finally {
-          setIsConverting(false);
+        // Convert to PNG for mobile devices
+        if (isMobile) {
+          setIsConverting(true);
+          try {
+            const pngUrl = await convertSvgToPng(text);
+            setPngDataUrl(pngUrl);
+          } catch (err) {
+            console.error("Failed to convert SVG to PNG:", err);
+          } finally {
+            setIsConverting(false);
+          }
         }
+      } catch (err) {
+        console.error("Failed to load SVG:", err);
+        alert("Failed to load SVG: " + (err as Error).message);
       }
-    } catch (err) {
-      console.error("Failed to load SVG:", err);
-      alert("Failed to load SVG: " + (err as Error).message);
-    }
-  }, [isMobile, convertSvgToPng]);
+    },
+    [isMobile, convertSvgToPng]
+  );
 
   // Fetch drawings from backend using access key
-  const fetchDrawings = useCallback(async (key: string) => {
-    if (!key.trim()) return;
+  const fetchDrawings = useCallback(
+    async (key: string) => {
+      if (!key.trim()) return;
 
-    setIsLoading(true);
-    try {
-      const response = await fetch(
-        `https://api.modelflick.com/api/viewer/public/svg-files/${key}/`
-      );
+      setIsLoading(true);
+      try {
+        const response = await fetch(
+          `https://api.modelflick.com/api/viewer/public/svg-files/${key}/`
+        );
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data: BackendResponse = await response.json();
+
+        // Convert backend response to ViewerFile format
+        const drawings: ViewerFile[] = data.svg_files.map((svgFile) => ({
+          id: svgFile.id.toString(),
+          userId: svgFile.user.toString(),
+          organisationId: svgFile.organisation.toString(),
+          projectId: svgFile.project.toString(),
+          viewName: svgFile.view_name,
+          viewDate: svgFile.view_date,
+          file: svgFile.file,
+          file_url: svgFile.file_url,
+          title: svgFile.view_name,
+          description: svgFile.description,
+          tags: svgFile.tag_names.length > 0 ? svgFile.tag_names : svgFile.tags,
+          createdAt: svgFile.created_at,
+        }));
+
+        setUnlockedDrawings(drawings);
+
+        if (drawings.length > 0) {
+          // Automatically load the first drawing
+          loadSvg(drawings[0], 0);
+        } else {
+          alert("No drawings found for this access key");
+        }
+      } catch (err) {
+        console.error("Failed to fetch drawings:", err);
+        alert("Invalid access key or failed to fetch drawings");
+      } finally {
+        setIsLoading(false);
       }
-
-      const data: BackendResponse = await response.json();
-
-      // Convert backend response to ViewerFile format
-      const drawings: ViewerFile[] = data.svg_files.map((svgFile) => ({
-        id: svgFile.id.toString(),
-        userId: svgFile.user.toString(),
-        organisationId: svgFile.organisation.toString(),
-        projectId: svgFile.project.toString(),
-        viewName: svgFile.view_name,
-        viewDate: svgFile.view_date,
-        file: svgFile.file,
-        file_url: svgFile.file_url,
-        title: svgFile.view_name,
-        description: svgFile.description,
-        tags: svgFile.tag_names.length > 0 ? svgFile.tag_names : svgFile.tags,
-        createdAt: svgFile.created_at,
-      }));
-
-      setUnlockedDrawings(drawings);
-
-      if (drawings.length > 0) {
-        // Automatically load the first drawing
-        loadSvg(drawings[0]);
-      } else {
-        alert("No drawings found for this access key");
-      }
-    } catch (err) {
-      console.error("Failed to fetch drawings:", err);
-      alert("Invalid access key or failed to fetch drawings");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [loadSvg]);
+    },
+    [loadSvg]
+  );
 
   // Load uploaded file
   const loadUploadedFile = useCallback(async () => {
     if (!fileUrl || !fileNameParam) return;
-    
+
     try {
       const res = await fetch(fileUrl);
       const text = await res.text();
-      
+
       const parser = new DOMParser();
       const doc = parser.parseFromString(text, "image/svg+xml");
       const svg = doc.querySelector("svg");
@@ -272,7 +290,7 @@ export default function SvgViewerWithZoomPan() {
       setFileName(fileNameParam);
       setScale(1);
       setOffset({ x: 0, y: 0 });
-      
+
       // Convert to PNG for mobile devices
       if (isMobile) {
         setIsConverting(true);
@@ -309,18 +327,36 @@ export default function SvgViewerWithZoomPan() {
     };
   }, []);
 
-  // Zoom handlers
+  // Zoom handlers - fixed to zoom from cursor position
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+
+    if (!containerRef.current) return;
+
     const zoomFactor = 1.1;
     const delta = e.deltaY < 0 ? zoomFactor : 1 / zoomFactor;
-    
+    const newScale = Math.min(Math.max(scale * delta, 0.1), 10);
+
+    // Get mouse position relative to the container
+    const rect = containerRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Calculate the mouse position in the SVG coordinate system
+    const mouseXInSvg = (mouseX - offset.x) / scale;
+    const mouseYInSvg = (mouseY - offset.y) / scale;
+
+    // Calculate new offset to keep the mouse position fixed
+    const newOffsetX = mouseX - mouseXInSvg * newScale;
+    const newOffsetY = mouseY - mouseYInSvg * newScale;
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-    
+
     animationFrameRef.current = requestAnimationFrame(() => {
-      setScale((prev) => Math.min(Math.max(prev * delta, 0.1), 10));
+      setScale(newScale);
+      setOffset({ x: newOffsetX, y: newOffsetY });
     });
   };
 
@@ -329,14 +365,14 @@ export default function SvgViewerWithZoomPan() {
     dragging.current = true;
     lastPos.current = { x: e.clientX, y: e.clientY };
   };
-  
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!dragging.current) return;
-    
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-    
+
     animationFrameRef.current = requestAnimationFrame(() => {
       const dx = e.clientX - lastPos.current.x;
       const dy = e.clientY - lastPos.current.y;
@@ -344,12 +380,12 @@ export default function SvgViewerWithZoomPan() {
       setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
     });
   };
-  
+
   const handleMouseUp = () => {
     dragging.current = false;
   };
 
-  // Touch pan handlers - optimized for mobile
+  // Touch pan handlers - optimized for mobile with proper zoom origin
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       dragging.current = true;
@@ -359,6 +395,11 @@ export default function SvgViewerWithZoomPan() {
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       initialDistance.current = Math.sqrt(dx * dx + dy * dy);
       initialScale.current = scale;
+
+      // Store the midpoint for zoom origin
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      lastPos.current = { x: midX, y: midY };
     }
     e.preventDefault();
   };
@@ -367,25 +408,48 @@ export default function SvgViewerWithZoomPan() {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-    
+
     animationFrameRef.current = requestAnimationFrame(() => {
       if (e.touches.length === 1 && dragging.current) {
         const dx = e.touches[0].clientX - lastPos.current.x;
         const dy = e.touches[0].clientY - lastPos.current.y;
         lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-      } else if (e.touches.length === 2) {
+      } else if (e.touches.length === 2 && containerRef.current) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
-        
+
         if (initialDistance.current) {
           const zoomFactor = currentDistance / initialDistance.current;
-          setScale(initialScale.current * zoomFactor);
+          const newScale = Math.min(
+            Math.max(initialScale.current * zoomFactor, 0.1),
+            10
+          );
+
+          // Calculate midpoint for zoom origin
+          const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+          // Get container position
+          const rect = containerRef.current.getBoundingClientRect();
+          const containerX = midX - rect.left;
+          const containerY = midY - rect.top;
+
+          // Calculate the touch position in the SVG coordinate system
+          const touchXInSvg = (containerX - offset.x) / scale;
+          const touchYInSvg = (containerY - offset.y) / scale;
+
+          // Calculate new offset to keep the touch position fixed
+          const newOffsetX = containerX - touchXInSvg * newScale;
+          const newOffsetY = containerY - touchYInSvg * newScale;
+
+          setScale(newScale);
+          setOffset({ x: newOffsetX, y: newOffsetY });
         }
       }
     });
-    
+
     e.preventDefault();
   };
 
@@ -403,9 +467,9 @@ export default function SvgViewerWithZoomPan() {
   // Toggle fullscreen
   const toggleFullscreen = () => {
     if (!viewerRef.current) return;
-    
+
     if (!document.fullscreenElement) {
-      viewerRef.current.requestFullscreen().catch(err => {
+      viewerRef.current.requestFullscreen().catch((err) => {
         console.error(`Error attempting to enable fullscreen: ${err.message}`);
       });
       setIsFullscreen(true);
@@ -421,9 +485,9 @@ export default function SvgViewerWithZoomPan() {
       setIsFullscreen(!!document.fullscreenElement);
     };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
 
@@ -506,11 +570,11 @@ export default function SvgViewerWithZoomPan() {
       if (!pngDataUrl && svgContent) {
         setIsConverting(true);
         convertSvgToPng(svgContent)
-          .then(url => {
+          .then((url) => {
             setPngDataUrl(url);
             setUsePngForMobile(true);
           })
-          .catch(err => {
+          .catch((err) => {
             console.error("Failed to convert SVG to PNG:", err);
           })
           .finally(() => {
@@ -523,170 +587,358 @@ export default function SvgViewerWithZoomPan() {
   };
 
   return (
-    <div style={{ padding: 20, textAlign: "center" }}>
-      {/* Back button to return to main page */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <button 
-          onClick={() => router.push('/tools/drawing')}
-          style={{ padding: "8px 16px", cursor: "pointer" }}
+    <div className="min-h-screen bg-gray-50 text-gray-800">
+      {/* Header */}
+      <header className="bg-white shadow-sm py-4 px-6 flex items-center justify-between">
+        <button
+          onClick={() => router.push("/tools/drawing")}
+          className="flex items-center text-blue-600 hover:text-blue-800 transition-colors"
         >
-          ← Back to Main
+          <svg
+            className="w-5 h-5 mr-2"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 19l-7-7m0 0l7-7m-7 7h18"
+            />
+          </svg>
+          Back to Main
         </button>
-        <h2 style={{ margin: 0 }}>SVG Viewer - {fileName}</h2>
-        <div style={{ width: "100px" }}></div>
-      </div>
 
-      {/* Available drawings list (only for access key routes) */}
-      {!isUploadedFile && unlockedDrawings.length > 0 && (
-        <div style={{ marginBottom: 10 }}>
-          <h3>Available Drawings</h3>
-          {unlockedDrawings.map((f) => (
-            <div key={f.id}>
+        <h1 className="text-xl font-semibold text-gray-800 truncate max-w-md mx-4">
+          {fileName}
+        </h1>
+
+        <div className="w-24"></div>
+      </header>
+
+      <main className="p-4 max-w-7xl mx-auto">
+        {/* Available drawings list (only for access key routes) */}
+        {!isUploadedFile && unlockedDrawings.length > 0 && (
+          <div className="mb-6 bg-white rounded-lg shadow-sm p-4">
+            <h3 className="text-lg font-medium mb-3 text-gray-700">
+              Available Drawings
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {unlockedDrawings.map((f, index) => (
+                <button
+                  key={f.id}
+                  onClick={() => loadSvg(f, index)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    activeTab === index
+                      ? "bg-blue-600 text-white shadow-md"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  {f.viewName || f.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Controls */}
+        {svgContent && (
+          <div className="mb-4 bg-white rounded-lg shadow-sm p-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => loadSvg(f)}
-                style={{ 
-                  margin: "2px", 
-                  cursor: "pointer",
-                  backgroundColor: fileName === (f.viewName || f.title) ? "#ddd" : "transparent"
+                onClick={() => {
+                  if (!containerRef.current) return;
+                  const rect = containerRef.current.getBoundingClientRect();
+                  const centerX = rect.width / 2;
+                  const centerY = rect.height / 2;
+
+                  const newScale = Math.min(scale + 0.1, 10);
+                  const centerXInSvg = (centerX - offset.x) / scale;
+                  const centerYInSvg = (centerY - offset.y) / scale;
+
+                  const newOffsetX = centerX - centerXInSvg * newScale;
+                  const newOffsetY = centerY - centerYInSvg * newScale;
+
+                  setScale(newScale);
+                  setOffset({ x: newOffsetX, y: newOffsetY });
                 }}
+                className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+                aria-label="Zoom in"
               >
-                {f.viewName || f.title}
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                  />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (!containerRef.current) return;
+                  const rect = containerRef.current.getBoundingClientRect();
+                  const centerX = rect.width / 2;
+                  const centerY = rect.height / 2;
+
+                  const newScale = Math.max(scale - 0.1, 0.1);
+                  const centerXInSvg = (centerX - offset.x) / scale;
+                  const centerYInSvg = (centerY - offset.y) / scale;
+
+                  const newOffsetX = centerX - centerXInSvg * newScale;
+                  const newOffsetY = centerY - centerYInSvg * newScale;
+
+                  setScale(newScale);
+                  setOffset({ x: newOffsetX, y: newOffsetY });
+                }}
+                className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+                aria-label="Zoom out"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M18 12H6"
+                  />
+                </svg>
+              </button>
+
+              <span className="text-sm font-medium text-gray-600 min-w-[60px] text-center">
+                {Math.round(scale * 100)}%
+              </span>
+            </div>
+
+            <button
+              onClick={resetView}
+              className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-sm font-medium"
+            >
+              Reset View
+            </button>
+
+            <button
+              onClick={toggleFullscreen}
+              className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-sm font-medium flex items-center gap-1"
+            >
+              {isFullscreen ? (
+                <>
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25"
+                    />
+                  </svg>
+                  Exit Fullscreen
+                </>
+              ) : (
+                <>
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 8V4m0 0h4M3 4l4 4m8 0V4m0 0h-4m4 0l-4 4m-8 8v4m0 0h4m-4 0l4-4m8 4l-4-4m4 4v-4m0 4h-4"
+                    />
+                  </svg>
+                  Fullscreen
+                </>
+              )}
+            </button>
+
+            {isMobile && (
+              <button
+                onClick={toggleViewMode}
+                disabled={isConverting}
+                className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-sm font-medium disabled:opacity-50"
+              >
+                {usePngForMobile ? "View as SVG" : "View as PNG (Faster)"}
+              </button>
+            )}
+
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={downloadPdf}
+                disabled={isConverting}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                PDF
+              </button>
+
+              <button
+                onClick={downloadPng}
+                disabled={isConverting}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                {isConverting ? "Converting..." : "PNG"}
               </button>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Controls */}
-      {svgContent && (
-        <div style={{ marginBottom: 10 }}>
-          <button onClick={() => setScale((s) => Math.min(s + 0.1, 10))}>
-            Zoom In
-          </button>
-          <button onClick={() => setScale((s) => Math.max(s - 0.1, 0.1))}>
-            Zoom Out
-          </button>
-          <button onClick={resetView}>Reset View</button>
-          <button onClick={toggleFullscreen}>
-            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          </button>
-          {isMobile && (
-            <button onClick={toggleViewMode} disabled={isConverting}>
-              {usePngForMobile ? "View as SVG" : "View as PNG (Faster)"}
-            </button>
-          )}
-        </div>
-      )}
+        {/* Loading indicators */}
+        {isLoading && (
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+          </div>
+        )}
 
-      {/* Loading indicator */}
-      {isLoading && <p>Loading drawings...</p>}
-      {isConverting && <p>Converting image for better performance...</p>}
+        {isConverting && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500"></div>
+            <span className="text-blue-700">
+              Converting image for better performance...
+            </span>
+          </div>
+        )}
 
-      {/* Viewer */}
-      <div
-        ref={viewerRef}
-        style={{
-          position: isFullscreen ? "fixed" : "relative",
-          top: isFullscreen ? 0 : "auto",
-          left: isFullscreen ? 0 : "auto",
-          width: isFullscreen ? "100vw" : "auto",
-          height: isFullscreen ? "100vh" : "auto",
-          zIndex: isFullscreen ? 9999 : "auto",
-          backgroundColor: isFullscreen ? "white" : "transparent",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
+        {/* Viewer */}
         <div
-          ref={containerRef}
-          onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchEnd}
-          style={{
-            border: "1px solid #ccc",
-            margin: "auto",
-            maxWidth: isFullscreen ? "100%" : "80vw",
-            maxHeight: isFullscreen ? "100%" : "60vh",
-            overflow: "hidden",
-            cursor: dragging.current ? "grabbing" : "grab",
-            userSelect: "none",
-            touchAction: "none",
-            backgroundColor: "#f9f9f9",
-            transform: "translateZ(0)",
-            willChange: "transform",
-          }}
+          ref={viewerRef}
+          className={`relative bg-white rounded-lg shadow-sm overflow-hidden ${
+            isFullscreen
+              ? "fixed inset-0 z-50 bg-white"
+              : "border border-gray-200 h-[70vh] min-h-[400px]"
+          }`}
         >
-          {usePngForMobile && pngDataUrl ? (
-            <img
-              src={pngDataUrl}
-              alt={fileName}
-              style={{
-                transformOrigin: "0 0",
-                transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                display: "block",
-                willChange: "transform",
-                maxWidth: "100%",
-                height: "auto",
-              }}
-            />
-          ) : svgElement && (
-            <div
-              style={{
-                transformOrigin: "0 0",
-                transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                display: "inline-block",
-                willChange: "transform",
-              }}
-              ref={(el) => {
-                if (el) {
-                  while (el.firstChild) el.removeChild(el.firstChild);
-                  el.appendChild(svgElement.cloneNode(true));
-                }
-              }}
-            />
+          <div
+            ref={containerRef}
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+            className={`w-full h-full flex items-center justify-center overflow-hidden ${
+              dragging.current ? "cursor-grabbing" : "cursor-grab"
+            }`}
+            style={{ transformOrigin: "0 0" }}
+          >
+            {usePngForMobile && pngDataUrl ? (
+              <NextImage
+                src={pngDataUrl}
+                alt={fileName}
+                className="max-w-full max-h-full"
+                style={{
+                  transformOrigin: "0 0",
+                  transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+                }}
+                width={800}
+                height={600}
+                unoptimized={true}
+              />
+            ) : (
+              svgElement && (
+                <div
+                  style={{
+                    transformOrigin: "0 0",
+                    transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+                  }}
+                  ref={(el) => {
+                    if (el) {
+                      while (el.firstChild) el.removeChild(el.firstChild);
+                      el.appendChild(svgElement.cloneNode(true));
+                    }
+                  }}
+                />
+              )
+            )}
+          </div>
+
+          {/* Zoom level indicator */}
+          {svgContent && !isFullscreen && (
+            <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm font-medium">
+              {Math.round(scale * 100)}%
+            </div>
           )}
         </div>
-      </div>
 
-      {svgContent && (
-        <div style={{ marginTop: 20 }}>
-          <button
-            onClick={downloadPdf}
-            style={{
-              marginRight: 10,
-              padding: "0.5rem 1rem",
-              cursor: "pointer",
-            }}
-            disabled={isConverting}
-          >
-            Download as Vector PDF
-          </button>
-          <button
-            onClick={downloadPng}
-            style={{
-              marginRight: 10,
-              padding: "0.5rem 1rem",
-              cursor: "pointer",
-            }}
-            disabled={isConverting}
-          >
-            {isConverting ? "Converting..." : "Download as PNG"}
-          </button>
-        </div>
-      )}
+        {isMobile && (
+          <div className="mt-4 text-sm text-gray-500 text-center">
+            Using {usePngForMobile ? "PNG" : "SVG"} view - PNG provides better
+            performance on mobile devices
+          </div>
+        )}
+      </main>
 
-      {isMobile && (
-        <div style={{ marginTop: 10, fontSize: "0.9rem", color: "#666" }}>
-          <p>Using {usePngForMobile ? "PNG" : "SVG"} view - PNG provides better performance on mobile devices</p>
-        </div>
-      )}
+      <style jsx global>{`
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+          background: #c1c1c1;
+          border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+          background: #a8a8a8;
+        }
+      `}</style>
     </div>
   );
 }
