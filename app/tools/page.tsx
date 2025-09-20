@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { FaCalculator, FaRulerCombined, FaArrowRight, FaQuestionCircle, FaEye } from "react-icons/fa";
+import {
+  FaCalculator,
+  FaRulerCombined,
+  FaArrowRight,
+  FaQuestionCircle,
+  FaEye,
+  FaDraftingCompass, // Added for Drawings tool
+} from "react-icons/fa";
 
 export default function ToolsPage() {
   return (
@@ -8,7 +15,7 @@ export default function ToolsPage() {
         <h1 className="text-3xl font-bold text-center mb-8 text-gray-800">
           Tools
         </h1>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Fee Calculator Card */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
@@ -98,6 +105,29 @@ export default function ToolsPage() {
                 className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors"
               >
                 Open Viewer <FaArrowRight className="ml-2" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Drawings Tool Card */}
+          <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="p-3 rounded-full bg-red-100 text-red-600 mr-4">
+                  <FaDraftingCompass size={24} />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-800">
+                  Drawings
+                </h2>
+              </div>
+              <p className="text-gray-600 mb-6">
+                Access detailed architectural drawings with layering options and export capabilities for clients.
+              </p>
+              <Link
+                href="/tools/drawing"
+                className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+              >
+                View Drawings <FaArrowRight className="ml-2" />
               </Link>
             </div>
           </div>

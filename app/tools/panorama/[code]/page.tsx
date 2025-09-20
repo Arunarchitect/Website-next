@@ -73,7 +73,7 @@ export default function PanoramaViewerWithCode() {
     setError('');
     
     try {
-      const response = await fetch(`https://api.modelflick.com/api/viewer/public/${key}/`);
+      const response = await fetch(`https://api.modelflick.com/api/viewer/public/360-images/${key}/`);
       
       if (!response.ok) {
         if (response.status === 401) {
