@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "module": "CommonJS",
+    "esModuleInterop": true,
+    "strict": true,
+    "outDir": "./dist",
+    "skipLibCheck": true,
+    "noEmit": false
+  },
+  "include": ["next.config.ts"]
+}
