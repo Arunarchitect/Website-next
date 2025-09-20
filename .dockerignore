@@ -1,4 +1,33 @@
+# Original
 node_modules
 .next
 .git
-.env
+.env.local
+
+# Add these for better performance
+Dockerfile
+Dockerfile.dev
+.dockerignore
+README.md
+*.log
+*.md
+.dist
+.nyc_output
+coverage
+.elasticbeanstalk
+.idea
+.vscode
+.npm
+.eslintcache
+.yarn-integrity
+docker-compose.yml
+docker-compose.dev.yml
+
+# Exclude development and test files
+*.tsbuildinfo
+*.test.*
+*.spec.*
+__tests__
+__mocks__
+coverage/
+jest.config.*
