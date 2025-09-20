@@ -3,7 +3,71 @@
 import { useState, useRef, ChangeEvent } from "react";
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
-import { svgFiles, accessKeys, ViewerFile, ProjectAccessKey } from "./data"; // adjust path if needed
+
+// Interfaces
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface Organisation {
+  id: string;
+  name: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  organisationId: string;
+}
+
+export interface ViewerFile {
+  id: string;
+  userId: string;
+  organisationId: string;
+  projectId: string;
+  viewName: string;
+  viewDate: string;
+  file: string;
+  file_url?: string;
+  title: string;
+  description?: string;
+  tags?: string[];
+  createdAt: string;
+}
+
+export interface ProjectAccessKey {
+  id: string;
+  organisationId: string;
+  projectId: string;
+  accessKey: string;
+}
+
+interface BackendResponse {
+  project: {
+    id: number;
+    name: string;
+  };
+  organisation: {
+    id: number;
+    name: string;
+  };
+  svg_files: Array<{
+    id: number;
+    user: number;
+    organisation: number;
+    project: number;
+    view_name: string;
+    view_date: string;
+    file: string;
+    file_url: string;
+    description: string;
+    tags: string[];
+    tag_names: string[];
+    created_at: string;
+  }>;
+}
 
 export default function SvgViewerWithZoomPan() {
   const [svgElement, setSvgElement] = useState<SVGSVGElement | null>(null);
@@ -13,6 +77,7 @@ export default function SvgViewerWithZoomPan() {
   const [unlockedDrawings, setUnlockedDrawings] = useState<ViewerFile[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<ViewerFile[]>([]);
   const [isConverting, setIsConverting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Transform state for pan & zoom
   const [scale, setScale] = useState(1);
@@ -25,48 +90,89 @@ export default function SvgViewerWithZoomPan() {
   const loadSvg = async (file: ViewerFile) => {
     try {
       let text: string;
-      
+
       // Check if it's an uploaded file (has blob URL)
-      if (file.file.startsWith('blob:') || file.file.startsWith('data:')) {
+      if (file.file.startsWith("blob:") || file.file.startsWith("data:")) {
         // For uploaded files, fetch from blob URL
         const res = await fetch(file.file);
         text = await res.text();
       } else {
-        // For pre-defined files, fetch from server path
-        const res = await fetch(`/${file.file}`);
+        // For backend files, use the full URL from the backend response
+        const fileUrl = file.file; // This should be the full URL like "http://localhost:8000/media/..."
+        const res = await fetch(fileUrl);
+
+        if (!res.ok) {
+          throw new Error(
+            `Failed to fetch SVG: ${res.status} ${res.statusText}`
+          );
+        }
+
         text = await res.text();
       }
-      
+
       const parser = new DOMParser();
       const doc = parser.parseFromString(text, "image/svg+xml");
       const svg = doc.querySelector("svg");
       if (!svg) return alert("Invalid SVG file");
-      
+
       // Store both the element and the original content
       setSvgElement(svg.cloneNode(true) as SVGSVGElement);
       setSvgContent(text);
-      setFileName(file.title);
+      setFileName(file.viewName || file.title);
       setScale(1);
       setOffset({ x: 0, y: 0 });
     } catch (err) {
-      alert("Failed to load SVG: " + err);
+      console.error("Failed to load SVG:", err);
+      alert("Failed to load SVG: " + (err as Error).message);
     }
   };
 
-  // Unlock drawings using access key
-  const handleUnlock = () => {
-    const key: ProjectAccessKey | undefined = accessKeys.find(
-      (k) => k.accessKey === accessKey
-    );
-    if (!key) return alert("Invalid access key");
+  // Fetch drawings from backend using access key
+  const handleUnlock = async () => {
+    if (!accessKey.trim()) return alert("Please enter an access key");
 
-    const drawings = svgFiles.filter(
-      (f) => f.projectId === key.projectId && f.organisationId === key.organisationId
-    );
-    setUnlockedDrawings(drawings);
+    setIsLoading(true);
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/viewer/public/svg-files/${accessKey}/`
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data: BackendResponse = await response.json();
+
+      // Convert backend response to ViewerFile format
+      const drawings: ViewerFile[] = data.svg_files.map((svgFile) => ({
+        id: svgFile.id.toString(),
+        userId: svgFile.user.toString(),
+        organisationId: svgFile.organisation.toString(),
+        projectId: svgFile.project.toString(),
+        viewName: svgFile.view_name,
+        viewDate: svgFile.view_date,
+        file: svgFile.file,
+        file_url: svgFile.file_url,
+        title: svgFile.view_name,
+        description: svgFile.description,
+        tags: svgFile.tag_names.length > 0 ? svgFile.tag_names : svgFile.tags,
+        createdAt: svgFile.created_at,
+      }));
+
+      setUnlockedDrawings(drawings);
+
+      if (drawings.length === 0) {
+        alert("No drawings found for this access key");
+      }
+    } catch (err) {
+      console.error("Failed to fetch drawings:", err);
+      alert("Invalid access key or failed to fetch drawings");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  // Handle file upload - FIXED VERSION
+  // Handle file upload
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -74,7 +180,7 @@ export default function SvgViewerWithZoomPan() {
       alert("Please upload a valid SVG file");
       return;
     }
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result;
@@ -98,7 +204,7 @@ export default function SvgViewerWithZoomPan() {
 
         setUploadedFiles((prev) => [uploadedFile, ...prev]);
         setSvgContent(text);
-        
+
         // Create a clone of the SVG element for display
         setSvgElement(svg.cloneNode(true) as SVGSVGElement);
         setFileName(file.name.replace(/\.svg$/i, ""));
@@ -142,38 +248,38 @@ export default function SvgViewerWithZoomPan() {
   // Download PDF (fixed text distortion)
   const downloadPdf = async () => {
     if (!svgElement || !svgContent) return alert("No SVG loaded");
-    
+
     try {
       // Create a new SVG element from the original content
       const parser = new DOMParser();
       const doc = parser.parseFromString(svgContent, "image/svg+xml");
       const originalSvg = doc.querySelector("svg");
       if (!originalSvg) return;
-      
+
       // Get dimensions
       let width = parseFloat(originalSvg.getAttribute("width") || "210");
       let height = parseFloat(originalSvg.getAttribute("height") || "297");
-      
+
       if ((!width || !height) && originalSvg.viewBox.baseVal) {
         width = originalSvg.viewBox.baseVal.width || width;
         height = originalSvg.viewBox.baseVal.height || height;
       }
-      
+
       // Create PDF
       const pdf = new jsPDF({
         unit: "pt",
         format: [width, height],
         orientation: width > height ? "landscape" : "portrait",
       });
-      
+
       // Add SVG to PDF (using original, untransformed SVG)
-      await pdf.svg(originalSvg, { 
-        x: 0, 
-        y: 0, 
-        width, 
-        height 
+      await pdf.svg(originalSvg, {
+        x: 0,
+        y: 0,
+        width,
+        height,
       });
-      
+
       pdf.save(`${fileName}.pdf`);
     } catch (e) {
       alert("Error exporting PDF: " + (e as Error).message);
@@ -183,14 +289,16 @@ export default function SvgViewerWithZoomPan() {
   // Download PNG directly
   const downloadPng = async () => {
     if (!svgElement || !svgContent) return alert("No SVG loaded");
-    
+
     setIsConverting(true);
-    
+
     try {
       // Create an image from the SVG data
-      const svgBlob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+      const svgBlob = new Blob([svgContent], {
+        type: "image/svg+xml;charset=utf-8",
+      });
       const url = URL.createObjectURL(svgBlob);
-      
+
       // Wait for image to load
       const img = new Image();
       await new Promise((resolve, reject) => {
@@ -198,25 +306,25 @@ export default function SvgViewerWithZoomPan() {
         img.onerror = reject;
         img.src = url;
       });
-      
+
       URL.revokeObjectURL(url);
-      
+
       // Create a canvas with the correct dimensions
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Could not get canvas context");
-      
+
       // Set canvas dimensions to match the image
       canvas.width = img.width;
       canvas.height = img.height;
-      
+
       // Draw the image on canvas
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      
+
       // Create download link
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.download = `${fileName}.png`;
-      link.href = canvas.toDataURL('image/png');
+      link.href = canvas.toDataURL("image/png");
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -239,8 +347,11 @@ export default function SvgViewerWithZoomPan() {
           placeholder="Enter access key"
           value={accessKey}
           onChange={(e) => setAccessKey(e.target.value)}
+          style={{ marginRight: 8, padding: 4 }}
         />
-        <button onClick={handleUnlock}>Unlock</button>
+        <button onClick={handleUnlock} disabled={isLoading}>
+          {isLoading ? "Loading..." : "Unlock"}
+        </button>
       </div>
 
       {/* Upload */}
@@ -265,7 +376,7 @@ export default function SvgViewerWithZoomPan() {
               onClick={() => loadSvg(f)}
               style={{ margin: "2px", cursor: "pointer" }}
             >
-              {f.title}
+              {f.viewName || f.title}
             </button>
           </div>
         ))}
@@ -274,8 +385,12 @@ export default function SvgViewerWithZoomPan() {
       {/* Controls */}
       {svgElement && (
         <div style={{ marginBottom: 10 }}>
-          <button onClick={() => setScale(s => Math.min(s + 0.1, 10))}>Zoom In</button>
-          <button onClick={() => setScale(s => Math.max(s - 0.1, 0.1))}>Zoom Out</button>
+          <button onClick={() => setScale((s) => Math.min(s + 0.1, 10))}>
+            Zoom In
+          </button>
+          <button onClick={() => setScale((s) => Math.max(s - 0.1, 0.1))}>
+            Zoom Out
+          </button>
           <button onClick={resetView}>Reset View</button>
         </div>
       )}
@@ -321,14 +436,22 @@ export default function SvgViewerWithZoomPan() {
         <div style={{ marginTop: 20 }}>
           <button
             onClick={downloadPdf}
-            style={{ marginRight: 10, padding: "0.5rem 1rem", cursor: "pointer" }}
+            style={{
+              marginRight: 10,
+              padding: "0.5rem 1rem",
+              cursor: "pointer",
+            }}
             disabled={isConverting}
           >
             Download as Vector PDF
           </button>
           <button
             onClick={downloadPng}
-            style={{ marginRight: 10, padding: "0.5rem 1rem", cursor: "pointer" }}
+            style={{
+              marginRight: 10,
+              padding: "0.5rem 1rem",
+              cursor: "pointer",
+            }}
             disabled={isConverting}
           >
             {isConverting ? "Converting..." : "Download as PNG"}
