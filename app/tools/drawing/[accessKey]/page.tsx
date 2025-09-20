@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import "svg2pdf.js";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 
-// Interfaces (same as before)
+// Interfaces
 export interface User {
   id: string;
   name: string;
@@ -82,13 +82,17 @@ export default function SvgViewerWithZoomPan() {
   const [unlockedDrawings, setUnlockedDrawings] = useState<ViewerFile[]>([]);
   const [isConverting, setIsConverting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Transform state for pan & zoom
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
+  const initialDistance = useRef(0);
+  const initialScale = useRef(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
 
   // Check if this is an uploaded file (ID starts with "uploaded-")
   const isUploadedFile = accessKey.startsWith("uploaded-");
@@ -225,11 +229,12 @@ export default function SvgViewerWithZoomPan() {
     setScale((prev) => Math.min(Math.max(prev * delta, 0.1), 10));
   };
 
-  // Drag pan
+  // Mouse pan handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     dragging.current = true;
     lastPos.current = { x: e.clientX, y: e.clientY };
   };
+  
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!dragging.current) return;
     const dx = e.clientX - lastPos.current.x;
@@ -237,8 +242,51 @@ export default function SvgViewerWithZoomPan() {
     lastPos.current = { x: e.clientX, y: e.clientY };
     setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
   };
+  
   const handleMouseUp = () => {
     dragging.current = false;
+  };
+
+  // Touch pan handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      // Single finger touch for panning
+      dragging.current = true;
+      lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    } else if (e.touches.length === 2) {
+      // Two finger touch for pinch-to-zoom
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      initialDistance.current = Math.sqrt(dx * dx + dy * dy);
+      initialScale.current = scale;
+    }
+    e.preventDefault();
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 1 && dragging.current) {
+      // Single finger panning
+      const dx = e.touches[0].clientX - lastPos.current.x;
+      const dy = e.touches[0].clientY - lastPos.current.y;
+      lastPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+    } else if (e.touches.length === 2) {
+      // Two finger pinch-to-zoom
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const currentDistance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (initialDistance.current) {
+        const zoomFactor = currentDistance / initialDistance.current;
+        setScale(initialScale.current * zoomFactor);
+      }
+    }
+    e.preventDefault();
+  };
+
+  const handleTouchEnd = () => {
+    dragging.current = false;
+    initialDistance.current = 0;
   };
 
   // Reset view
@@ -246,6 +294,33 @@ export default function SvgViewerWithZoomPan() {
     setScale(1);
     setOffset({ x: 0, y: 0 });
   };
+
+  // Toggle fullscreen
+  const toggleFullscreen = () => {
+    if (!viewerRef.current) return;
+    
+    if (!document.fullscreenElement) {
+      viewerRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  // Handle fullscreen change
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   // Download PDF (fixed text distortion)
   const downloadPdf = async () => {
@@ -383,6 +458,9 @@ export default function SvgViewerWithZoomPan() {
             Zoom Out
           </button>
           <button onClick={resetView}>Reset View</button>
+          <button onClick={toggleFullscreen}>
+            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          </button>
         </div>
       )}
 
@@ -391,39 +469,59 @@ export default function SvgViewerWithZoomPan() {
 
       {/* Viewer */}
       <div
-        ref={containerRef}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        ref={viewerRef}
         style={{
-          border: "1px solid #ccc",
-          margin: "auto",
-          maxWidth: "80vw",
-          maxHeight: "60vh",
-          overflow: "hidden",
-          cursor: dragging.current ? "grabbing" : "grab",
-          userSelect: "none",
-          touchAction: "none",
-          backgroundColor: "#f9f9f9",
+          position: isFullscreen ? "fixed" : "relative",
+          top: isFullscreen ? 0 : "auto",
+          left: isFullscreen ? 0 : "auto",
+          width: isFullscreen ? "100vw" : "auto",
+          height: isFullscreen ? "100vh" : "auto",
+          zIndex: isFullscreen ? 9999 : "auto",
+          backgroundColor: isFullscreen ? "white" : "transparent",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
         }}
       >
-        {svgElement && (
-          <div
-            style={{
-              transformOrigin: "0 0",
-              transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-              display: "inline-block",
-            }}
-            ref={(el) => {
-              if (el) {
-                while (el.firstChild) el.removeChild(el.firstChild);
-                el.appendChild(svgElement.cloneNode(true));
-              }
-            }}
-          />
-        )}
+        <div
+          ref={containerRef}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
+          style={{
+            border: "1px solid #ccc",
+            margin: "auto",
+            maxWidth: isFullscreen ? "100%" : "80vw",
+            maxHeight: isFullscreen ? "100%" : "60vh",
+            overflow: "hidden",
+            cursor: dragging.current ? "grabbing" : "grab",
+            userSelect: "none",
+            touchAction: "none",
+            backgroundColor: "#f9f9f9",
+          }}
+        >
+          {svgElement && (
+            <div
+              style={{
+                transformOrigin: "0 0",
+                transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+                display: "inline-block",
+              }}
+              ref={(el) => {
+                if (el) {
+                  while (el.firstChild) el.removeChild(el.firstChild);
+                  el.appendChild(svgElement.cloneNode(true));
+                }
+              }}
+            />
+          )}
+        </div>
       </div>
 
       {svgElement && (
