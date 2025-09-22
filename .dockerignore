@@ -2,7 +2,7 @@
 node_modules
 .next
 .git
-.env.local
+
 
 # Add these for better performance
 Dockerfile
