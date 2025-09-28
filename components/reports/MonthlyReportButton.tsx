@@ -96,7 +96,6 @@ export function MonthlyReportButton({
     { skip: !userId }
   );
 
-
   // With this:
   const allExpenses: Expense[] = useMemo(
     () => expensesQuery.data || [],
@@ -316,14 +315,18 @@ export function MonthlyReportButton({
     let halfDaysCount = 0;
     let lessTimeHours = 0;
     let overtimeHours = 0;
+    let timefullDeduct = 0;
+    let timehalfDeduct = 0;
 
     sortedDays.forEach((day) => {
       const hours = day.minutes / 60;
 
       if (hours >= 7.5 && hours <= 8) {
         fullDaysCount += 1;
+        timefullDeduct += 8 - hours;
       } else if (hours >= 3.5 && hours <= 4) {
         halfDaysCount += 1;
+        timehalfDeduct += 8 - hours;
       } else if (hours < 7.5) {
         lessTimeHours += hours;
       } else {
@@ -334,13 +337,29 @@ export function MonthlyReportButton({
     });
 
     // Calculate effective days from less time and overtime
-    const totalExtraHours = lessTimeHours + overtimeHours;
+    const totalExtraHours =
+      lessTimeHours + overtimeHours;
     const extraDays = (totalExtraHours / 4) * 0.5;
     const roundedExtraDays = Math.floor(extraDays * 2) / 2;
 
     // Total effective days (full days + half days + converted extra time)
-    const effectiveDays =
+    const effectivetrialDays =
       fullDaysCount + halfDaysCount * 0.5 + roundedExtraDays;
+
+    let effectiveDays;
+
+    if (effectivetrialDays > uniqueWorkDays) {
+      const totalExtraHours =
+        lessTimeHours + overtimeHours - timefullDeduct - timehalfDeduct;
+      const extraDays = (totalExtraHours / 4) * 0.5;
+      const roundedExtraDays = Math.floor(extraDays * 2) / 2;
+
+      effectiveDays = fullDaysCount + halfDaysCount * 0.5 + roundedExtraDays;
+    } else {
+      // Add your else case here
+      effectiveDays = effectivetrialDays; // You need to define this
+    }
+
     const hoursPerDay = totalHours / uniqueWorkDays;
 
     // Calculate total expenses
