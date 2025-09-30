@@ -6,7 +6,14 @@ import {
   useGetExamsQuery,
   useLazyGetExamCategoriesQuery,
 } from "@/redux/features/quizApiSlice";
-import { Question, QuizParams, QuestionExplanation, QuizEvaluation, QuizState } from "../types/quiztypes";
+import { 
+  Question, 
+  QuizParams, 
+  QuestionExplanation, 
+  QuizEvaluation, 
+  QuizState,
+  QuizResponse  // Add this import
+} from "../types/quiztypes";
 
 export const useQuiz = () => {
   const { data: exams = [] } = useGetExamsQuery();
@@ -22,6 +29,7 @@ export const useQuiz = () => {
   const [currentExam, setCurrentExam] = useState<number | null>(null);
   const [currentCategory, setCurrentCategory] = useState<number | null>(null);
   const [quizState, setQuizState] = useState<QuizState>("settings");
+  const [metadata, setMetadata] = useState<any>(null); // Optional: store metadata
 
   const handleExamChange = async (examId: number | null) => {
     setCurrentExam(examId);
@@ -43,8 +51,11 @@ export const useQuiz = () => {
       setCurrentExam(params.exam || null);
       setCurrentCategory(params.category || null);
       
-      const response = await getQuestions(params).unwrap();
-      setQuestions(response);
+      const response: QuizResponse = await getQuestions(params).unwrap();
+      
+      // FIX: Extract questions from the response object
+      setQuestions(response.questions || []);
+      setMetadata(response.metadata); // Optional: store metadata if needed
       setAnswers({});
       setResults(null);
       setQuizState("in-progress");
@@ -124,6 +135,7 @@ export const useQuiz = () => {
     setCurrentExam(null);
     setCurrentCategory(null);
     setQuizState("settings");
+    setMetadata(null);
   };
 
   return {
@@ -145,5 +157,6 @@ export const useQuiz = () => {
     currentCategory,
     handleExamChange,
     setCurrentCategory,
+    metadata, // Optional: expose metadata if needed
   };
 };

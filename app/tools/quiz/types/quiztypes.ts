@@ -25,6 +25,9 @@ export interface QuizParams {
   count?: number;
   exam?: number;
   category?: number;
+  recency_percentage?: number;
+  pool_percentage?: number;
+  reset_session?: boolean;
 }
 
 export interface QuestionExplanation {
@@ -97,4 +100,31 @@ export interface ScoreRecord {
   date: string;
   exam?: Exam;
   category?: Category;
+}
+
+// ADD THESE NEW TYPES FOR API RESPONSES
+export interface QuizResponse {
+  questions: Question[];
+  metadata: {
+    requested_count: number;
+    adjusted_count: number;
+    returned_count: number;
+    total_available: number;
+    session_size: number;
+    has_auto_cleaned: boolean;
+    session_reset: boolean;
+  };
+}
+
+export interface ScoreHistoryResponse {
+  results: ScoreRecord[];
+  count: number;
+  next: string | null;
+  previous: string | null;
+}
+
+export interface ScoreBreakdownResponse {
+  average_score: number;
+  exam_breakdown: ExamScoreBreakdown[];
+  category_breakdown: CategoryScoreBreakdown[];
 }
