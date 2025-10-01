@@ -22,7 +22,7 @@ export interface Category {
 }
 
 export interface QuizParams {
-  count?: number;
+  count: number;
   exam?: number;
   category?: number;
   recency_percentage?: number;
@@ -66,8 +66,6 @@ export interface EvaluationResponse {
 
 export type QuizState = 'settings' | 'in-progress' | 'results';
 
-// Add these to your existing types in quiztypes.ts
-
 export interface ScoreStats {
   average_score: number;
   highest_score: number;
@@ -102,7 +100,6 @@ export interface ScoreRecord {
   category?: Category;
 }
 
-// ADD THESE NEW TYPES FOR API RESPONSES
 export interface QuizResponse {
   questions: Question[];
   metadata: {
@@ -127,4 +124,25 @@ export interface ScoreBreakdownResponse {
   average_score: number;
   exam_breakdown: ExamScoreBreakdown[];
   category_breakdown: CategoryScoreBreakdown[];
+}
+
+// Extended quiz parameters used in the hook and components
+export interface ExtendedQuizParams {
+  count: number;
+  exam?: number;
+  category?: number;
+  recency_percentage?: number;
+  pool_percentage?: number;
+  reset_session?: boolean;
+}
+
+// Add this interface for the metadata display
+export interface QuizMetadata {
+  requested_count: number;
+  adjusted_count: number;
+  returned_count: number;
+  total_available: number;
+  session_size: number;
+  has_auto_cleaned: boolean;
+  session_reset: boolean;
 }

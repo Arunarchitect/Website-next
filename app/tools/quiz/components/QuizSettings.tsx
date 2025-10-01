@@ -6,7 +6,14 @@ import { useDownloadQuestionsTemplateMutation, useUploadQuestionsCSVMutation } f
 interface QuizSettingsProps {
   exams: Exam[];
   categories: Category[];
-  onStartQuiz: (params: { count: number; exam?: number; category?: number }) => void;
+  onStartQuiz: (params: { 
+    count: number; 
+    exam?: number; 
+    category?: number;
+    recency_percentage?: number;
+    pool_percentage?: number;
+    reset_session?: boolean;
+  }) => void;
   isLoading: boolean;
   isCategoriesLoading?: boolean;
   currentExam?: number | null;
@@ -25,6 +32,9 @@ export default function QuizSettings({
   const [selectedExam, setSelectedExam] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [questionCount, setQuestionCount] = useState(10);
+  const [recencyPercentage, setRecencyPercentage] = useState(50);
+  const [poolPercentage, setPoolPercentage] = useState(20);
+  const [resetSession, setResetSession] = useState(true);
   const [showUploader, setShowUploader] = useState(false);
   const [downloadTemplate] = useDownloadQuestionsTemplateMutation();
   const [uploadCSV] = useUploadQuestionsCSVMutation();
@@ -35,6 +45,9 @@ export default function QuizSettings({
       count: questionCount,
       exam: selectedExam || undefined,
       category: selectedCategory || undefined,
+      recency_percentage: recencyPercentage,
+      pool_percentage: poolPercentage,
+      reset_session: resetSession,
     });
   };
 
@@ -56,9 +69,9 @@ export default function QuizSettings({
   const handleUpload = async (formData: FormData) => {
     try {
       const response = await uploadCSV(formData).unwrap();
-      return response; // Directly return the response which matches UploadResult
+      return response;
     } catch (error) {
-      throw error; // Let the QuestionUploader handle the error
+      throw error;
     }
   };
 
@@ -134,11 +147,93 @@ export default function QuizSettings({
           />
         </div>
 
+        {/* Recency Percentage Slider */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-2 dark:text-gray-300">
+            Recency Percentage: {recencyPercentage}%
+            <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+              (Higher percentage favors newer questions)
+            </span>
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={recencyPercentage}
+            onChange={(e) => setRecencyPercentage(Number(e.target.value))}
+            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            disabled={isLoading}
+          />
+          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <span>Older Questions</span>
+            <span>Newer Questions</span>
+          </div>
+        </div>
+
+        {/* Pool Percentage Slider */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-2 dark:text-gray-300">
+            Question Pool Size: {poolPercentage}%
+            <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+              (Percentage of total questions to select from)
+            </span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="100"
+            value={poolPercentage}
+            onChange={(e) => setPoolPercentage(Number(e.target.value))}
+            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            disabled={isLoading}
+          />
+          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <span>Smaller Pool</span>
+            <span>Larger Pool</span>
+          </div>
+        </div>
+
+        {/* Reset Session Toggle */}
+        <div className="mb-4">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="resetSession"
+              checked={resetSession}
+              onChange={(e) => setResetSession(e.target.checked)}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded dark:bg-gray-700 dark:border-gray-600"
+              disabled={isLoading}
+            />
+            <label 
+              htmlFor="resetSession" 
+              className="ml-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              Reset Question Session
+              <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                (Unckeck if  you dont want questions in the previous quiz session)
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* Info Section */}
+        <div className="mb-6 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
+          <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-1 text-sm">
+            About These Settings:
+          </h3>
+          <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
+            <li>• <strong>Recency Percentage</strong>: Controls how much newer questions are favored (0-100%)</li>
+            <li>• <strong>Question Pool</strong>: Percentage of total questions to select from (1-100%)</li>
+            <li>• <strong>Reset Session</strong>: When enabled, starts with fresh questions each time</li>
+            <li>• Higher values = more variety but potentially less focused practice</li>
+          </ul>
+        </div>
+
         <div className="flex flex-col space-y-3">
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-800 disabled:bg-gray-400 dark:disabled:bg-gray-600"
+            className="w-full bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-800 disabled:bg-gray-400 dark:disabled:bg-gray-600 transition-colors duration-200"
           >
             {isLoading ? 'Loading...' : 'Start Quiz'}
           </button>
@@ -146,7 +241,7 @@ export default function QuizSettings({
           <button
             type="button"
             onClick={() => setShowUploader(true)}
-            className="w-full bg-green-600 dark:bg-green-700 text-white py-2 px-4 rounded hover:bg-green-700 dark:hover:bg-green-800"
+            className="w-full bg-green-600 dark:bg-green-700 text-white py-2 px-4 rounded hover:bg-green-700 dark:hover:bg-green-800 transition-colors duration-200"
           >
             Upload Questions via CSV
           </button>

@@ -8,12 +8,24 @@ import {
 } from "@/redux/features/quizApiSlice";
 import { 
   Question, 
-  QuizParams, 
   QuestionExplanation, 
   QuizEvaluation, 
   QuizState,
-  QuizResponse  // Add this import
+  ExtendedQuizParams,
+  QuizMetadata,
+  QuizResponse
 } from "../types/quiztypes";
+
+// Define proper error types
+interface ApiError {
+  data?: {
+    error?: string;
+    detail?: string;
+    message?: string;
+  };
+  status?: number;
+  originalStatus?: number;
+}
 
 export const useQuiz = () => {
   const { data: exams = [] } = useGetExamsQuery();
@@ -29,7 +41,7 @@ export const useQuiz = () => {
   const [currentExam, setCurrentExam] = useState<number | null>(null);
   const [currentCategory, setCurrentCategory] = useState<number | null>(null);
   const [quizState, setQuizState] = useState<QuizState>("settings");
-  const [metadata, setMetadata] = useState<any>(null); // Optional: store metadata
+  const [metadata, setMetadata] = useState<QuizMetadata | null>(null);
 
   const handleExamChange = async (examId: number | null) => {
     setCurrentExam(examId);
@@ -45,23 +57,71 @@ export const useQuiz = () => {
     }
   };
 
-  const fetchQuestions = async (params: QuizParams) => {
+  const fetchQuestions = async (params: ExtendedQuizParams) => {
     try {
       setError(null);
       setCurrentExam(params.exam || null);
       setCurrentCategory(params.category || null);
       
-      const response: QuizResponse = await getQuestions(params).unwrap();
+      // Prepare the API call parameters with defaults
+      const apiParams = {
+        count: params.count,
+        exam: params.exam,
+        category: params.category,
+        recency_percentage: params.recency_percentage || 50,
+        pool_percentage: params.pool_percentage || 20,
+        reset_session: params.reset_session !== undefined ? params.reset_session : true,
+      };
+
+      console.log("Fetching questions with params:", apiParams);
+
+      // The API returns a QuizResponse object with questions and metadata
+      const response: QuizResponse = await getQuestions(apiParams).unwrap();
       
-      // FIX: Extract questions from the response object
+      console.log("API Response:", response);
+      console.log("Questions received:", response.questions);
+      console.log("Metadata received:", response.metadata);
+      
+      // Set questions and metadata from the response object
       setQuestions(response.questions || []);
-      setMetadata(response.metadata); // Optional: store metadata if needed
+      setMetadata(response.metadata);
       setAnswers({});
       setResults(null);
       setQuizState("in-progress");
-    } catch (err) {
-      setError("Failed to fetch questions. Please try again.");
-      console.error("Error fetching questions:", err);
+    } catch (err: unknown) {
+      // Enhanced error handling with better debugging
+      console.error("Full error object:", err);
+      
+      const apiError = err as ApiError;
+      
+      // Log detailed error information for debugging
+      console.log("Error details:", {
+        data: apiError.data,
+        status: apiError.status,
+        originalStatus: apiError.originalStatus
+      });
+      
+      if (apiError.data?.error) {
+        setError(`API Error: ${apiError.data.error}`);
+      } else if (apiError.data?.detail) {
+        setError(`API Error: ${apiError.data.detail}`);
+      } else if (apiError.data?.message) {
+        setError(`API Error: ${apiError.data.message}`);
+      } else if (apiError.status === 400) {
+        setError("Invalid request parameters. Please check your settings.");
+      } else if (apiError.status === 401) {
+        setError("Authentication required. Please log in again.");
+      } else if (apiError.status === 403) {
+        setError("You don't have permission to access these questions.");
+      } else if (apiError.status === 404) {
+        setError("No questions found with the selected criteria.");
+      } else if (apiError.status === 500) {
+        setError("Server error. Please try again later.");
+      } else if (apiError.originalStatus === 0) {
+        setError("Network error. Please check your connection.");
+      } else {
+        setError("Failed to fetch questions. Please try again.");
+      }
     }
   };
 
@@ -114,8 +174,15 @@ export const useQuiz = () => {
         explanations,
       });
       setQuizState("results");
-    } catch (err) {
-      setError("Failed to evaluate answers. Please try again.");
+    } catch (err: unknown) {
+      // Proper error handling without 'any'
+      const apiError = err as ApiError;
+      
+      if (apiError.data?.error) {
+        setError(apiError.data.error);
+      } else {
+        setError("Failed to evaluate answers. Please try again.");
+      }
       console.error("Error evaluating quiz:", err);
     }
   };
@@ -138,6 +205,11 @@ export const useQuiz = () => {
     setMetadata(null);
   };
 
+  // Optional: Function to manually set error (useful for testing)
+  const setQuizError = (errorMessage: string | null) => {
+    setError(errorMessage);
+  };
+
   return {
     exams,
     categories,
@@ -157,6 +229,7 @@ export const useQuiz = () => {
     currentCategory,
     handleExamChange,
     setCurrentCategory,
-    metadata, // Optional: expose metadata if needed
+    metadata,
+    setQuizError, // Expose error setter if needed
   };
 };

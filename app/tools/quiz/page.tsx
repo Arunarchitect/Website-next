@@ -16,10 +16,9 @@ import ErrorDisplay from "./components/ErrorDisplay";
 import QuizHeader from "./components/QuizHeader";
 import { useQuiz } from "./hooks/useQuiz";
 import ScoreDetailsModal from "./components/ScoreDetailsModal";
-import { useRouter } from "next/navigation";
+import { ExtendedQuizParams } from "./types/quiztypes";
 
 export default function QuizPage() {
-  const router = useRouter();
   const { data: user, isLoading: userLoading, error: userError } = useRetrieveUserQuery();
   const { data: exams = [] } = useGetExamsQuery();
   const {
@@ -39,6 +38,7 @@ export default function QuizPage() {
     currentExam,
     currentCategory,
     handleExamChange,
+    metadata,
   } = useQuiz();
 
   const [questionsPerPage, setQuestionsPerPage] = useState(5);
@@ -64,7 +64,7 @@ export default function QuizPage() {
   }] = useLazyGetFilteredScoresQuery();
 
   useEffect(() => {
-    if (questions.length > 0) {
+    if (questions && questions.length > 0) {
       setCurrentPage(1);
     }
   }, [questions]);
@@ -78,7 +78,7 @@ export default function QuizPage() {
     }
   };
 
-  const handleStartQuiz = (params: { count: number; exam?: number; category?: number }) => {
+  const handleStartQuiz = (params: ExtendedQuizParams) => {
     fetchQuestions(params);
   };
 
@@ -102,79 +102,12 @@ export default function QuizPage() {
     }
   };
 
-  const handleLoginRedirect = () => {
-    router.push("/auth/login");
-  };
-
-  // If user is not logged in (401 error) or user data is not available, show authorization message
-  const isUnauthorized = (!userLoading && !user) || 
-  (userError && 'status' in userError && userError.status === 401);
-  
-  if (isUnauthorized) {
-    return (
-      <div className="max-w-md mx-auto mt-10 px-4 sm:px-6 lg:px-8 relative">
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-          <div className="text-center">
-            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900">
-              <svg className="h-6 w-6 text-red-600 dark:text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">Sorry</h3>
-            <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              <p>You are not authorized to access this tool.</p>
-              <p>Please log in and return to continue. If you are unregistered, this is a test phase, for more info you can write to modelflick@gmail.com</p>
-            </div>
-            <div className="mt-6">
-              <button
-                onClick={handleLoginRedirect}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800"
-              >
-                Login
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Check if user is authorized (only user IDs 1 or 2)
-  const isAuthorizedUser = user && (user.id === 1 || user.id === 2);
-  
-  if (!isAuthorizedUser) {
-    return (
-      <div className="max-w-md mx-auto mt-10 px-4 sm:px-6 lg:px-8 relative">
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-          <div className="text-center">
-            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900">
-              <svg className="h-6 w-6 text-red-600 dark:text-red-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <h3 className="mt-4 text-lg font-medium text-gray-900 dark:text-white">Access Denied</h3>
-            <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              <p>You are not authorized to access this page.</p>
-              <p>Only specific users can use this tool. If you are unregistered, this is a test phase, for more info you can write to modelflick@gmail.com</p>
-            </div>
-            <div className="mt-6">
-              <button
-                onClick={() => router.push("/")}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800"
-              >
-                Go Back Home
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const totalPages = Math.ceil(questions.length / questionsPerPage);
+  // Safe array handling with null checks
+  const safeQuestions = Array.isArray(questions) ? questions : [];
+  const totalPages = Math.ceil(safeQuestions.length / questionsPerPage);
   const startIndex = (currentPage - 1) * questionsPerPage;
   const endIndex = startIndex + questionsPerPage;
-  const paginatedQuestions = questions.slice(startIndex, endIndex);
+  const paginatedQuestions = safeQuestions.slice(startIndex, endIndex);
 
   if (quizState === "settings") {
     return (
@@ -260,12 +193,12 @@ export default function QuizPage() {
     return (
       <div className="max-w-2xl mx-auto mt-10 px-4 sm:px-6 text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 dark:border-blue-400 mx-auto"></div>
-        <p className="mt-4 text-gray-60 dark:text-gray-300">
+        <p className="mt-4 text-gray-600 dark:text-gray-300">
           Preparing your quiz{user ? `, ${user.first_name}` : ''}...
         </p>
         <button 
           onClick={handleViewHistory}
-          className="mt-4 bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-800 dark:text-blue-200 py-2 px-4 rounded-lg"
+          className="mt-4 bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-800 dark:text-blue-200 py-2 px-4 rounded-lg transition-colors duration-200"
         >
           View History While Waiting
         </button>
@@ -298,13 +231,14 @@ export default function QuizPage() {
     );
   }
 
-  if (questions.length === 0) {
+  // Check if questions is not an array or is empty
+  if (!Array.isArray(questions) || safeQuestions.length === 0) {
     return (
       <div className="max-w-md mx-auto mt-10 px-4 sm:px-6">
         <ErrorDisplay error="No questions available. Please try different settings." />
         <button
           onClick={handleQuitQuiz}
-          className="mt-4 bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-800"
+          className="mt-4 bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-800 transition-colors duration-200"
         >
           Back to Settings
         </button>
@@ -314,6 +248,51 @@ export default function QuizPage() {
 
   return (
     <div className="max-w-2xl mx-auto mt-6 p-4 sm:p-6">
+      {/* Metadata Display */}
+      {metadata && (
+        <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+          <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-3 text-sm">
+            Quiz Session Information
+          </h3>
+          <div className="grid grid-cols-2 gap-4 text-xs">
+            <div>
+              <span className="text-gray-600 dark:text-gray-400">Requested:</span>
+              <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                {metadata.requested_count} questions
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600 dark:text-gray-400">Returned:</span>
+              <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                {metadata.returned_count} questions
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600 dark:text-gray-400">Available:</span>
+              <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                {metadata.total_available} total
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600 dark:text-gray-400">Session:</span>
+              <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                {metadata.session_size} seen
+              </span>
+            </div>
+            {metadata.session_reset && (
+              <div className="col-span-2">
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                  <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Fresh session started
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <QuizHeader
         currentQuestion={currentPage}
         totalQuestions={totalPages}
@@ -348,7 +327,7 @@ export default function QuizPage() {
         <button
           onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
           disabled={currentPage === 1}
-          className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white py-2 px-4 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50"
+          className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white py-2 px-4 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors duration-200"
         >
           Previous
         </button>
@@ -356,7 +335,7 @@ export default function QuizPage() {
         {currentPage < totalPages ? (
           <button
             onClick={() => setCurrentPage(p => p + 1)}
-            className="bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-800"
+            className="bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-800 transition-colors duration-200"
           >
             Next
           </button>
@@ -364,7 +343,7 @@ export default function QuizPage() {
           <button
             onClick={handleSubmitQuiz}
             disabled={isEvaluationLoading}
-            className="bg-green-600 dark:bg-green-700 text-white py-2 px-4 rounded hover:bg-green-700 dark:hover:bg-green-800 disabled:bg-gray-400 dark:disabled:bg-gray-600"
+            className="bg-green-600 dark:bg-green-700 text-white py-2 px-4 rounded hover:bg-green-700 dark:hover:bg-green-800 disabled:bg-gray-400 dark:disabled:bg-gray-600 transition-colors duration-200"
           >
             {isEvaluationLoading ? "Submitting..." : "Submit Quiz"}
           </button>
