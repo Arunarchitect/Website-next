@@ -164,28 +164,22 @@ export const useQuiz = () => {
       const displayScore = Math.max(0, rawScore);
       const displayPercentage = Math.max(0, percentage);
 
-      // Use the stored quizExam and quizCategory that were used to fetch the questions
       console.log("=== DEBUG: Submitting quiz data ===");
       console.log("quizExam:", quizExam);
       console.log("quizCategory:", quizCategory);
-      console.log("rawScore:", rawScore);
-      console.log("percentage:", percentage);
-      console.log("questions length:", questions.length);
-      console.log("answers:", answers);
-      console.log("=== END DEBUG ===");
 
       const response = await evaluateQuiz({
         answers,
         calculated_score: rawScore,
         calculated_percentage: percentage,
-        exam: quizExam, // Use the stored quiz exam
-        category: quizCategory, // Use the stored quiz category
+        exam: quizExam,
+        category: quizCategory,
       }).unwrap();
 
       console.log("=== DEBUG: Evaluation response ===");
       console.log("Response:", response);
-      console.log("=== END DEBUG ===");
 
+      // Handle both old and new response formats
       setResults({
         ...response,
         rawScore: parseFloat(rawScore.toFixed(2)),
@@ -193,24 +187,22 @@ export const useQuiz = () => {
         displayScore,
         displayPercentage,
         explanations,
+        // Include breakdown data if available
+        category_breakdown: response.category_breakdown,
+        exam_breakdown: response.exam_breakdown,
+        overall_score: response.overall_score,
       });
+      
       setQuizState("results");
     } catch (err: unknown) {
-      // Proper error handling without 'any'
       const apiError = err as ApiError;
-      
-      console.log("=== DEBUG: Evaluation error ===");
-      console.log("Error:", err);
-      console.log("Error data:", apiError.data);
-      console.log("Error status:", apiError.status);
-      console.log("=== END DEBUG ===");
+      console.error("Error evaluating quiz:", err);
       
       if (apiError.data?.error) {
         setError(apiError.data.error);
       } else {
         setError("Failed to evaluate answers. Please try again.");
       }
-      console.error("Error evaluating quiz:", err);
     }
   };
 

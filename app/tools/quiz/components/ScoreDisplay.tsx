@@ -1,8 +1,18 @@
 // components/ScoreDisplay.tsx
-import { QuizEvaluation, QuestionExplanation } from '../types/quiztypes';
+import { QuizEvaluation } from '../types/quiztypes';
 
 interface ScoreDisplayProps {
-  results: QuizEvaluation;
+  results: QuizEvaluation & {
+    category_breakdown?: Record<string, {
+      category_name: string;
+      percentage: number;
+      display_percentage: number;
+      question_count: number;
+      display_score: number;
+    }>;
+    exam_breakdown?: Record<string, any>;
+    overall_score?: any;
+  };
   onRetry: () => void;
   averageScore?: number;
   onViewDetails: () => void;
@@ -58,10 +68,41 @@ export default function ScoreDisplay({
         </p>
       </div>
 
+      {/* Category Breakdown in Results */}
+      {results.category_breakdown && Object.keys(results.category_breakdown).length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-xl font-semibold mb-4 dark:text-white">Performance by Category</h3>
+          <div className="space-y-3">
+            {Object.entries(results.category_breakdown).map(([categoryId, categoryData]) => {
+              const categoryScoreColor = categoryData.percentage >= 70 ? 'text-green-600 dark:text-green-400' :
+                                      categoryData.percentage >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
+                                      'text-red-600 dark:text-red-400';
+              
+              return (
+                <div key={categoryId} className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-900 dark:text-white">
+                      {categoryData.category_name}
+                    </span>
+                    <span className={`font-bold ${categoryScoreColor}`}>
+                      {categoryData.display_percentage.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {categoryData.question_count} question{categoryData.question_count !== 1 ? 's' : ''} • 
+                    Score: {categoryData.display_score.toFixed(2)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mb-8">
         <h3 className="text-xl font-semibold mb-4 dark:text-white">Question Review</h3>
         <div className="space-y-4">
-          {results.explanations.map((item: QuestionExplanation, index: number) => (
+          {results.explanations.map((item, index) => (
             <div key={item.id} className="p-4 border rounded-lg dark:border-gray-700 dark:bg-gray-700">
               <div className="flex justify-between items-start mb-2">
                 <span className="font-medium dark:text-gray-200">Q{index + 1}: {item.question}</span>

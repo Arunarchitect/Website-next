@@ -33,10 +33,25 @@ interface ScoreDetailsModalProps {
     lowest_score: number;
     total_attempts: number;
     last_attempt: string;
+    unique_sessions?: number; // Add this to track unique quiz sessions
   };
   historyLoading: boolean;
   historyError: FetchBaseQueryError | SerializedError | undefined;
   onClose: () => void;
+}
+
+interface BreakdownItem {
+  exam?: Exam | null;
+  exam_name?: string;
+  category?: Category | null;
+  category_name?: string;
+  attempt_count: number;
+  average_score: number;
+  highest_score?: number;
+  lowest_score?: number;
+  exam_id?: number;
+  category_id?: number;
+  type?: string;
 }
 
 export default function ScoreDetailsModal({
@@ -76,32 +91,53 @@ export default function ScoreDetailsModal({
     return 'Unknown error';
   };
 
-  const getExamName = (item: any) => {
+  const getExamName = (item: BreakdownItem) => {
     return item.exam?.name || item.exam_name || 'General Quiz';
   };
 
-  const getCategoryName = (item: any) => {
+  const getCategoryName = (item: BreakdownItem) => {
     return item.category?.name || item.category_name || 'General Category';
   };
 
-  const getAttemptCount = (item: any) => {
+  const getAttemptCount = (item: BreakdownItem) => {
     return item.attempt_count || 0;
   };
 
-  const getAverageScore = (item: any) => {
+  const getAverageScore = (item: BreakdownItem) => {
     return item.average_score || 0;
   };
 
-  // Use overallStats if available, otherwise use individual breakdowns
+  // FIX: Calculate unique quiz sessions instead of summing all entries
+  const calculateUniqueQuizSessions = () => {
+    // If backend provides unique_sessions, use that
+    if (overallStats?.unique_sessions) {
+      return overallStats.unique_sessions;
+    }
+    
+    // Otherwise, use the total_attempts from overallStats which should represent unique sessions
+    if (overallStats?.total_attempts) {
+      return overallStats.total_attempts;
+    }
+    
+    // Fallback: Use the maximum attempt count from any exam/category
+    const maxExamAttempts = examBreakdown.length > 0 
+      ? Math.max(...examBreakdown.map(item => getAttemptCount(item)))
+      : 0;
+    const maxCategoryAttempts = categoryBreakdown.length > 0
+      ? Math.max(...categoryBreakdown.map(item => getAttemptCount(item)))
+      : 0;
+    
+    return Math.max(maxExamAttempts, maxCategoryAttempts);
+  };
+
+  // FIX: Use overallStats for display values
   const displayAverageScore = overallStats?.average_score || averageScore;
-  const totalAttempts = overallStats?.total_attempts || 
-    examBreakdown.reduce((sum, item) => sum + getAttemptCount(item), 0) +
-    categoryBreakdown.reduce((sum, item) => sum + getAttemptCount(item), 0);
+  const uniqueQuizSessions = calculateUniqueQuizSessions();
 
   // Check if we have any data to show
   const hasExamData = examBreakdown && examBreakdown.length > 0 && examBreakdown.some(item => getAttemptCount(item) > 0);
   const hasCategoryData = categoryBreakdown && categoryBreakdown.length > 0 && categoryBreakdown.some(item => getAttemptCount(item) > 0);
-  const hasData = hasAttempts || displayAverageScore > 0 || totalAttempts > 0 || hasExamData || hasCategoryData;
+  const hasData = hasAttempts || displayAverageScore > 0 || uniqueQuizSessions > 0 || hasExamData || hasCategoryData;
 
   // Format date for display
   const formatDate = (dateString: string) => {
@@ -128,6 +164,7 @@ export default function ScoreDetailsModal({
   console.log('ScoreDetailsModal Data:', {
     averageScore: displayAverageScore,
     overallStats,
+    uniqueQuizSessions,
     examBreakdown: filteredExamBreakdown,
     categoryBreakdown: filteredCategoryBreakdown,
     hasAttempts,
@@ -196,9 +233,9 @@ export default function ScoreDetailsModal({
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                 <div>
                   <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {totalAttempts}
+                    {uniqueQuizSessions}
                   </p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Attempts</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Quiz Sessions</p>
                 </div>
                 <div>
                   <p className={`text-2xl font-bold ${getScoreColor(displayAverageScore)}`}>
@@ -250,7 +287,7 @@ export default function ScoreDetailsModal({
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <span className="text-gray-500 dark:text-gray-400">Attempts: </span>
+                          <span className="text-gray-500 dark:text-gray-400">Questions Attempted: </span>
                           <span className="font-medium text-gray-900 dark:text-white">
                             {getAttemptCount(item)}
                           </span>
@@ -302,7 +339,7 @@ export default function ScoreDetailsModal({
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <span className="text-gray-500 dark:text-gray-400">Attempts: </span>
+                          <span className="text-gray-500 dark:text-gray-400">Questions Attempted: </span>
                           <span className="font-medium text-gray-900 dark:text-white">
                             {getAttemptCount(item)}
                           </span>
@@ -339,21 +376,21 @@ export default function ScoreDetailsModal({
               </h4>
               <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1">
                 {displayAverageScore >= 70 ? (
-                  <li>• Excellent! You're consistently scoring high. Keep up the great work!</li>
+                  <li>• Excellent! You&apos;re consistently scoring high. Keep up the great work!</li>
                 ) : displayAverageScore >= 50 ? (
-                  <li>• Good progress! You're above average. Focus on weak areas to improve further.</li>
+                  <li>• Good progress! You&apos;re above average. Focus on weak areas to improve further.</li>
                 ) : (
                   <li>• Keep practicing! Review the explanations for wrong answers to improve.</li>
                 )}
-                <li>• You've completed {totalAttempts} quiz attempts so far.</li>
+                <li>• You&apos;ve completed {uniqueQuizSessions} quiz session{uniqueQuizSessions !== 1 ? 's' : ''} so far.</li>
                 {overallStats?.highest_score && overallStats.highest_score >= 80 && (
                   <li>• Your best score of {overallStats.highest_score.toFixed(1)}% shows great potential!</li>
                 )}
                 {filteredCategoryBreakdown.length > 0 && (
-                  <li>• You have attempted quizzes in {filteredCategoryBreakdown.length} different category{filteredCategoryBreakdown.length !== 1 ? 's' : ''}.</li>
+                  <li>• You have attempted questions from {filteredCategoryBreakdown.length} different category{filteredCategoryBreakdown.length !== 1 ? 's' : ''}.</li>
                 )}
                 {filteredExamBreakdown.length > 0 && (
-                  <li>• You have attempted quizzes from {filteredExamBreakdown.length} different exam{filteredExamBreakdown.length !== 1 ? 's' : ''}.</li>
+                  <li>• You have attempted questions from {filteredExamBreakdown.length} different exam{filteredExamBreakdown.length !== 1 ? 's' : ''}.</li>
                 )}
               </ul>
             </div>

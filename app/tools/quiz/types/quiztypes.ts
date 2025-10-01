@@ -39,6 +39,40 @@ export interface QuestionExplanation {
   is_correct: boolean;
 }
 
+export interface CategoryBreakdown {
+  [categoryId: string]: {
+    raw_score: number;
+    display_score: number;
+    percentage: number;
+    display_percentage: number;
+    question_count: number;
+    category_name: string;
+  };
+}
+
+export interface ExamBreakdown {
+  [examId: string]: {
+    exam_id: string | number;
+    exam_name: string;
+    raw_score: number;
+    display_score: number;
+    percentage: number;
+    display_percentage: number;
+    question_count: number;
+    category_count: number;
+  };
+}
+
+export interface OverallScoreData {
+  raw_score: number;
+  display_score: number;
+  percentage: number;
+  display_percentage: number;
+  total_questions: number;
+  exam_count: number;
+  category_count: number;
+}
+
 export interface QuizEvaluation {
   score: number;
   total: number;
@@ -47,6 +81,9 @@ export interface QuizEvaluation {
   rawScore?: number;
   displayScore?: number;
   displayPercentage?: number;
+  category_breakdown?: CategoryBreakdown;
+  exam_breakdown?: ExamBreakdown;
+  overall_score?: OverallScoreData;
 }
 
 export interface EvaluationRequest {
@@ -62,6 +99,9 @@ export interface EvaluationResponse {
   total: number;
   percentage: number;
   explanations: QuestionExplanation[];
+  category_breakdown?: CategoryBreakdown;
+  exam_breakdown?: ExamBreakdown;
+  overall_score?: OverallScoreData;
 }
 
 export type QuizState = 'settings' | 'in-progress' | 'results';
