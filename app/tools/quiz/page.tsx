@@ -19,6 +19,7 @@ import { useQuiz } from "./hooks/useQuiz";
 import ScoreDetailsModal from "./components/ScoreDetailsModal";
 import { ExtendedQuizParams } from "./types/quiztypes";
 
+
 export default function QuizPage() {
   const { data: user, isLoading: userLoading, error: userError } = useRetrieveUserQuery();
   const { data: exams = [] } = useGetExamsQuery();

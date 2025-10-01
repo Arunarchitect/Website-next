@@ -282,3 +282,22 @@ export interface CompleteUserStats {
     recentActivity: number;
   };
 }
+
+export interface ScoreDetailsModalProps {
+  averageScore: number;
+  examBreakdown: ExamScoreBreakdown[];
+  categoryBreakdown: CategoryScoreBreakdown[];
+  hasAttempts: boolean;
+  overallStats?: {
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    total_attempts: number;
+    last_attempt: string;
+    recent_activity: number;
+  };
+  scoreHistory: ScoreRecord[];
+  historyLoading: boolean;
+  historyError?: unknown;
+  onClose: () => void;
+}

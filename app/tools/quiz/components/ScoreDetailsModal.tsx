@@ -1,7 +1,7 @@
 // ScoreDetailsModal.tsx
 
 import React from 'react';
-import { Exam, Category } from '../types/quiztypes';
+import { Exam, Category, ScoreRecord } from '../types/quiztypes';
 import { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { SerializedError } from '@reduxjs/toolkit';
 
@@ -33,8 +33,9 @@ interface ScoreDetailsModalProps {
     lowest_score: number;
     total_attempts: number;
     last_attempt: string;
-    unique_sessions?: number; // Add this to track unique quiz sessions
+    unique_sessions?: number;
   };
+  scoreHistory: ScoreRecord[];
   historyLoading: boolean;
   historyError: FetchBaseQueryError | SerializedError | undefined;
   onClose: () => void;
@@ -60,6 +61,7 @@ export default function ScoreDetailsModal({
   categoryBreakdown,
   hasAttempts = false,
   overallStats,
+  scoreHistory,
   historyLoading,
   historyError,
   onClose
@@ -107,19 +109,15 @@ export default function ScoreDetailsModal({
     return item.average_score || 0;
   };
 
-  // FIX: Calculate unique quiz sessions instead of summing all entries
   const calculateUniqueQuizSessions = () => {
-    // If backend provides unique_sessions, use that
     if (overallStats?.unique_sessions) {
       return overallStats.unique_sessions;
     }
     
-    // Otherwise, use the total_attempts from overallStats which should represent unique sessions
     if (overallStats?.total_attempts) {
       return overallStats.total_attempts;
     }
     
-    // Fallback: Use the maximum attempt count from any exam/category
     const maxExamAttempts = examBreakdown.length > 0 
       ? Math.max(...examBreakdown.map(item => getAttemptCount(item)))
       : 0;
@@ -130,16 +128,15 @@ export default function ScoreDetailsModal({
     return Math.max(maxExamAttempts, maxCategoryAttempts);
   };
 
-  // FIX: Use overallStats for display values
   const displayAverageScore = overallStats?.average_score || averageScore;
   const uniqueQuizSessions = calculateUniqueQuizSessions();
 
-  // Check if we have any data to show
+  // Check if we have score history data
+  const hasScoreHistory = scoreHistory && scoreHistory.length > 0;
   const hasExamData = examBreakdown && examBreakdown.length > 0 && examBreakdown.some(item => getAttemptCount(item) > 0);
   const hasCategoryData = categoryBreakdown && categoryBreakdown.length > 0 && categoryBreakdown.some(item => getAttemptCount(item) > 0);
-  const hasData = hasAttempts || displayAverageScore > 0 || uniqueQuizSessions > 0 || hasExamData || hasCategoryData;
+  const hasData = hasAttempts || displayAverageScore > 0 || uniqueQuizSessions > 0 || hasExamData || hasCategoryData || hasScoreHistory;
 
-  // Format date for display
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -151,25 +148,18 @@ export default function ScoreDetailsModal({
     });
   };
 
-  // Filter and sort category data
   const filteredCategoryBreakdown = categoryBreakdown
     .filter(item => getAttemptCount(item) > 0)
     .sort((a, b) => getAverageScore(b) - getAverageScore(a));
 
-  // Filter and sort exam data
   const filteredExamBreakdown = examBreakdown
     .filter(item => getAttemptCount(item) > 0)
     .sort((a, b) => getAverageScore(b) - getAverageScore(a));
 
-  console.log('ScoreDetailsModal Data:', {
-    averageScore: displayAverageScore,
-    overallStats,
-    uniqueQuizSessions,
-    examBreakdown: filteredExamBreakdown,
-    categoryBreakdown: filteredCategoryBreakdown,
-    hasAttempts,
-    hasData
-  });
+  // Sort score history by date (newest first)
+  const sortedScoreHistory = [...scoreHistory].sort((a, b) => 
+    new Date(b.date).getTime() - new Date(a.date).getTime()
+  ).slice(0, 10); // Show only last 10 attempts
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center p-4 z-50">
@@ -200,7 +190,6 @@ export default function ScoreDetailsModal({
             </div>
           </div>
         ) : !hasData ? (
-          // Empty state when no quizzes taken
           <div className="text-center py-8">
             <div className="bg-gray-100 dark:bg-gray-700 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl">📊</span>
@@ -264,6 +253,41 @@ export default function ScoreDetailsModal({
                 </div>
               )}
             </div>
+
+            {/* Recent Score History */}
+            {hasScoreHistory && (
+              <div>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
+                  Recent Quiz Attempts
+                </h3>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {sortedScoreHistory.map((record, index) => (
+                    <div 
+                      key={record.id || `history-${index}`}
+                      className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600"
+                    >
+                      <div className="flex justify-between items-center">
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {formatDate(record.date)}
+                          </p>
+                          {(record.exam || record.category) && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {record.exam?.name && `Exam: ${record.exam.name}`}
+                              {record.exam?.name && record.category?.name && ' • '}
+                              {record.category?.name && `Category: ${record.category.name}`}
+                            </p>
+                          )}
+                        </div>
+                        <span className={`text-lg font-bold ${getScoreColor(record.score)}`}>
+                          {record.score.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Category Breakdown */}
             {hasCategoryData && (
@@ -383,6 +407,9 @@ export default function ScoreDetailsModal({
                   <li>• Keep practicing! Review the explanations for wrong answers to improve.</li>
                 )}
                 <li>• You&apos;ve completed {uniqueQuizSessions} quiz session{uniqueQuizSessions !== 1 ? 's' : ''} so far.</li>
+                {hasScoreHistory && (
+                  <li>• You have {scoreHistory.length} recorded attempt{scoreHistory.length !== 1 ? 's' : ''} in your history.</li>
+                )}
                 {overallStats?.highest_score && overallStats.highest_score >= 80 && (
                   <li>• Your best score of {overallStats.highest_score.toFixed(1)}% shows great potential!</li>
                 )}

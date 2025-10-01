@@ -1,5 +1,5 @@
 // components/ScoreDisplay.tsx
-import { QuizEvaluation } from '../types/quiztypes';
+import { QuizEvaluation, ExamBreakdown, OverallScoreData } from '../types/quiztypes';
 
 interface ScoreDisplayProps {
   results: QuizEvaluation & {
@@ -10,8 +10,8 @@ interface ScoreDisplayProps {
       question_count: number;
       display_score: number;
     }>;
-    exam_breakdown?: Record<string, any>;
-    overall_score?: any;
+    exam_breakdown?: ExamBreakdown;
+    overall_score?: OverallScoreData;
   };
   onRetry: () => void;
   averageScore?: number;

@@ -6,7 +6,7 @@ import { Navbar, Footer } from "@/components/common";
 import Provider from "@/redux/provider";
 import { Setup } from "@/components/utils";
 import AuthGate from "@/components/utils/AuthGate";
-import Script from "next/script"; // ✅ import Script
+import Script from "next/script";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,17 +34,18 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* ✅ Google Analytics Script */}
+        {/* ✅ Perfect - keeping the async attribute */}
         <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-W5MZBSCF4M"
+          src="https://www.googletagmanager.com/gtag/js?id=G-09W0263SMS"
           strategy="afterInteractive"
+          async
         />
         <Script id="google-analytics" strategy="afterInteractive">
           {`
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'G-W5MZBSCF4M');
+            gtag('config', 'G-09W0263SMS');
           `}
         </Script>
       </head>
