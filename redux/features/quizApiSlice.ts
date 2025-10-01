@@ -9,7 +9,8 @@ import {
   EvaluationResponse,
   ScoreStats,
   ExamScoreBreakdown,
-  CategoryScoreBreakdown
+  CategoryScoreBreakdown,
+  QuizResponse
 } from "@/app/tools/quiz/types/quiztypes";
 
 export const quizApiSlice = apiSlice.injectEndpoints({
@@ -30,7 +31,8 @@ export const quizApiSlice = apiSlice.injectEndpoints({
       providesTags: ["Categories"],
     }),
 
-    getQuizQuestions: builder.query<Question[], QuizParams>({
+    // FIXED: Updated to return QuizResponse instead of Question[]
+    getQuizQuestions: builder.query<QuizResponse, QuizParams>({
       query: (params) => ({
         url: "/get-quiz/",
         method: "POST",
