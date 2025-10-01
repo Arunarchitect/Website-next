@@ -6,7 +6,8 @@ import {
   useGetScoreStatsQuery,
   useGetScoresByExamQuery,
   useGetScoresByCategoryQuery,
-  useLazyGetFilteredScoresQuery
+  useLazyGetFilteredScoresQuery,
+  useGetUserStatsQuery
 } from "@/redux/features/quizApiSlice";
 import { useRetrieveUserQuery } from "@/redux/features/authApiSlice";
 import QuizSettings from "./components/QuizSettings";
@@ -44,18 +45,33 @@ export default function QuizPage() {
   const [questionsPerPage, setQuestionsPerPage] = useState(5);
   const [currentPage, setCurrentPage] = useState(1);
   const [showScoreDetails, setShowScoreDetails] = useState(false);
+  const [shouldFetchStats, setShouldFetchStats] = useState(false);
 
-  const { data: statsData } = useGetScoreStatsQuery(undefined, {
-    skip: quizState !== "results" || !results
-  });
+  // Always fetch user stats - they're lightweight and cached
+  const { 
+    data: userStats, 
+    isLoading: userStatsLoading, 
+    error: userStatsError,
+    refetch: refetchUserStats 
+  } = useGetUserStatsQuery();
 
-  const { data: examBreakdown = [] } = useGetScoresByExamQuery(undefined, {
-    skip: quizState !== "results" || !results
-  });
+  const { 
+    data: statsData, 
+    isLoading: statsLoading,
+    refetch: refetchScoreStats 
+  } = useGetScoreStatsQuery();
 
-  const { data: categoryBreakdown = [] } = useGetScoresByCategoryQuery(undefined, {
-    skip: quizState !== "results" || !results
-  });
+  const { 
+    data: examBreakdown = [], 
+    isLoading: examBreakdownLoading,
+    refetch: refetchExamBreakdown 
+  } = useGetScoresByExamQuery();
+
+  const { 
+    data: categoryBreakdown = [], 
+    isLoading: categoryBreakdownLoading,
+    refetch: refetchCategoryBreakdown 
+  } = useGetScoresByCategoryQuery();
 
   const [getFilteredScores, { 
     data: scoreHistory, 
@@ -69,8 +85,38 @@ export default function QuizPage() {
     }
   }, [questions]);
 
+  // Trigger stats refresh when quiz is completed
+  useEffect(() => {
+    if (quizState === "results" && results) {
+      setShouldFetchStats(true);
+    }
+  }, [quizState, results]);
+
+  // Refetch stats when shouldFetchStats is true
+  useEffect(() => {
+    if (shouldFetchStats) {
+      const refreshStats = async () => {
+        try {
+          await Promise.all([
+            refetchUserStats(),
+            refetchScoreStats(),
+            refetchExamBreakdown(),
+            refetchCategoryBreakdown()
+          ]);
+        } catch (err) {
+          console.error("Failed to refresh stats:", err);
+        } finally {
+          setShouldFetchStats(false);
+        }
+      };
+      
+      refreshStats();
+    }
+  }, [shouldFetchStats, refetchUserStats, refetchScoreStats, refetchExamBreakdown, refetchCategoryBreakdown]);
+
   const handleViewHistory = async () => {
     try {
+      // Only fetch filtered scores (the others are already being fetched)
       await getFilteredScores({});
       setShowScoreDetails(true);
     } catch (err) {
@@ -109,6 +155,9 @@ export default function QuizPage() {
   const endIndex = startIndex + questionsPerPage;
   const paginatedQuestions = safeQuestions.slice(startIndex, endIndex);
 
+  // Combined loading state for history modal
+  const isHistoryLoading = userStatsLoading || statsLoading || examBreakdownLoading || categoryBreakdownLoading || historyLoading;
+
   if (quizState === "settings") {
     return (
       <div className="max-w-md mx-auto mt-10 px-4 sm:px-6 lg:px-8 relative">
@@ -137,12 +186,12 @@ export default function QuizPage() {
             </div>
             <button
               onClick={handleViewHistory}
-              disabled={historyLoading}
+              disabled={isHistoryLoading}
               className={`ml-auto bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-800 dark:text-blue-200 py-2 px-4 rounded-lg flex items-center ${
-                historyLoading ? 'opacity-50 cursor-not-allowed' : ''
+                isHistoryLoading ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
-              {historyLoading ? (
+              {isHistoryLoading ? (
                 <>
                   <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-800 dark:text-blue-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -176,12 +225,14 @@ export default function QuizPage() {
 
         {showScoreDetails && (
           <ScoreDetailsModal
-            averageScore={statsData?.average_score || 0}
+            averageScore={userStats?.average_score || statsData?.average_score || 0}
             examBreakdown={examBreakdown}
             categoryBreakdown={categoryBreakdown}
+            hasAttempts={userStats?.has_attempts || false}
+            overallStats={userStats?.overall_stats}
             scoreHistory={scoreHistory?.results || []}
-            historyLoading={historyLoading}
-            historyError={historyError}
+            historyLoading={isHistoryLoading}
+            historyError={userStatsError || historyError}
             onClose={() => setShowScoreDetails(false)}
           />
         )}
@@ -212,18 +263,20 @@ export default function QuizPage() {
         <ScoreDisplay
           results={results}
           onRetry={handleRetry}
-          averageScore={statsData?.average_score || 0}
+          averageScore={userStats?.average_score || statsData?.average_score || 0}
           onViewDetails={toggleScoreDetails}
         />
         
         {showScoreDetails && (
           <ScoreDetailsModal
-            averageScore={statsData?.average_score || 0}
+            averageScore={userStats?.average_score || statsData?.average_score || 0}
             examBreakdown={examBreakdown}
             categoryBreakdown={categoryBreakdown}
+            hasAttempts={userStats?.has_attempts || false}
+            overallStats={userStats?.overall_stats}
             scoreHistory={scoreHistory?.results || []}
-            historyLoading={historyLoading}
-            historyError={historyError}
+            historyLoading={isHistoryLoading}
+            historyError={userStatsError || historyError}
             onClose={toggleScoreDetails}
           />
         )}

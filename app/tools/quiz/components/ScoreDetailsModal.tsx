@@ -1,4 +1,6 @@
-import { useState } from 'react';
+// ScoreDetailsModal.tsx
+
+import React from 'react';
 import { Exam, Category } from '../types/quiztypes';
 import { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { SerializedError } from '@reduxjs/toolkit';
@@ -6,22 +8,32 @@ import { SerializedError } from '@reduxjs/toolkit';
 interface ScoreDetailsModalProps {
   averageScore: number;
   examBreakdown: Array<{
-    exam?: Exam | null;
+    exam_id?: number;
+    exam_name?: string;
     average_score: number;
     attempt_count: number;
+    highest_score?: number;
+    lowest_score?: number;
+    exam?: Exam | null;
   }>;
   categoryBreakdown: Array<{
-    category?: Category | null;
+    category_id?: number;
+    category_name?: string;
     average_score: number;
     attempt_count: number;
-  }>;
-  scoreHistory: Array<{
-    id: number;
-    score: number;
-    date: string;
-    exam?: Exam | null;
+    highest_score?: number;
+    lowest_score?: number;
     category?: Category | null;
+    type?: string;
   }>;
+  hasAttempts?: boolean;
+  overallStats?: {
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    total_attempts: number;
+    last_attempt: string;
+  };
   historyLoading: boolean;
   historyError: FetchBaseQueryError | SerializedError | undefined;
   onClose: () => void;
@@ -31,12 +43,12 @@ export default function ScoreDetailsModal({
   averageScore,
   examBreakdown,
   categoryBreakdown,
-  scoreHistory,
+  hasAttempts = false,
+  overallStats,
   historyLoading,
   historyError,
   onClose
 }: ScoreDetailsModalProps) {
-  const [activeTab, setActiveTab] = useState<'stats' | 'history'>('stats');
 
   const getScoreColor = (score: number) => {
     return score >= 70 ? 'text-green-500 dark:text-green-400' :
@@ -44,31 +56,90 @@ export default function ScoreDetailsModal({
            'text-red-500 dark:text-red-400';
   };
 
+  const getScoreBgColor = (score: number) => {
+    return score >= 70 ? 'bg-green-100 dark:bg-green-900/30 border-green-200 dark:border-green-800' :
+           score >= 50 ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800' : 
+           'bg-red-100 dark:bg-red-900/30 border-red-200 dark:border-red-800';
+  };
+
   const getErrorMessage = (error: FetchBaseQueryError | SerializedError | undefined): string => {
     if (!error) return 'Unknown error';
-    
     if ('status' in error) {
-      // Handle FetchBaseQueryError
       const errMsg = error.data && typeof error.data === 'object' && 'message' in error.data 
         ? (error.data as { message: string }).message
         : JSON.stringify(error.data);
       return `Error ${error.status}: ${errMsg}`;
     }
-    
     if ('message' in error) {
-      // Handle SerializedError
       return error.message || 'Unknown error';
     }
-    
     return 'Unknown error';
   };
 
+  const getExamName = (item: any) => {
+    return item.exam?.name || item.exam_name || 'General Quiz';
+  };
+
+  const getCategoryName = (item: any) => {
+    return item.category?.name || item.category_name || 'General Category';
+  };
+
+  const getAttemptCount = (item: any) => {
+    return item.attempt_count || 0;
+  };
+
+  const getAverageScore = (item: any) => {
+    return item.average_score || 0;
+  };
+
+  // Use overallStats if available, otherwise use individual breakdowns
+  const displayAverageScore = overallStats?.average_score || averageScore;
+  const totalAttempts = overallStats?.total_attempts || 
+    examBreakdown.reduce((sum, item) => sum + getAttemptCount(item), 0) +
+    categoryBreakdown.reduce((sum, item) => sum + getAttemptCount(item), 0);
+
+  // Check if we have any data to show
+  const hasExamData = examBreakdown && examBreakdown.length > 0 && examBreakdown.some(item => getAttemptCount(item) > 0);
+  const hasCategoryData = categoryBreakdown && categoryBreakdown.length > 0 && categoryBreakdown.some(item => getAttemptCount(item) > 0);
+  const hasData = hasAttempts || displayAverageScore > 0 || totalAttempts > 0 || hasExamData || hasCategoryData;
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // Filter and sort category data
+  const filteredCategoryBreakdown = categoryBreakdown
+    .filter(item => getAttemptCount(item) > 0)
+    .sort((a, b) => getAverageScore(b) - getAverageScore(a));
+
+  // Filter and sort exam data
+  const filteredExamBreakdown = examBreakdown
+    .filter(item => getAttemptCount(item) > 0)
+    .sort((a, b) => getAverageScore(b) - getAverageScore(a));
+
+  console.log('ScoreDetailsModal Data:', {
+    averageScore: displayAverageScore,
+    overallStats,
+    examBreakdown: filteredExamBreakdown,
+    categoryBreakdown: filteredCategoryBreakdown,
+    hasAttempts,
+    hasData
+  });
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-            Your Performance Details
+            Your Performance Overview
           </h2>
           <button
             onClick={onClose}
@@ -79,158 +150,221 @@ export default function ScoreDetailsModal({
           </button>
         </div>
 
-        <div className="flex border-b border-gray-200 dark:border-gray-700 mb-6">
-          <button
-            className={`py-2 px-4 font-medium ${
-              activeTab === 'stats' 
-                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400 dark:border-blue-400' 
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-            onClick={() => setActiveTab('stats')}
-          >
-            Performance Stats
-          </button>
-          <button
-            className={`py-2 px-4 font-medium ${
-              activeTab === 'history' 
-                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400 dark:border-blue-400' 
-                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-            onClick={() => setActiveTab('history')}
-          >
-            Score History
-          </button>
-        </div>
-
-        {activeTab === 'stats' && (
-          <>
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white">
-                Overall Average
-              </h3>
-              <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg">
-                <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
-                  {averageScore.toFixed(1)}%
-                </p>
-              </div>
+        {historyLoading ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-900 dark:text-white">Loading your performance data...</p>
+          </div>
+        ) : historyError ? (
+          <div className="text-red-500 dark:text-red-400 text-center py-8">
+            <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+              <p className="font-semibold mb-2">Error Loading Data</p>
+              <p>{getErrorMessage(historyError)}</p>
             </div>
-
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
-                Performance by Exam
-              </h3>
-              <div className="space-y-3">
-                {examBreakdown.length > 0 ? (
-                  examBreakdown.map((item, index) => (
-                    <div 
-                      key={item.exam?.id || index} 
-                      className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg"
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-gray-900 dark:text-white">
-                          {item.exam?.name || 'General Quiz'}
-                        </span>
-                        <span className="font-bold text-gray-900 dark:text-white">
-                          {item.average_score.toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        {item.attempt_count} attempt{item.attempt_count !== 1 && 's'}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-500 dark:text-gray-400">No exam data available</p>
-                )}
-              </div>
+          </div>
+        ) : !hasData ? (
+          // Empty state when no quizzes taken
+          <div className="text-center py-8">
+            <div className="bg-gray-100 dark:bg-gray-700 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">📊</span>
             </div>
-
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
-                Performance by Category
-              </h3>
-              <div className="space-y-3">
-                {categoryBreakdown.length > 0 ? (
-                  categoryBreakdown.map((item, index) => (
-                    <div 
-                      key={item.category?.id || index} 
-                      className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg"
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-gray-900 dark:text-white">
-                          {item.category?.name || 'General Category'}
-                        </span>
-                        <span className="font-bold text-gray-900 dark:text-white">
-                          {item.average_score.toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        {item.attempt_count} attempt{item.attempt_count !== 1 && 's'}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-500 dark:text-gray-400">No category data available</p>
-                )}
-              </div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+              No Quiz Data Yet
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              Complete your first quiz to see your performance statistics and track your progress over time.
+            </p>
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">
+                How it works:
+              </h4>
+              <ul className="text-sm text-blue-700 dark:text-blue-400 text-left space-y-1">
+                <li>• Complete quizzes to build your performance history</li>
+                <li>• Track your average scores across different exams</li>
+                <li>• Identify your strong and weak categories</li>
+                <li>• Monitor your improvement over time</li>
+              </ul>
             </div>
-          </>
-        )}
-
-        {activeTab === 'history' && (
-          <div className="space-y-4">
-            {historyLoading ? (
-              <div className="text-center py-8 text-gray-900 dark:text-white">
-                Loading your history...
-              </div>
-            ) : historyError ? (
-              <div className="text-red-500 dark:text-red-400 text-center py-8">
-                {getErrorMessage(historyError)}
-              </div>
-            ) : scoreHistory?.length ? (
-              <>
-                <div className="grid grid-cols-12 gap-4 font-semibold border-b border-gray-200 dark:border-gray-700 pb-2 text-gray-900 dark:text-white">
-                  <div className="col-span-4">Quiz</div>
-                  <div className="col-span-3">Category</div>
-                  <div className="col-span-2 text-right">Score</div>
-                  <div className="col-span-3 text-right">Date</div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Overall Performance Card */}
+            <div className={`border rounded-lg p-6 ${getScoreBgColor(displayAverageScore)}`}>
+              <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white text-center">
+                Overall Performance Summary
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <div>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {totalAttempts}
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Attempts</p>
                 </div>
-                
-                {scoreHistory.map((score) => (
-                  <div 
-                    key={score.id} 
-                    className="grid grid-cols-12 gap-4 items-center py-3 border-b border-gray-100 dark:border-gray-700"
-                  >
-                    <div className="col-span-4 font-medium text-gray-900 dark:text-white">
-                      {score.exam?.name || 'General Quiz'}
+                <div>
+                  <p className={`text-2xl font-bold ${getScoreColor(displayAverageScore)}`}>
+                    {displayAverageScore.toFixed(1)}%
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Average Score</p>
+                </div>
+                <div>
+                  <p className={`text-2xl font-bold ${getScoreColor(overallStats?.highest_score || 0)}`}>
+                    {(overallStats?.highest_score || 0).toFixed(1)}%
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Best Score</p>
+                </div>
+                <div>
+                  <p className={`text-2xl font-bold ${getScoreColor(overallStats?.lowest_score || 0)}`}>
+                    {(overallStats?.lowest_score || 0).toFixed(1)}%
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Lowest Score</p>
+                </div>
+              </div>
+              {overallStats?.last_attempt && (
+                <div className="mt-4 text-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Last attempt: {formatDate(overallStats.last_attempt)}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Category Breakdown */}
+            {hasCategoryData && (
+              <div>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
+                  Performance by Category
+                </h3>
+                <div className="space-y-3">
+                  {filteredCategoryBreakdown.map((item, index) => (
+                    <div 
+                      key={item.category?.id || item.category_id || `category-${index}`} 
+                      className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg border border-gray-200 dark:border-gray-600"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-medium text-gray-900 dark:text-white text-lg">
+                          {getCategoryName(item)}
+                        </span>
+                        <span className={`text-xl font-bold ${getScoreColor(getAverageScore(item))}`}>
+                          {getAverageScore(item).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Attempts: </span>
+                          <span className="font-medium text-gray-900 dark:text-white">
+                            {getAttemptCount(item)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Best: </span>
+                          <span className={`font-bold ${getScoreColor(item.highest_score || 0)}`}>
+                            {(item.highest_score || 0).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Average: </span>
+                          <span className={`font-bold ${getScoreColor(getAverageScore(item))}`}>
+                            {getAverageScore(item).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Lowest: </span>
+                          <span className={`font-bold ${getScoreColor(item.lowest_score || 0)}`}>
+                            {(item.lowest_score || 0).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="col-span-3 text-gray-600 dark:text-gray-300">
-                      {score.category?.name || '-'}
-                    </div>
-                    <div className={`col-span-2 font-bold text-right ${getScoreColor(score.score)}`}>
-                      {score.score.toFixed(1)}%
-                    </div>
-                    <div className="col-span-3 text-gray-500 dark:text-gray-400 text-right text-sm">
-                      {new Date(score.date).toLocaleDateString()}
-                      <br />
-                      {new Date(score.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                    </div>
-                  </div>
-                ))}
-              </>
-            ) : (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                No quiz attempts found
+                  ))}
+                </div>
               </div>
             )}
+
+            {/* Exam Breakdown */}
+            {hasExamData && (
+              <div>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">
+                  Performance by Exam
+                </h3>
+                <div className="space-y-3">
+                  {filteredExamBreakdown.map((item, index) => (
+                    <div 
+                      key={item.exam?.id || item.exam_id || `exam-${index}`} 
+                      className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg border border-gray-200 dark:border-gray-600"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-medium text-gray-900 dark:text-white text-lg">
+                          {getExamName(item)}
+                        </span>
+                        <span className={`text-xl font-bold ${getScoreColor(getAverageScore(item))}`}>
+                          {getAverageScore(item).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Attempts: </span>
+                          <span className="font-medium text-gray-900 dark:text-white">
+                            {getAttemptCount(item)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Best: </span>
+                          <span className={`font-bold ${getScoreColor(item.highest_score || 0)}`}>
+                            {(item.highest_score || 0).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Average: </span>
+                          <span className={`font-bold ${getScoreColor(getAverageScore(item))}`}>
+                            {getAverageScore(item).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 dark:text-gray-400">Lowest: </span>
+                          <span className={`font-bold ${getScoreColor(item.lowest_score || 0)}`}>
+                            {(item.lowest_score || 0).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Performance Insights */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+              <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">
+                Performance Insights
+              </h4>
+              <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1">
+                {displayAverageScore >= 70 ? (
+                  <li>• Excellent! You're consistently scoring high. Keep up the great work!</li>
+                ) : displayAverageScore >= 50 ? (
+                  <li>• Good progress! You're above average. Focus on weak areas to improve further.</li>
+                ) : (
+                  <li>• Keep practicing! Review the explanations for wrong answers to improve.</li>
+                )}
+                <li>• You've completed {totalAttempts} quiz attempts so far.</li>
+                {overallStats?.highest_score && overallStats.highest_score >= 80 && (
+                  <li>• Your best score of {overallStats.highest_score.toFixed(1)}% shows great potential!</li>
+                )}
+                {filteredCategoryBreakdown.length > 0 && (
+                  <li>• You have attempted quizzes in {filteredCategoryBreakdown.length} different category{filteredCategoryBreakdown.length !== 1 ? 's' : ''}.</li>
+                )}
+                {filteredExamBreakdown.length > 0 && (
+                  <li>• You have attempted quizzes from {filteredExamBreakdown.length} different exam{filteredExamBreakdown.length !== 1 ? 's' : ''}.</li>
+                )}
+              </ul>
+            </div>
           </div>
         )}
 
         <button
           onClick={onClose}
-          className="mt-6 w-full bg-blue-600 dark:bg-blue-700 text-white py-2 px-4 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+          className="mt-6 w-full bg-blue-600 dark:bg-blue-700 text-white py-3 px-4 rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors font-medium"
         >
-          Close
+          {hasData ? 'Close' : 'Start a Quiz'}
         </button>
       </div>
     </div>

@@ -72,24 +72,34 @@ export interface ScoreStats {
   lowest_score: number;
   total_attempts: number;
   last_attempt?: string;
+  message?: string;
+  has_attempts?: boolean;
 }
 
 export interface ExamScoreBreakdown {
-  exam_id: number;
-  exam_name: string;
+  exam_id?: number;
+  exam_name?: string;
   average_score: number;
   attempt_count: number;
-  highest_score: number;
-  lowest_score: number;
+  highest_score?: number;
+  lowest_score?: number;
+  exam?: {
+    id: number;
+    name: string;
+  };
 }
 
 export interface CategoryScoreBreakdown {
-  category_id: number;
-  category_name: string;
+  category_id?: number;
+  category_name?: string;
   average_score: number;
   attempt_count: number;
-  highest_score: number;
-  lowest_score: number;
+  highest_score?: number;
+  lowest_score?: number;
+  category?: {
+    id: number;
+    name: string;
+  };
 }
 
 export interface ScoreRecord {
@@ -145,4 +155,90 @@ export interface QuizMetadata {
   session_size: number;
   has_auto_cleaned: boolean;
   session_reset: boolean;
+}
+
+// NEW: User Stats Response Interface
+export interface UserStatsResponse {
+  has_attempts: boolean;
+  average_score: number;
+  overall_stats: {
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    total_attempts: number;
+    last_attempt: string;
+    recent_activity: number;
+  };
+  exam_breakdown: Array<{
+    exam_id: number;
+    exam_name: string;
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    attempt_count: number;
+  }>;
+  category_breakdown: Array<{
+    category_id: number;
+    category_name: string;
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    attempt_count: number;
+  }>;
+  summary: {
+    total_quizzes_taken: number;
+    exams_attempted: number;
+    categories_attempted: number;
+    recent_activity: number;
+  };
+}
+
+// NEW: Progress Data Interface for Charts
+export interface ProgressData {
+  week: string;
+  average_score: number;
+  attempt_count: number;
+  period: string;
+}
+
+// NEW: Enhanced Exam Breakdown for Frontend
+export interface EnhancedExamScoreBreakdown {
+  exam_id: number;
+  exam_name: string;
+  average_score: number;
+  highest_score: number;
+  lowest_score: number;
+  attempt_count: number;
+}
+
+// NEW: Enhanced Category Breakdown for Frontend
+export interface EnhancedCategoryScoreBreakdown {
+  category_id: number;
+  category_name: string;
+  average_score: number;
+  highest_score: number;
+  lowest_score: number;
+  attempt_count: number;
+}
+
+// NEW: Complete User Stats for Frontend Components
+export interface CompleteUserStats {
+  hasAttempts: boolean;
+  averageScore: number;
+  overallStats: {
+    averageScore: number;
+    highestScore: number;
+    lowestScore: number;
+    totalAttempts: number;
+    lastAttempt: string;
+    recentActivity: number;
+  };
+  examBreakdown: EnhancedExamScoreBreakdown[];
+  categoryBreakdown: EnhancedCategoryScoreBreakdown[];
+  summary: {
+    totalQuizzesTaken: number;
+    examsAttempted: number;
+    categoriesAttempted: number;
+    recentActivity: number;
+  };
 }

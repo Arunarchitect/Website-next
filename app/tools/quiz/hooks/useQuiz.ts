@@ -42,6 +42,9 @@ export const useQuiz = () => {
   const [currentCategory, setCurrentCategory] = useState<number | null>(null);
   const [quizState, setQuizState] = useState<QuizState>("settings");
   const [metadata, setMetadata] = useState<QuizMetadata | null>(null);
+  // Add state to track the actual exam/category used for the current quiz
+  const [quizExam, setQuizExam] = useState<number | null>(null);
+  const [quizCategory, setQuizCategory] = useState<number | null>(null);
 
   const handleExamChange = async (examId: number | null) => {
     setCurrentExam(examId);
@@ -62,6 +65,10 @@ export const useQuiz = () => {
       setError(null);
       setCurrentExam(params.exam || null);
       setCurrentCategory(params.category || null);
+      
+      // Store the actual exam and category used for this quiz
+      setQuizExam(params.exam || null);
+      setQuizCategory(params.category || null);
       
       // Prepare the API call parameters with defaults
       const apiParams = {
@@ -157,13 +164,27 @@ export const useQuiz = () => {
       const displayScore = Math.max(0, rawScore);
       const displayPercentage = Math.max(0, percentage);
 
+      // Use the stored quizExam and quizCategory that were used to fetch the questions
+      console.log("=== DEBUG: Submitting quiz data ===");
+      console.log("quizExam:", quizExam);
+      console.log("quizCategory:", quizCategory);
+      console.log("rawScore:", rawScore);
+      console.log("percentage:", percentage);
+      console.log("questions length:", questions.length);
+      console.log("answers:", answers);
+      console.log("=== END DEBUG ===");
+
       const response = await evaluateQuiz({
         answers,
         calculated_score: rawScore,
         calculated_percentage: percentage,
-        exam: currentExam,
-        category: currentCategory,
+        exam: quizExam, // Use the stored quiz exam
+        category: quizCategory, // Use the stored quiz category
       }).unwrap();
+
+      console.log("=== DEBUG: Evaluation response ===");
+      console.log("Response:", response);
+      console.log("=== END DEBUG ===");
 
       setResults({
         ...response,
@@ -177,6 +198,12 @@ export const useQuiz = () => {
     } catch (err: unknown) {
       // Proper error handling without 'any'
       const apiError = err as ApiError;
+      
+      console.log("=== DEBUG: Evaluation error ===");
+      console.log("Error:", err);
+      console.log("Error data:", apiError.data);
+      console.log("Error status:", apiError.status);
+      console.log("=== END DEBUG ===");
       
       if (apiError.data?.error) {
         setError(apiError.data.error);
@@ -201,6 +228,8 @@ export const useQuiz = () => {
     setError(null);
     setCurrentExam(null);
     setCurrentCategory(null);
+    setQuizExam(null);
+    setQuizCategory(null);
     setQuizState("settings");
     setMetadata(null);
   };

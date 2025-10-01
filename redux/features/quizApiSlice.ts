@@ -13,6 +13,49 @@ import {
   QuizResponse
 } from "@/app/tools/quiz/types/quiztypes";
 
+// Add these interfaces for the new endpoints
+export interface UserStatsResponse {
+  has_attempts: boolean;
+  average_score: number;
+  overall_stats: {
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    total_attempts: number;
+    last_attempt: string;
+    recent_activity: number;
+  };
+  exam_breakdown: Array<{
+    exam_id: number;
+    exam_name: string;
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    attempt_count: number;
+  }>;
+  category_breakdown: Array<{
+    category_id: number;
+    category_name: string;
+    average_score: number;
+    highest_score: number;
+    lowest_score: number;
+    attempt_count: number;
+  }>;
+  summary: {
+    total_quizzes_taken: number;
+    exams_attempted: number;
+    categories_attempted: number;
+    recent_activity: number;
+  };
+}
+
+export interface ProgressData {
+  week: string;
+  average_score: number;
+  attempt_count: number;
+  period: string;
+}
+
 export const quizApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     // Existing endpoints
@@ -90,6 +133,18 @@ export const quizApiSlice = apiSlice.injectEndpoints({
       providesTags: ["Scores"],
     }),
 
+    // NEW: Comprehensive user stats endpoint
+    getUserStats: builder.query<UserStatsResponse, void>({
+      query: () => "/scores/user_stats/",
+      providesTags: ["Scores"],
+    }),
+
+    // NEW: Progress over time for charts
+    getProgressOverTime: builder.query<ProgressData[], void>({
+      query: () => "/scores/progress_over_time/",
+      providesTags: ["Scores"],
+    }),
+
     // Optional: Get scores with filters
     getFilteredScores: builder.query<{
       results: Array<{
@@ -133,5 +188,7 @@ export const {
   useGetScoreStatsQuery,
   useGetScoresByExamQuery,
   useGetScoresByCategoryQuery,
+  useGetUserStatsQuery,
+  useGetProgressOverTimeQuery,
   useLazyGetFilteredScoresQuery,
 } = quizApiSlice;
