@@ -6,14 +6,14 @@ import {
   useGetExamsQuery,
   useLazyGetExamCategoriesQuery,
 } from "@/redux/features/quizApiSlice";
-import { 
-  Question, 
-  QuestionExplanation, 
-  QuizEvaluation, 
+import {
+  Question,
+  QuestionExplanation,
+  QuizEvaluation,
   QuizState,
   ExtendedQuizParams,
   QuizMetadata,
-  QuizResponse
+  QuizResponse,
 } from "../types/quiztypes";
 
 // Define proper error types
@@ -29,10 +29,15 @@ interface ApiError {
 
 export const useQuiz = () => {
   const { data: exams = [] } = useGetExamsQuery();
-  const [getExamCategories, { data: categories = [], isLoading: isCategoriesLoading }] = useLazyGetExamCategoriesQuery();
+  const [
+    getExamCategories,
+    { data: categories = [], isLoading: isCategoriesLoading },
+  ] = useLazyGetExamCategoriesQuery();
 
-  const [getQuestions, { isLoading: isQuestionsLoading }] = useLazyGetQuizQuestionsQuery();
-  const [evaluateQuiz, { isLoading: isEvaluationLoading }] = useEvaluateQuizMutation();
+  const [getQuestions, { isLoading: isQuestionsLoading }] =
+    useLazyGetQuizQuestionsQuery();
+  const [evaluateQuiz, { isLoading: isEvaluationLoading }] =
+    useEvaluateQuizMutation();
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -49,7 +54,7 @@ export const useQuiz = () => {
   const handleExamChange = async (examId: number | null) => {
     setCurrentExam(examId);
     setCurrentCategory(null);
-    
+
     if (examId) {
       try {
         await getExamCategories(examId).unwrap();
@@ -65,11 +70,11 @@ export const useQuiz = () => {
       setError(null);
       setCurrentExam(params.exam || null);
       setCurrentCategory(params.category || null);
-      
+
       // Store the actual exam and category used for this quiz
       setQuizExam(params.exam || null);
       setQuizCategory(params.category || null);
-      
+
       // Prepare the API call parameters with defaults
       const apiParams = {
         count: params.count,
@@ -77,18 +82,19 @@ export const useQuiz = () => {
         category: params.category,
         recency_percentage: params.recency_percentage || 50,
         pool_percentage: params.pool_percentage || 20,
-        reset_session: params.reset_session !== undefined ? params.reset_session : true,
+        reset_session:
+          params.reset_session !== undefined ? params.reset_session : true,
       };
 
       console.log("Fetching questions with params:", apiParams);
 
       // The API returns a QuizResponse object with questions and metadata
       const response: QuizResponse = await getQuestions(apiParams).unwrap();
-      
+
       console.log("API Response:", response);
       console.log("Questions received:", response.questions);
       console.log("Metadata received:", response.metadata);
-      
+
       // Set questions and metadata from the response object
       setQuestions(response.questions || []);
       setMetadata(response.metadata);
@@ -98,16 +104,16 @@ export const useQuiz = () => {
     } catch (err: unknown) {
       // Enhanced error handling with better debugging
       console.error("Full error object:", err);
-      
+
       const apiError = err as ApiError;
-      
+
       // Log detailed error information for debugging
       console.log("Error details:", {
         data: apiError.data,
         status: apiError.status,
-        originalStatus: apiError.originalStatus
+        originalStatus: apiError.originalStatus,
       });
-      
+
       if (apiError.data?.error) {
         setError(`API Error: ${apiError.data.error}`);
       } else if (apiError.data?.detail) {
@@ -139,9 +145,14 @@ export const useQuiz = () => {
       let rawScore = 0;
       const explanations: QuestionExplanation[] = [];
 
+      // Create a complete answers object that includes ALL questions
+      const completeAnswers: Record<string, string> = {};
+
       questions.forEach((question) => {
         const answerKey = `question_${question.id}`;
-        const selectedOption = answers[answerKey];
+        const selectedOption = answers[answerKey] || ""; // Use empty string for unanswered
+        completeAnswers[answerKey] = selectedOption;
+
         const isCorrect = selectedOption === question.correct_option;
 
         if (isCorrect) {
@@ -167,9 +178,12 @@ export const useQuiz = () => {
       console.log("=== DEBUG: Submitting quiz data ===");
       console.log("quizExam:", quizExam);
       console.log("quizCategory:", quizCategory);
+      console.log("Complete answers object:", completeAnswers);
+      console.log("Total questions:", questions.length);
+      console.log("Answers count:", Object.keys(completeAnswers).length);
 
       const response = await evaluateQuiz({
-        answers,
+        answers: completeAnswers, // ← Now includes ALL questions
         calculated_score: rawScore,
         calculated_percentage: percentage,
         exam: quizExam,
@@ -192,12 +206,12 @@ export const useQuiz = () => {
         exam_breakdown: response.exam_breakdown,
         overall_score: response.overall_score,
       });
-      
+
       setQuizState("results");
     } catch (err: unknown) {
       const apiError = err as ApiError;
       console.error("Error evaluating quiz:", err);
-      
+
       if (apiError.data?.error) {
         setError(apiError.data.error);
       } else {
