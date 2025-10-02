@@ -1,5 +1,5 @@
 // hooks/useQuiz.ts
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useLazyGetQuizQuestionsQuery,
   useEvaluateQuizMutation,
@@ -14,6 +14,7 @@ import {
   ExtendedQuizParams,
   QuizMetadata,
   QuizResponse,
+  Category,
 } from "../types/quiztypes";
 
 // Define proper error types
@@ -31,7 +32,7 @@ export const useQuiz = () => {
   const { data: exams = [] } = useGetExamsQuery();
   const [
     getExamCategories,
-    { data: categories = [], isLoading: isCategoriesLoading },
+    { isLoading: isCategoriesLoading },
   ] = useLazyGetExamCategoriesQuery();
 
   const [getQuestions, { isLoading: isQuestionsLoading }] =
@@ -50,6 +51,25 @@ export const useQuiz = () => {
   // Add state to track the actual exam/category used for the current quiz
   const [quizExam, setQuizExam] = useState<number | null>(null);
   const [quizCategory, setQuizCategory] = useState<number | null>(null);
+  // Store all categories for lookup
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
+
+  // Fetch all categories when component mounts
+  useEffect(() => {
+    const fetchAllCategories = async () => {
+      try {
+        if (exams.length > 0) {
+          const firstExamId = exams[0].id;
+          const categoriesData = await getExamCategories(firstExamId).unwrap();
+          setAllCategories(categoriesData);
+        }
+      } catch (err) {
+        console.error("Error fetching categories:", err);
+      }
+    };
+
+    fetchAllCategories();
+  }, [exams, getExamCategories]);
 
   const handleExamChange = async (examId: number | null) => {
     setCurrentExam(examId);
@@ -57,7 +77,8 @@ export const useQuiz = () => {
 
     if (examId) {
       try {
-        await getExamCategories(examId).unwrap();
+        const categoriesData = await getExamCategories(examId).unwrap();
+        setAllCategories(categoriesData);
       } catch (err) {
         setError("Failed to fetch categories for this exam");
         console.error("Error fetching exam categories:", err);
@@ -74,6 +95,16 @@ export const useQuiz = () => {
       // Store the actual exam and category used for this quiz
       setQuizExam(params.exam || null);
       setQuizCategory(params.category || null);
+
+      // If we have a specific category selected, make sure we have its categories loaded
+      if (params.exam && allCategories.length === 0) {
+        try {
+          const categoriesData = await getExamCategories(params.exam).unwrap();
+          setAllCategories(categoriesData);
+        } catch (err) {
+          console.error("Error fetching categories for exam:", err);
+        }
+      }
 
       // Prepare the API call parameters with defaults
       const apiParams = {
@@ -93,7 +124,7 @@ export const useQuiz = () => {
 
       console.log("API Response:", response);
       console.log("Questions received:", response.questions);
-      console.log("Metadata received:", response.metadata);
+      console.log("Available categories:", allCategories);
 
       // Set questions and metadata from the response object
       setQuestions(response.questions || []);
@@ -138,15 +169,52 @@ export const useQuiz = () => {
     }
   };
 
+  // Helper function to get category name by ID with fallback mapping
+  const getCategoryNameById = (categoryId: number): string => {
+    console.log("Looking up category ID:", categoryId);
+    console.log("Available categories for lookup:", allCategories);
+    
+    // First try to find in loaded categories
+    const category = allCategories.find((cat: Category) => cat.id === categoryId);
+    if (category) {
+      console.log("Found category name:", category.name);
+      return category.name;
+    }
+    
+    // Fallback to hardcoded mapping based on common categories
+    const categoryMap: Record<number, string> = {
+      59: "Building Services and Structural Systems",
+      86: "Urban Planning and Design",
+      // Add more mappings as needed based on your database
+    };
+    
+    const categoryName = categoryMap[categoryId] || `Category ${categoryId}`;
+    console.log("Using fallback category name:", categoryName);
+    return categoryName;
+  };
+
   const submitAnswers = async () => {
     try {
       if (questions.length === 0) return;
 
       let rawScore = 0;
       const explanations: QuestionExplanation[] = [];
+      
+      // Track scores by category
+      const categoryScores: Record<string, { 
+        category_name: string; 
+        correct: number; 
+        total: number; 
+        rawScore: number;
+        display_score: number;
+      }> = {};
 
       // Create a complete answers object that includes ALL questions
       const completeAnswers: Record<string, string> = {};
+
+      console.log("=== DEBUG: Processing questions ===");
+      console.log("Questions to process:", questions);
+      console.log("Available categories:", allCategories);
 
       questions.forEach((question) => {
         const answerKey = `question_${question.id}`;
@@ -155,10 +223,44 @@ export const useQuiz = () => {
 
         const isCorrect = selectedOption === question.correct_option;
 
+        // Calculate points for this question
+        let questionScore = 0;
         if (isCorrect) {
-          rawScore += 1;
-        } else if (selectedOption) {
-          rawScore -= 0.33;
+          questionScore = 1;
+        } else if (selectedOption && selectedOption !== "") { // Only penalize if an option was actually selected
+          questionScore = -0.33;
+        }
+        // Empty string (unanswered) gets 0 points
+
+        rawScore += questionScore;
+
+        // Track category scores with proper calculation
+        // Use the category ID from the question and get the name from available categories
+        const categoryId = question.category;
+        if (categoryId) {
+          const categoryName = getCategoryNameById(categoryId);
+          const categoryKey = categoryId.toString();
+          
+          console.log(`Processing question ${question.id} with category ${categoryId}: ${categoryName}`);
+          
+          if (!categoryScores[categoryKey]) {
+            categoryScores[categoryKey] = { 
+              category_name: categoryName,
+              correct: 0, 
+              total: 0, 
+              rawScore: 0,
+              display_score: 0
+            };
+          }
+          
+          categoryScores[categoryKey].total += 1;
+          categoryScores[categoryKey].rawScore += questionScore;
+          categoryScores[categoryKey].display_score = categoryScores[categoryKey].rawScore;
+          if (isCorrect) {
+            categoryScores[categoryKey].correct += 1;
+          }
+        } else {
+          console.log(`Question ${question.id} has no category ID`);
         }
 
         explanations.push({
@@ -175,15 +277,33 @@ export const useQuiz = () => {
       const displayScore = Math.max(0, rawScore);
       const displayPercentage = Math.max(0, percentage);
 
-      console.log("=== DEBUG: Submitting quiz data ===");
-      console.log("quizExam:", quizExam);
-      console.log("quizCategory:", quizCategory);
-      console.log("Complete answers object:", completeAnswers);
-      console.log("Total questions:", questions.length);
-      console.log("Answers count:", Object.keys(completeAnswers).length);
+      // Create proper category breakdown with negative scores
+      const categoryBreakdown: Record<string, {
+        raw_score: number;
+        display_score: number;
+        percentage: number;
+        display_percentage: number;
+        question_count: number;
+        category_name: string;
+      }> = {};
+
+      Object.entries(categoryScores).forEach(([categoryId, scores]) => {
+        const actualPercentage = (scores.rawScore / scores.total) * 100;
+        categoryBreakdown[categoryId] = {
+          raw_score: scores.rawScore, // Actual score (can be negative)
+          display_score: scores.rawScore, // Same as raw_score for now
+          percentage: actualPercentage, // This can be negative!
+          display_percentage: Math.max(0, actualPercentage), // Clamped for display
+          question_count: scores.total,
+          category_name: scores.category_name, // Use the actual category name
+        };
+      });
+
+      console.log("=== DEBUG: Final Category Breakdown ===");
+      console.log("Category scores:", categoryBreakdown);
 
       const response = await evaluateQuiz({
-        answers: completeAnswers, // ← Now includes ALL questions
+        answers: completeAnswers,
         calculated_score: rawScore,
         calculated_percentage: percentage,
         exam: quizExam,
@@ -201,8 +321,8 @@ export const useQuiz = () => {
         displayScore,
         displayPercentage,
         explanations,
-        // Include breakdown data if available
-        category_breakdown: response.category_breakdown,
+        // Use our calculated breakdown that includes negative scores
+        category_breakdown: categoryBreakdown,
         exam_breakdown: response.exam_breakdown,
         overall_score: response.overall_score,
       });
@@ -220,11 +340,26 @@ export const useQuiz = () => {
     }
   };
 
+  // FIXED: Added deselection functionality
   const handleAnswerSelect = (questionId: number, option: string) => {
-    setAnswers((prev) => ({
-      ...prev,
-      [`question_${questionId}`]: option,
-    }));
+    setAnswers((prev) => {
+      const answerKey = `question_${questionId}`;
+      const currentAnswer = prev[answerKey];
+      
+      // Toggle selection - if same option clicked, set to empty string to deselect
+      if (currentAnswer === option) {
+        return {
+          ...prev,
+          [answerKey]: "" // Use empty string for deselected/unanswered
+        };
+      } else {
+        // Select new option
+        return {
+          ...prev,
+          [answerKey]: option
+        };
+      }
+    });
   };
 
   const resetQuiz = () => {
@@ -247,7 +382,7 @@ export const useQuiz = () => {
 
   return {
     exams,
-    categories,
+    categories: allCategories,
     questions,
     answers,
     results,

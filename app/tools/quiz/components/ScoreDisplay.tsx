@@ -4,11 +4,12 @@ import { QuizEvaluation, ExamBreakdown, OverallScoreData } from '../types/quizty
 interface ScoreDisplayProps {
   results: QuizEvaluation & {
     category_breakdown?: Record<string, {
-      category_name: string;
+      raw_score: number;
+      display_score: number;
       percentage: number;
       display_percentage: number;
       question_count: number;
-      display_score: number;
+      category_name: string;
     }>;
     exam_breakdown?: ExamBreakdown;
     overall_score?: OverallScoreData;
@@ -68,29 +69,39 @@ export default function ScoreDisplay({
         </p>
       </div>
 
-      {/* Category Breakdown in Results */}
+      {/* Category Breakdown in Results - FIXED SECTION */}
       {results.category_breakdown && Object.keys(results.category_breakdown).length > 0 && (
         <div className="mb-6">
           <h3 className="text-xl font-semibold mb-4 dark:text-white">Performance by Category</h3>
           <div className="space-y-3">
             {Object.entries(results.category_breakdown).map(([categoryId, categoryData]) => {
-              const categoryScoreColor = categoryData.percentage >= 70 ? 'text-green-600 dark:text-green-400' :
-                                      categoryData.percentage >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
-                                      'text-red-600 dark:text-red-400';
+              // FIX: Use actual percentage (can be negative) instead of clamped display_percentage
+              const actualCategoryPercentage = categoryData.percentage;
+              const categoryScoreColor = actualCategoryPercentage >= 70 ? 'text-green-600 dark:text-green-400' :
+                                      actualCategoryPercentage >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
+                                      actualCategoryPercentage >= 0 ? 'text-red-600 dark:text-red-400' : 
+                                      'text-red-800 dark:text-red-500';
               
               return (
                 <div key={categoryId} className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
                   <div className="flex justify-between items-center">
                     <span className="font-medium text-gray-900 dark:text-white">
+                      {/* FIX: Use category_name instead of category ID */}
                       {categoryData.category_name}
                     </span>
                     <span className={`font-bold ${categoryScoreColor}`}>
-                      {categoryData.display_percentage.toFixed(1)}%
+                      {/* FIX: Show actual percentage that can be negative */}
+                      {actualCategoryPercentage.toFixed(1)}%
                     </span>
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     {categoryData.question_count} question{categoryData.question_count !== 1 ? 's' : ''} • 
-                    Score: {categoryData.display_score.toFixed(2)}
+                    Score: {categoryData.raw_score.toFixed(2)}
+                    {categoryData.raw_score < 0 && (
+                      <span className="text-red-600 dark:text-red-400 ml-1">
+                        (Penalty: -0.33 per wrong answer)
+                      </span>
+                    )}
                   </div>
                 </div>
               );
