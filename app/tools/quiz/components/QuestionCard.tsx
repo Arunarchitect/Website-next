@@ -1,4 +1,5 @@
 // components/QuestionCard.tsx
+import { useMemo } from 'react';
 import { Question } from '../types/quiztypes';
 
 interface QuestionCardProps {
@@ -16,17 +17,27 @@ export default function QuestionCard({
   showResult = false,
   correctAnswer
 }: QuestionCardProps) {
-  const options = [
-    { id: 'option_1', value: question.option_1 },
-    { id: 'option_2', value: question.option_2 },
-    { id: 'option_3', value: question.option_3 },
-    { id: 'correct_option', value: question.correct_option }
-  ];
 
-  const uniqueOptions = options.filter(
-    (option, index, self) => 
-      index === self.findIndex((o) => o.value === option.value)
-  );
+  // Shuffle and deduplicate options only once per question render
+  const shuffledOptions = useMemo(() => {
+    const rawOptions = [
+      question.option_1,
+      question.option_2,
+      question.option_3,
+      question.correct_option,
+    ];
+
+    // Remove duplicates
+    const uniqueOptions = Array.from(new Set(rawOptions));
+
+    // Fisher-Yates shuffle
+    for (let i = uniqueOptions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [uniqueOptions[i], uniqueOptions[j]] = [uniqueOptions[j], uniqueOptions[i]];
+    }
+
+    return uniqueOptions;
+  }, [question]);
 
   const getOptionClass = (option: string) => {
     if (!showResult) {
@@ -50,15 +61,15 @@ export default function QuestionCard({
         {question.question_text}
       </h3>
       <div className="space-y-2">
-        {uniqueOptions.map((opt) => (
+        {shuffledOptions.map((option, index) => (
           <div
-            key={opt.id}
-            onClick={() => !showResult && onAnswerSelect(opt.value)}
+            key={index}
+            onClick={() => !showResult && onAnswerSelect(option)}
             className={`p-3 border rounded cursor-pointer transition-colors ${
               !showResult ? 'text-gray-900 dark:text-white' : ''
-            } ${getOptionClass(opt.value)}`}
+            } ${getOptionClass(option)}`}
           >
-            {opt.value}
+            {option}
           </div>
         ))}
       </div>
