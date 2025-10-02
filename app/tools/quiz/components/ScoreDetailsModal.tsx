@@ -311,7 +311,7 @@ export default function ScoreDetailsModal({
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <span className="text-gray-500 dark:text-gray-400">Questions Attempted: </span>
+                          <span className="text-gray-500 dark:text-gray-400">Quiz Sessions: </span>
                           <span className="font-medium text-gray-900 dark:text-white">
                             {getAttemptCount(item)}
                           </span>
@@ -363,7 +363,7 @@ export default function ScoreDetailsModal({
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <span className="text-gray-500 dark:text-gray-400">Questions Attempted: </span>
+                          <span className="text-gray-500 dark:text-gray-400">Quiz Sessions: </span>
                           <span className="font-medium text-gray-900 dark:text-white">
                             {getAttemptCount(item)}
                           </span>
