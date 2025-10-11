@@ -1,8 +1,11 @@
+// panorama/page.tsx
+
 'use client';
 
 import { useEffect, useRef, useState, ChangeEvent, useCallback } from 'react';
 import 'pannellum/build/pannellum.css';
 import 'pannellum/build/pannellum.js';
+import { useParams } from 'next/navigation';
 
 // Type definitions for pannellum
 declare const pannellum: {
@@ -16,6 +19,8 @@ declare const pannellum: {
       mouseZoom?: boolean;
       draggable?: boolean;
       compass?: boolean;
+      showControls?: boolean;
+      showFullscreenCtrl?: boolean;
     }
   ) => PannellumViewer;
 };
@@ -46,7 +51,10 @@ interface ProjectData {
   "360_images": ViewerData[];
 }
 
-export default function PanoramaViewer() {
+export default function PanoramaViewerWithCode() {
+  const params = useParams();
+  const code = params.code as string;
+
   const [accessKey, setAccessKey] = useState<string>('');
   const [projectData, setProjectData] = useState<ProjectData | null>(null);
   const [selectedView, setSelectedView] = useState<ViewerData | null>(null);
@@ -54,36 +62,68 @@ export default function PanoramaViewer() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'accessKey' | 'upload'>('accessKey');
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  
   const viewerRef = useRef<HTMLDivElement>(null);
+  const viewerContainerRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const navigationRef = useRef<HTMLDivElement>(null);
+  
   const viewerInstance = useRef<PannellumViewer | null>(null);
 
-  // Fetch project data when access key is submitted
+  // Automatically set access key from URL
+  useEffect(() => {
+    if (code) {
+      setAccessKey(code);
+      fetchProjectData(code);
+    }
+  }, [code]);
+
+  // Handle fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const fullscreenElement = !!document.fullscreenElement;
+      setIsFullscreen(fullscreenElement);
+      
+      // Force re-render of custom controls
+      if (navigationRef.current) {
+        navigationRef.current.style.display = 'none';
+        setTimeout(() => {
+          if (navigationRef.current) {
+            navigationRef.current.style.display = 'block';
+          }
+        }, 10);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Fetch project data
   const fetchProjectData = async (key: string) => {
     if (!key.trim()) {
       setError('Please enter an access key');
       return;
     }
-    
     setLoading(true);
     setError('');
-    
     try {
-      const response = await fetch(`https://api.modelflick.com/api/viewer/public/360-images/${key}/`);
-      
+      const response = await fetch(`http://localhost:8000/api/viewer/public/360-images/${key}/`);
       if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error('Invalid access key');
-        }
+        if (response.status === 401) throw new Error('Invalid access key');
         throw new Error('Failed to fetch project data');
       }
-      
       const data: ProjectData = await response.json();
       setProjectData(data);
-      
-      // Automatically select the first view if available
       if (data["360_images"].length > 0) {
         setSelectedView(data["360_images"][0]);
-        setUploadedImage(null); // Clear any uploaded image
+        setCurrentImageIndex(0);
+        setUploadedImage(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -99,29 +139,45 @@ export default function PanoramaViewer() {
 
   const handleViewSelect = (view: ViewerData) => {
     setSelectedView(view);
-    setUploadedImage(null); // Clear any uploaded image
+    setUploadedImage(null);
+    if (projectData) {
+      const index = projectData["360_images"].findIndex(v => v.id === view.id);
+      setCurrentImageIndex(index);
+    }
   };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
-    // Check if file is an image
     if (!file.type.startsWith('image/')) {
       setError('Please upload an image file');
       return;
     }
-    
     setError('');
     const reader = new FileReader();
     reader.onload = (ev) => {
       if (ev.target?.result && typeof ev.target.result === 'string') {
         setUploadedImage(ev.target.result);
-        setSelectedView(null); // Clear any selected view from access key
-        setProjectData(null); // Clear project data
+        setSelectedView(null);
+        setProjectData(null);
+        setCurrentImageIndex(0);
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const navigateImages = (direction: 'next' | 'prev') => {
+    if (!projectData || projectData["360_images"].length <= 1) return;
+
+    let newIndex;
+    if (direction === 'next') {
+      newIndex = (currentImageIndex + 1) % projectData["360_images"].length;
+    } else {
+      newIndex = (currentImageIndex - 1 + projectData["360_images"].length) % projectData["360_images"].length;
+    }
+
+    setCurrentImageIndex(newIndex);
+    setSelectedView(projectData["360_images"][newIndex]);
   };
 
   const resetView = () => {
@@ -133,36 +189,35 @@ export default function PanoramaViewer() {
   };
 
   const toggleFullscreen = () => {
-    if (!viewerRef.current) return;
+    if (!viewerContainerRef.current) return;
+    
     if (!document.fullscreenElement) {
-      viewerRef.current.requestFullscreen().catch((e) => console.error(e));
+      viewerContainerRef.current.requestFullscreen().catch(console.error);
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(console.error);
     }
   };
 
-  // Get the current image to display - wrapped in useCallback
-  const getCurrentImage = useCallback(() => {
-    return uploadedImage || selectedView?.image_360 || null;
-  }, [uploadedImage, selectedView]);
+  const getCurrentImage = useCallback(() => uploadedImage || selectedView?.image_360 || null, [uploadedImage, selectedView]);
 
-  // Initialize/update the panorama viewer when the image changes
+  const getCurrentImageName = () => {
+    if (uploadedImage) return 'Uploaded Image';
+    if (selectedView) return selectedView.view_name;
+    return '';
+  };
+
   useEffect(() => {
     const currentImage = getCurrentImage();
     if (!currentImage || !viewerRef.current) return;
 
-    // Destroy existing viewer if it exists
     if (viewerInstance.current) {
       viewerInstance.current.destroy();
       viewerInstance.current = null;
     }
 
-    // Clear the container
-    if (viewerRef.current) {
-      viewerRef.current.innerHTML = '';
-    }
+    viewerRef.current.innerHTML = '';
 
-    // Create new viewer
+    // Initialize pannellum with custom configuration
     viewerInstance.current = pannellum.viewer(viewerRef.current, {
       type: 'equirectangular',
       panorama: currentImage,
@@ -171,9 +226,10 @@ export default function PanoramaViewer() {
       mouseZoom: true,
       draggable: true,
       compass: false,
+      showControls: false, // Hide pannellum's default controls
+      showFullscreenCtrl: false, // Hide pannellum's fullscreen button
     });
 
-    // Cleanup function
     return () => {
       if (viewerInstance.current) {
         viewerInstance.current.destroy();
@@ -182,39 +238,43 @@ export default function PanoramaViewer() {
     };
   }, [getCurrentImage]);
 
+  // Add keyboard navigation
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (!projectData || projectData["360_images"].length <= 1) return;
+      
+      if (e.key === 'ArrowLeft') {
+        navigateImages('prev');
+      } else if (e.key === 'ArrowRight') {
+        navigateImages('next');
+      } else if (e.key === 'Escape' && isFullscreen) {
+        toggleFullscreen();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyPress);
+    return () => {
+      document.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [projectData, currentImageIndex, isFullscreen]);
+
+  const hasMultipleImages = projectData && projectData["360_images"].length > 1;
+
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '1000px', margin: '0 auto' }}>
-      <h1 style={{ textAlign: 'center', color: '#333', marginBottom: '20px' }}>
-        360° Panorama Viewer
-      </h1>
+      <h1 style={{ textAlign: 'center', color: '#333', marginBottom: '20px' }}>360° Panorama Viewer</h1>
 
       {/* Tab Selection */}
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
         <button
           onClick={() => setActiveTab('accessKey')}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: activeTab === 'accessKey' ? '#4CAF50' : '#f0f0f0',
-            color: activeTab === 'accessKey' ? 'white' : '#333',
-            border: 'none',
-            borderRadius: '6px 0 0 6px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
+          style={{ padding: '10px 20px', backgroundColor: activeTab === 'accessKey' ? '#4CAF50' : '#f0f0f0', color: activeTab === 'accessKey' ? 'white' : '#333', border: 'none', borderRadius: '6px 0 0 6px', cursor: 'pointer', fontWeight: 'bold' }}
         >
           Access Key
         </button>
         <button
           onClick={() => setActiveTab('upload')}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: activeTab === 'upload' ? '#4CAF50' : '#f0f0f0',
-            color: activeTab === 'upload' ? 'white' : '#333',
-            border: 'none',
-            borderRadius: '0 6px 6px 0',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
+          style={{ padding: '10px 20px', backgroundColor: activeTab === 'upload' ? '#4CAF50' : '#f0f0f0', color: activeTab === 'upload' ? 'white' : '#333', border: 'none', borderRadius: '0 6px 6px 0', cursor: 'pointer', fontWeight: 'bold' }}
         >
           Upload Image
         </button>
@@ -222,260 +282,311 @@ export default function PanoramaViewer() {
 
       {/* Access Key Input */}
       {activeTab === 'accessKey' && (
-        <div style={{ marginBottom: '20px' }}>
-          <form onSubmit={handleAccessKeySubmit} style={{ display: 'flex', gap: '10px', justifyContent: 'center', alignItems: 'center' }}>
-            <input
-              type="text"
-              value={accessKey}
-              onChange={(e) => setAccessKey(e.target.value)}
-              placeholder="Enter access key (e.g., anil)"
-              style={{
-                padding: '10px',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                width: '250px',
-                fontSize: '16px'
-              }}
-            />
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: loading ? '#ccc' : '#4CAF50',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                fontWeight: 'bold',
-                fontSize: '16px'
-              }}
-            >
-              {loading ? 'Loading...' : 'Load Project'}
-            </button>
-          </form>
-          
-          {/* Example access key hint */}
-          <p style={{ textAlign: 'center', color: '#666', fontSize: '14px', marginTop: '8px' }}>
-            Example: Try access key &quot;anil&quot; to load sample project
-          </p>
-        </div>
+        <form onSubmit={handleAccessKeySubmit} style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '20px' }}>
+          <input
+            type="text"
+            value={accessKey}
+            onChange={(e) => setAccessKey(e.target.value)}
+            placeholder="Enter access key (e.g., anil)"
+            style={{ padding: '10px', border: '1px solid #ccc', borderRadius: '6px', width: '250px', fontSize: '16px' }}
+          />
+          <button type="submit" disabled={loading} style={{ padding: '10px 20px', backgroundColor: loading ? '#ccc' : '#4CAF50', color: 'white', border: 'none', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
+            {loading ? 'Loading...' : 'Load Project'}
+          </button>
+        </form>
       )}
 
-      {/* File Upload */}
+      {/* Upload Image */}
       {activeTab === 'upload' && (
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-          <input 
-            type="file" 
-            accept="image/*" 
-            onChange={handleFileUpload} 
-            id="upload" 
-            style={{ display: 'none' }} 
-          />
-          <label
-            htmlFor="upload"
-            style={{
-              padding: '12px 30px',
-              backgroundColor: '#2196F3',
-              color: 'white',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              fontSize: '16px',
-              boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-              transition: 'background-color 0.2s ease',
-            }}
-            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#1976D2')}
-            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#2196F3')}
-          >
+          <input type="file" accept="image/*" id="upload" onChange={handleFileUpload} style={{ display: 'none' }} />
+          <label htmlFor="upload" style={{ padding: '12px 30px', backgroundColor: '#2196F3', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
             Upload 360° Image
           </label>
         </div>
       )}
-      
-      {error && (
-        <p style={{ color: 'red', textAlign: 'center', marginTop: '10px' }}>
-          {error}
-        </p>
-      )}
+
+      {error && <p style={{ color: 'red', textAlign: 'center', marginBottom: '20px' }}>{error}</p>}
 
       {/* Project Info */}
-      {projectData && (
+      {projectData && !isFullscreen && (
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <h2 style={{ color: '#333', margin: '0' }}>{projectData.project.name}</h2>
-          <p style={{ color: '#666', margin: '5px 0 15px 0' }}>
-            Organization: {projectData.organisation.name}
-          </p>
+          <h2>{projectData.project.name}</h2>
+          <p>Organization: {projectData.organisation.name}</p>
         </div>
       )}
 
       {/* Views Selection */}
-      {projectData && projectData["360_images"].length > 0 && (
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ marginBottom: '10px', color: '#333', textAlign: 'center' }}>Select a View:</h3>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center' }}>
-            {projectData["360_images"].map((view) => (
-              <button
-                key={view.id}
-                onClick={() => handleViewSelect(view)}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: selectedView?.id === view.id ? '#2196F3' : '#f0f0f0',
-                  color: selectedView?.id === view.id ? 'white' : '#333',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: selectedView?.id === view.id ? 'bold' : 'normal',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseOver={(e) => {
-                  if (selectedView?.id !== view.id) {
-                    e.currentTarget.style.backgroundColor = '#e0e0e0';
-                  }
-                }}
-                onMouseOut={(e) => {
-                  if (selectedView?.id !== view.id) {
-                    e.currentTarget.style.backgroundColor = '#f0f0f0';
-                  }
-                }}
-              >
-                {view.view_name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Current Image Info */}
-      {uploadedImage && (
-        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <p style={{ color: '#666', fontStyle: 'italic' }}>
-            Viewing uploaded image
-          </p>
+      {projectData && projectData["360_images"].length > 0 && !isFullscreen && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginBottom: '20px' }}>
+          {projectData["360_images"].map((view) => (
+            <button key={view.id} onClick={() => handleViewSelect(view)} style={{ padding: '8px 16px', backgroundColor: selectedView?.id === view.id ? '#2196F3' : '#f0f0f0', color: selectedView?.id === view.id ? 'white' : '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedView?.id === view.id ? 'bold' : 'normal' }}>
+              {view.view_name}
+            </button>
+          ))}
         </div>
       )}
 
       {/* Controls */}
-      {(selectedView || uploadedImage) && (
+      {(uploadedImage || selectedView) && !isFullscreen && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '20px' }}>
-          <button
-            onClick={resetView}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#2196F3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-              transition: 'background-color 0.2s ease',
-            }}
-            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#1976D2')}
-            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#2196F3')}
-          >
-            Reset View
-          </button>
-
-          <button
-            onClick={toggleFullscreen}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#FF9800',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-              transition: 'background-color 0.2s ease',
-            }}
-            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#FB8C00')}
-            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#FF9800')}
-          >
-            Fullscreen
+          <button onClick={resetView} style={{ padding: '10px 20px', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Reset View</button>
+          <button onClick={toggleFullscreen} style={{ padding: '10px 20px', backgroundColor: '#FF9800', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           </button>
         </div>
       )}
 
-      {/* Viewer */}
-      <div
-        ref={viewerRef}
-        style={{
-          width: '100%',
-          height: '500px',
-          borderRadius: '8px',
-          boxShadow: '0 6px 12px rgba(0,0,0,0.1)',
-          border: '1px solid #ccc',
-          overflow: 'hidden',
-          backgroundColor: '#000',
+      {/* Main Viewer Container - This will go fullscreen */}
+      <div 
+        ref={viewerContainerRef}
+        style={{ 
+          position: 'relative', 
+          width: '100%', 
+          height: isFullscreen ? '100vh' : '500px', 
+          borderRadius: isFullscreen ? '0' : '8px', 
+          backgroundColor: '#000', 
+          overflow: 'hidden', 
+          border: isFullscreen ? 'none' : '1px solid #ccc',
+          margin: isFullscreen ? '0' : 'initial'
         }}
       >
-        {!getCurrentImage() && !loading && (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              height: '100%',
-              color: '#999',
-              textAlign: 'center',
-              fontSize: '16px',
-              padding: '10px',
-            }}
-          >
-            {activeTab === 'accessKey' 
-              ? 'Enter an access key to load project views' 
-              : 'Upload a 360° image to start viewing'}
-          </div>
-        )}
         
-        {loading && (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              height: '100%',
-              color: '#999',
-            }}
-          >
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ 
-                border: '4px solid #f3f3f3', 
-                borderTop: '4px solid #4CAF50', 
-                borderRadius: '50%', 
-                width: '40px', 
-                height: '40px', 
-                animation: 'spin 1s linear infinite',
-                margin: '0 auto 10px' 
-              }}></div>
+        {/* Pannellum Viewer */}
+        <div 
+          ref={viewerRef} 
+          style={{ 
+            width: '100%', 
+            height: '100%',
+            position: 'relative',
+            zIndex: 1
+          }}
+        >
+          {!getCurrentImage() && !loading && (
+            <div style={{ color: '#999', textAlign: 'center', lineHeight: isFullscreen ? '100vh' : '500px' }}>
+              {activeTab === 'accessKey' ? 'Enter an access key to load project views' : 'Upload a 360° image to start viewing'}
+            </div>
+          )}
+          {loading && (
+            <div style={{ color: '#999', textAlign: 'center', lineHeight: isFullscreen ? '100vh' : '500px' }}>
               Loading...
             </div>
+          )}
+        </div>
+
+        {/* Custom Navigation Arrows - Higher z-index */}
+        {hasMultipleImages && (
+          <div ref={navigationRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, pointerEvents: 'none' }}>
+            <button
+              onClick={() => navigateImages('prev')}
+              style={{
+                position: 'absolute',
+                left: '20px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                width: isFullscreen ? '70px' : '50px',
+                height: isFullscreen ? '70px' : '50px',
+                cursor: 'pointer',
+                zIndex: 1001,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: isFullscreen ? '32px' : '24px',
+                fontWeight: 'bold',
+                transition: 'all 0.3s ease',
+                pointerEvents: 'auto',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+                e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+              }}
+            >
+              ‹
+            </button>
+            <button
+              onClick={() => navigateImages('next')}
+              style={{
+                position: 'absolute',
+                right: '20px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                width: isFullscreen ? '70px' : '50px',
+                height: isFullscreen ? '70px' : '50px',
+                cursor: 'pointer',
+                zIndex: 1001,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: isFullscreen ? '32px' : '24px',
+                fontWeight: 'bold',
+                transition: 'all 0.3s ease',
+                pointerEvents: 'auto',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+                e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+              }}
+            >
+              ›
+            </button>
+          </div>
+        )}
+
+        {/* Custom Title Overlay - Higher z-index */}
+        {(uploadedImage || selectedView) && (
+          <div
+            ref={overlayRef}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              color: 'white',
+              padding: isFullscreen ? '16px 32px' : '12px 24px',
+              borderRadius: '25px',
+              zIndex: 1001, // Higher than navigation
+              fontSize: isFullscreen ? '20px' : '16px',
+              fontWeight: 'bold',
+              backdropFilter: 'blur(10px)',
+              textAlign: 'center',
+              maxWidth: '90%',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              pointerEvents: 'none',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+            }}
+          >
+            {getCurrentImageName()}
+            {hasMultipleImages && (
+              <span style={{ 
+                marginLeft: '15px', 
+                fontSize: isFullscreen ? '18px' : '14px', 
+                opacity: 0.9,
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                padding: '4px 12px',
+                borderRadius: '12px'
+              }}>
+                {currentImageIndex + 1} / {projectData!["360_images"].length}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Custom Fullscreen Controls */}
+        {(uploadedImage || selectedView) && (
+          <div style={{
+            position: 'absolute',
+            bottom: '20px',
+            right: '20px',
+            zIndex: 1001,
+            display: 'flex',
+            gap: '10px',
+            pointerEvents: 'auto'
+          }}>
+            <button
+              onClick={resetView}
+              style={{
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                width: isFullscreen ? '60px' : '45px',
+                height: isFullscreen ? '60px' : '45px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: isFullscreen ? '18px' : '14px',
+                fontWeight: 'bold',
+                transition: 'all 0.3s ease',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+                e.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              title="Reset View"
+            >
+              ↺
+            </button>
+            <button
+              onClick={toggleFullscreen}
+              style={{
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                width: isFullscreen ? '60px' : '45px',
+                height: isFullscreen ? '60px' : '45px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: isFullscreen ? '18px' : '14px',
+                fontWeight: 'bold',
+                transition: 'all 0.3s ease',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(255, 152, 0, 0.9)';
+                e.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+            >
+              {isFullscreen ? '⤢' : '⤡'}
+            </button>
           </div>
         )}
       </div>
 
-      {/* Instructions */}
-      <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '8px' }}>
-        <h3 style={{ color: '#333', marginTop: '0' }}>How to use:</h3>
-        <ol style={{ color: '#666', lineHeight: '1.6' }}>
-          <li>Use the <strong>Access Key</strong> tab to load projects from the server</li>
-          <li>Use the <strong>Upload Image</strong> tab to upload your own 360° images</li>
-          <li>Use your mouse to drag and explore the panorama</li>
-          <li>Use the mouse wheel to zoom in and out</li>
-          <li>Click the <strong>Reset View</strong> button to return to the initial view</li>
-          <li>Click the <strong>Fullscreen</strong> button for an immersive experience</li>
-          <li>You can also directly access panoramas by URL: <code>/tools/panorama/your-access-key</code></li>
-        </ol>
-      </div>
+      {/* Image Counter for Multiple Images */}
+      {hasMultipleImages && !isFullscreen && (
+        <div style={{ textAlign: 'center', marginTop: '10px', color: '#666' }}>
+          Image {currentImageIndex + 1} of {projectData!["360_images"].length}
+        </div>
+      )}
 
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
+      {/* Keyboard Navigation Info */}
+      {hasMultipleImages && !isFullscreen && (
+        <div style={{ 
+          textAlign: 'center', 
+          marginTop: '15px', 
+          color: '#666', 
+          fontSize: '14px',
+          fontStyle: 'italic'
+        }}>
+          Tip: Use the navigation buttons or keyboard arrow keys to switch between views
+        </div>
+      )}
     </div>
   );
 }

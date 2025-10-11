@@ -28,6 +28,8 @@ export interface QuizParams {
   recency_percentage?: number;
   pool_percentage?: number;
   reset_session?: boolean;
+  questions_per_set?: number; // ADDED: Questions per set
+  set_number?: number; // ADDED: Set number
 }
 
 export interface QuestionExplanation {
@@ -150,6 +152,7 @@ export interface ScoreRecord {
   category?: Category;
 }
 
+// UPDATED: Added set_info to QuizResponse metadata
 export interface QuizResponse {
   questions: Question[];
   metadata: {
@@ -160,6 +163,12 @@ export interface QuizResponse {
     session_size: number;
     has_auto_cleaned: boolean;
     session_reset: boolean;
+    set_info?: { // ADDED: Set information
+      current_set: number;
+      total_sets: number;
+      questions_per_set: number;
+      is_last_set: boolean;
+    };
   };
 }
 
@@ -176,7 +185,7 @@ export interface ScoreBreakdownResponse {
   category_breakdown: CategoryScoreBreakdown[];
 }
 
-// Extended quiz parameters used in the hook and components
+// UPDATED: Extended quiz parameters with set_number
 export interface ExtendedQuizParams {
   count: number;
   exam?: number;
@@ -184,9 +193,10 @@ export interface ExtendedQuizParams {
   recency_percentage?: number;
   pool_percentage?: number;
   reset_session?: boolean;
+  set_number?: number; // ADDED: Set number parameter
 }
 
-// Add this interface for the metadata display
+// UPDATED: Added set_info to QuizMetadata
 export interface QuizMetadata {
   requested_count: number;
   adjusted_count: number;
@@ -195,6 +205,12 @@ export interface QuizMetadata {
   session_size: number;
   has_auto_cleaned: boolean;
   session_reset: boolean;
+  set_info?: { // ADDED: Set information
+    current_set: number;
+    total_sets: number;
+    questions_per_set: number;
+    is_last_set: boolean;
+  };
 }
 
 // NEW: User Stats Response Interface
@@ -300,4 +316,12 @@ export interface ScoreDetailsModalProps {
   historyLoading: boolean;
   historyError?: unknown;
   onClose: () => void;
+}
+
+// NEW: Set Information Interface for better type safety
+export interface SetInfo {
+  current_set: number;
+  total_sets: number;
+  questions_per_set: number;
+  is_last_set: boolean;
 }

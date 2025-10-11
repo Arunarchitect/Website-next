@@ -106,15 +106,13 @@ export const useQuiz = () => {
         }
       }
 
-      // Prepare the API call parameters with defaults
+      // Prepare the API call parameters - simplified to only use count
       const apiParams = {
         count: params.count,
         exam: params.exam,
         category: params.category,
-        recency_percentage: params.recency_percentage || 50,
-        pool_percentage: params.pool_percentage || 20,
-        reset_session:
-          params.reset_session !== undefined ? params.reset_session : true,
+        questions_per_set: params.count, // Copy count to questions_per_set
+        set_number: params.set_number || 1, // This should now work
       };
 
       console.log("Fetching questions with params:", apiParams);

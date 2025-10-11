@@ -19,7 +19,6 @@ import { useQuiz } from "./hooks/useQuiz";
 import ScoreDetailsModal from "./components/ScoreDetailsModal";
 import { ExtendedQuizParams } from "./types/quiztypes";
 
-
 export default function QuizPage() {
   const { data: user, isLoading: userLoading, error: userError } = useRetrieveUserQuery();
   const { data: exams = [] } = useGetExamsQuery();
@@ -302,7 +301,7 @@ export default function QuizPage() {
 
   return (
     <div className="max-w-2xl mx-auto mt-6 p-4 sm:p-6">
-      {/* Metadata Display */}
+      {/* Metadata Display - Updated for set-based system */}
       {metadata && (
         <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
           <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-3 text-sm">
@@ -327,21 +326,37 @@ export default function QuizPage() {
                 {metadata.total_available} total
               </span>
             </div>
-            <div>
-              <span className="text-gray-600 dark:text-gray-400">Session:</span>
-              <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
-                {metadata.session_size} seen
-              </span>
-            </div>
-            {metadata.session_reset && (
-              <div className="col-span-2">
-                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                  <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                  Fresh session started
-                </span>
-              </div>
+            {metadata.set_info && (
+              <>
+                <div>
+                  <span className="text-gray-600 dark:text-gray-400">Questions per Set:</span>
+                  <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                    {metadata.set_info.questions_per_set}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600 dark:text-gray-400">Current Set:</span>
+                  <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                    {metadata.set_info.current_set}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600 dark:text-gray-400">Total Sets:</span>
+                  <span className="ml-2 font-medium text-gray-800 dark:text-gray-200">
+                    {metadata.set_info.total_sets}
+                  </span>
+                </div>
+                {metadata.set_info.is_last_set && (
+                  <div className="col-span-2">
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                      Last set in current sequence
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -385,6 +400,10 @@ export default function QuizPage() {
         >
           Previous
         </button>
+
+        <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+          Page {currentPage} of {totalPages}
+        </div>
 
         {currentPage < totalPages ? (
           <button

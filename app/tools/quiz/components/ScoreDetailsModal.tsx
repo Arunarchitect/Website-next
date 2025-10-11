@@ -150,7 +150,7 @@ export default function ScoreDetailsModal({
 
   const filteredCategoryBreakdown = categoryBreakdown
     .filter(item => getAttemptCount(item) > 0)
-    .sort((a, b) => getAverageScore(b) - getAverageScore(a));
+    .sort((a, b) => getAverageScore(a) - getAverageScore(b)); // Lowest scores first
 
   const filteredExamBreakdown = examBreakdown
     .filter(item => getAttemptCount(item) > 0)

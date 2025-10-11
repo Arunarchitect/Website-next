@@ -10,9 +10,7 @@ interface QuizSettingsProps {
     count: number; 
     exam?: number; 
     category?: number;
-    recency_percentage?: number;
-    pool_percentage?: number;
-    reset_session?: boolean;
+    set_number?: number;
   }) => void;
   isLoading: boolean;
   isCategoriesLoading?: boolean;
@@ -32,9 +30,9 @@ export default function QuizSettings({
   const [selectedExam, setSelectedExam] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [questionCount, setQuestionCount] = useState(10);
-  const [recencyPercentage, setRecencyPercentage] = useState(50);
-  const [poolPercentage, setPoolPercentage] = useState(20);
-  const [resetSession, setResetSession] = useState(true);
+  const [questionCountInput, setQuestionCountInput] = useState("10"); // Add this state for question count input
+  const [setNumber, setSetNumber] = useState(1);
+  const [setNumberInput, setSetNumberInput] = useState("1");
   const [showUploader, setShowUploader] = useState(false);
   const [downloadTemplate] = useDownloadQuestionsTemplateMutation();
   const [uploadCSV] = useUploadQuestionsCSVMutation();
@@ -45,10 +43,58 @@ export default function QuizSettings({
       count: questionCount,
       exam: selectedExam || undefined,
       category: selectedCategory || undefined,
-      recency_percentage: recencyPercentage,
-      pool_percentage: poolPercentage,
-      reset_session: resetSession,
+      set_number: setNumber,
     });
+  };
+
+  const handleQuestionCountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setQuestionCountInput(value); // Always update the input value
+    
+    // Only update the numeric value if it's a valid number within range
+    if (value === "") {
+      return;
+    }
+    
+    const numValue = Number(value);
+    if (!isNaN(numValue)) {
+      const clampedValue = Math.max(1, Math.min(50, numValue));
+      setQuestionCount(clampedValue);
+    }
+  };
+
+  const handleQuestionCountBlur = () => {
+    // When input loses focus, validate and set default if empty or invalid
+    if (questionCountInput === "" || Number(questionCountInput) < 1) {
+      setQuestionCountInput("10");
+      setQuestionCount(10);
+    } else {
+      // Ensure the value is within bounds
+      const numValue = Math.max(1, Math.min(50, Number(questionCountInput)));
+      setQuestionCountInput(numValue.toString());
+      setQuestionCount(numValue);
+    }
+  };
+
+  const handleSetNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSetNumberInput(value);
+    
+    if (value === "" || value === "-") {
+      return;
+    }
+    
+    const numValue = Number(value);
+    if (!isNaN(numValue)) {
+      setSetNumber(numValue);
+    }
+  };
+
+  const handleSetNumberBlur = () => {
+    if (setNumberInput === "" || setNumberInput === "-") {
+      setSetNumberInput("1");
+      setSetNumber(1);
+    }
   };
 
   const handleDownloadTemplate = async () => {
@@ -134,98 +180,55 @@ export default function QuizSettings({
           )}
         </div>
 
+        {/* Updated Question Count Input */}
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1 dark:text-gray-300">Number of Questions</label>
           <input
-            type="number"
-            min="1"
-            max="50"
-            value={questionCount}
-            onChange={(e) => setQuestionCount(Math.max(1, Math.min(50, Number(e.target.value))))}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={questionCountInput}
+            onChange={handleQuestionCountChange}
+            onBlur={handleQuestionCountBlur}
             className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             disabled={isLoading}
+            placeholder="Enter number of questions"
           />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Minimum: 1, Maximum: 50. This also determines questions per set.
+          </p>
         </div>
 
-        {/* Recency Percentage Slider */}
+        {/* Set Number Input */}
         <div className="mb-4">
-          <label className="block text-sm font-medium mb-2 dark:text-gray-300">
-            Recency Percentage: {recencyPercentage}%
-            <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-              (Higher percentage favors newer questions)
-            </span>
-          </label>
+          <label className="block text-sm font-medium mb-1 dark:text-gray-300">Set Number</label>
           <input
-            type="range"
-            min="0"
-            max="100"
-            value={recencyPercentage}
-            onChange={(e) => setRecencyPercentage(Number(e.target.value))}
-            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            type="text"
+            inputMode="numeric"
+            pattern="-?[0-9]*"
+            value={setNumberInput}
+            onChange={handleSetNumberChange}
+            onBlur={handleSetNumberBlur}
+            className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
             disabled={isLoading}
+            placeholder="Enter set number"
           />
-          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-            <span>Older Questions</span>
-            <span>Newer Questions</span>
-          </div>
-        </div>
-
-        {/* Pool Percentage Slider */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2 dark:text-gray-300">
-            Question Pool Size: {poolPercentage}%
-            <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-              (Percentage of total questions to select from)
-            </span>
-          </label>
-          <input
-            type="range"
-            min="1"
-            max="100"
-            value={poolPercentage}
-            onChange={(e) => setPoolPercentage(Number(e.target.value))}
-            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
-            disabled={isLoading}
-          />
-          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-            <span>Smaller Pool</span>
-            <span>Larger Pool</span>
-          </div>
-        </div>
-
-        {/* Reset Session Toggle */}
-        <div className="mb-4">
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              id="resetSession"
-              checked={resetSession}
-              onChange={(e) => setResetSession(e.target.checked)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded dark:bg-gray-700 dark:border-gray-600"
-              disabled={isLoading}
-            />
-            <label 
-              htmlFor="resetSession" 
-              className="ml-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-            >
-              Reset Question Session
-              <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-                (Unckeck if  you dont want questions in the previous quiz session)
-              </span>
-            </label>
-          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Set 1 = first set, Set -1 = last set, Set -2 = second last, etc.
+          </p>
         </div>
 
         {/* Info Section */}
         <div className="mb-6 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
           <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-1 text-sm">
-            About These Settings:
+            About Set-Based Quiz:
           </h3>
           <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
-            <li>• <strong>Recency Percentage</strong>: Controls how much newer questions are favored (0-100%)</li>
-            <li>• <strong>Question Pool</strong>: Percentage of total questions to select from (1-100%)</li>
-            <li>• <strong>Reset Session</strong>: When enabled, starts with fresh questions each time</li>
-            <li>• Higher values = more variety but potentially less focused practice</li>
+            <li>• Questions are organized into sets based on your count</li>
+            <li>• Each set contains your specified number of questions</li>
+            <li>• You can navigate between sets using different set numbers</li>
+            <li>• Set 1 = first set, Set -1 = last set, Set -2 = second last, etc.</li>
+            <li>• When both exam and category are &quot;All&quot;, questions are distributed evenly across categories</li>
           </ul>
         </div>
 
