@@ -1,13 +1,13 @@
-// panorama/[code]/page.tsx
+// tools/panorama/[code]/page.tsx - For direct access via URL
 
 'use client';
 
 import { useEffect, useRef, useState, ChangeEvent, useCallback } from 'react';
 import 'pannellum/build/pannellum.css';
 import 'pannellum/build/pannellum.js';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 
-// Extended type definitions for pannellum
+// Type definitions for pannellum
 declare const pannellum: {
   viewer: (
     container: HTMLDivElement,
@@ -21,9 +21,6 @@ declare const pannellum: {
       compass?: boolean;
       showControls?: boolean;
       showFullscreenCtrl?: boolean;
-      orientationOnByDefault?: boolean;
-      deviceOrientationControls?: boolean;
-      touchPanSpeedCoefficientFactor?: number;
     }
   ) => PannellumViewer;
 };
@@ -32,9 +29,6 @@ interface PannellumViewer {
   setYaw: (yaw: number) => void;
   setPitch: (pitch: number) => void;
   setHfov: (hfov: number) => void;
-  isOrientationActive: () => boolean;
-  startOrientation: () => void;
-  stopOrientation: () => void;
   destroy: () => void;
 }
 
@@ -59,39 +53,24 @@ interface ProjectData {
 
 export default function PanoramaViewerWithCode() {
   const params = useParams();
+  const router = useRouter();
   const code = params.code as string;
 
-  const [accessKey, setAccessKey] = useState<string>('');
   const [projectData, setProjectData] = useState<ProjectData | null>(null);
   const [selectedView, setSelectedView] = useState<ViewerData | null>(null);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'accessKey' | 'upload'>('accessKey');
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [isOrientationActive, setIsOrientationActive] = useState<boolean>(false);
-  const [isMobile, setIsMobile] = useState<boolean>(false);
   
   const viewerRef = useRef<HTMLDivElement>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const navigationRef = useRef<HTMLDivElement>(null);
-  
   const viewerInstance = useRef<PannellumViewer | null>(null);
 
-  // Detect mobile device
-  useEffect(() => {
-    const checkMobile = () => {
-      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    };
-    setIsMobile(checkMobile());
-  }, []);
-
-  // Automatically set access key from URL
+  // Automatically fetch project data when code changes
   useEffect(() => {
     if (code) {
-      setAccessKey(code);
       fetchProjectData(code);
     }
   }, [code]);
@@ -99,12 +78,10 @@ export default function PanoramaViewerWithCode() {
   // Handle fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const fullscreenElement = !!document.fullscreenElement;
-      setIsFullscreen(fullscreenElement);
+      setIsFullscreen(!!document.fullscreenElement);
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
@@ -112,14 +89,14 @@ export default function PanoramaViewerWithCode() {
 
   // Fetch project data
   const fetchProjectData = async (key: string) => {
-    if (!key.trim()) {
-      setError('Please enter an access key');
-      return;
-    }
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`http://localhost:8000/api/viewer/public/360-images/${key}/`);
+      // Use your preferred API endpoint
+      const response = await fetch(`https://api.modelflick.com/api/viewer/public/360-images/${key}/`);
+      // For local development, use:
+      // const response = await fetch(`http://localhost:8000/api/viewer/public/360-images/${key}/`);
+      
       if (!response.ok) {
         if (response.status === 401) throw new Error('Invalid access key');
         throw new Error('Failed to fetch project data');
@@ -129,18 +106,12 @@ export default function PanoramaViewerWithCode() {
       if (data["360_images"].length > 0) {
         setSelectedView(data["360_images"][0]);
         setCurrentImageIndex(0);
-        setUploadedImage(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleAccessKeySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    fetchProjectData(accessKey);
   };
 
   const handleViewSelect = (view: ViewerData) => {
@@ -172,7 +143,7 @@ export default function PanoramaViewerWithCode() {
     reader.readAsDataURL(file);
   };
 
-  const navigateImages = (direction: 'next' | 'prev') => {
+  const navigateImages = useCallback((direction: 'next' | 'prev') => {
     if (!projectData || projectData["360_images"].length <= 1) return;
 
     let newIndex;
@@ -184,30 +155,13 @@ export default function PanoramaViewerWithCode() {
 
     setCurrentImageIndex(newIndex);
     setSelectedView(projectData["360_images"][newIndex]);
-  };
+  }, [projectData, currentImageIndex]);
 
   const resetView = () => {
     if (viewerInstance.current) {
       viewerInstance.current.setYaw(0);
       viewerInstance.current.setPitch(0);
       viewerInstance.current.setHfov(100);
-    }
-  };
-
-  const toggleOrientation = () => {
-    if (!viewerInstance.current) return;
-    
-    try {
-      if (isOrientationActive) {
-        viewerInstance.current.stopOrientation();
-        setIsOrientationActive(false);
-      } else {
-        viewerInstance.current.startOrientation();
-        setIsOrientationActive(true);
-      }
-    } catch (error) {
-      console.error('Orientation error:', error);
-      setError('Device orientation not supported on this device');
     }
   };
 
@@ -229,6 +183,7 @@ export default function PanoramaViewerWithCode() {
     return '';
   };
 
+  // Initialize Pannellum viewer
   useEffect(() => {
     const currentImage = getCurrentImage();
     if (!currentImage || !viewerRef.current) return;
@@ -240,7 +195,6 @@ export default function PanoramaViewerWithCode() {
 
     viewerRef.current.innerHTML = '';
 
-    // Initialize pannellum with mobile-friendly configuration
     viewerInstance.current = pannellum.viewer(viewerRef.current, {
       type: 'equirectangular',
       panorama: currentImage,
@@ -251,17 +205,7 @@ export default function PanoramaViewerWithCode() {
       compass: false,
       showControls: false,
       showFullscreenCtrl: false,
-      deviceOrientationControls: true, // Enable device orientation
-      orientationOnByDefault: false, // Don't start automatically (requires user gesture)
-      touchPanSpeedCoefficientFactor: 1.5, // Better touch sensitivity
     });
-
-    // Check orientation status after initialization
-    setTimeout(() => {
-      if (viewerInstance.current) {
-        setIsOrientationActive(viewerInstance.current.isOrientationActive());
-      }
-    }, 1000);
 
     return () => {
       if (viewerInstance.current) {
@@ -271,7 +215,7 @@ export default function PanoramaViewerWithCode() {
     };
   }, [getCurrentImage]);
 
-  // Add keyboard navigation
+  // Keyboard navigation
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (!projectData || projectData["360_images"].length <= 1) return;
@@ -282,8 +226,6 @@ export default function PanoramaViewerWithCode() {
         navigateImages('next');
       } else if (e.key === 'Escape' && isFullscreen) {
         toggleFullscreen();
-      } else if (e.key === 'o' || e.key === 'O') {
-        toggleOrientation();
       }
     };
 
@@ -291,75 +233,38 @@ export default function PanoramaViewerWithCode() {
     return () => {
       document.removeEventListener('keydown', handleKeyPress);
     };
-  }, [projectData, currentImageIndex, isFullscreen, isOrientationActive]);
+  }, [projectData, currentImageIndex, isFullscreen, navigateImages]);
 
   const hasMultipleImages = projectData && projectData["360_images"].length > 1;
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '1000px', margin: '0 auto' }}>
-      <h1 style={{ textAlign: 'center', color: '#333', marginBottom: '20px' }}>360° Panorama Viewer</h1>
-
-      {/* Mobile-specific instructions */}
-      {isMobile && (
-        <div style={{ 
-          backgroundColor: '#e3f2fd', 
-          border: '1px solid #2196f3', 
-          borderRadius: '8px', 
-          padding: '15px', 
-          marginBottom: '20px',
-          textAlign: 'center'
-        }}>
-          <strong>Mobile Tips:</strong> 
-          <br />
-          • Move your device to look around (like a window)
-          <br />
-          • Use touch to drag the view
-          <br />
-          • Use the orientation button below for gyroscope control
-        </div>
-      )}
-
-      {/* Tab Selection */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-        <button
-          onClick={() => setActiveTab('accessKey')}
-          style={{ padding: '10px 20px', backgroundColor: activeTab === 'accessKey' ? '#4CAF50' : '#f0f0f0', color: activeTab === 'accessKey' ? 'white' : '#333', border: 'none', borderRadius: '6px 0 0 6px', cursor: 'pointer', fontWeight: 'bold' }}
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h1 style={{ color: '#333', margin: 0 }}>360° Panorama Viewer</h1>
+        <button 
+          onClick={() => router.push('/tools/panorama')}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: '#6c757d', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '6px', 
+            cursor: 'pointer', 
+            fontWeight: 'bold' 
+          }}
         >
-          Access Key
-        </button>
-        <button
-          onClick={() => setActiveTab('upload')}
-          style={{ padding: '10px 20px', backgroundColor: activeTab === 'upload' ? '#4CAF50' : '#f0f0f0', color: activeTab === 'upload' ? 'white' : '#333', border: 'none', borderRadius: '0 6px 6px 0', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          Upload Image
+          Enter Different Key
         </button>
       </div>
 
-      {/* Access Key Input */}
-      {activeTab === 'accessKey' && (
-        <form onSubmit={handleAccessKeySubmit} style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '20px' }}>
-          <input
-            type="text"
-            value={accessKey}
-            onChange={(e) => setAccessKey(e.target.value)}
-            placeholder="Enter access key (e.g., anil)"
-            style={{ padding: '10px', border: '1px solid #ccc', borderRadius: '6px', width: '250px', fontSize: '16px' }}
-          />
-          <button type="submit" disabled={loading} style={{ padding: '10px 20px', backgroundColor: loading ? '#ccc' : '#4CAF50', color: 'white', border: 'none', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
-            {loading ? 'Loading...' : 'Load Project'}
-          </button>
-        </form>
-      )}
-
-      {/* Upload Image */}
-      {activeTab === 'upload' && (
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
-          <input type="file" accept="image/*" id="upload" onChange={handleFileUpload} style={{ display: 'none' }} />
-          <label htmlFor="upload" style={{ padding: '12px 30px', backgroundColor: '#2196F3', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
-            Upload 360° Image
-          </label>
-        </div>
-      )}
+      {/* Upload Section */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+        <input type="file" accept="image/*" id="upload" onChange={handleFileUpload} style={{ display: 'none' }} />
+        <label htmlFor="upload" style={{ padding: '12px 30px', backgroundColor: '#2196F3', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+          Upload Your Own 360° Image
+        </label>
+      </div>
 
       {error && <p style={{ color: 'red', textAlign: 'center', marginBottom: '20px' }}>{error}</p>}
 
@@ -375,7 +280,19 @@ export default function PanoramaViewerWithCode() {
       {projectData && projectData["360_images"].length > 0 && !isFullscreen && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginBottom: '20px' }}>
           {projectData["360_images"].map((view) => (
-            <button key={view.id} onClick={() => handleViewSelect(view)} style={{ padding: '8px 16px', backgroundColor: selectedView?.id === view.id ? '#2196F3' : '#f0f0f0', color: selectedView?.id === view.id ? 'white' : '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: selectedView?.id === view.id ? 'bold' : 'normal' }}>
+            <button 
+              key={view.id} 
+              onClick={() => handleViewSelect(view)}
+              style={{ 
+                padding: '8px 16px', 
+                backgroundColor: selectedView?.id === view.id ? '#2196F3' : '#f0f0f0', 
+                color: selectedView?.id === view.id ? 'white' : '#333', 
+                border: 'none', 
+                borderRadius: '6px', 
+                cursor: 'pointer', 
+                fontWeight: selectedView?.id === view.id ? 'bold' : 'normal' 
+              }}
+            >
               {view.view_name}
             </button>
           ))}
@@ -384,31 +301,17 @@ export default function PanoramaViewerWithCode() {
 
       {/* Controls */}
       {(uploadedImage || selectedView) && !isFullscreen && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
-          <button onClick={resetView} style={{ padding: '10px 20px', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Reset View</button>
-          {isMobile && (
-            <button 
-              onClick={toggleOrientation} 
-              style={{ 
-                padding: '10px 20px', 
-                backgroundColor: isOrientationActive ? '#4CAF50' : '#FF9800', 
-                color: 'white', 
-                border: 'none', 
-                borderRadius: '6px', 
-                cursor: 'pointer', 
-                fontWeight: 'bold' 
-              }}
-            >
-              {isOrientationActive ? 'Gyro: ON' : 'Gyro: OFF'}
-            </button>
-          )}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '20px' }}>
+          <button onClick={resetView} style={{ padding: '10px 20px', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+            Reset View
+          </button>
           <button onClick={toggleFullscreen} style={{ padding: '10px 20px', backgroundColor: '#FF9800', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
             {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           </button>
         </div>
       )}
 
-      {/* Main Viewer Container */}
+      {/* Viewer Container */}
       <div 
         ref={viewerContainerRef}
         style={{ 
@@ -422,7 +325,6 @@ export default function PanoramaViewerWithCode() {
           margin: isFullscreen ? '0' : 'initial'
         }}
       >
-        
         {/* Pannellum Viewer */}
         <div 
           ref={viewerRef} 
@@ -435,19 +337,19 @@ export default function PanoramaViewerWithCode() {
         >
           {!getCurrentImage() && !loading && (
             <div style={{ color: '#999', textAlign: 'center', lineHeight: isFullscreen ? '100vh' : '500px' }}>
-              {activeTab === 'accessKey' ? 'Enter an access key to load project views' : 'Upload a 360° image to start viewing'}
+              {loading ? 'Loading...' : 'No image loaded'}
             </div>
           )}
           {loading && (
             <div style={{ color: '#999', textAlign: 'center', lineHeight: isFullscreen ? '100vh' : '500px' }}>
-              Loading...
+              Loading panorama...
             </div>
           )}
         </div>
 
-        {/* Custom Navigation Arrows */}
+        {/* Navigation Arrows */}
         {hasMultipleImages && (
-          <div ref={navigationRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, pointerEvents: 'none' }}>
+          <>
             <button
               onClick={() => navigateImages('prev')}
               style={{
@@ -471,14 +373,6 @@ export default function PanoramaViewerWithCode() {
                 transition: 'all 0.3s ease',
                 pointerEvents: 'auto',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
-                e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-                e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
               }}
             >
               ‹
@@ -507,24 +401,15 @@ export default function PanoramaViewerWithCode() {
                 pointerEvents: 'auto',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
               }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
-                e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-                e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
-              }}
             >
               ›
             </button>
-          </div>
+          </>
         )}
 
-        {/* Custom Title Overlay */}
+        {/* Title Overlay */}
         {(uploadedImage || selectedView) && (
           <div
-            ref={overlayRef}
             style={{
               position: 'absolute',
               top: '20px',
@@ -564,7 +449,7 @@ export default function PanoramaViewerWithCode() {
           </div>
         )}
 
-        {/* Custom Controls */}
+        {/* Control Buttons */}
         {(uploadedImage || selectedView) && (
           <div style={{
             position: 'absolute',
@@ -575,40 +460,6 @@ export default function PanoramaViewerWithCode() {
             gap: '10px',
             pointerEvents: 'auto'
           }}>
-            {isMobile && (
-              <button
-                onClick={toggleOrientation}
-                style={{
-                  backgroundColor: isOrientationActive ? 'rgba(76, 175, 80, 0.9)' : 'rgba(0, 0, 0, 0.8)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: isFullscreen ? '60px' : '45px',
-                  height: isFullscreen ? '60px' : '45px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: isFullscreen ? '16px' : '12px',
-                  fontWeight: 'bold',
-                  transition: 'all 0.3s ease',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(76, 175, 80, 0.9)';
-                  e.currentTarget.style.transform = 'scale(1.1)';
-                }}
-                onMouseOut={(e) => {
-                  if (!isOrientationActive) {
-                    e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-                  }
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title={isOrientationActive ? 'Disable Gyroscope' : 'Enable Gyroscope'}
-              >
-                🎯
-              </button>
-            )}
             <button
               onClick={resetView}
               style={{
@@ -624,16 +475,7 @@ export default function PanoramaViewerWithCode() {
                 justifyContent: 'center',
                 fontSize: isFullscreen ? '18px' : '14px',
                 fontWeight: 'bold',
-                transition: 'all 0.3s ease',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
-                e.currentTarget.style.transform = 'scale(1.1)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-                e.currentTarget.style.transform = 'scale(1)';
               }}
               title="Reset View"
             >
@@ -654,16 +496,7 @@ export default function PanoramaViewerWithCode() {
                 justifyContent: 'center',
                 fontSize: isFullscreen ? '18px' : '14px',
                 fontWeight: 'bold',
-                transition: 'all 0.3s ease',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 152, 0, 0.9)';
-                e.currentTarget.style.transform = 'scale(1.1)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-                e.currentTarget.style.transform = 'scale(1)';
               }}
               title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
             >
@@ -673,36 +506,24 @@ export default function PanoramaViewerWithCode() {
         )}
       </div>
 
-      {/* Mobile Orientation Status */}
-      {isMobile && isOrientationActive && (
-        <div style={{ 
-          textAlign: 'center', 
-          marginTop: '10px', 
-          color: '#4CAF50', 
-          fontWeight: 'bold',
-          fontSize: '14px'
-        }}>
-          🎯 Gyroscope Active - Move your device to look around
-        </div>
-      )}
-
-      {/* Image Counter for Multiple Images */}
+      {/* Image Counter */}
       {hasMultipleImages && !isFullscreen && (
         <div style={{ textAlign: 'center', marginTop: '10px', color: '#666' }}>
           Image {currentImageIndex + 1} of {projectData!["360_images"].length}
         </div>
       )}
 
-      {/* Keyboard Navigation Info */}
-      {hasMultipleImages && !isFullscreen && !isMobile && (
-        <div style={{ 
-          textAlign: 'center', 
-          marginTop: '15px', 
-          color: '#666', 
-          fontSize: '14px',
-          fontStyle: 'italic'
-        }}>
-          Tip: Use arrow keys to navigate between views, 'O' to toggle orientation
+      {/* Instructions */}
+      {!isFullscreen && (
+        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '8px' }}>
+          <h3 style={{ color: '#333', marginTop: '0' }}>How to navigate:</h3>
+          <ul style={{ color: '#666', lineHeight: '1.6', margin: 0, paddingLeft: '20px' }}>
+            <li>Drag to look around the panorama</li>
+            <li>Use mouse wheel to zoom in/out</li>
+            {hasMultipleImages && <li>Use arrow keys or navigation buttons to switch between views</li>}
+            <li>Click fullscreen for immersive experience</li>
+            <li>Share this link: <code>{typeof window !== 'undefined' ? window.location.href : ''}</code></li>
+          </ul>
         </div>
       )}
     </div>
