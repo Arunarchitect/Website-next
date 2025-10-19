@@ -10,6 +10,7 @@ import PannellumViewer, {
   PannellumViewerRef,
 } from "./components/PannellumViewer";
 import ViewerOverlay from "./components/ViewerOverlay";
+import { ViewerData } from "./types/panorama";
 
 export default function PanoramaViewerWithCode() {
   const params = useParams();
@@ -17,12 +18,23 @@ export default function PanoramaViewerWithCode() {
   const code = params.code as string;
 
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isDirectionLockEnabled, setIsDirectionLockEnabled] =
+    useState<boolean>(false);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pannellumViewerRef = useRef<PannellumViewerRef>(null);
 
+  // Detect mobile device on component mount
+  useEffect(() => {
+    const checkDevice = () => {
+      const mobileCheck = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobileDevice(mobileCheck);
+    };
+    checkDevice();
+  }, []);
+
   const {
     projectData,
-    selectedView,
     uploadedImage,
     loading,
     error,
@@ -48,6 +60,39 @@ export default function PanoramaViewerWithCode() {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
+
+  const toggleDirectionLock = useCallback(() => {
+    if (!pannellumViewerRef.current) return;
+
+    // Check if motion control is supported
+    if (!pannellumViewerRef.current.isMotionControlSupported()) {
+      alert(
+        "Motion control is only available on mobile devices with gyroscope support."
+      );
+      return;
+    }
+
+    if (isDirectionLockEnabled) {
+      pannellumViewerRef.current.disableDirectionLock();
+      setIsDirectionLockEnabled(false);
+    } else {
+      // enableDirectionLock returns void, so we assume success and update state
+      pannellumViewerRef.current.enableDirectionLock();
+      setIsDirectionLockEnabled(true);
+    }
+  }, [isDirectionLockEnabled]);
+
+  const handleDirectionLockChange = useCallback((enabled: boolean) => {
+    setIsDirectionLockEnabled(enabled);
+  }, []);
+
+  // Auto-disable motion control when image changes
+  useEffect(() => {
+    if (isDirectionLockEnabled && pannellumViewerRef.current) {
+      pannellumViewerRef.current.disableDirectionLock();
+      setIsDirectionLockEnabled(false);
+    }
+  }, [currentImageIndex, uploadedImage, isDirectionLockEnabled]);
 
   const handleFileUpload = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -85,17 +130,69 @@ export default function PanoramaViewerWithCode() {
     }
   }, []);
 
+  // Enhanced navigation that handles motion control with delay
+  const handleNavigate = useCallback(
+    (direction: "next" | "prev") => {
+      // Only disable motion control if it's currently enabled
+      if (isDirectionLockEnabled && pannellumViewerRef.current) {
+        pannellumViewerRef.current.disableDirectionLock();
+        setIsDirectionLockEnabled(false);
+
+        // Add delay to ensure motion control is fully disabled before DOM manipulation
+        setTimeout(() => {
+          navigateImages(direction);
+        }, 100);
+      } else {
+        // If motion control is not enabled, navigate immediately
+        navigateImages(direction);
+      }
+    },
+    [isDirectionLockEnabled, navigateImages]
+  );
+
+  // Enhanced view selection that handles motion control with delay
+  const handleViewSelectWithControl = useCallback(
+    (view: ViewerData) => {
+      // Only disable motion control if it's currently enabled
+      if (isDirectionLockEnabled && pannellumViewerRef.current) {
+        pannellumViewerRef.current.disableDirectionLock();
+        setIsDirectionLockEnabled(false);
+
+        // Add delay to ensure motion control is fully disabled before DOM manipulation
+        setTimeout(() => {
+          handleViewSelect(view);
+        }, 100);
+      } else {
+        // If motion control is not enabled, select immediately
+        handleViewSelect(view);
+      }
+    },
+    [isDirectionLockEnabled, handleViewSelect]
+  );
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isFullscreen) {
+        toggleFullscreen();
+      } else if (e.key === "m" || e.key === "M") {
+        // 'M' key to toggle motion control
+        toggleDirectionLock();
+      } else if (e.key === "r" || e.key === "R") {
+        // 'R' key to reset view
+        resetView();
+      } else if (e.key === "f" || e.key === "F") {
+        // 'F' key to toggle fullscreen
+        toggleFullscreen();
+      }
+
+      // Only handle arrow keys if we have multiple images and no uploaded image
       if (!hasMultipleImages || uploadedImage) return;
 
       if (e.key === "ArrowLeft") {
-        navigateImages("prev");
+        handleNavigate("prev");
       } else if (e.key === "ArrowRight") {
-        navigateImages("next");
-      } else if (e.key === "Escape" && isFullscreen) {
-        toggleFullscreen();
+        handleNavigate("next");
       }
     };
 
@@ -107,8 +204,10 @@ export default function PanoramaViewerWithCode() {
     hasMultipleImages,
     uploadedImage,
     isFullscreen,
-    navigateImages,
     toggleFullscreen,
+    toggleDirectionLock,
+    resetView,
+    handleNavigate,
   ]);
 
   return (
@@ -120,157 +219,153 @@ export default function PanoramaViewerWithCode() {
         margin: "0 auto",
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "20px",
-        }}
-      >
-        <h1 style={{ color: "#333", margin: 0 }}>360° Panorama Viewer</h1>
-        <button
-          onClick={() => router.push("/tools/panorama")}
+      {/* Header - Only show when not in fullscreen */}
+      {!isFullscreen && (
+        <div
           style={{
-            padding: "8px 16px",
-            backgroundColor: "#6c757d",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: "bold",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "20px",
           }}
         >
-          Enter Different Key
-        </button>
-      </div>
+          <h1 style={{ color: "#333", margin: 0 }}>360° Panorama Viewer</h1>
+          <button
+            onClick={() => router.push("/tools/panorama")}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#6c757d",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: "bold",
+            }}
+          >
+            Enter Different Key
+          </button>
+        </div>
+      )}
 
-      {/* Upload Section */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          marginBottom: "20px",
-        }}
-      >
-        <input
-          type="file"
-          accept="image/*"
-          id="upload"
-          onChange={handleFileUpload}
-          style={{ display: "none" }}
-        />
-        <label
-          htmlFor="upload"
+      {/* Upload Section - Only show when not in fullscreen */}
+      {!isFullscreen && (
+        <div
           style={{
-            padding: "12px 30px",
-            backgroundColor: "#2196F3",
-            color: "white",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: "bold",
+            display: "flex",
+            justifyContent: "center",
+            marginBottom: "20px",
           }}
         >
-          Upload Your Own 360° Image
-        </label>
-      </div>
+          <input
+            type="file"
+            accept="image/*"
+            id="upload"
+            onChange={handleFileUpload}
+            style={{ display: "none" }}
+          />
+          <label
+            htmlFor="upload"
+            style={{
+              padding: "12px 30px",
+              backgroundColor: "#2196F3",
+              color: "white",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: "bold",
+            }}
+          >
+            Upload Your Own 360° Image
+          </label>
+        </div>
+      )}
 
-      {error && (
+      {error && !isFullscreen && (
         <p style={{ color: "red", textAlign: "center", marginBottom: "20px" }}>
           {error}
         </p>
       )}
 
-      {/* Project Info */}
-      {projectData && !isFullscreen && !hasImageLoaded && (
-        <div style={{ textAlign: "center", marginBottom: "20px" }}>
-          <h2>{projectData.project.name}</h2>
-          <p>Organization: {projectData.organisation.name}</p>
-        </div>
-      )}
-
-      {/* Views Selection */}
-      {projectData &&
-        projectData["360_images"].length > 0 &&
-        !isFullscreen &&
-        !hasImageLoaded && (
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "10px",
-              justifyContent: "center",
-              marginBottom: "20px",
-            }}
-          >
-            {projectData["360_images"].map((view) => (
-              <button
-                key={view.id}
-                onClick={() => handleViewSelect(view)}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor:
-                    selectedView?.id === view.id ? "#2196F3" : "#f0f0f0",
-                  color: selectedView?.id === view.id ? "white" : "#333",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontWeight: selectedView?.id === view.id ? "bold" : "normal",
-                }}
-              >
-                {view.view_name}
-              </button>
-            ))}
+      {/* Project Info and Image Names - Only show when not in fullscreen */}
+      {projectData && !isFullscreen && (
+        <div style={{ marginBottom: "20px" }}>
+          {/* Project Header */}
+          <div style={{ textAlign: "center", marginBottom: "15px" }}>
+            <h2 style={{ color: "#333", margin: "0 0 5px 0" }}>
+              {projectData.project.name}
+            </h2>
+            <p style={{ color: "#666", margin: 0 }}>
+              Organization: {projectData.organisation.name}
+            </p>
           </div>
-        )}
 
-      {/* Main Controls */}
-      {hasImageLoaded && !isFullscreen && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "15px",
-            marginBottom: "20px",
-          }}
-        >
-          <button
-            onClick={resetView}
-            style={{
-              padding: "10px 20px",
-              backgroundColor: "#2196F3",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            Reset View
-          </button>
-          <button
-            onClick={toggleFullscreen}
-            style={{
-              padding: "10px 20px",
-              backgroundColor: "#FF9800",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontWeight: "bold",
-            }}
-          >
-            {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          </button>
+          {/* Image Names as Navigation */}
+          {projectData["360_images"].length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              {projectData["360_images"].map((view, index) => (
+                <button
+                  key={view.id}
+                  onClick={() => handleViewSelectWithControl(view)}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor:
+                      currentImageIndex === index ? "#2196F3" : "#f8f9fa",
+                    color: currentImageIndex === index ? "white" : "#333",
+                    border: "1px solid #dee2e6",
+                    borderRadius: "20px",
+                    cursor: "pointer",
+                    fontWeight: currentImageIndex === index ? "bold" : "normal",
+                    fontSize: "14px",
+                    transition: "all 0.2s ease",
+                    boxShadow:
+                      currentImageIndex === index
+                        ? "0 2px 8px rgba(33, 150, 243, 0.3)"
+                        : "none",
+                  }}
+                  onMouseOver={(e) => {
+                    if (currentImageIndex !== index) {
+                      e.currentTarget.style.backgroundColor = "#e9ecef";
+                      e.currentTarget.style.transform = "translateY(-1px)";
+                    }
+                  }}
+                  onMouseOut={(e) => {
+                    if (currentImageIndex !== index) {
+                      e.currentTarget.style.backgroundColor = "#f8f9fa";
+                      e.currentTarget.style.transform = "translateY(0)";
+                    }
+                  }}
+                >
+                  {view.view_name}
+                  {hasMultipleImages && (
+                    <span
+                      style={{
+                        marginLeft: "6px",
+                        fontSize: "12px",
+                        opacity: 0.8,
+                      }}
+                    >
+                      ({index + 1})
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Viewer Container - CRITICAL: Make sure this has position: relative */}
+      {/* Viewer Container */}
       <div
         ref={viewerContainerRef}
         style={{
-          position: "relative", // This is essential
+          position: "relative",
           width: "100%",
           height: isFullscreen ? "100vh" : "500px",
           borderRadius: isFullscreen ? "0" : "8px",
@@ -285,30 +380,28 @@ export default function PanoramaViewerWithCode() {
           ref={pannellumViewerRef}
           imageUrl={getCurrentImage()}
           loading={loading}
+          isDirectionLockEnabled={isDirectionLockEnabled}
+          onDirectionLockChange={handleDirectionLockChange}
         />
 
-        {/* Overlay controls - This should appear on top */}
+        {/* Overlay controls - All controls are now in the overlay */}
         <ViewerOverlay
           onReset={resetView}
           onFullscreen={toggleFullscreen}
+          onDirectionLock={toggleDirectionLock}
           isFullscreen={isFullscreen}
           hasImageLoaded={hasImageLoaded}
           getCurrentImageName={getCurrentImageName}
           hasMultipleImages={!!hasMultipleImages}
           projectData={projectData}
           currentImageIndex={currentImageIndex}
-          onNavigate={navigateImages}
+          onNavigate={handleNavigate}
+          isDirectionLockEnabled={isDirectionLockEnabled}
+          isMobileDevice={isMobileDevice}
         />
       </div>
 
-      {/* Image Counter */}
-      {hasMultipleImages && !isFullscreen && !uploadedImage && (
-        <div style={{ textAlign: "center", marginTop: "10px", color: "#666" }}>
-          Image {currentImageIndex + 1} of {projectData!["360_images"].length}
-        </div>
-      )}
-
-      {/* Instructions */}
+      {/* Instructions - Only show when not in fullscreen */}
       {!isFullscreen && (
         <div
           style={{
@@ -330,14 +423,30 @@ export default function PanoramaViewerWithCode() {
             <li>Drag to look around the panorama</li>
             <li>Use mouse wheel to zoom in/out</li>
             {hasMultipleImages && !uploadedImage && (
-              <li>
-                Use arrow keys or navigation buttons to switch between views
-              </li>
+              <>
+                <li>Click on image names above to switch between views</li>
+                <li>Use arrow keys to navigate between images</li>
+                <li>
+                  Motion control automatically turns off when switching images
+                </li>
+              </>
             )}
-            <li>Click fullscreen for immersive experience</li>
+            <li>Use overlay controls for fullscreen and motion control</li>
+            <li>
+              Keyboard shortcuts:
+              <strong> F</strong> - Fullscreen,
+              <strong> R</strong> - Reset view,
+              <strong> M</strong> - Motion control
+            </li>
             <li>
               Share this link:{" "}
-              <code>
+              <code
+                style={{
+                  backgroundColor: "#e9ecef",
+                  padding: "2px 6px",
+                  borderRadius: "3px",
+                }}
+              >
                 {typeof window !== "undefined" ? window.location.href : ""}
               </code>
             </li>
