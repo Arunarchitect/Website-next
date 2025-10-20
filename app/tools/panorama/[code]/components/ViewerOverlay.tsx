@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ProjectData } from "../types/panorama";
 
-interface ViewerOverlayProps {
+interface UnifiedViewerOverlayProps {
   onReset: () => void;
   onFullscreen: () => void;
   onDirectionLock: () => void;
@@ -18,7 +18,7 @@ interface ViewerOverlayProps {
   isMobileDevice?: boolean;
 }
 
-export default function ViewerOverlay({
+export default function UnifiedViewerOverlay({
   onReset,
   onFullscreen,
   onDirectionLock,
@@ -31,7 +31,7 @@ export default function ViewerOverlay({
   onNavigate,
   isDirectionLockEnabled = false,
   isMobileDevice = false,
-}: ViewerOverlayProps) {
+}: UnifiedViewerOverlayProps) {
   const [isVisible, setIsVisible] = useState(true);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -56,7 +56,7 @@ export default function ViewerOverlay({
     // Set new timeout to hide after 3 seconds
     timeoutRef.current = setTimeout(() => {
       setIsVisible(false);
-    }, 1500);
+    }, 3000);
   }, []);
 
   // Show controls when user interacts with the viewer
@@ -69,6 +69,7 @@ export default function ViewerOverlay({
       showControls();
     };
 
+    // Add event listeners to the entire document
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("touchstart", handleTouchStart);
 
@@ -111,22 +112,14 @@ export default function ViewerOverlay({
               color: "white",
               border: "none",
               borderRadius: "50%",
-              // Smaller on mobile
-              width: isMobileDevice 
-                ? "35px" 
-                : (isFullscreen ? "70px" : "50px"),
-              height: isMobileDevice 
-                ? "35px" 
-                : (isFullscreen ? "70px" : "50px"),
+              width: isMobileDevice ? "35px" : (isFullscreen ? "70px" : "50px"),
+              height: isMobileDevice ? "35px" : (isFullscreen ? "70px" : "50px"),
               cursor: "pointer",
               zIndex: 1002,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              // Smaller font on mobile
-              fontSize: isMobileDevice 
-                ? "16px" 
-                : (isFullscreen ? "32px" : "24px"),
+              fontSize: isMobileDevice ? "16px" : (isFullscreen ? "32px" : "24px"),
               fontWeight: "bold",
               pointerEvents: "auto",
               boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
@@ -148,22 +141,14 @@ export default function ViewerOverlay({
               color: "white",
               border: "none",
               borderRadius: "50%",
-              // Smaller on mobile
-              width: isMobileDevice 
-                ? "35px" 
-                : (isFullscreen ? "70px" : "50px"),
-              height: isMobileDevice 
-                ? "35px" 
-                : (isFullscreen ? "70px" : "50px"),
+              width: isMobileDevice ? "35px" : (isFullscreen ? "70px" : "50px"),
+              height: isMobileDevice ? "35px" : (isFullscreen ? "70px" : "50px"),
               cursor: "pointer",
               zIndex: 1002,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              // Smaller font on mobile
-              fontSize: isMobileDevice 
-                ? "16px" 
-                : (isFullscreen ? "32px" : "24px"),
+              fontSize: isMobileDevice ? "16px" : (isFullscreen ? "32px" : "24px"),
               fontWeight: "bold",
               pointerEvents: "auto",
               boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
@@ -186,16 +171,10 @@ export default function ViewerOverlay({
           transform: "translateX(-50%)",
           backgroundColor: "rgba(0, 0, 0, 0.85)",
           color: "white",
-          // Smaller padding on mobile
-          padding: isMobileDevice 
-            ? "8px 16px" 
-            : (isFullscreen ? "16px 32px" : "12px 24px"),
+          padding: isMobileDevice ? "8px 16px" : (isFullscreen ? "16px 32px" : "12px 24px"),
           borderRadius: "25px",
           zIndex: 1002,
-          // Smaller font on mobile
-          fontSize: isMobileDevice 
-            ? "12px" 
-            : (isFullscreen ? "20px" : "16px"),
+          fontSize: isMobileDevice ? "12px" : (isFullscreen ? "20px" : "16px"),
           fontWeight: "bold",
           backdropFilter: "blur(10px)",
           textAlign: "center",
@@ -215,10 +194,7 @@ export default function ViewerOverlay({
           <span
             style={{
               marginLeft: "8px",
-              // Smaller font on mobile
-              fontSize: isMobileDevice 
-                ? "10px" 
-                : (isFullscreen ? "18px" : "14px"),
+              fontSize: isMobileDevice ? "10px" : (isFullscreen ? "18px" : "14px"),
               opacity: 0.9,
               backgroundColor: "rgba(255, 255, 255, 0.2)",
               padding: isMobileDevice ? "2px 6px" : "4px 12px",
@@ -226,6 +202,21 @@ export default function ViewerOverlay({
             }}
           >
             {currentImageIndex + 1} / {projectData["360_images"].length}
+          </span>
+        )}
+        {isDirectionLockEnabled && (
+          <span
+            style={{
+              marginLeft: "8px",
+              fontSize: isMobileDevice ? "10px" : (isFullscreen ? "18px" : "14px"),
+              opacity: 0.9,
+              backgroundColor: "rgba(0, 255, 0, 0.2)",
+              padding: isMobileDevice ? "2px 6px" : "4px 12px",
+              borderRadius: "12px",
+              color: "#4CAF50",
+            }}
+          >
+            Motion Control ON
           </span>
         )}
       </div>
@@ -244,46 +235,34 @@ export default function ViewerOverlay({
           transition: "opacity 0.3s ease",
         }}
       >
-        {/* Direction Lock Button */}
-        <button
-          onClick={onDirectionLock}
-          style={{
-            backgroundColor: isDirectionLockEnabled
-              ? "#4CAF50"
-              : "rgba(0, 0, 0, 0.8)",
-            color: "white",
-            border: "none",
-            borderRadius: "50%",
-            // Smaller on mobile
-            width: isMobileDevice 
-              ? "30px" 
-              : (isFullscreen ? "60px" : "45px"),
-            height: isMobileDevice 
-              ? "30px" 
-              : (isFullscreen ? "60px" : "45px"),
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            // Smaller font on mobile
-            fontSize: isMobileDevice 
-              ? "12px" 
-              : (isFullscreen ? "18px" : "14px"),
-            fontWeight: "bold",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-            pointerEvents: "auto",
-            opacity: isMobileDevice ? 1 : 0.6,
-          }}
-          title={
-            isMobileDevice
-              ? isDirectionLockEnabled
-                ? "Disable Motion Control"
-                : "Enable Motion Control"
-              : "Motion control only available on mobile devices"
-          }
-        >
-          📱
-        </button>
+        {/* Direction Lock Button - Only show on mobile devices */}
+        {isMobileDevice && (
+          <button
+            onClick={onDirectionLock}
+            style={{
+              backgroundColor: isDirectionLockEnabled
+                ? "#4CAF50"
+                : "rgba(0, 0, 0, 0.8)",
+              color: "white",
+              border: "none",
+              borderRadius: "50%",
+              width: isMobileDevice ? "30px" : (isFullscreen ? "60px" : "45px"),
+              height: isMobileDevice ? "30px" : (isFullscreen ? "60px" : "45px"),
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: isMobileDevice ? "12px" : (isFullscreen ? "18px" : "14px"),
+              fontWeight: "bold",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              pointerEvents: "auto",
+            }}
+            title={isDirectionLockEnabled ? "Disable Motion Control" : "Enable Motion Control"}
+          >
+            📱
+          </button>
+        )}
+        
         <button
           onClick={onReset}
           style={{
@@ -291,21 +270,13 @@ export default function ViewerOverlay({
             color: "white",
             border: "none",
             borderRadius: "50%",
-            // Smaller on mobile
-            width: isMobileDevice 
-              ? "30px" 
-              : (isFullscreen ? "60px" : "45px"),
-            height: isMobileDevice 
-              ? "30px" 
-              : (isFullscreen ? "60px" : "45px"),
+            width: isMobileDevice ? "30px" : (isFullscreen ? "60px" : "45px"),
+            height: isMobileDevice ? "30px" : (isFullscreen ? "60px" : "45px"),
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            // Smaller font on mobile
-            fontSize: isMobileDevice 
-              ? "12px" 
-              : (isFullscreen ? "18px" : "14px"),
+            fontSize: isMobileDevice ? "12px" : (isFullscreen ? "18px" : "14px"),
             fontWeight: "bold",
             boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
             pointerEvents: "auto",
@@ -314,6 +285,7 @@ export default function ViewerOverlay({
         >
           ↺
         </button>
+        
         <button
           onClick={onFullscreen}
           style={{
@@ -321,21 +293,13 @@ export default function ViewerOverlay({
             color: "white",
             border: "none",
             borderRadius: "50%",
-            // Smaller on mobile
-            width: isMobileDevice 
-              ? "30px" 
-              : (isFullscreen ? "60px" : "45px"),
-            height: isMobileDevice 
-              ? "30px" 
-              : (isFullscreen ? "60px" : "45px"),
+            width: isMobileDevice ? "30px" : (isFullscreen ? "60px" : "45px"),
+            height: isMobileDevice ? "30px" : (isFullscreen ? "60px" : "45px"),
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            // Smaller font on mobile
-            fontSize: isMobileDevice 
-              ? "12px" 
-              : (isFullscreen ? "18px" : "14px"),
+            fontSize: isMobileDevice ? "12px" : (isFullscreen ? "18px" : "14px"),
             fontWeight: "bold",
             boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
             pointerEvents: "auto",
@@ -359,16 +323,15 @@ export default function ViewerOverlay({
             padding: isMobileDevice ? "6px 12px" : "10px 20px",
             borderRadius: "8px",
             zIndex: 1002,
-            // Smaller font on mobile
             fontSize: isMobileDevice ? "10px" : "14px",
             textAlign: "center",
             pointerEvents: "none",
             backdropFilter: "blur(10px)",
           }}
         >
+          {hasMultipleImages && "Use arrow keys to navigate • "}
+          {isDirectionLockEnabled && isMobileDevice && "Move device to look around • "}
           Move mouse to show controls
-          {hasMultipleImages && " • Use arrow keys to navigate"}
-          {isDirectionLockEnabled && isMobileDevice && " • Move device to look around"}
         </div>
       )}
     </div>

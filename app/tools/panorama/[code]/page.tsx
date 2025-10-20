@@ -27,7 +27,10 @@ export default function PanoramaViewerWithCode() {
   // Detect mobile device on component mount
   useEffect(() => {
     const checkDevice = () => {
-      const mobileCheck = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const mobileCheck =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        );
       setIsMobileDevice(mobileCheck);
     };
     checkDevice();
@@ -62,37 +65,33 @@ export default function PanoramaViewerWithCode() {
   }, []);
 
   const toggleDirectionLock = useCallback(() => {
-    if (!pannellumViewerRef.current) return;
-
-    // Check if motion control is supported
-    if (!pannellumViewerRef.current.isMotionControlSupported()) {
-      alert(
-        "Motion control is only available on mobile devices with gyroscope support."
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
       );
+
+    if (!isMobile) {
+      alert("Motion control is only available on mobile devices.");
+      return;
+    }
+
+    // Check if we're on HTTPS
+    if (window.location.protocol !== "https:") {
+      alert("Motion control requires HTTPS. Please use a secure connection.");
       return;
     }
 
     if (isDirectionLockEnabled) {
-      pannellumViewerRef.current.disableDirectionLock();
-      setIsDirectionLockEnabled(false);
+      pannellumViewerRef.current?.disableDirectionLock();
     } else {
-      // enableDirectionLock returns void, so we assume success and update state
-      pannellumViewerRef.current.enableDirectionLock();
-      setIsDirectionLockEnabled(true);
+      pannellumViewerRef.current?.enableDirectionLock();
     }
   }, [isDirectionLockEnabled]);
 
   const handleDirectionLockChange = useCallback((enabled: boolean) => {
+    console.log("Direction lock changed to:", enabled);
     setIsDirectionLockEnabled(enabled);
   }, []);
-
-  // Auto-disable motion control when image changes
-  useEffect(() => {
-    if (isDirectionLockEnabled && pannellumViewerRef.current) {
-      pannellumViewerRef.current.disableDirectionLock();
-      setIsDirectionLockEnabled(false);
-    }
-  }, [currentImageIndex, uploadedImage, isDirectionLockEnabled]);
 
   const handleFileUpload = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -175,8 +174,8 @@ export default function PanoramaViewerWithCode() {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isFullscreen) {
         toggleFullscreen();
-      } else if (e.key === "m" || e.key === "M") {
-        // 'M' key to toggle motion control
+      } else if ((e.key === "m" || e.key === "M") && isMobileDevice) {
+        // 'M' key to toggle motion control (only on mobile)
         toggleDirectionLock();
       } else if (e.key === "r" || e.key === "R") {
         // 'R' key to reset view
@@ -208,6 +207,7 @@ export default function PanoramaViewerWithCode() {
     toggleDirectionLock,
     resetView,
     handleNavigate,
+    isMobileDevice,
   ]);
 
   return (
@@ -435,8 +435,12 @@ export default function PanoramaViewerWithCode() {
             <li>
               Keyboard shortcuts:
               <strong> F</strong> - Fullscreen,
-              <strong> R</strong> - Reset view,
-              <strong> M</strong> - Motion control
+              <strong> R</strong> - Reset view
+              {isMobileDevice && (
+                <>
+                  , <strong>M</strong> - Motion control
+                </>
+              )}
             </li>
             <li>
               Share this link:{" "}

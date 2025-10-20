@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useRef, forwardRef, useImperativeHandle, useState, useCallback } from 'react';
-import type { PannellumViewer as PannellumViewerType } from '../types/panorama';
+import {
+  useEffect,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  useState,
+  useCallback,
+} from 'react';
 
 interface PannellumViewerProps {
   imageUrl: string | null;
@@ -17,76 +23,67 @@ export interface PannellumViewerRef {
   isMotionControlSupported: () => boolean;
 }
 
-// Type definitions for DeviceOrientationEvent
-interface DeviceOrientationEventWithPermission extends DeviceOrientationEvent {
-  requestPermission?: () => Promise<'granted' | 'denied'>;
+// -- Pannellum Types --
+interface PannellumConfig {
+  type: string;
+  panorama: string;
+  autoLoad: boolean;
+  showZoomCtrl: boolean;
+  mouseZoom: boolean;
+  draggable: boolean;
+  compass: boolean;
+  showControls: boolean;
+  showFullscreenCtrl: boolean;
+  orientationOnByDefault: boolean;
+  autoRotate: boolean;
 }
 
-interface DeviceOrientationEventConstructor {
-  prototype: DeviceOrientationEventWithPermission;
-  new(type: string, eventInitDict?: DeviceOrientationEventInit): DeviceOrientationEventWithPermission;
-  requestPermission?: () => Promise<'granted' | 'denied'>;
+interface PannellumViewerInstance {
+  setYaw: (yaw: number) => void;
+  setPitch: (pitch: number) => void;
+  setHfov: (hfov: number) => void;
+  startOrientation?: () => void;
+  stopOrientation?: () => void;
+  getYaw?: () => number;
+  getPitch?: () => number;
+  getRenderer?: () => unknown;
 }
 
-declare global {
-  interface Window {
-    DeviceOrientationEvent: DeviceOrientationEventConstructor;
+interface PannellumGlobal {
+  viewer: (container: HTMLElement, config: PannellumConfig) => PannellumViewerInstance;
+}
+
+// ✅ Get pannellum safely without using `any`
+const getPannellum = (): PannellumGlobal | null => {
+  if (typeof window !== 'undefined' && 'pannellum' in window) {
+    return (window as unknown as { pannellum: PannellumGlobal }).pannellum;
   }
-}
+  return null;
+};
 
 const PannellumViewer = forwardRef<PannellumViewerRef, PannellumViewerProps>(
   ({ imageUrl, loading, isDirectionLockEnabled = false, onDirectionLockChange }, ref) => {
     const viewerContainerRef = useRef<HTMLDivElement>(null);
-    const viewerInstance = useRef<PannellumViewerType | null>(null);
+    const viewerInstance = useRef<PannellumViewerInstance | null>(null);
     const [isLockEnabled, setIsLockEnabled] = useState(isDirectionLockEnabled);
-    const [isMobileDevice, setIsMobileDevice] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const isMountedRef = useRef(true);
 
-    // Device orientation state
-    const alphaRef = useRef<number | null>(null);
-    const orientationHandlerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
-
-    // Check if device is mobile and supports motion control
-    useEffect(() => {
-      const checkDevice = () => {
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        setIsMobileDevice(isMobile);
-      };
-      checkDevice();
-    }, []);
-
-    const isMotionControlSupported = useCallback(() => {
-      return isMobileDevice && 'DeviceOrientationEvent' in window;
-    }, [isMobileDevice]);
-
-    // Completely disable direction lock and clean up
-    const disableDirectionLock = useCallback(() => {
-      if (orientationHandlerRef.current) {
-        window.removeEventListener('deviceorientation', orientationHandlerRef.current);
-        orientationHandlerRef.current = null;
-      }
-      alphaRef.current = null;
-      setIsLockEnabled(false);
-      onDirectionLockChange?.(false);
-    }, [onDirectionLockChange]);
-
-    // Safe viewer destruction
+    // 🧹 Cleanup function
     const safeDestroyViewer = useCallback(() => {
-      disableDirectionLock();
-      
       if (viewerInstance.current) {
         try {
           if (viewerContainerRef.current) {
             viewerContainerRef.current.innerHTML = '';
           }
-        } catch (error) {
-          console.warn('Error during viewer cleanup:', error);
+        } catch (cleanupError) {
+          console.warn('Error during viewer cleanup:', cleanupError);
         }
         viewerInstance.current = null;
       }
-    }, [disableDirectionLock]);
+    }, []);
 
-    // Initialize viewer
+    // 🧭 Initialize viewer
     const initializeViewer = useCallback(() => {
       if (!imageUrl || !viewerContainerRef.current || !isMountedRef.current) return;
 
@@ -96,103 +93,134 @@ const PannellumViewer = forwardRef<PannellumViewerRef, PannellumViewerProps>(
         if (!isMountedRef.current || !viewerContainerRef.current) return;
 
         try {
-          viewerInstance.current = pannellum.viewer(viewerContainerRef.current, {
-            type: 'equirectangular',
-            panorama: imageUrl,
-            autoLoad: true,
-            showZoomCtrl: false,
-            mouseZoom: true,
-            draggable: true,
-            compass: false,
-            showControls: false,
-            showFullscreenCtrl: false,
-          });
-        } catch (error) {
-          console.error('Error initializing Pannellum viewer:', error);
+          const pannellum = getPannellum();
+          if (pannellum) {
+            viewerInstance.current = pannellum.viewer(viewerContainerRef.current, {
+              type: 'equirectangular',
+              panorama: imageUrl,
+              autoLoad: true,
+              showZoomCtrl: false,
+              mouseZoom: true,
+              draggable: true,
+              compass: true,
+              showControls: false,
+              showFullscreenCtrl: false,
+              orientationOnByDefault: false,
+              autoRotate: false,
+            });
+            console.log('✅ Pannellum viewer initialized');
+          } else {
+            console.error('❌ Pannellum library not loaded');
+            setError('Pannellum viewer library not available');
+          }
+        } catch (initError: unknown) {
+          console.error('Error initializing Pannellum viewer:', initError);
+          setError('Failed to initialize viewer');
         }
       }, 50);
 
       return () => clearTimeout(initTimer);
     }, [imageUrl, safeDestroyViewer]);
 
-    // Device orientation handler
-    const startDeviceOrientation = useCallback(() => {
-      if (!isMountedRef.current || !viewerInstance.current || !isMotionControlSupported()) {
-        return;
-      }
+    // 🌐 Motion support check
+    const isMotionControlSupported = useCallback(() => {
+      try {
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        );
+        const isHTTPS = window.location.protocol === 'https:';
 
-      if (orientationHandlerRef.current) {
-        window.removeEventListener('deviceorientation', orientationHandlerRef.current);
-      }
+        console.log('Motion control check:', { isMobile, isHTTPS });
 
-      const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
-        if (!isMountedRef.current || !viewerInstance.current || !viewerContainerRef.current) {
-          disableDirectionLock();
+        if (isMobile && !isHTTPS) {
+          console.log('Development (HTTP) mode detected');
+          return true;
+        }
+        return isMobile && isHTTPS;
+      } catch (checkError: unknown) {
+        console.error('Error checking motion control support:', checkError);
+        return false;
+      }
+    }, []);
+
+    // 🧲 Enable Direction Lock
+    const enableDirectionLock = useCallback(async () => {
+      if (!isMountedRef.current) return;
+
+      console.log('Attempting to enable motion control...');
+      setError(null);
+
+      try {
+        const isMobile = isMotionControlSupported();
+        if (!isMobile) {
+          setError('Motion control only works on mobile devices');
           return;
         }
 
-        const { alpha } = event;
-
-        if (alpha !== null) {
-          if (alphaRef.current === null) {
-            alphaRef.current = alpha;
-          }
-
-          const yaw = -((alpha - (alphaRef.current || 0)) * Math.PI / 180);
-          try {
-            viewerInstance.current.setYaw(yaw);
-          } catch (error) {
-            console.warn('Failed to set yaw, disabling motion control:', error);
-            disableDirectionLock();
-          }
+        const isHTTPS = window.location.protocol === 'https:';
+        if (!isHTTPS) {
+          setIsLockEnabled(true);
+          onDirectionLockChange?.(true);
+          setError('Motion control requires HTTPS. Use ngrok or SSL for testing.');
+          console.log('Development mode: HTTPS required');
+          return;
         }
-      };
 
-      orientationHandlerRef.current = handleDeviceOrientation;
-      window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
-    }, [disableDirectionLock, isMotionControlSupported]);
-
-    const enableDirectionLock = useCallback(() => {
-      if (!isMountedRef.current || !viewerInstance.current) {
-        console.warn('Cannot enable motion control: viewer not ready');
-        return false;
-      }
-
-      // Check if motion control is supported
-      if (!isMotionControlSupported()) {
-        alert('Motion control is only available on mobile devices with gyroscope support.');
-        return false;
-      }
-
-      const checkIOSPermission = async () => {
-        try {
-          const deviceOrientationEvent = window.DeviceOrientationEvent as DeviceOrientationEventConstructor | undefined;
-          
-          if (deviceOrientationEvent?.requestPermission) {
-            const permission = await deviceOrientationEvent.requestPermission();
-            if (permission === 'granted') {
-              startDeviceOrientation();
+        if (viewerInstance.current?.startOrientation) {
+          viewerInstance.current.startOrientation();
+          setTimeout(() => {
+            if (isMountedRef.current) {
               setIsLockEnabled(true);
               onDirectionLockChange?.(true);
-            } else {
-              console.warn('Device orientation permission denied');
-              alert('Device orientation permission is required for motion control.');
+              console.log('Motion control enabled');
             }
-          } else if ('DeviceOrientationEvent' in window) {
-            startDeviceOrientation();
+          }, 100);
+          return;
+        }
+
+        // ✅ Safe check for iOS permission API
+        if (
+          typeof DeviceOrientationEvent !== 'undefined' &&
+          'requestPermission' in DeviceOrientationEvent
+        ) {
+          const requestPermission = (DeviceOrientationEvent as unknown as {
+            requestPermission: () => Promise<PermissionState>;
+          }).requestPermission;
+
+          const permission = await requestPermission();
+          if (permission === 'granted') {
             setIsLockEnabled(true);
             onDirectionLockChange?.(true);
+            console.log('iOS permission granted');
+          } else {
+            setError('Motion control permission was denied');
           }
-        } catch (error) {
-          console.error('Error requesting device orientation permission:', error);
-          alert('Failed to enable motion control. Please check your device settings.');
+        } else {
+          setIsLockEnabled(true);
+          onDirectionLockChange?.(true);
+          console.log('Motion control enabled (fallback)');
         }
-      };
+      } catch (unexpectedError: unknown) {
+        console.error('Unexpected motion control error:', unexpectedError);
+        setError('Unexpected error enabling motion control');
+      }
+    }, [isMotionControlSupported, onDirectionLockChange]);
 
-      checkIOSPermission();
-      return true;
-    }, [startDeviceOrientation, onDirectionLockChange, isMotionControlSupported]);
+    // ❎ Disable Direction Lock
+    const disableDirectionLock = useCallback(() => {
+      console.log('Disabling motion control...');
+      try {
+        viewerInstance.current?.stopOrientation?.();
+      } catch (stopError: unknown) {
+        console.warn('Error stopping orientation:', stopError);
+      }
 
+      setIsLockEnabled(false);
+      setError(null);
+      onDirectionLockChange?.(false);
+    }, [onDirectionLockChange]);
+
+    // Expose imperative methods
     useImperativeHandle(ref, () => ({
       resetView: () => {
         if (viewerInstance.current && isMountedRef.current) {
@@ -200,29 +228,17 @@ const PannellumViewer = forwardRef<PannellumViewerRef, PannellumViewerProps>(
             viewerInstance.current.setYaw(0);
             viewerInstance.current.setPitch(0);
             viewerInstance.current.setHfov(100);
-          } catch (error) {
-            console.warn('Error resetting view:', error);
+          } catch (resetError: unknown) {
+            console.warn('Error resetting view:', resetError);
           }
-          alphaRef.current = null;
         }
       },
-      enableDirectionLock: () => {
-        if (viewerInstance.current && isMountedRef.current) {
-          return enableDirectionLock();
-        }
-        return false;
-      },
-      disableDirectionLock: () => {
-        if (isMountedRef.current) {
-          disableDirectionLock();
-        }
-      },
-      isMotionControlSupported: () => {
-        return isMotionControlSupported();
-      }
+      enableDirectionLock,
+      disableDirectionLock,
+      isMotionControlSupported,
     }));
 
-    // Initialize viewer on mount and imageUrl changes
+    // Initialize on mount
     useEffect(() => {
       isMountedRef.current = true;
       initializeViewer();
@@ -233,60 +249,98 @@ const PannellumViewer = forwardRef<PannellumViewerRef, PannellumViewerProps>(
       };
     }, [initializeViewer, safeDestroyViewer]);
 
-    // Auto-disable motion control when image changes
+    // Sync external lock state
     useEffect(() => {
-      if (isLockEnabled) {
+      if (isDirectionLockEnabled && !isLockEnabled) {
+        enableDirectionLock();
+      } else if (!isDirectionLockEnabled && isLockEnabled) {
         disableDirectionLock();
       }
-    }, [imageUrl, isLockEnabled, disableDirectionLock]);
+    }, [isDirectionLockEnabled, isLockEnabled, enableDirectionLock, disableDirectionLock]);
 
     return (
-      <div 
-        ref={viewerContainerRef} 
-        style={{ 
-          width: '100%', 
+      <div
+        ref={viewerContainerRef}
+        style={{
+          width: '100%',
           height: '100%',
           position: 'relative',
-          zIndex: 1
+          zIndex: 1,
         }}
       >
         {!imageUrl && !loading && (
-          <div style={{ 
-            color: '#999', 
-            textAlign: 'center', 
-            lineHeight: '500px',
-            width: '100%',
-            height: '100%'
-          }}>
+          <div
+            style={{
+              color: '#999',
+              textAlign: 'center',
+              lineHeight: '500px',
+              width: '100%',
+              height: '100%',
+            }}
+          >
             No image loaded
           </div>
         )}
         {loading && (
-          <div style={{ 
-            color: '#999', 
-            textAlign: 'center', 
-            lineHeight: '500px',
-            width: '100%',
-            height: '100%'
-          }}>
+          <div
+            style={{
+              color: '#999',
+              textAlign: 'center',
+              lineHeight: '500px',
+              width: '100%',
+              height: '100%',
+            }}
+          >
             Loading panorama...
           </div>
         )}
-        
-        {isLockEnabled && (
-          <div style={{
+
+        {/* Motion control status indicator */}
+        <div
+          style={{
             position: 'absolute',
             top: '10px',
-            right: '10px',
-            backgroundColor: 'rgba(0, 255, 0, 0.8)',
+            left: '10px',
+            backgroundColor: isLockEnabled
+              ? 'rgba(0, 200, 0, 0.8)'
+              : 'rgba(0, 0, 0, 0.6)',
             color: 'white',
-            padding: '5px 10px',
+            padding: '8px 12px',
             borderRadius: '15px',
             fontSize: '12px',
             fontWeight: 'bold',
-            zIndex: 10
-          }}>
-            Motion Control ON
+            zIndex: 10,
+            backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+          }}
+        >
+          {isLockEnabled ? '🎯 Motion Control ON' : '🧭 Tap 📱 to Enable'}
+        </div>
+
+        {/* Error message */}
+        {error && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '50px',
+              left: '10px',
+              right: '10px',
+              backgroundColor: 'rgba(255, 0, 0, 0.8)',
+              color: 'white',
+              padding: '10px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              zIndex: 10,
+              textAlign: 'center',
+            }}
+          >
+            {error}
+            {error.includes('HTTPS') && (
+              <div style={{ marginTop: '5px', fontSize: '10px', opacity: 0.9 }}>
+                Try: <strong>ngrok http 3000</strong> or enable HTTPS locally
+              </div>
+            )}
           </div>
         )}
       </div>
