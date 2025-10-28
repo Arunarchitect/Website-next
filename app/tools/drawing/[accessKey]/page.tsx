@@ -20,6 +20,7 @@ interface Deliverable {
   name: string;
   description?: string;
   project: number;
+  drawing_count?: number;
   drawings_count?: number;
 }
 
@@ -27,7 +28,7 @@ interface Drawing {
   id: number;
   drawing_name: string;
   description?: string;
-  original_file_type: 'svg' | 'png' | 'pdf';
+  original_file_type: "svg" | "png" | "pdf";
   status: string;
   created_at: string;
   updated_at: string;
@@ -46,6 +47,7 @@ interface Drawing {
       url?: string | null;
     };
   };
+  available_files?: string[];
 }
 
 // API Response Interfaces
@@ -56,10 +58,22 @@ interface ProjectsResponse {
 
 interface DeliverablesResponse {
   deliverables: Deliverable[];
+  project: {
+    id: number;
+    name: string;
+  };
 }
 
 interface DrawingsResponse {
   drawings: Drawing[];
+  project: {
+    id: number;
+    name: string;
+  };
+  deliverable: {
+    id: number;
+    name: string;
+  };
 }
 
 export default function DrawingViewerPage() {
@@ -97,17 +111,18 @@ export default function DrawingViewerPage() {
     setIsLoading(true);
     setError("");
     try {
-      console.log('Fetching projects for access key:', key);
       const response = await fetch(
         `${API_BASE_URL}/api/drawings/public/access/${key}/projects/`
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Failed to fetch projects: ${response.status}`);
       }
 
       const data: ProjectsResponse = await response.json();
-      console.log('Projects response:', data);
+      
+      // Debug log to see actual API response
+      console.log('Projects API Response:', data);
       
       setOrganisation(data.organisation);
       setProjects(data.projects || []);
@@ -116,8 +131,7 @@ export default function DrawingViewerPage() {
       setSelectedDeliverable(null);
       setDrawings([]);
 
-    } catch (err) {
-      console.error("Failed to fetch projects:", err);
+    } catch {
       setError("Invalid access key or failed to fetch projects");
     } finally {
       setIsLoading(false);
@@ -128,23 +142,24 @@ export default function DrawingViewerPage() {
   const fetchDeliverables = async (projectId: number) => {
     setIsLoading(true);
     try {
-      console.log('Fetching deliverables for project:', projectId);
       const response = await fetch(
         `${API_BASE_URL}/api/drawings/public/access/${accessKey}/projects/${projectId}/deliverables/`
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Failed to fetch deliverables: ${response.status}`);
       }
 
       const data: DeliverablesResponse = await response.json();
-      console.log('Deliverables response:', data);
+      
+      // Debug log to see actual API response
+      console.log('Deliverables API Response:', data);
+      
       setDeliverables(data.deliverables || []);
       setSelectedDeliverable(null);
       setDrawings([]);
 
-    } catch (err) {
-      console.error("Failed to fetch deliverables:", err);
+    } catch {
       setError("Failed to fetch deliverables");
     } finally {
       setIsLoading(false);
@@ -155,21 +170,18 @@ export default function DrawingViewerPage() {
   const fetchDrawings = async (projectId: number, deliverableId: number) => {
     setIsLoading(true);
     try {
-      console.log('Fetching drawings for project:', projectId, 'deliverable:', deliverableId);
       const response = await fetch(
         `${API_BASE_URL}/api/drawings/public/access/${accessKey}/projects/${projectId}/deliverables/${deliverableId}/drawings/`
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Failed to fetch drawings: ${response.status}`);
       }
 
       const data: DrawingsResponse = await response.json();
-      console.log('Drawings response:', data);
       setDrawings(data.drawings || []);
 
-    } catch (err) {
-      console.error("Failed to fetch drawings:", err);
+    } catch {
       setError("Failed to fetch drawings");
     } finally {
       setIsLoading(false);
@@ -178,115 +190,71 @@ export default function DrawingViewerPage() {
 
   // Handle project selection
   const handleProjectSelect = (project: Project) => {
-    console.log('Project selected:', project);
     setSelectedProject(project);
     fetchDeliverables(project.id);
   };
 
   // Handle deliverable selection
   const handleDeliverableSelect = (deliverable: Deliverable) => {
-    console.log('Deliverable selected:', deliverable);
     setSelectedDeliverable(deliverable);
     if (selectedProject) {
       fetchDrawings(selectedProject.id, deliverable.id);
+    }
+  };
+
+  // Check if file type is available for a drawing
+  const isFileAvailable = (drawing: Drawing, fileType: string): boolean => {
+    return drawing.available_files?.includes(fileType) ?? false;
+  };
+
+  // Handle view document - try PNG first, then PDF
+  const handleViewDocument = async (drawing: Drawing) => {
+    const hasPng = isFileAvailable(drawing, "png");
+    const hasPdf = isFileAvailable(drawing, "pdf");
+
+    if (hasPng) {
+      const pngUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/png/${drawing.id}/`;
+      window.open(pngUrl, "_blank");
+    } else if (hasPdf) {
+      const pdfUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/pdf/${drawing.id}/`;
+      window.open(pdfUrl, "_blank");
     } else {
-      console.error('No project selected when trying to fetch drawings');
+      alert(`No viewable document available for "${drawing.drawing_name}".`);
     }
-  };
-
-  // Test if file URL is accessible
-  const testFileAccess = async (url: string): Promise<boolean> => {
-    try {
-      const response = await fetch(url, { method: 'HEAD' });
-      return response.ok;
-    } catch (err) {
-      console.error('File access test failed:', err);
-      return false;
-    }
-  };
-
-  // Handle view drawing - try multiple approaches
-  const handleViewDrawing = async (drawing: Drawing) => {
-    console.log('Attempting to view drawing:', drawing);
-    
-    // Try PNG first
-    const pngUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/png/${drawing.id}/`;
-    console.log('PNG URL:', pngUrl);
-    
-    // Test if PNG is accessible
-    const isPngAccessible = await testFileAccess(pngUrl);
-    console.log('PNG accessible:', isPngAccessible);
-    
-    if (isPngAccessible) {
-      window.open(pngUrl, '_blank');
-      return;
-    }
-    
-    // If PNG not accessible, try using file_info URLs
-    if (drawing.file_info?.png?.url) {
-      const fileInfoUrl = drawing.file_info.png.url.startsWith('http') 
-        ? drawing.file_info.png.url 
-        : `${API_BASE_URL}${drawing.file_info.png.url}`;
-      
-      console.log('Trying file_info PNG URL:', fileInfoUrl);
-      const isFileInfoAccessible = await testFileAccess(fileInfoUrl);
-      
-      if (isFileInfoAccessible) {
-        window.open(fileInfoUrl, '_blank');
-        return;
-      }
-    }
-    
-    // If nothing works, show error
-    alert(`Unable to view drawing "${drawing.drawing_name}". The file may not be available or accessible. Check console for details.`);
   };
 
   // Handle download PDF
-  const handleDownloadPdf = async (drawing: Drawing) => {
-    console.log('Attempting to download PDF for:', drawing);
-    
-    const pdfUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/pdf/${drawing.id}/`;
-    console.log('PDF URL:', pdfUrl);
-    
-    // Test if PDF is accessible
-    const isPdfAccessible = await testFileAccess(pdfUrl);
-    console.log('PDF accessible:', isPdfAccessible);
-    
-    if (isPdfAccessible) {
-      const link = document.createElement('a');
-      link.href = pdfUrl;
-      link.download = `${drawing.drawing_name}.pdf`;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      alert(`Unable to download PDF for "${drawing.drawing_name}". The file may not be available.`);
+  const handleDownloadPdf = (drawing: Drawing) => {
+    if (!isFileAvailable(drawing, "pdf")) {
+      alert(`PDF not available for "${drawing.drawing_name}".`);
+      return;
     }
+
+    const pdfUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/pdf/${drawing.id}/`;
+    const link = document.createElement("a");
+    link.href = pdfUrl;
+    link.download = `${drawing.drawing_name}.pdf`;
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Handle download SVG
-  const handleDownloadSvg = async (drawing: Drawing) => {
-    console.log('Attempting to download SVG for:', drawing);
-    
-    const svgUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/svg/${drawing.id}/`;
-    console.log('SVG URL:', svgUrl);
-    
-    // Test if SVG is accessible
-    const isSvgAccessible = await testFileAccess(svgUrl);
-    console.log('SVG accessible:', isSvgAccessible);
-    
-    if (isSvgAccessible) {
-      const link = document.createElement('a');
-      link.href = svgUrl;
-      link.download = `${drawing.drawing_name}.svg`;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      alert(`Unable to download SVG for "${drawing.drawing_name}". The file may not be available.`);
+  const handleDownloadSvg = (drawing: Drawing) => {
+    if (!isFileAvailable(drawing, "svg")) {
+      alert(`SVG not available for "${drawing.drawing_name}".`);
+      return;
     }
+
+    const svgUrl = `${API_BASE_URL}/api/drawings/public/access/${accessKey}/files/svg/${drawing.id}/`;
+    const link = document.createElement("a");
+    link.href = svgUrl;
+    link.download = `${drawing.drawing_name}.svg`;
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -300,7 +268,7 @@ export default function DrawingViewerPage() {
 
   // Reset and go back to main page
   const handleReset = () => {
-    router.push('/tools/drawing');
+    router.push("/tools/drawing");
     setAccessKey("");
     setOrganisation(null);
     setProjects([]);
@@ -309,6 +277,58 @@ export default function DrawingViewerPage() {
     setSelectedDeliverable(null);
     setDrawings([]);
     setError("");
+  };
+
+  // Get button styles based on availability
+  const getButtonStyles = (isAvailable: boolean) => {
+    const baseStyles = "px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2";
+    
+    if (isAvailable) {
+      return `${baseStyles} bg-blue-600 hover:bg-blue-700 text-white`;
+    }
+    
+    return `${baseStyles} bg-gray-300 text-gray-500 cursor-not-allowed`;
+  };
+
+  const getDownloadPdfStyles = (isAvailable: boolean) => {
+    const baseStyles = "px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2";
+    
+    if (isAvailable) {
+      return `${baseStyles} bg-green-600 hover:bg-green-700 text-white`;
+    }
+    
+    return `${baseStyles} bg-gray-300 text-gray-500 cursor-not-allowed`;
+  };
+
+  const getDownloadSvgStyles = (isAvailable: boolean) => {
+    const baseStyles = "px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2";
+    
+    if (isAvailable) {
+      return `${baseStyles} bg-purple-600 hover:bg-purple-700 text-white`;
+    }
+    
+    return `${baseStyles} bg-gray-300 text-gray-500 cursor-not-allowed`;
+  };
+
+  // Get deliverable count for display - handle multiple possible field names
+  const getDeliverableCount = (project: Project): number => {
+    // Check all possible field names from API
+    const count = project.deliverables_count || 0;
+    console.log('Project deliverable count:', { project, count });
+    return count;
+  };
+
+  // Get drawing count for deliverable - handle multiple possible field names
+  const getDrawingCount = (deliverable: Deliverable): number => {
+    // Check all possible field names from API
+    const count = deliverable.drawing_count || deliverable.drawings_count || 0;
+    console.log('Deliverable drawing count:', { deliverable, count });
+    return count;
+  };
+
+  // Check if document is viewable (has PNG or PDF)
+  const isDocumentViewable = (drawing: Drawing): boolean => {
+    return isFileAvailable(drawing, "png") || isFileAvailable(drawing, "pdf");
   };
 
   return (
@@ -422,7 +442,7 @@ export default function DrawingViewerPage() {
                 >
                   <h4 className="font-semibold text-gray-800 mb-1">{project.name}</h4>
                   <p className="text-sm text-gray-600">
-                    {project.deliverables_count || 0} deliverable(s)
+                    {getDeliverableCount(project)} deliverable(s)
                   </p>
                 </button>
               ))}
@@ -464,7 +484,7 @@ export default function DrawingViewerPage() {
                           <p className="text-sm text-gray-600">{deliverable.description}</p>
                         )}
                         <p className="text-xs text-gray-500 mt-1">
-                          Deliverable ID: {deliverable.id}
+                          {getDrawingCount(deliverable)} drawing(s) • Deliverable ID: {deliverable.id}
                         </p>
                       </div>
                       <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -485,71 +505,80 @@ export default function DrawingViewerPage() {
               <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              Drawings for {selectedDeliverable.name}
+              Documents for {selectedDeliverable.name}
             </h3>
             
             {drawings.length === 0 ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mx-auto mb-3"></div>
-                <p className="text-gray-600">Loading drawings...</p>
+                <p className="text-gray-600">Loading documents...</p>
               </div>
             ) : (
               <div className="space-y-4">
-                {drawings.map((drawing) => (
-                  <div key={drawing.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h4 className="font-semibold text-gray-800 mb-1">{drawing.drawing_name}</h4>
-                        {drawing.description && (
-                          <p className="text-sm text-gray-600 mb-2">{drawing.description}</p>
-                        )}
-                        <div className="flex items-center gap-4 text-xs text-gray-500">
-                          <span>Type: {drawing.original_file_type.toUpperCase()}</span>
-                          <span>Status: {drawing.status}</span>
-                          <span>
-                            Created: {new Date(drawing.created_at).toLocaleDateString()}
-                          </span>
+                {drawings.map((drawing) => {
+                  const hasPdf = isFileAvailable(drawing, "pdf");
+                  const hasSvg = isFileAvailable(drawing, "svg");
+                  const isViewable = isDocumentViewable(drawing);
+
+                  return (
+                    <div key={drawing.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h4 className="font-semibold text-gray-800 mb-1">{drawing.drawing_name}</h4>
+                          {drawing.description && (
+                            <p className="text-sm text-gray-600 mb-2">{drawing.description}</p>
+                          )}
+                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                            <span>Type: {drawing.original_file_type.toUpperCase()}</span>
+                            <span>Status: {drawing.status}</span>
+                            <span>
+                              Created: {new Date(drawing.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="flex gap-2 flex-wrap">
-                      {/* View Drawing Button */}
-                      <button
-                        onClick={() => handleViewDrawing(drawing)}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        View Drawing
-                      </button>
+                      
+                      <div className="flex gap-2 flex-wrap">
+                        {/* View Document Button - Always show but disabled if not viewable */}
+                        <button
+                          onClick={() => handleViewDocument(drawing)}
+                          disabled={!isViewable}
+                          className={getButtonStyles(isViewable)}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                          View Document
+                        </button>
 
-                      {/* Download PDF Button */}
-                      <button
-                        onClick={() => handleDownloadPdf(drawing)}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        Download PDF
-                      </button>
+                        {/* Download PDF Button */}
+                        <button
+                          onClick={() => handleDownloadPdf(drawing)}
+                          disabled={!hasPdf}
+                          className={getDownloadPdfStyles(hasPdf)}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Download PDF
+                        </button>
 
-                      {/* Download SVG Button */}
-                      <button
-                        onClick={() => handleDownloadSvg(drawing)}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                        Download SVG
-                      </button>
+                        {/* Download SVG Button */}
+                        <button
+                          onClick={() => handleDownloadSvg(drawing)}
+                          disabled={!hasSvg}
+                          className={getDownloadSvgStyles(hasSvg)}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0L8 8m4-4v12" />
+                          </svg>
+                          Download SVG
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
