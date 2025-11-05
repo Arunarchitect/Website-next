@@ -6,7 +6,7 @@ import {
   Drawing 
 } from "../types";
 
-const API_BASE_URL = "http://localhost:8000/api/drawings";
+const API_BASE_URL = "https://api.modelflick.com/api/drawings";
 
 interface DrawingViewerState {
   accessKey: string;

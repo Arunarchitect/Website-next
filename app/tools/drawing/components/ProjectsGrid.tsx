@@ -5,7 +5,7 @@ import { FolderIcon } from "./icons";
 interface ProjectsGridProps {
   projects: Project[];
   selectedProject: Project | null;
-  onProjectSelect: (project: Project) => void;
+  onProjectSelect: (project: { id: number }) => void; // Accept minimal object
 }
 
 export const ProjectsGrid = ({

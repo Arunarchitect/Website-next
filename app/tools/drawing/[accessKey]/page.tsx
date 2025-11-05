@@ -12,7 +12,7 @@ import { DrawingsList } from "../components/DrawingsList";
 import { Spinner } from "../components/LoadingState";
 import { ImageViewer } from "../components/ImageViewer";
 
-const API_BASE_URL = "http://localhost:8000/api/drawings";
+const API_BASE_URL = "https://api.modelflick.com/api/drawings";
 
 export default function DrawingViewerPage() {
   const router = useRouter();
@@ -33,8 +33,8 @@ export default function DrawingViewerPage() {
     title: string;
   }>({
     isOpen: false,
-    imageUrl: '',
-    title: ''
+    imageUrl: "",
+    title: "",
   });
 
   // Auto-load projects if access key is in URL
@@ -45,94 +45,123 @@ export default function DrawingViewerPage() {
     }
   }, [urlAccessKey, updateState, fetchProjects]);
 
-  const isFileAvailable = useCallback((drawing: Drawing, fileType: string): boolean =>
-    drawing.available_files?.includes(fileType) ?? false, []);
+  const isFileAvailable = useCallback(
+    (drawing: Drawing, fileType: string): boolean =>
+      drawing.available_files?.includes(fileType) ?? false,
+    []
+  );
 
-  const handleProjectSelect = useCallback((project: { id: number }) => {
-    updateState({ selectedProject: project });
-    fetchDeliverables(project.id);
-  }, [updateState, fetchDeliverables]);
+  const handleProjectSelect = useCallback(
+    (project: { id: number }) => {
+      // Find the full project object from state
+      const fullProject = state.projects.find((p) => p.id === project.id);
+      if (fullProject) {
+        updateState({ selectedProject: fullProject });
+        fetchDeliverables(project.id);
+      }
+    },
+    [state.projects, updateState, fetchDeliverables]
+  );
 
-  const handleDeliverableSelect = useCallback((deliverable: { id: number }) => {
-    updateState({ selectedDeliverable: deliverable });
-    if (state.selectedProject) {
-      fetchDrawings(state.selectedProject.id, deliverable.id);
-    }
-  }, [state.selectedProject, updateState, fetchDrawings]);
+  const handleDeliverableSelect = useCallback(
+    (deliverable: { id: number }) => {
+      // Find the full deliverable object from state
+      const fullDeliverable = state.deliverables.find(
+        (d) => d.id === deliverable.id
+      );
+      if (fullDeliverable && state.selectedProject) {
+        updateState({ selectedDeliverable: fullDeliverable });
+        fetchDrawings(state.selectedProject.id, deliverable.id);
+      }
+    },
+    [state.deliverables, state.selectedProject, updateState, fetchDrawings]
+  );
 
   const openImageViewer = (imageUrl: string, title: string) => {
     setViewerState({
       isOpen: true,
       imageUrl,
-      title
+      title,
     });
   };
 
   const closeImageViewer = () => {
     setViewerState({
       isOpen: false,
-      imageUrl: '',
-      title: ''
+      imageUrl: "",
+      title: "",
     });
   };
 
-  const handleViewDocument = useCallback((drawing: Drawing) => {
-    const hasPng = isFileAvailable(drawing, "png");
-    const hasPdf = isFileAvailable(drawing, "pdf");
+  const handleViewDocument = useCallback(
+    (drawing: Drawing) => {
+      const hasPng = isFileAvailable(drawing, "png");
+      const hasPdf = isFileAvailable(drawing, "pdf");
 
-    if (hasPng) {
-      const pngUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/png/${drawing.id}/`;
-      // Open in our custom image viewer
-      openImageViewer(pngUrl, drawing.drawing_name);
-    } else if (hasPdf) {
+      if (hasPng) {
+        const pngUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/png/${drawing.id}/`;
+        // Open in our custom image viewer
+        openImageViewer(pngUrl, drawing.drawing_name);
+      } else if (hasPdf) {
+        const pdfUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/pdf/${drawing.id}/`;
+        // For PDFs, still open in new tab since we can't display PDFs in our viewer
+        window.open(pdfUrl, "_blank");
+      } else {
+        alert(`No viewable document available for "${drawing.drawing_name}".`);
+      }
+    },
+    [state.accessKey, isFileAvailable]
+  );
+
+  const handleDownloadPdf = useCallback(
+    (drawing: Drawing) => {
+      if (!isFileAvailable(drawing, "pdf")) {
+        alert(`PDF not available for "${drawing.drawing_name}".`);
+        return;
+      }
+
       const pdfUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/pdf/${drawing.id}/`;
-      // For PDFs, still open in new tab since we can't display PDFs in our viewer
-      window.open(pdfUrl, "_blank");
-    } else {
-      alert(`No viewable document available for "${drawing.drawing_name}".`);
-    }
-  }, [state.accessKey, isFileAvailable]);
+      const link = document.createElement("a");
+      link.href = pdfUrl;
+      link.download = `${drawing.drawing_name}.pdf`;
+      link.target = "_blank";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+    [state.accessKey, isFileAvailable]
+  );
 
-  const handleDownloadPdf = useCallback((drawing: Drawing) => {
-    if (!isFileAvailable(drawing, "pdf")) {
-      alert(`PDF not available for "${drawing.drawing_name}".`);
-      return;
-    }
+  const handleDownloadSvg = useCallback(
+    (drawing: Drawing) => {
+      if (!isFileAvailable(drawing, "svg")) {
+        alert(`SVG not available for "${drawing.drawing_name}".`);
+        return;
+      }
 
-    const pdfUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/pdf/${drawing.id}/`;
-    const link = document.createElement("a");
-    link.href = pdfUrl;
-    link.download = `${drawing.drawing_name}.pdf`;
-    link.target = "_blank";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [state.accessKey, isFileAvailable]);
+      const svgUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/svg/${drawing.id}/`;
+      const link = document.createElement("a");
+      link.href = svgUrl;
+      link.download = `${drawing.drawing_name}.svg`;
+      link.target = "_blank";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+    [state.accessKey, isFileAvailable]
+  );
 
-  const handleDownloadSvg = useCallback((drawing: Drawing) => {
-    if (!isFileAvailable(drawing, "svg")) {
-      alert(`SVG not available for "${drawing.drawing_name}".`);
-      return;
-    }
-
-    const svgUrl = `${API_BASE_URL}/public/access/${state.accessKey}/files/svg/${drawing.id}/`;
-    const link = document.createElement("a");
-    link.href = svgUrl;
-    link.download = `${drawing.drawing_name}.svg`;
-    link.target = "_blank";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [state.accessKey, isFileAvailable]);
-
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (state.accessKey.trim()) {
-      fetchProjects(state.accessKey);
-    } else {
-      updateState({ error: "Please enter an access key" });
-    }
-  }, [state.accessKey, fetchProjects, updateState]);
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (state.accessKey.trim()) {
+        fetchProjects(state.accessKey);
+      } else {
+        updateState({ error: "Please enter an access key" });
+      }
+    },
+    [state.accessKey, fetchProjects, updateState]
+  );
 
   const handleReset = useCallback(() => {
     router.push("/tools/drawing");
@@ -148,21 +177,31 @@ export default function DrawingViewerPage() {
     });
   }, [router, updateState]);
 
-  const handleAccessKeyChange = useCallback((value: string) => {
-    updateState({ accessKey: value });
-  }, [updateState]);
+  const handleAccessKeyChange = useCallback(
+    (value: string) => {
+      updateState({ accessKey: value });
+    },
+    [updateState]
+  );
 
   // Render conditions
-  const showAccessKeyForm = !urlAccessKey || (urlAccessKey && state.projects.length === 0 && !state.isLoading);
-  const showEmptyState = !state.isLoading && state.projects.length === 0 && state.organisation;
+  const showAccessKeyForm =
+    !urlAccessKey ||
+    (urlAccessKey && state.projects.length === 0 && !state.isLoading);
+  const showEmptyState =
+    !state.isLoading && state.projects.length === 0 && state.organisation;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 py-8 px-4">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-3">Drawing Viewer</h1>
-          <p className="text-gray-600 text-lg">Access and view your project drawings with secure access keys</p>
+          <h1 className="text-4xl font-bold text-gray-800 mb-3">
+            Drawing Viewer
+          </h1>
+          <p className="text-gray-600 text-lg">
+            Access and view your project drawings with secure access keys
+          </p>
         </div>
 
         {/* Access Key Form */}
@@ -230,11 +269,25 @@ export default function DrawingViewerPage() {
         {/* Empty State */}
         {showEmptyState && (
           <div className="text-center py-12">
-            <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              className="w-16 h-16 text-gray-400 mx-auto mb-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Projects Found</h3>
-            <p className="text-gray-500">There are no projects with drawings for this access key.</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              No Projects Found
+            </h3>
+            <p className="text-gray-500">
+              There are no projects with drawings for this access key.
+            </p>
           </div>
         )}
 

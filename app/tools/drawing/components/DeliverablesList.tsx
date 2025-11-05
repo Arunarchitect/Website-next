@@ -7,8 +7,8 @@ interface DeliverablesListProps {
   deliverables: Deliverable[];
   selectedDeliverable: Deliverable | null;
   selectedProject: Project;
-  onDeliverableSelect: (deliverable: Deliverable) => void;
-  isLoading?: boolean;
+  onDeliverableSelect: (deliverable: { id: number }) => void; // Accept minimal object
+  isLoading: boolean;
 }
 
 export const DeliverablesList = ({
