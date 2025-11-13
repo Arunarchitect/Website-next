@@ -39,11 +39,21 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
 
   // Zoom functions
   const zoomIn = useCallback(() => {
-    setScale(prev => Math.min(prev * 1.2, 5));
+    setScale(prev => {
+      const newScale = Math.min(prev * 1.2, 5);
+      return newScale;
+    });
   }, []);
 
   const zoomOut = useCallback(() => {
-    setScale(prev => Math.max(prev / 1.2, 0.1));
+    setScale(prev => {
+      const newScale = Math.max(prev / 1.2, 0.1);
+      // Reset position if zooming back to 1x
+      if (newScale <= 1) {
+        setPosition({ x: 0, y: 0 });
+      }
+      return newScale;
+    });
   }, []);
 
   const resetZoom = useCallback(() => {
@@ -55,41 +65,56 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const mouseX = e.clientX - rect.left - rect.width / 2;
+    const mouseY = e.clientY - rect.top - rect.height / 2;
+
     if (e.ctrlKey) {
-      // Zoom with Ctrl + Wheel
+      // Zoom with Ctrl + Wheel at mouse position
       const delta = -e.deltaY * 0.01;
       setScale(prev => {
         const newScale = prev * (1 + delta);
-        return Math.max(0.1, Math.min(newScale, 5));
+        const clampedScale = Math.max(0.1, Math.min(newScale, 5));
+        
+        // Adjust position to zoom towards mouse
+        if (clampedScale !== prev) {
+          const scaleRatio = clampedScale / prev;
+          setPosition(prevPos => ({
+            x: prevPos.x * scaleRatio + mouseX * (1 - scaleRatio),
+            y: prevPos.y * scaleRatio + mouseY * (1 - scaleRatio)
+          }));
+        }
+        
+        return clampedScale;
       });
     } else {
-      // Pan with Wheel (vertical)
+      // Pan with Wheel (both vertical and horizontal with shift key)
       setPosition(prev => ({
-        x: prev.x,
-        y: prev.y - e.deltaY * 0.5
+        x: e.shiftKey ? prev.x - e.deltaY * 0.5 : prev.x - e.deltaX * 0.5,
+        y: e.shiftKey ? prev.y : prev.y - e.deltaY * 0.5
       }));
     }
   }, []);
 
-  // Mouse drag for panning (desktop)
+  // Mouse drag for panning (always available)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (scale <= 1) return;
-    
     setIsDragging(true);
     setDragStart({
       x: e.clientX - position.x,
       y: e.clientY - position.y
     });
-  }, [scale, position]);
+  }, [position]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging || scale <= 1) return;
+    if (!isDragging) return;
     
     setPosition({
       x: e.clientX - dragStart.x,
       y: e.clientY - dragStart.y
     });
-  }, [isDragging, dragStart, scale]);
+  }, [isDragging, dragStart]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
@@ -112,10 +137,11 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
         touch1.clientX - touch2.clientX,
         touch1.clientY - touch2.clientY
       );
-      // Store initial distance for pinch zoom
+      // Store initial distance and scale for pinch zoom
       e.currentTarget.setAttribute('data-initial-distance', distance.toString());
+      e.currentTarget.setAttribute('data-initial-scale', scale.toString());
     }
-  }, [position]);
+  }, [position, scale]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
@@ -138,13 +164,14 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
       const initialDistance = parseFloat(
         e.currentTarget.getAttribute('data-initial-distance') || '0'
       );
+      const initialScale = parseFloat(
+        e.currentTarget.getAttribute('data-initial-scale') || '1'
+      );
       
       if (initialDistance > 0) {
         const scaleChange = currentDistance / initialDistance;
-        setScale(prev => {
-          const newScale = prev * scaleChange;
-          return Math.max(0.1, Math.min(newScale, 5));
-        });
+        const newScale = Math.max(0.1, Math.min(initialScale * scaleChange, 5));
+        setScale(newScale);
         
         // Update initial distance for continuous zooming
         e.currentTarget.setAttribute('data-initial-distance', currentDistance.toString());
@@ -179,16 +206,16 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
           resetZoom();
           break;
         case 'ArrowLeft':
-          setPosition(prev => ({ ...prev, x: prev.x + 50 }));
+          setPosition(prev => ({ ...prev, x: prev.x + 30 }));
           break;
         case 'ArrowRight':
-          setPosition(prev => ({ ...prev, x: prev.x - 50 }));
+          setPosition(prev => ({ ...prev, x: prev.x - 30 }));
           break;
         case 'ArrowUp':
-          setPosition(prev => ({ ...prev, y: prev.y + 50 }));
+          setPosition(prev => ({ ...prev, y: prev.y + 30 }));
           break;
         case 'ArrowDown':
-          setPosition(prev => ({ ...prev, y: prev.y - 50 }));
+          setPosition(prev => ({ ...prev, y: prev.y - 30 }));
           break;
       }
     };
@@ -284,7 +311,7 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        style={{ cursor: isDragging ? 'grabbing' : scale > 1 ? 'grab' : 'default' }}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
         {imageError ? (
           <div className="text-center text-gray-800">
@@ -305,7 +332,8 @@ export const ImageViewer = ({ isOpen, onClose, imageUrl, title }: ImageViewerPro
           <div
             style={{
               transform: `scale(${scale}) translate(${position.x}px, ${position.y}px)`,
-              transformOrigin: 'center center'
+              transformOrigin: 'center center',
+              transition: isDragging ? 'none' : 'transform 0.1s ease-out'
             }}
           >
             <Image
