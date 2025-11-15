@@ -8,8 +8,8 @@ interface VideoCardProps {
 export default function VideoCard({ video }: VideoCardProps) {
   const handleInstagramClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // ✅ Prevent triggering the YouTube link
-    if (video.instagramUrl) {
-      window.open(video.instagramUrl, '_blank', 'noopener,noreferrer');
+    if (video.instagram_url) {
+      window.open(video.instagram_url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -28,7 +28,7 @@ export default function VideoCard({ video }: VideoCardProps) {
 
       {/* Overlay clickable link for YouTube */}
       <a
-        href={video.youtubeUrl}
+        href={video.youtube_url}
         target="_blank"
         rel="noopener noreferrer"
         className="absolute inset-0 z-10"
@@ -36,7 +36,7 @@ export default function VideoCard({ video }: VideoCardProps) {
       />
 
       {/* Instagram Icon with gradient colors */}
-      {video.instagramUrl && (
+      {video.instagram_url && (
         <button
           onClick={handleInstagramClick}
           className="absolute top-2 right-2 z-20 bg-white/90 dark:bg-gray-800/90 rounded-full p-2 hover:scale-110 transition-all duration-200 shadow-md"

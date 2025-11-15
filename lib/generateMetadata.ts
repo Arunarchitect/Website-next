@@ -11,7 +11,7 @@ export function generateMetadata({
   description = "Modelflick page", 
   imageText = title 
 }: GenerateMetadataProps): Metadata {
-  const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:3000';
+  const baseUrl = process.env.NEXT_PUBLIC_HOST || 'https://api.modelflick.com';
   const imageUrl = `${baseUrl}/api/og?text=${encodeURIComponent(imageText)}`;
 
   return {

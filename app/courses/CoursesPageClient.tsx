@@ -2,30 +2,116 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { videoData, playlists } from "./data";
 import VideoCard from "./components/VideoCard";
 import SearchBar from "./components/SearchBar";
 import Image from "next/image";
+import { Video, Playlist, CoverVideo, ApiResponse } from "./types";
+
+// API base URL - adjust based on your environment
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.modelflick.com/api';
 
 export default function CoursesPageClient() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPlaylist, setSelectedPlaylist] = useState("all");
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(true);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [coverVideos, setCoverVideos] = useState<CoverVideo[]>([]);
+  const [filteredVideos, setFilteredVideos] = useState<Video[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const playlistContainerRef = useRef<HTMLDivElement>(null);
 
-  // Selected playlist
-  const selectedPlaylistData = playlists.find((p) => p.id === selectedPlaylist);
+  // Fetch initial data
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        setLoading(true);
+        await Promise.all([
+          fetchPlaylistsWithCovers(),
+          fetchFilteredVideos('all', '')
+        ]);
+      } catch (err) {
+        setError('Failed to load data');
+        console.error('Error fetching data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Filtered videos (based on playlist + search)
-  const filteredVideos = videoData.filter((video) => {
-    const inPlaylist =
-      selectedPlaylist === "all" || video.playlists.includes(selectedPlaylist);
-    const matchesSearch = video.title
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-    return inPlaylist && matchesSearch;
-  });
+    fetchInitialData();
+  }, []);
+
+  // Fetch filtered videos when playlist or search changes
+  useEffect(() => {
+    const fetchVideos = async () => {
+      try {
+        setLoading(true);
+        await fetchFilteredVideos(selectedPlaylist, searchTerm);
+      } catch (err) {
+        setError('Failed to load videos');
+        console.error('Error fetching videos:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // Add debounce to prevent too many API calls
+    const timeoutId = setTimeout(() => {
+      fetchVideos();
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedPlaylist, searchTerm]);
+
+  // Fetch playlists with cover videos
+  const fetchPlaylistsWithCovers = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/course/frontend/playlists-with-covers/`);
+      if (!response.ok) throw new Error('Failed to fetch playlists');
+      const data = await response.json();
+      setPlaylists(data);
+
+      // Fetch cover videos for each playlist
+      const coverResponse = await fetch(`${API_BASE_URL}/course/frontend/cover-videos/`);
+      if (!coverResponse.ok) throw new Error('Failed to fetch cover videos');
+      const coverData = await coverResponse.json();
+      setCoverVideos(coverData);
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  // Fetch filtered videos
+  const fetchFilteredVideos = async (playlistId: string, search: string) => {
+    try {
+      const params = new URLSearchParams({
+        playlist: playlistId,
+        search: search
+      });
+      
+      const response = await fetch(`${API_BASE_URL}/course/frontend/filtered-videos/?${params}`);
+      if (!response.ok) throw new Error('Failed to fetch videos');
+      const data: ApiResponse<Video> = await response.json();
+      setFilteredVideos(data.videos);
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  // Get cover video for a playlist
+  const getCoverVideo = (playlistId: string) => {
+    return coverVideos.find(cv => cv.playlist_id === playlistId)?.cover_video;
+  };
+
+  // Get video count for a playlist
+  const getVideoCount = (playlistId: string) => {
+    const playlist = playlists.find(p => p.id === playlistId);
+    return playlist?.video_count || 0;
+  };
+
+  // Selected playlist data
+  const selectedPlaylistData = playlists.find((p) => p.id === selectedPlaylist);
 
   // Check scroll position and update arrow visibility
   const updateArrowVisibility = () => {
@@ -72,6 +158,26 @@ export default function CoursesPageClient() {
       };
     }
   }, []);
+
+  if (loading && playlists.length === 0) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="flex justify-center items-center h-64">
+          <div className="text-lg text-gray-600 dark:text-gray-400">Loading...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="flex justify-center items-center h-64">
+          <div className="text-lg text-red-600 dark:text-red-400">{error}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -174,9 +280,7 @@ export default function CoursesPageClient() {
           style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         >
           {playlists.map((playlist) => {
-            const coverVideo = videoData.find((v) =>
-              playlist.id === "all" ? true : v.playlists.includes(playlist.id)
-            );
+            const coverVideo = getCoverVideo(playlist.id);
 
             if (!coverVideo) return null;
 
@@ -225,12 +329,8 @@ export default function CoursesPageClient() {
                       </h3>
                       <p className="text-sm text-gray-200 mt-1">
                         {playlist.id === "all"
-                          ? `${videoData.length} videos`
-                          : `${
-                              videoData.filter((v) =>
-                                v.playlists.includes(playlist.id)
-                              ).length
-                            } videos`}
+                          ? `${getVideoCount('all')} videos`
+                          : `${getVideoCount(playlist.id)} videos`}
                       </p>
                     </div>
                   </div>
@@ -248,6 +348,7 @@ export default function CoursesPageClient() {
         </h2>
         <p className="text-gray-600 dark:text-gray-400 mt-1">
           {filteredVideos.length} video{filteredVideos.length !== 1 ? "s" : ""}
+          {loading && " (loading...)"}
         </p>
       </div>
 
@@ -257,7 +358,7 @@ export default function CoursesPageClient() {
         ))}
       </div>
 
-      {filteredVideos.length === 0 && (
+      {filteredVideos.length === 0 && !loading && (
         <p className="text-gray-600 dark:text-gray-400 mt-6">
           No videos found. Try a different search term or playlist.
         </p>
