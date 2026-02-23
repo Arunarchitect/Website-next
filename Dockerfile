@@ -3,9 +3,9 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install system deps for debugging & build
+# Install system deps for debugging & build, and latest pnpm
 RUN apt-get update && apt-get install -y bash curl nano \
-    && npm install -g pnpm \
+    && npm install -g pnpm@latest \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
@@ -14,7 +14,13 @@ COPY pnpm-lock.yaml package.json ./
 # Install all dependencies using pnpm
 RUN pnpm install --no-frozen-lockfile
 
-# Copy ALL source files (this will include everything including redux files)
+# 🔐 Security audit and auto‑fix vulnerabilities
+# First, show the audit report (optional, doesn't fail build)
+RUN pnpm audit || true
+# Then attempt to automatically fix vulnerabilities (will fail build if fix fails)
+RUN pnpm audit --fix
+
+# Copy ALL source files
 COPY . .
 
 ENV NEXT_DISABLE_TYPECHECK=1
@@ -28,11 +34,14 @@ FROM node:20-slim AS runner
 
 WORKDIR /app
 
+# 🔧 FIX: Install pkill (procps) so that spawn pkill works
+RUN apt-get update && apt-get install -y procps && rm -rf /var/lib/apt/lists/*
+
 # Install pnpm globally
 RUN npm install -g pnpm
 
-# Copy dependency files
-COPY package.json pnpm-lock.yaml ./
+# Copy the **updated** package.json from builder (after audit fixes)
+COPY --from=builder /app/package.json ./
 
 # Copy production node_modules and built app from builder
 COPY --from=builder /app/node_modules ./node_modules
