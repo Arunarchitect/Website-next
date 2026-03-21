@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useMemo, useRef, useEffect } from "react";
-import { entries, projects, deliverables, members, organisation } from "./data";
+import {
+  entries, expenses, projects, deliverables, members, organisation,
+  EXPENSE_CATEGORY_LABELS,
+  type ExpenseCategory,
+} from "./data";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const MONTHS = [
@@ -21,6 +25,14 @@ function fmtDate(iso: string) {
   const [y, m, d] = iso.split("-");
   return `${d} ${MONTHS[parseInt(m) - 1].slice(0, 3)} ${y}`;
 }
+
+const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
+  travel:        "#6366f1",
+  food:          "#f59e0b",
+  accommodation: "#10b981",
+  stationery:    "#3b82f6",
+  others:        "#8b5cf6",
+};
 
 // ─── Ring ─────────────────────────────────────────────────────────────────────
 function Ring({ value, size = 52, stroke = 5, color = "#6366f1" }: {
@@ -160,7 +172,6 @@ const STYLE_TAG = `
     letter-spacing: 0.01em;
   }
 
-  /* date range inputs */
   .oa-date-input {
     width: 100%;
     background: var(--oa-surface2);
@@ -244,7 +255,6 @@ const STYLE_TAG = `
   .oa-sort-btn:hover { border-color: var(--oa-accent-border); color: var(--oa-text); }
   .oa-sort-btn.active { background: var(--oa-accent-bg); border-color: var(--oa-accent-border); color: var(--oa-accent); }
 
-  /* shared elements */
   .oa-cal-day { background: transparent; border: 1px solid transparent; color: var(--oa-text); font-size: 12px; padding: 7px 0; border-radius: 8px; cursor: pointer; text-align: center; transition: all 0.15s; width: 100%; opacity: 0.7; }
   .oa-cal-day:hover { background: var(--oa-surface2); opacity: 1; }
   .oa-cal-day.on { background: #6366f1 !important; border-color: #6366f1 !important; color: #fff !important; opacity: 1; font-weight: 600; }
@@ -278,6 +288,45 @@ const STYLE_TAG = `
   .oa-btn-ghost { background: transparent; border: 1px solid var(--oa-border); color: var(--oa-muted); font-size: 13px; padding: 10px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
   .oa-btn-ghost:hover { border-color: var(--oa-accent-border); color: var(--oa-text); }
 
+  /* load-entries button */
+  .oa-load-entries-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    background: var(--oa-surface2);
+    border: 1px dashed var(--oa-border);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .oa-load-entries-bar:hover {
+    border-color: var(--oa-accent-border);
+    background: var(--oa-accent-bg);
+  }
+  .oa-load-entries-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: var(--oa-accent-bg);
+    border: 1px solid var(--oa-accent-border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .oa-btn-load {
+    background: var(--oa-accent-bg);
+    border: 1px solid var(--oa-accent-border);
+    color: var(--oa-accent);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .oa-btn-load:hover { background: var(--oa-accent); color: #fff; }
+
   .oa-panel { background: var(--oa-surface); border: 1px solid var(--oa-border); border-radius: 16px; padding: 22px 20px; }
   @media (max-width: 400px) { .oa-panel { padding: 16px 14px; border-radius: 12px; } }
 
@@ -301,6 +350,29 @@ const STYLE_TAG = `
     font-size: 12px; padding: 0; line-height: 1; opacity: 0.7;
   }
   .oa-filter-tag button:hover { opacity: 1; }
+
+  /* Expenses table */
+  .oa-cat-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    border-radius: 20px; padding: 2px 8px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  /* Tab bar */
+  .oa-tabs {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--oa-border);
+    margin-bottom: 0;
+  }
+  .oa-tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--oa-muted); font-size: 13px; font-weight: 500;
+    padding: 10px 18px; cursor: pointer; transition: all 0.15s;
+    margin-bottom: -1px;
+  }
+  .oa-tab:hover { color: var(--oa-text); }
+  .oa-tab.active { color: var(--oa-accent); border-bottom-color: var(--oa-accent); font-weight: 600; }
 `;
 
 // ─── SearchDropdown ────────────────────────────────────────────────────────────
@@ -419,7 +491,7 @@ function CalendarMonth({ year, month, selectedDates, onToggleDate, rangeStart, r
   );
 }
 
-// ─── Entries Table ──────────────────────────────────────────────────────────────
+// ─── Revenue Entries Table (lazy-loaded) ───────────────────────────────────────
 type SortKey = "date" | "revenue" | "spend" | "profit";
 type SortDir = "asc" | "desc";
 
@@ -427,22 +499,29 @@ function EntriesTable({ filteredEntries }: { filteredEntries: typeof entries }) 
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage]       = useState(0);
+  const [loaded, setLoaded]   = useState(false);
   const PAGE_SIZE = 12;
 
-  const projectMap    = useMemo(() => Object.fromEntries(projects.map(p => [p.id, p])), []);
-  const delivMap      = useMemo(() => Object.fromEntries(deliverables.map(d => [d.id, d])), []);
-  const memberMap     = useMemo(() => Object.fromEntries(members.map(m => [m.id, m])), []);
+  const projectMap = useMemo(() => Object.fromEntries(projects.map(p => [p.id, p])), []);
+  const delivMap   = useMemo(() => Object.fromEntries(deliverables.map(d => [d.id, d])), []);
+  const memberMap  = useMemo(() => Object.fromEntries(members.map(m => [m.id, m])), []);
 
   const sorted = useMemo(() => {
+    if (!loaded) return [];
     return [...filteredEntries].sort((a, b) => {
-      let av: number, bv: number;
-      if (sortKey === "date")    { av = a.date.localeCompare(b.date) > 0 ? 1 : -1; bv = 0; return sortDir === "asc" ? av : -av; }
-      if (sortKey === "revenue") { av = a.revenue; bv = b.revenue; }
-      else if (sortKey === "spend")  { av = a.spend;   bv = b.spend;   }
-      else                           { av = a.revenue - a.spend; bv = b.revenue - b.spend; }
-      return sortDir === "asc" ? av - bv : bv - av;
+      if (sortKey === "date") {
+        const av = a.date.localeCompare(b.date);
+        return sortDir === "asc" ? av : -av;
+      }
+      const vals: Record<SortKey, number> = {
+        date:    0,
+        revenue: a.revenue - b.revenue,
+        spend:   a.spend   - b.spend,
+        profit:  (a.revenue - a.spend) - (b.revenue - b.spend),
+      };
+      return sortDir === "asc" ? vals[sortKey] : -vals[sortKey];
     });
-  }, [filteredEntries, sortKey, sortDir]);
+  }, [filteredEntries, sortKey, sortDir, loaded]);
 
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const paged      = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -455,16 +534,45 @@ function EntriesTable({ filteredEntries }: { filteredEntries: typeof entries }) 
 
   const arrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
+  // ── Collapsed / load prompt ──
+  if (!loaded) {
+    return (
+      <button
+        className="oa-load-entries-bar"
+        style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer" }}
+        onClick={() => setLoaded(true)}
+      >
+        <div className="oa-load-entries-icon">📋</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)" }}>
+            Revenue Entries
+          </div>
+          <div style={{ fontSize: 12, color: "var(--oa-muted)", marginTop: 2 }}>
+            {filteredEntries.length} records — click to load table
+          </div>
+        </div>
+        <span className="oa-btn-load">Load Entries ↓</span>
+      </button>
+    );
+  }
+
   return (
     <div className="oa-panel" style={{ padding: 0, overflow: "hidden" }}>
       <div className="oa-table-header">
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)" }}>
-            Entries
+            Revenue Entries
           </span>
-          <span style={{ fontSize: 12, color: "var(--oa-muted)", marginLeft: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--oa-muted)" }}>
             {filteredEntries.length} record{filteredEntries.length !== 1 ? "s" : ""}
           </span>
+          <button
+            onClick={() => setLoaded(false)}
+            style={{ background: "none", border: "none", color: "var(--oa-faint)", cursor: "pointer", fontSize: 11, padding: "2px 6px" }}
+            title="Collapse table"
+          >
+            ✕ hide
+          </button>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {(["date","revenue","spend","profit"] as SortKey[]).map(k => (
@@ -496,9 +604,7 @@ function EntriesTable({ filteredEntries }: { filteredEntries: typeof entries }) 
               const profit = e.revenue - e.spend;
               return (
                 <tr key={e.id}>
-                  <td style={{ whiteSpace: "nowrap", color: "var(--oa-muted)", fontSize: 11 }}>
-                    {fmtDate(e.date)}
-                  </td>
+                  <td style={{ whiteSpace: "nowrap", color: "var(--oa-muted)", fontSize: 11 }}>{fmtDate(e.date)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <span className="oa-proj-dot" style={{ background: proj?.color }} />
                     <span style={{ fontSize: 12 }}>{proj?.name ?? e.projectId}</span>
@@ -533,9 +639,159 @@ function EntriesTable({ filteredEntries }: { filteredEntries: typeof entries }) 
 
       {totalPages > 1 && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--oa-border)" }}>
+          <span style={{ fontSize: 12, color: "var(--oa-muted)" }}>Page {page + 1} of {totalPages}</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="oa-nav-btn" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              style={{ opacity: page === 0 ? 0.4 : 1 }}>‹</button>
+            <button className="oa-nav-btn" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
+              style={{ opacity: page === totalPages - 1 ? 0.4 : 1 }}>›</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Expenses Table (separate model — not linked to deliverables) ──────────────
+function ExpensesTable({ filteredExpenses }: { filteredExpenses: typeof expenses }) {
+  const [sortKey, setSortKey] = useState<"date" | "amount">("date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage]       = useState(0);
+  const [loaded, setLoaded]   = useState(false);
+  const PAGE_SIZE = 12;
+
+  const projectMap = useMemo(() => Object.fromEntries(projects.map(p => [p.id, p])), []);
+  const memberMap  = useMemo(() => Object.fromEntries(members.map(m => [m.id, m])), []);
+
+  const sorted = useMemo(() => {
+    if (!loaded) return [];
+    return [...filteredExpenses].sort((a, b) => {
+      if (sortKey === "date") {
+        const v = a.date.localeCompare(b.date);
+        return sortDir === "asc" ? v : -v;
+      }
+      return sortDir === "asc" ? a.amount - b.amount : b.amount - a.amount;
+    });
+  }, [filteredExpenses, sortKey, sortDir, loaded]);
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const paged      = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  function toggleSort(key: "date" | "amount") {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+    setPage(0);
+  }
+
+  const arrow = (key: "date" | "amount") => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
+  if (!loaded) {
+    return (
+      <button
+        className="oa-load-entries-bar"
+        style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer" }}
+        onClick={() => setLoaded(true)}
+      >
+        <div className="oa-load-entries-icon">🧾</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)" }}>
+            Expense Records
+          </div>
+          <div style={{ fontSize: 12, color: "var(--oa-muted)", marginTop: 2 }}>
+            {filteredExpenses.length} expenses — click to load table
+          </div>
+        </div>
+        <span className="oa-btn-load">Load Expenses ↓</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="oa-panel" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="oa-table-header">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)" }}>Expense Records</span>
           <span style={{ fontSize: 12, color: "var(--oa-muted)" }}>
-            Page {page + 1} of {totalPages}
+            {filteredExpenses.length} record{filteredExpenses.length !== 1 ? "s" : ""}
           </span>
+          <button
+            onClick={() => setLoaded(false)}
+            style={{ background: "none", border: "none", color: "var(--oa-faint)", cursor: "pointer", fontSize: 11, padding: "2px 6px" }}
+          >
+            ✕ hide
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {(["date","amount"] as const).map(k => (
+            <button key={k} className={`oa-sort-btn${sortKey === k ? " active" : ""}`} onClick={() => toggleSort(k)}>
+              {k.charAt(0).toUpperCase() + k.slice(1)}{arrow(k)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="oa-table-wrap">
+        <table className="oa-entries-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Project</th>
+              <th>Member</th>
+              <th>Category</th>
+              <th>Remarks</th>
+              <th style={{ textAlign: "right" }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map(exp => {
+              const proj   = projectMap[exp.projectId];
+              const member = memberMap[exp.userId];
+              const catColor = CATEGORY_COLORS[exp.category];
+              return (
+                <tr key={exp.id}>
+                  <td style={{ whiteSpace: "nowrap", color: "var(--oa-muted)", fontSize: 11 }}>{fmtDate(exp.date)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <span className="oa-proj-dot" style={{ background: proj?.color }} />
+                    <span style={{ fontSize: 12 }}>{proj?.name ?? exp.projectId}</span>
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: "50%",
+                        background: "var(--oa-accent-bg)", border: "1px solid var(--oa-accent-border)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 8, fontWeight: 700, color: "var(--oa-accent)", flexShrink: 0,
+                      }}>
+                        {member?.avatar ?? "?"}
+                      </div>
+                      <span style={{ fontSize: 12 }}>{member?.name ?? exp.userId}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span className="oa-cat-badge" style={{
+                      background: `${catColor}18`,
+                      border: `1px solid ${catColor}40`,
+                      color: catColor,
+                    }}>
+                      {EXPENSE_CATEGORY_LABELS[exp.category]}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--oa-muted)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {exp.remarks ?? "—"}
+                  </td>
+                  <td className="td-spnd" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {fmt(exp.amount)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--oa-border)" }}>
+          <span style={{ fontSize: 12, color: "var(--oa-muted)" }}>Page {page + 1} of {totalPages}</span>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="oa-nav-btn" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
               style={{ opacity: page === 0 ? 0.4 : 1 }}>‹</button>
@@ -551,28 +807,27 @@ function EntriesTable({ filteredEntries }: { filteredEntries: typeof entries }) 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 export default function OrgPage() {
   const today = new Date();
-  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calYear,  setCalYear]  = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
 
-  // individual date picking
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
-
-  // month / year filters
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [selectedYear,  setSelectedYear]  = useState<number | null>(null);
+  const [rangeStart,    setRangeStart]    = useState<string>("");
+  const [rangeEnd,      setRangeEnd]      = useState<string>("");
 
-  // date range
-  const [rangeStart, setRangeStart] = useState<string>("");
-  const [rangeEnd,   setRangeEnd]   = useState<string>("");
-
-  // dropdowns
   const [projectId,     setProjectId]     = useState<string | null>(null);
   const [deliverableId, setDeliverableId] = useState<string | null>(null);
   const [memberId,      setMemberId]      = useState<string | null>(null);
 
+  // which results tab is active
+  const [activeTab, setActiveTab] = useState<"revenue" | "expenses">("revenue");
+
   const [result, setResult] = useState<{
     revenue: number; spend: number; profit: number; count: number;
     filteredEntries: typeof entries;
+    filteredExpenses: typeof expenses;
+    totalExpenses: number;
   } | null>(null);
   const [ran, setRan] = useState(false);
 
@@ -580,7 +835,6 @@ export default function OrgPage() {
   function nextMonth() { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }
 
   function toggleDate(iso: string) {
-    // In date range mode, clicking a date clears range & picks individual
     if (rangeStart || rangeEnd) { setRangeStart(""); setRangeEnd(""); }
     setSelectedDates(prev => { const n = new Set(prev); n.has(iso) ? n.delete(iso) : n.add(iso); return n; });
   }
@@ -605,32 +859,38 @@ export default function OrgPage() {
     setResult(null); setRan(false);
   }
 
-  function runAnalysis() {
-    let f = entries;
-
-    // priority: date range > individual dates > month/year pills
+  function applyDateFilter<T extends { date: string }>(list: T[]): T[] {
     if (rangeStart && rangeEnd) {
       const s = rangeStart < rangeEnd ? rangeStart : rangeEnd;
-      const e2 = rangeStart < rangeEnd ? rangeEnd : rangeStart;
-      f = f.filter(e => e.date >= s && e.date <= e2);
-    } else if (rangeStart) {
-      f = f.filter(e => e.date >= rangeStart);
-    } else if (rangeEnd) {
-      f = f.filter(e => e.date <= rangeEnd);
-    } else if (selectedDates.size > 0) {
-      f = f.filter(e => selectedDates.has(e.date));
-    } else {
-      if (selectedYear  !== null) f = f.filter(e => new Date(e.date).getFullYear() === selectedYear);
-      if (selectedMonth !== null) f = f.filter(e => new Date(e.date).getMonth()    === selectedMonth);
+      const e = rangeStart < rangeEnd ? rangeEnd   : rangeStart;
+      return list.filter(r => r.date >= s && r.date <= e);
     }
+    if (rangeStart) return list.filter(r => r.date >= rangeStart);
+    if (rangeEnd)   return list.filter(r => r.date <= rangeEnd);
+    if (selectedDates.size > 0) return list.filter(r => selectedDates.has(r.date));
+    let out = list;
+    if (selectedYear  !== null) out = out.filter(r => new Date(r.date).getFullYear() === selectedYear);
+    if (selectedMonth !== null) out = out.filter(r => new Date(r.date).getMonth()    === selectedMonth);
+    return out;
+  }
 
-    if (projectId)     f = f.filter(e => e.projectId     === projectId);
-    if (deliverableId) f = f.filter(e => e.deliverableId === deliverableId);
-    if (memberId)      f = f.filter(e => e.memberId       === memberId);
+  function runAnalysis() {
+    // Revenue entries
+    let fe = applyDateFilter(entries);
+    if (projectId)     fe = fe.filter(e => e.projectId     === projectId);
+    if (deliverableId) fe = fe.filter(e => e.deliverableId === deliverableId);
+    if (memberId)      fe = fe.filter(e => e.memberId       === memberId);
 
-    const revenue = f.reduce((s, e) => s + e.revenue, 0);
-    const spend   = f.reduce((s, e) => s + e.spend,   0);
-    setResult({ revenue, spend, profit: revenue - spend, count: f.length, filteredEntries: f });
+    const revenue = fe.reduce((s, e) => s + e.revenue, 0);
+    const spend   = fe.reduce((s, e) => s + e.spend,   0);
+
+    // Expenses (no deliverable filter — separate model)
+    let fx = applyDateFilter(expenses);
+    if (projectId) fx = fx.filter(e => e.projectId === projectId);
+    if (memberId)  fx = fx.filter(e => e.userId    === memberId);
+    const totalExpenses = fx.reduce((s, e) => s + e.amount, 0);
+
+    setResult({ revenue, spend, profit: revenue - spend, count: fe.length, filteredEntries: fe, filteredExpenses: fx, totalExpenses });
     setRan(true);
   }
 
@@ -638,7 +898,6 @@ export default function OrgPage() {
   const costRatio = result?.revenue ? (result.spend  / result.revenue) * 100 : 0;
   const revShare  = result ? (result.revenue / (result.revenue + result.spend + 1)) * 100 : 0;
 
-  // active filter tags for display
   const activeFilterTags: { label: string; clear: () => void }[] = [];
   if (hasDateRange) {
     const label = rangeStart && rangeEnd
@@ -671,7 +930,7 @@ export default function OrgPage() {
           </span>
         </h1>
         <p style={{ color: "var(--oa-muted)", fontSize: 14, margin: "5px 0 0" }}>
-          Select dates &amp; filters, then run analysis to see revenue &amp; spend
+          Select dates &amp; filters, then run analysis to see revenue, spend &amp; expenses
         </p>
       </div>
 
@@ -679,8 +938,6 @@ export default function OrgPage() {
 
         {/* ── LEFT: Calendar + filters ── */}
         <div className="oa-panel">
-
-          {/* Calendar nav */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <button className="oa-nav-btn" onClick={prevMonth}>‹</button>
             <span style={{ fontSize: 14, fontWeight: 600, color: "var(--oa-text)" }}>
@@ -707,32 +964,17 @@ export default function OrgPage() {
 
           <div className="oa-divider" />
 
-          {/* ── Date Range filter ── */}
           <p className="oa-label">Date Range</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
             <div>
               <div style={{ fontSize: 10, color: "var(--oa-faint)", marginBottom: 4, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>From</div>
-              <input
-                type="date"
-                className="oa-date-input"
-                value={rangeStart}
-                onChange={e => {
-                  setRangeStart(e.target.value);
-                  if (e.target.value) setSelectedDates(new Set()); // clear individual picks when range set
-                }}
-              />
+              <input type="date" className="oa-date-input" value={rangeStart}
+                onChange={e => { setRangeStart(e.target.value); if (e.target.value) setSelectedDates(new Set()); }} />
             </div>
             <div>
               <div style={{ fontSize: 10, color: "var(--oa-faint)", marginBottom: 4, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>To</div>
-              <input
-                type="date"
-                className="oa-date-input"
-                value={rangeEnd}
-                onChange={e => {
-                  setRangeEnd(e.target.value);
-                  if (e.target.value) setSelectedDates(new Set());
-                }}
-              />
+              <input type="date" className="oa-date-input" value={rangeEnd}
+                onChange={e => { setRangeEnd(e.target.value); if (e.target.value) setSelectedDates(new Set()); }} />
             </div>
           </div>
           {hasDateRange && (
@@ -744,7 +986,6 @@ export default function OrgPage() {
 
           <div className="oa-divider" />
 
-          {/* Month pills */}
           <p className="oa-label">Month</p>
           <div className="oa-month-grid">
             {MONTHS.map((m, i) => (
@@ -755,7 +996,6 @@ export default function OrgPage() {
             ))}
           </div>
 
-          {/* Year pills */}
           <p className="oa-label">Year</p>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {availableYears.map(y => (
@@ -844,6 +1084,25 @@ export default function OrgPage() {
                 </div>
               </div>
 
+              {/* Expenses summary card */}
+              <div className="oa-panel" style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                  background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)",
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                }}>🧾</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--oa-faint)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Total Expenses</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: "#dc2626", letterSpacing: "-0.5px" }}>
+                    {fmt(result.totalExpenses)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--oa-muted)", textAlign: "right" }}>
+                  {result.filteredExpenses.length} expense records<br />
+                  <span style={{ fontSize: 11, opacity: 0.7 }}>Not linked to deliverables</span>
+                </div>
+              </div>
+
               {/* Rev vs Spend bar */}
               <div className="oa-panel">
                 <div className="oa-ring-row">
@@ -887,10 +1146,39 @@ export default function OrgPage() {
                 </div>
               </div>
 
-              {/* Entries table — replaces avg cards */}
-              {result.filteredEntries.length > 0 && (
-                <EntriesTable filteredEntries={result.filteredEntries} />
-              )}
+              {/* Tabbed tables — Revenue Entries | Expense Records */}
+              <div className="oa-panel" style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ padding: "0 20px" }}>
+                  <div className="oa-tabs">
+                    <button
+                      className={`oa-tab${activeTab === "revenue" ? " active" : ""}`}
+                      onClick={() => setActiveTab("revenue")}
+                    >
+                      Revenue Entries
+                      <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.6 }}>({result.filteredEntries.length})</span>
+                    </button>
+                    <button
+                      className={`oa-tab${activeTab === "expenses" ? " active" : ""}`}
+                      onClick={() => setActiveTab("expenses")}
+                    >
+                      Expenses
+                      <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.6 }}>({result.filteredExpenses.length})</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ padding: "16px 0 0" }}>
+                  {activeTab === "revenue" ? (
+                    result.filteredEntries.length > 0
+                      ? <div style={{ padding: "0 0" }}><EntriesTable filteredEntries={result.filteredEntries} /></div>
+                      : <div style={{ padding: "24px", textAlign: "center", fontSize: 13, color: "var(--oa-muted)" }}>No revenue entries match the selected filters.</div>
+                  ) : (
+                    result.filteredExpenses.length > 0
+                      ? <div><ExpensesTable filteredExpenses={result.filteredExpenses} /></div>
+                      : <div style={{ padding: "24px", textAlign: "center", fontSize: 13, color: "var(--oa-muted)" }}>No expense records match the selected filters.</div>
+                  )}
+                </div>
+              </div>
             </>
           ) : ran ? (
             <div className="oa-empty">
