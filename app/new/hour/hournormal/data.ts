@@ -17,7 +17,7 @@ export interface Project {
 export interface Deliverable {
   id: string;
   projectId: string;
-  organisationId: string; // denormalised for fast lookup
+  organisationId: string;
   name: string;
   stage: "1" | "2" | "3" | "4" | "5";
   status: "not_started" | "ongoing" | "ready" | "passed" | "failed" | "discrepancy";
@@ -29,8 +29,6 @@ export interface Member {
   role: string;
 }
 
-// ─── Assignment: deliverable assigned to a member ─────────────────────────────
-
 export interface Assignment {
   id: string;
   deliverableId: string;
@@ -39,16 +37,12 @@ export interface Assignment {
   dueDate: string;   // "YYYY-MM-DD"
 }
 
-// ─── QuickAccess: per-user pinned deliverables ────────────────────────────────
-
 export interface QuickAccess {
   id: string;
   userId: string;
   deliverableId: string;
   position: number;
 }
-
-// ─── WorklogEntry: a completed or open work session ──────────────────────────
 
 export interface WorklogEntry {
   id: string;
@@ -62,12 +56,12 @@ export interface WorklogEntry {
   notes?: string;
 }
 
-// ─── Current user ─────────────────────────────────────────────────────────────
-
 export interface User {
   id: string;
   name: string;
 }
+
+// ─── Current user ─────────────────────────────────────────────────────────────
 
 export const currentUser: User = {
   id: "user-1",
@@ -122,10 +116,10 @@ export let quickAccessItems: QuickAccess[] = [
   { id: "qa-2", userId: "user-1", deliverableId: "del-2", position: 1 },
 ];
 
-// Mutators used by the worklog page (replace with API calls in production)
 export function addQuickAccess(userId: string, deliverableId: string): void {
   if (quickAccessItems.some(q => q.userId === userId && q.deliverableId === deliverableId)) return;
-  const maxPos = quickAccessItems.filter(q => q.userId === userId)
+  const maxPos = quickAccessItems
+    .filter(q => q.userId === userId)
     .reduce((m, q) => Math.max(m, q.position), -1);
   quickAccessItems = [
     ...quickAccessItems,
@@ -157,13 +151,27 @@ export const worklogEntries: WorklogEntry[] = [
 
 // ─── Lookup maps ──────────────────────────────────────────────────────────────
 
-export const orgMap      = Object.fromEntries(organisations.map(o => [o.id, o]));
-export const projMap     = Object.fromEntries(projects.map(p => [p.id, p]));
-export const delivMap    = Object.fromEntries(deliverables.map(d => [d.id, d]));
-export const memberMap   = Object.fromEntries(members.map(m => [m.id, m]));
+export const orgMap    = Object.fromEntries(organisations.map(o => [o.id, o]));
+export const projMap   = Object.fromEntries(projects.map(p => [p.id, p]));
+export const delivMap  = Object.fromEntries(deliverables.map(d => [d.id, d]));
+export const memberMap = Object.fromEntries(members.map(m => [m.id, m]));
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
 
+/** Single-item lookups (used by dashboard page) */
+export function getDeliverable(id: string) {
+  return delivMap[id] ?? null;
+}
+
+export function getProject(id: string) {
+  return projMap[id] ?? null;
+}
+
+export function getOrganisation(id: string) {
+  return orgMap[id] ?? null;
+}
+
+/** Filtered-list helpers (used by both pages) */
 export function getMyAssignments(userId = currentUser.id) {
   return assignments.filter(a => a.memberId === userId);
 }
