@@ -17,6 +17,10 @@ function fmt(n: number) {
   if (n >= 1_000)     return `₹${(n / 1_000).toFixed(1)}K`;
   return `₹${n}`;
 }
+function fmtDate(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return `${d} ${MONTHS[parseInt(m) - 1].slice(0, 3)} ${y}`;
+}
 
 // ─── Ring ─────────────────────────────────────────────────────────────────────
 function Ring({ value, size = 52, stroke = 5, color = "#6366f1" }: {
@@ -65,7 +69,6 @@ const STYLE_TAG = `
   }
   .oa-wrap * { box-sizing: border-box; }
 
-  /* ── layout ── */
   .oa-layout {
     display: grid;
     grid-template-columns: 300px 1fr;
@@ -77,7 +80,6 @@ const STYLE_TAG = `
     .oa-wrap { padding: 16px 14px 40px !important; }
   }
 
-  /* ── filters grid ── */
   .oa-filters-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -87,7 +89,6 @@ const STYLE_TAG = `
     .oa-filters-grid { grid-template-columns: 1fr; gap: 12px; }
   }
 
-  /* ── stat cards ── */
   .oa-stats-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -97,17 +98,6 @@ const STYLE_TAG = `
     .oa-stats-grid { grid-template-columns: 1fr; gap: 10px; }
   }
 
-  /* ── avg breakdown ── */
-  .oa-avg-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-  @media (max-width: 400px) {
-    .oa-avg-grid { grid-template-columns: 1fr; }
-  }
-
-  /* ── run bar ── */
   .oa-run-bar {
     display: flex;
     align-items: center;
@@ -122,7 +112,6 @@ const STYLE_TAG = `
     .oa-btn-ghost { flex: 1; text-align: center; }
   }
 
-  /* ── month pills ── */
   .oa-month-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -130,7 +119,6 @@ const STYLE_TAG = `
     margin-bottom: 16px;
   }
 
-  /* ── ring row ── */
   .oa-ring-row {
     display: flex;
     align-items: center;
@@ -141,7 +129,6 @@ const STYLE_TAG = `
     .oa-ring-row .oa-ring-badge { display: none; }
   }
 
-  /* ── legend row ── */
   .oa-legend {
     display: flex;
     gap: 14px;
@@ -150,7 +137,6 @@ const STYLE_TAG = `
     flex-wrap: wrap;
   }
 
-  /* ── header org badge ── */
   .oa-org-badge {
     display: inline-flex;
     align-items: center;
@@ -174,10 +160,96 @@ const STYLE_TAG = `
     letter-spacing: 0.01em;
   }
 
-  /* ── shared elements ── */
+  /* date range inputs */
+  .oa-date-input {
+    width: 100%;
+    background: var(--oa-surface2);
+    border: 1px solid var(--oa-border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: var(--oa-text);
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s;
+    cursor: pointer;
+  }
+  .oa-date-input:focus, .oa-date-input:hover { border-color: var(--oa-accent-border); }
+  .oa-date-input::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+
+  /* entries table */
+  .oa-entries-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .oa-entries-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--oa-faint);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0 10px 10px;
+    border-bottom: 1px solid var(--oa-border);
+    white-space: nowrap;
+  }
+  .oa-entries-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--oa-border);
+    color: var(--oa-text);
+    vertical-align: middle;
+  }
+  .oa-entries-table tr:last-child td { border-bottom: none; }
+  .oa-entries-table tr:hover td { background: var(--oa-hover); }
+  .oa-entries-table .td-rev { color: #059669; font-weight: 600; }
+  .oa-entries-table .td-spnd { color: #dc2626; font-weight: 600; }
+  .oa-entries-table .td-profit-pos { color: #4f46e5; font-weight: 600; }
+  .oa-entries-table .td-profit-neg { color: #dc2626; font-weight: 600; }
+
+  .oa-proj-dot {
+    display: inline-block;
+    width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 5px; flex-shrink: 0;
+    vertical-align: middle;
+  }
+
+  .oa-table-wrap {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 380px;
+    border-radius: 0 0 12px 12px;
+  }
+
+  .oa-table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--oa-border);
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .oa-sort-btn {
+    background: var(--oa-surface2);
+    border: 1px solid var(--oa-border);
+    border-radius: 7px;
+    color: var(--oa-muted);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .oa-sort-btn:hover { border-color: var(--oa-accent-border); color: var(--oa-text); }
+  .oa-sort-btn.active { background: var(--oa-accent-bg); border-color: var(--oa-accent-border); color: var(--oa-accent); }
+
+  /* shared elements */
   .oa-cal-day { background: transparent; border: 1px solid transparent; color: var(--oa-text); font-size: 12px; padding: 7px 0; border-radius: 8px; cursor: pointer; text-align: center; transition: all 0.15s; width: 100%; opacity: 0.7; }
   .oa-cal-day:hover { background: var(--oa-surface2); opacity: 1; }
   .oa-cal-day.on { background: #6366f1 !important; border-color: #6366f1 !important; color: #fff !important; opacity: 1; font-weight: 600; }
+  .oa-cal-day.in-range { background: var(--oa-accent-bg) !important; border-color: var(--oa-accent-border) !important; opacity: 1; }
+  .oa-cal-day.range-start, .oa-cal-day.range-end { background: #6366f1 !important; border-color: #6366f1 !important; color: #fff !important; opacity: 1; font-weight: 600; }
 
   .oa-nav-btn { background: var(--oa-surface2); border: 1px solid var(--oa-border); color: var(--oa-text); width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: background 0.15s; flex-shrink: 0; }
   .oa-nav-btn:hover { background: var(--oa-hover); }
@@ -216,10 +288,19 @@ const STYLE_TAG = `
   .oa-stat-rev  { background: rgba(16,185,129,0.08);  border: 1px solid rgba(16,185,129,0.2);  }
   .oa-stat-spnd { background: rgba(239,68,68,0.08);   border: 1px solid rgba(239,68,68,0.2);   }
   .oa-stat-pft  { background: rgba(99,102,241,0.08);  border: 1px solid rgba(99,102,241,0.2);  }
-  .oa-stat-avg  { border-radius: 10px; padding: 12px 14px; }
-  .oa-stat-avg-rev  { background: rgba(16,185,129,0.06);  border: 1px solid rgba(16,185,129,0.12);  }
-  .oa-stat-avg-spnd { background: rgba(239,68,68,0.06);   border: 1px solid rgba(239,68,68,0.12);   }
   .oa-empty { border-radius: 12px; padding: 48px 24px; text-align: center; background: var(--oa-surface2); border: 1px solid var(--oa-border); }
+
+  .oa-filter-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--oa-accent-bg); border: 1px solid var(--oa-accent-border);
+    color: var(--oa-accent); font-size: 11px; font-weight: 500;
+    border-radius: 20px; padding: 3px 8px 3px 10px;
+  }
+  .oa-filter-tag button {
+    background: none; border: none; color: var(--oa-accent); cursor: pointer;
+    font-size: 12px; padding: 0; line-height: 1; opacity: 0.7;
+  }
+  .oa-filter-tag button:hover { opacity: 1; }
 `;
 
 // ─── SearchDropdown ────────────────────────────────────────────────────────────
@@ -300,12 +381,24 @@ function SearchDropdown({ label, placeholder, items, selectedId, onSelect, dot }
 }
 
 // ─── CalendarMonth ─────────────────────────────────────────────────────────────
-function CalendarMonth({ year, month, selectedDates, onToggleDate }: {
-  year: number; month: number; selectedDates: Set<string>; onToggleDate: (d: string) => void;
+function CalendarMonth({ year, month, selectedDates, onToggleDate, rangeStart, rangeEnd }: {
+  year: number; month: number;
+  selectedDates: Set<string>; onToggleDate: (d: string) => void;
+  rangeStart?: string | null; rangeEnd?: string | null;
 }) {
   const total = getDaysInMonth(year, month);
   const first = getFirstDay(year, month);
   const cells = [...Array(first).fill(null), ...Array.from({ length: total }, (_, i) => i + 1)] as (number | null)[];
+
+  function getClass(iso: string) {
+    if (rangeStart && rangeEnd) {
+      if (iso === rangeStart) return "range-start";
+      if (iso === rangeEnd)   return "range-end";
+      if (iso > rangeStart && iso < rangeEnd) return "in-range";
+    }
+    if (selectedDates.has(iso)) return "on";
+    return "";
+  }
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 3 }}>
@@ -314,14 +407,143 @@ function CalendarMonth({ year, month, selectedDates, onToggleDate }: {
       ))}
       {cells.map((day, i) => {
         if (!day) return <div key={`_${i}`} />;
-        const iso    = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        const active = selectedDates.has(iso);
+        const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const cls = getClass(iso);
         return (
-          <button key={iso} className={`oa-cal-day${active ? " on" : ""}`} onClick={() => onToggleDate(iso)}>
+          <button key={iso} className={`oa-cal-day${cls ? ` ${cls}` : ""}`} onClick={() => onToggleDate(iso)}>
             {day}
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Entries Table ──────────────────────────────────────────────────────────────
+type SortKey = "date" | "revenue" | "spend" | "profit";
+type SortDir = "asc" | "desc";
+
+function EntriesTable({ filteredEntries }: { filteredEntries: typeof entries }) {
+  const [sortKey, setSortKey] = useState<SortKey>("date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage]       = useState(0);
+  const PAGE_SIZE = 12;
+
+  const projectMap    = useMemo(() => Object.fromEntries(projects.map(p => [p.id, p])), []);
+  const delivMap      = useMemo(() => Object.fromEntries(deliverables.map(d => [d.id, d])), []);
+  const memberMap     = useMemo(() => Object.fromEntries(members.map(m => [m.id, m])), []);
+
+  const sorted = useMemo(() => {
+    return [...filteredEntries].sort((a, b) => {
+      let av: number, bv: number;
+      if (sortKey === "date")    { av = a.date.localeCompare(b.date) > 0 ? 1 : -1; bv = 0; return sortDir === "asc" ? av : -av; }
+      if (sortKey === "revenue") { av = a.revenue; bv = b.revenue; }
+      else if (sortKey === "spend")  { av = a.spend;   bv = b.spend;   }
+      else                           { av = a.revenue - a.spend; bv = b.revenue - b.spend; }
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+  }, [filteredEntries, sortKey, sortDir]);
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const paged      = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+    setPage(0);
+  }
+
+  const arrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
+  return (
+    <div className="oa-panel" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="oa-table-header">
+        <div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)" }}>
+            Entries
+          </span>
+          <span style={{ fontSize: 12, color: "var(--oa-muted)", marginLeft: 8 }}>
+            {filteredEntries.length} record{filteredEntries.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {(["date","revenue","spend","profit"] as SortKey[]).map(k => (
+            <button key={k} className={`oa-sort-btn${sortKey === k ? " active" : ""}`} onClick={() => toggleSort(k)}>
+              {k.charAt(0).toUpperCase() + k.slice(1)}{arrow(k)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="oa-table-wrap">
+        <table className="oa-entries-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Project</th>
+              <th>Deliverable</th>
+              <th>Member</th>
+              <th style={{ textAlign: "right" }}>Revenue</th>
+              <th style={{ textAlign: "right" }}>Spend</th>
+              <th style={{ textAlign: "right" }}>Profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map(e => {
+              const proj   = projectMap[e.projectId];
+              const deliv  = delivMap[e.deliverableId];
+              const member = memberMap[e.memberId];
+              const profit = e.revenue - e.spend;
+              return (
+                <tr key={e.id}>
+                  <td style={{ whiteSpace: "nowrap", color: "var(--oa-muted)", fontSize: 11 }}>
+                    {fmtDate(e.date)}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <span className="oa-proj-dot" style={{ background: proj?.color }} />
+                    <span style={{ fontSize: 12 }}>{proj?.name ?? e.projectId}</span>
+                  </td>
+                  <td style={{ fontSize: 12, color: "var(--oa-muted)", whiteSpace: "nowrap" }}>
+                    {deliv?.name ?? e.deliverableId}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: "50%",
+                        background: "var(--oa-accent-bg)", border: "1px solid var(--oa-accent-border)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 8, fontWeight: 700, color: "var(--oa-accent)", flexShrink: 0,
+                      }}>
+                        {member?.avatar ?? "?"}
+                      </div>
+                      <span style={{ fontSize: 12 }}>{member?.name ?? e.memberId}</span>
+                    </div>
+                  </td>
+                  <td className="td-rev" style={{ textAlign: "right", whiteSpace: "nowrap" }}>{fmt(e.revenue)}</td>
+                  <td className="td-spnd" style={{ textAlign: "right", whiteSpace: "nowrap" }}>{fmt(e.spend)}</td>
+                  <td className={profit >= 0 ? "td-profit-pos" : "td-profit-neg"} style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {profit >= 0 ? "+" : ""}{fmt(profit)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid var(--oa-border)" }}>
+          <span style={{ fontSize: 12, color: "var(--oa-muted)" }}>
+            Page {page + 1} of {totalPages}
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="oa-nav-btn" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              style={{ opacity: page === 0 ? 0.4 : 1 }}>‹</button>
+            <button className="oa-nav-btn" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
+              style={{ opacity: page === totalPages - 1 ? 0.4 : 1 }}>›</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -332,21 +554,37 @@ export default function OrgPage() {
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
 
+  // individual date picking
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
+
+  // month / year filters
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [selectedYear,  setSelectedYear]  = useState<number | null>(null);
+
+  // date range
+  const [rangeStart, setRangeStart] = useState<string>("");
+  const [rangeEnd,   setRangeEnd]   = useState<string>("");
+
+  // dropdowns
   const [projectId,     setProjectId]     = useState<string | null>(null);
   const [deliverableId, setDeliverableId] = useState<string | null>(null);
   const [memberId,      setMemberId]      = useState<string | null>(null);
-  const [result, setResult] = useState<{ revenue: number; spend: number; profit: number; count: number } | null>(null);
-  const [ran, setRan]       = useState(false);
+
+  const [result, setResult] = useState<{
+    revenue: number; spend: number; profit: number; count: number;
+    filteredEntries: typeof entries;
+  } | null>(null);
+  const [ran, setRan] = useState(false);
 
   function prevMonth() { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); }
   function nextMonth() { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); }
 
   function toggleDate(iso: string) {
+    // In date range mode, clicking a date clears range & picks individual
+    if (rangeStart || rangeEnd) { setRangeStart(""); setRangeEnd(""); }
     setSelectedDates(prev => { const n = new Set(prev); n.has(iso) ? n.delete(iso) : n.add(iso); return n; });
   }
+
   function handleSetProject(id: string | null) { setProjectId(id); setDeliverableId(null); }
 
   const scopedDeliverables = useMemo(() =>
@@ -356,29 +594,43 @@ export default function OrgPage() {
   const availableYears = useMemo(() =>
     Array.from(new Set(entries.map(e => new Date(e.date).getFullYear()))).sort(), []);
 
-  const hasFilters = selectedDates.size > 0 || selectedMonth !== null || selectedYear !== null
-    || !!projectId || !!deliverableId || !!memberId;
+  const hasDateRange = rangeStart !== "" || rangeEnd !== "";
+  const hasFilters   = selectedDates.size > 0 || selectedMonth !== null || selectedYear !== null
+    || !!projectId || !!deliverableId || !!memberId || hasDateRange;
 
   function clearAll() {
     setSelectedDates(new Set()); setSelectedMonth(null); setSelectedYear(null);
     setProjectId(null); setDeliverableId(null); setMemberId(null);
+    setRangeStart(""); setRangeEnd("");
     setResult(null); setRan(false);
   }
 
   function runAnalysis() {
     let f = entries;
-    if (selectedDates.size > 0) {
+
+    // priority: date range > individual dates > month/year pills
+    if (rangeStart && rangeEnd) {
+      const s = rangeStart < rangeEnd ? rangeStart : rangeEnd;
+      const e2 = rangeStart < rangeEnd ? rangeEnd : rangeStart;
+      f = f.filter(e => e.date >= s && e.date <= e2);
+    } else if (rangeStart) {
+      f = f.filter(e => e.date >= rangeStart);
+    } else if (rangeEnd) {
+      f = f.filter(e => e.date <= rangeEnd);
+    } else if (selectedDates.size > 0) {
       f = f.filter(e => selectedDates.has(e.date));
     } else {
       if (selectedYear  !== null) f = f.filter(e => new Date(e.date).getFullYear() === selectedYear);
       if (selectedMonth !== null) f = f.filter(e => new Date(e.date).getMonth()    === selectedMonth);
     }
+
     if (projectId)     f = f.filter(e => e.projectId     === projectId);
     if (deliverableId) f = f.filter(e => e.deliverableId === deliverableId);
     if (memberId)      f = f.filter(e => e.memberId       === memberId);
+
     const revenue = f.reduce((s, e) => s + e.revenue, 0);
     const spend   = f.reduce((s, e) => s + e.spend,   0);
-    setResult({ revenue, spend, profit: revenue - spend, count: f.length });
+    setResult({ revenue, spend, profit: revenue - spend, count: f.length, filteredEntries: f });
     setRan(true);
   }
 
@@ -386,20 +638,32 @@ export default function OrgPage() {
   const costRatio = result?.revenue ? (result.spend  / result.revenue) * 100 : 0;
   const revShare  = result ? (result.revenue / (result.revenue + result.spend + 1)) * 100 : 0;
 
+  // active filter tags for display
+  const activeFilterTags: { label: string; clear: () => void }[] = [];
+  if (hasDateRange) {
+    const label = rangeStart && rangeEnd
+      ? `${fmtDate(rangeStart)} → ${fmtDate(rangeEnd)}`
+      : rangeStart ? `From ${fmtDate(rangeStart)}` : `Until ${fmtDate(rangeEnd)}`;
+    activeFilterTags.push({ label, clear: () => { setRangeStart(""); setRangeEnd(""); } });
+  }
+  if (selectedDates.size > 0) activeFilterTags.push({ label: `${selectedDates.size} dates`, clear: () => setSelectedDates(new Set()) });
+  if (selectedMonth !== null) activeFilterTags.push({ label: MONTHS[selectedMonth], clear: () => setSelectedMonth(null) });
+  if (selectedYear  !== null) activeFilterTags.push({ label: String(selectedYear), clear: () => setSelectedYear(null) });
+  if (projectId)     activeFilterTags.push({ label: projects.find(p => p.id === projectId)?.name ?? projectId, clear: () => handleSetProject(null) });
+  if (deliverableId) activeFilterTags.push({ label: deliverables.find(d => d.id === deliverableId)?.name ?? deliverableId, clear: () => setDeliverableId(null) });
+  if (memberId)      activeFilterTags.push({ label: members.find(m => m.id === memberId)?.name ?? memberId, clear: () => setMemberId(null) });
+
   return (
     <div className="oa-wrap" style={{ padding: "32px 32px 48px", display: "flex", flexDirection: "column", gap: 24, color: "var(--oa-text)" }}>
       <style>{STYLE_TAG}</style>
 
       {/* ── Header ── */}
       <div>
-        {/* Org badge */}
         <div className="oa-org-badge">
           <div className="oa-org-logo">{organisation.logo}</div>
           <span className="oa-org-name">{organisation.name}</span>
           <span style={{ fontSize: 11, color: "var(--oa-faint)", marginLeft: 2 }}>· {organisation.industry}</span>
         </div>
-
-        {/* Page title + subtitle */}
         <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--oa-text)", margin: 0, lineHeight: 1.2 }}>
           Analytics
           <span style={{ fontWeight: 400, color: "var(--oa-muted)", fontSize: 20, marginLeft: 10 }}>
@@ -411,11 +675,12 @@ export default function OrgPage() {
         </p>
       </div>
 
-      {/* ── Responsive two-column (stacks on mobile) ── */}
       <div className="oa-layout">
 
-        {/* ── LEFT: Calendar — appears first in DOM = top on mobile ── */}
+        {/* ── LEFT: Calendar + filters ── */}
         <div className="oa-panel">
+
+          {/* Calendar nav */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <button className="oa-nav-btn" onClick={prevMonth}>‹</button>
             <span style={{ fontSize: 14, fontWeight: 600, color: "var(--oa-text)" }}>
@@ -424,7 +689,11 @@ export default function OrgPage() {
             <button className="oa-nav-btn" onClick={nextMonth}>›</button>
           </div>
 
-          <CalendarMonth year={calYear} month={calMonth} selectedDates={selectedDates} onToggleDate={toggleDate} />
+          <CalendarMonth
+            year={calYear} month={calMonth}
+            selectedDates={selectedDates} onToggleDate={toggleDate}
+            rangeStart={rangeStart || null} rangeEnd={rangeEnd || null}
+          />
 
           {selectedDates.size > 0 && (
             <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, color: "var(--oa-accent)" }}>
@@ -438,6 +707,44 @@ export default function OrgPage() {
 
           <div className="oa-divider" />
 
+          {/* ── Date Range filter ── */}
+          <p className="oa-label">Date Range</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "var(--oa-faint)", marginBottom: 4, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>From</div>
+              <input
+                type="date"
+                className="oa-date-input"
+                value={rangeStart}
+                onChange={e => {
+                  setRangeStart(e.target.value);
+                  if (e.target.value) setSelectedDates(new Set()); // clear individual picks when range set
+                }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "var(--oa-faint)", marginBottom: 4, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>To</div>
+              <input
+                type="date"
+                className="oa-date-input"
+                value={rangeEnd}
+                onChange={e => {
+                  setRangeEnd(e.target.value);
+                  if (e.target.value) setSelectedDates(new Set());
+                }}
+              />
+            </div>
+          </div>
+          {hasDateRange && (
+            <button onClick={() => { setRangeStart(""); setRangeEnd(""); }}
+              style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, padding: "0 0 4px", display: "flex", alignItems: "center", gap: 4 }}>
+              ✕ Clear date range
+            </button>
+          )}
+
+          <div className="oa-divider" />
+
+          {/* Month pills */}
           <p className="oa-label">Month</p>
           <div className="oa-month-grid">
             {MONTHS.map((m, i) => (
@@ -448,6 +755,7 @@ export default function OrgPage() {
             ))}
           </div>
 
+          {/* Year pills */}
           <p className="oa-label">Year</p>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {availableYears.map(y => (
@@ -464,13 +772,23 @@ export default function OrgPage() {
 
           {/* Run bar */}
           <div className="oa-panel oa-run-bar">
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--oa-text)", marginBottom: activeFilterTags.length ? 6 : 0 }}>
                 {hasFilters ? "Filters active" : "No filters selected"}
               </div>
-              <div style={{ fontSize: 12, color: "var(--oa-muted)", marginTop: 2 }}>
-                {hasFilters ? "Ready to analyse" : "Will analyse all data"}
-              </div>
+              {activeFilterTags.length > 0 && (
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {activeFilterTags.map(tag => (
+                    <span key={tag.label} className="oa-filter-tag">
+                      {tag.label}
+                      <button onClick={tag.clear}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {!hasFilters && (
+                <div style={{ fontSize: 12, color: "var(--oa-muted)", marginTop: 2 }}>Will analyse all data</div>
+              )}
             </div>
             <div className="oa-run-bar-btns" style={{ display: "flex", gap: 10 }}>
               {hasFilters && <button className="oa-btn-ghost" onClick={clearAll}>Clear all</button>}
@@ -499,6 +817,7 @@ export default function OrgPage() {
           {/* Results */}
           {ran && result ? (
             <>
+              {/* Stat cards */}
               <div className="oa-stats-grid">
                 <div className="oa-stat oa-stat-rev">
                   <div className="oa-label" style={{ marginBottom: 6 }}>Revenue</div>
@@ -525,6 +844,7 @@ export default function OrgPage() {
                 </div>
               </div>
 
+              {/* Rev vs Spend bar */}
               <div className="oa-panel">
                 <div className="oa-ring-row">
                   <div className="oa-ring-badge" style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
@@ -565,24 +885,12 @@ export default function OrgPage() {
                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, color: "#4f46e5" }}>MGN</div>
                   </div>
                 </div>
-
-                <div className="oa-divider" style={{ margin: "0 0 16px" }} />
-
-                <div className="oa-avg-grid">
-                  <div className="oa-stat-avg oa-stat-avg-rev">
-                    <div style={{ fontSize: 11, color: "var(--oa-muted)", marginBottom: 4 }}>Avg Revenue / Record</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "#059669" }}>
-                      {result.count ? fmt(Math.round(result.revenue / result.count)) : "—"}
-                    </div>
-                  </div>
-                  <div className="oa-stat-avg oa-stat-avg-spnd">
-                    <div style={{ fontSize: 11, color: "var(--oa-muted)", marginBottom: 4 }}>Avg Spend / Record</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "#dc2626" }}>
-                      {result.count ? fmt(Math.round(result.spend / result.count)) : "—"}
-                    </div>
-                  </div>
-                </div>
               </div>
+
+              {/* Entries table — replaces avg cards */}
+              {result.filteredEntries.length > 0 && (
+                <EntriesTable filteredEntries={result.filteredEntries} />
+              )}
             </>
           ) : ran ? (
             <div className="oa-empty">

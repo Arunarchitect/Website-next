@@ -1,4 +1,4 @@
-// data.ts — single source of truth for dashboard + worklog + performance pages
+// data.ts — single source of truth for dashboard + worklog + performance + salary pages
 
 // ─── Core entity types ────────────────────────────────────────────────────────
 
@@ -179,53 +179,83 @@ export function isQuickAccess(userId: string, deliverableId: string) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PERFORMANCE PAGE EXTENSIONS
-// Everything below is additive — used only by performance.tsx
+// SALARY CALCULATOR EXTENSIONS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── Remark levels ────────────────────────────────────────────────────────────
+/**
+ * Per-member compensation rates.
+ *  hourlyRate      — amount paid per hour of logged work (used in Hourly mode)
+ *  feePercentage   — share of total project fee paid to this member, 0–100 (used in % of Fee mode)
+ */
+export interface MemberRate {
+  memberId: string;
+  hourlyRate: number;    // ₹ per hour
+  feePercentage: number; // % of total project fee (0–100)
+}
+
+/**
+ * Agreed total fee for a project.
+ * Used as the base for percentage-of-fee calculations.
+ */
+export interface ProjectFee {
+  projectId: string;
+  totalFee: number; // ₹
+}
+
+// ─── Default rates (editable in the UI, these are seed values) ────────────────
+
+export const memberRates: MemberRate[] = [
+  { memberId: "user-1", hourlyRate: 1500, feePercentage: 40 },
+  { memberId: "user-2", hourlyRate: 1200, feePercentage: 35 },
+  { memberId: "user-3", hourlyRate: 900,  feePercentage: 25 },
+];
+
+// ─── Default project fees ─────────────────────────────────────────────────────
+
+export const projectFees: ProjectFee[] = [
+  { projectId: "proj-1", totalFee: 1200000 },
+  { projectId: "proj-2", totalFee: 850000  },
+  { projectId: "proj-3", totalFee: 2500000 },
+];
+
+// ─── Salary helper: compute minutes logged per member for a set of entries ────
+
+export function minutesPerMember(entries: WorklogEntry[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const e of entries) {
+    const [sh, sm] = e.startTime.split(":").map(Number);
+    const [eh, em] = e.endTime.split(":").map(Number);
+    const mins = eh * 60 + em - (sh * 60 + sm);
+    map[e.memberId] = (map[e.memberId] ?? 0) + mins;
+  }
+  return map;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE PAGE EXTENSIONS  (additive — used only by performance.tsx)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export type RemarkLevel = "Excellent" | "Good" | "Average" | "Needs Improvement";
-
-// ─── Performance-specific Member type ─────────────────────────────────────────
-// Extends the base Member shape with skills, assignments, avatar, and orgId.
-// Named PerformanceMember internally; re-exported as the Member alias
-// that performance.tsx expects via the MEMBERS constant.
 
 export interface PerformanceMember {
   id: string;
   name: string;
   role: string;
   orgId: string;
-  avatar: string; // 2-char initials
-  skills: {
-    name: string;
-    score: number;       // 0–100
-    remark: RemarkLevel;
-  }[];
+  avatar: string;
+  skills: { name: string; score: number; remark: RemarkLevel; }[];
   assignments: {
-    id: string;
-    title: string;
-    projectId: string;
-    deliverableId: string;
-    assignedAt: string;  // ISO date string
-    dueAt: string;       // ISO date string
-    completedAt?: string; // ISO date string, undefined if not done
+    id: string; title: string; projectId: string; deliverableId: string;
+    assignedAt: string; dueAt: string; completedAt?: string;
     status: "Completed" | "In Progress" | "Overdue";
   }[];
 }
 
-// ─── Performance data ─────────────────────────────────────────────────────────
-
-export const ORGANISATIONS = organisations; // re-export under the name performance.tsx uses
+export const ORGANISATIONS = organisations;
 
 export const MEMBERS: PerformanceMember[] = [
   {
-    id: "user-1",
-    name: "Arun Ravikumar",
-    role: "Lead Architect",
-    orgId: "org-1",
-    avatar: "AR",
+    id: "user-1", name: "Arun Ravikumar", role: "Lead Architect", orgId: "org-1", avatar: "AR",
     skills: [
       { name: "Architectural Design",    score: 92, remark: "Excellent" },
       { name: "AutoCAD",                 score: 88, remark: "Excellent" },
@@ -234,198 +264,75 @@ export const MEMBERS: PerformanceMember[] = [
       { name: "Client Presentation",     score: 80, remark: "Good"      },
     ],
     assignments: [
-      {
-        id: "pa-1",
-        title: "Floor Plan — Sunilkumar Residence",
-        projectId: "proj-1",
-        deliverableId: "del-1",
-        assignedAt: "2025-03-20",
-        dueAt: "2025-03-28",
-        completedAt: "2025-03-26",
-        status: "Completed",
-      },
-      {
-        id: "pa-2",
-        title: "Elevation Drawing — Sunilkumar Residence",
-        projectId: "proj-1",
-        deliverableId: "del-2",
-        assignedAt: "2025-03-22",
-        dueAt: "2025-04-05",
-        status: "In Progress",
-      },
-      {
-        id: "pa-3",
-        title: "3D Render — Greenfield Mall",
-        projectId: "proj-3",
-        deliverableId: "del-5",
-        assignedAt: "2025-02-10",
-        dueAt: "2025-02-28",
-        completedAt: "2025-03-05",
-        status: "Overdue",
-      },
+      { id: "pa-1", title: "Floor Plan — Sunilkumar Residence",   projectId: "proj-1", deliverableId: "del-1", assignedAt: "2025-03-20", dueAt: "2025-03-28", completedAt: "2025-03-26", status: "Completed"   },
+      { id: "pa-2", title: "Elevation Drawing — Sunilkumar Residence", projectId: "proj-1", deliverableId: "del-2", assignedAt: "2025-03-22", dueAt: "2025-04-05", status: "In Progress" },
+      { id: "pa-3", title: "3D Render — Greenfield Mall",          projectId: "proj-3", deliverableId: "del-5", assignedAt: "2025-02-10", dueAt: "2025-02-28", completedAt: "2025-03-05", status: "Overdue"     },
     ],
   },
   {
-    id: "user-2",
-    name: "Priya Menon",
-    role: "Project Manager",
-    orgId: "org-1",
-    avatar: "PM",
+    id: "user-2", name: "Priya Menon", role: "Project Manager", orgId: "org-1", avatar: "PM",
     skills: [
-      { name: "Project Scheduling",  score: 90, remark: "Excellent"        },
-      { name: "Risk Management",     score: 74, remark: "Good"             },
-      { name: "Stakeholder Comms",   score: 85, remark: "Excellent"        },
-      { name: "Budget Control",      score: 60, remark: "Average"          },
-      { name: "AutoCAD",             score: 38, remark: "Needs Improvement"},
+      { name: "Project Scheduling", score: 90, remark: "Excellent"         },
+      { name: "Risk Management",    score: 74, remark: "Good"              },
+      { name: "Stakeholder Comms",  score: 85, remark: "Excellent"         },
+      { name: "Budget Control",     score: 60, remark: "Average"           },
+      { name: "AutoCAD",            score: 38, remark: "Needs Improvement" },
     ],
     assignments: [
-      {
-        id: "pa-4",
-        title: "Site Layout — Test Office Block",
-        projectId: "proj-2",
-        deliverableId: "del-3",
-        assignedAt: "2025-01-08",
-        dueAt: "2025-01-20",
-        completedAt: "2025-01-18",
-        status: "Completed",
-      },
-      {
-        id: "pa-5",
-        title: "Structural Report Review — Test Office Block",
-        projectId: "proj-2",
-        deliverableId: "del-4",
-        assignedAt: "2025-03-01",
-        dueAt: "2025-03-15",
-        completedAt: "2025-03-20",
-        status: "Overdue",
-      },
+      { id: "pa-4", title: "Site Layout — Test Office Block",           projectId: "proj-2", deliverableId: "del-3", assignedAt: "2025-01-08", dueAt: "2025-01-20", completedAt: "2025-01-18", status: "Completed" },
+      { id: "pa-5", title: "Structural Report Review — Test Office Block", projectId: "proj-2", deliverableId: "del-4", assignedAt: "2025-03-01", dueAt: "2025-03-15", completedAt: "2025-03-20", status: "Overdue" },
     ],
   },
   {
-    id: "user-3",
-    name: "Rohan Das",
-    role: "Structural Eng.",
-    orgId: "org-2",
-    avatar: "RD",
+    id: "user-3", name: "Rohan Das", role: "Structural Eng.", orgId: "org-2", avatar: "RD",
     skills: [
-      { name: "Structural Analysis",   score: 95, remark: "Excellent"        },
-      { name: "STAAD.Pro",             score: 88, remark: "Excellent"        },
-      { name: "Concrete Design",       score: 82, remark: "Good"             },
-      { name: "Foundation Design",     score: 70, remark: "Good"             },
-      { name: "Technical Reporting",   score: 55, remark: "Average"          },
-      { name: "Client Presentation",   score: 42, remark: "Needs Improvement"},
+      { name: "Structural Analysis", score: 95, remark: "Excellent"         },
+      { name: "STAAD.Pro",           score: 88, remark: "Excellent"         },
+      { name: "Concrete Design",     score: 82, remark: "Good"              },
+      { name: "Foundation Design",   score: 70, remark: "Good"              },
+      { name: "Technical Reporting", score: 55, remark: "Average"           },
+      { name: "Client Presentation", score: 42, remark: "Needs Improvement" },
     ],
     assignments: [
-      {
-        id: "pa-6",
-        title: "Structural Report — Test Office Block",
-        projectId: "proj-2",
-        deliverableId: "del-4",
-        assignedAt: "2025-01-10",
-        dueAt: "2025-01-25",
-        completedAt: "2025-01-24",
-        status: "Completed",
-      },
-      {
-        id: "pa-7",
-        title: "Foundation Analysis — Test Office Block",
-        projectId: "proj-2",
-        deliverableId: "del-4",
-        assignedAt: "2025-03-11",
-        dueAt: "2025-03-25",
-        status: "In Progress",
-      },
+      { id: "pa-6", title: "Structural Report — Test Office Block",   projectId: "proj-2", deliverableId: "del-4", assignedAt: "2025-01-10", dueAt: "2025-01-25", completedAt: "2025-01-24", status: "Completed"   },
+      { id: "pa-7", title: "Foundation Analysis — Test Office Block", projectId: "proj-2", deliverableId: "del-4", assignedAt: "2025-03-11", dueAt: "2025-03-25", status: "In Progress" },
     ],
   },
 ];
 
-// ─── Performance helper functions ─────────────────────────────────────────────
-
-/** All projects belonging to an org */
-export function projectsByOrg(orgId: string) {
-  return projects.filter(p => p.organisationId === orgId);
-}
-
-/** All deliverables belonging to a single project */
-export function deliverablesByProject(projectId: string) {
-  return deliverables.filter(d => d.projectId === projectId);
-}
-
-/** All deliverables belonging to a list of projects */
+export function projectsByOrg(orgId: string)  { return projects.filter(p => p.organisationId === orgId); }
+export function deliverablesByProject(projectId: string) { return deliverables.filter(d => d.projectId === projectId); }
 export function deliverablesByProjects(projectIds: string[]) {
   const set = new Set(projectIds);
   return deliverables.filter(d => set.has(d.projectId));
 }
+export function membersByOrg(orgId: string): PerformanceMember[] { return MEMBERS.filter(m => m.orgId === orgId); }
+export function projectName(projectId: string): string  { return projMap[projectId]?.name ?? projectId; }
+export function deliverableName(deliverableId: string): string { return delivMap[deliverableId]?.name ?? deliverableId; }
 
-/** All performance members belonging to an org */
-export function membersByOrg(orgId: string): PerformanceMember[] {
-  return MEMBERS.filter(m => m.orgId === orgId);
-}
-
-/** Human-readable project name, falls back to id */
-export function projectName(projectId: string): string {
-  return projMap[projectId]?.name ?? projectId;
-}
-
-/** Human-readable deliverable name, falls back to id */
-export function deliverableName(deliverableId: string): string {
-  return delivMap[deliverableId]?.name ?? deliverableId;
-}
-
-// ─── Scoring functions ────────────────────────────────────────────────────────
-
-/**
- * Maximum number of distinct skills held by any member in the given org.
- * Used as the denominator for coverage.
- */
 export function maxOrgSkills(orgId: string): number {
-  const orgMembers = membersByOrg(orgId);
-  if (orgMembers.length === 0) return 1;
-  return Math.max(...orgMembers.map(m => m.skills.length), 1);
+  const om = membersByOrg(orgId);
+  return om.length === 0 ? 1 : Math.max(...om.map(m => m.skills.length), 1);
 }
-
-/** Simple arithmetic mean of skill scores (0–100) */
 export function rawAvgSkillScore(member: PerformanceMember): number {
   if (member.skills.length === 0) return 0;
-  const sum = member.skills.reduce((acc, sk) => acc + sk.score, 0);
-  return Math.round(sum / member.skills.length);
+  return Math.round(member.skills.reduce((a, s) => a + s.score, 0) / member.skills.length);
 }
-
-/**
- * Coverage factor: how many skills this member has relative to the
- * maximum across their org.  Returns a value in [0, 1].
- */
 export function coverageFactor(member: PerformanceMember): number {
   const max = maxOrgSkills(member.orgId);
   return max > 0 ? member.skills.length / max : 0;
 }
-
-/**
- * Weighted skill score = rawAvg × coverage.
- * Penalises members who have high scores but on very few skills.
- */
 export function weightedSkillScore(member: PerformanceMember): number {
   return Math.round(rawAvgSkillScore(member) * coverageFactor(member));
 }
-
-/**
- * Assignment efficiency across a list of performance assignments.
- * For each completed assignment: efficiency = clamp(0, (2 − taken/allotted) × 50, 100).
- * Pending assignments contribute 0.
- * Returns the mean, or 0 when the list is empty.
- */
-export function assignmentEfficiency(
-  assignments: PerformanceMember["assignments"]
-): number {
+export function assignmentEfficiency(assignments: PerformanceMember["assignments"]): number {
   if (assignments.length === 0) return 0;
   const scores = assignments.map(a => {
-    const due      = new Date(a.dueAt).getTime();
-    const assigned = new Date(a.assignedAt).getTime();
-    const done     = a.completedAt ? new Date(a.completedAt).getTime() : null;
-    const window   = due - assigned;
-    if (done === null || window <= 0) return 0;
-    const taken = done - assigned;
-    return Math.max(0, Math.min(100, Math.round((2 - taken / window) * 50)));
+    const due = new Date(a.dueAt).getTime(), assigned = new Date(a.assignedAt).getTime();
+    const done = a.completedAt ? new Date(a.completedAt).getTime() : null;
+    const win = due - assigned;
+    if (!done || win <= 0) return 0;
+    return Math.max(0, Math.min(100, Math.round((2 - (done - assigned) / win) * 50)));
   });
   return Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
 }

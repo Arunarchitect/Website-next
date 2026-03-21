@@ -4,7 +4,7 @@ export type Organisation = {
   id: string;
   name: string;
   tagline: string;
-  logo: string; // initials
+  logo: string;
   industry: string;
   since: number;
 };
@@ -24,7 +24,7 @@ export type Deliverable = {
 export type Member = {
   id: string;
   name: string;
-  avatar: string; // initials
+  avatar: string;
   role: string;
 };
 
@@ -42,51 +42,46 @@ export type Entry = {
 
 export const organisation: Organisation = {
   id: "org1",
-  name: "Nexaflow Solutions",
-  tagline: "Building the future, one sprint at a time",
-  logo: "NF",
-  industry: "Software & Consulting",
+  name: "Stonemark Studio",
+  tagline: "Designing spaces that endure",
+  logo: "SM",
+  industry: "Architecture & Urban Design",
   since: 2019,
 };
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 
 export const projects: Project[] = [
-  { id: "p1", name: "Nova Platform",    color: "#6366f1" },
-  { id: "p2", name: "Horizon App",      color: "#f59e0b" },
-  { id: "p3", name: "Pulse Dashboard",  color: "#10b981" },
-  { id: "p4", name: "Orbit CRM",        color: "#ef4444" },
+  { id: "p1", name: "Meridian Tower",       color: "#6366f1" },
+  { id: "p2", name: "Harlow Residences",    color: "#f59e0b" },
+  { id: "p3", name: "Civic Arts Pavilion",  color: "#10b981" },
+  { id: "p4", name: "Vantage Mixed-Use",    color: "#ef4444" },
 ];
 
 export const deliverables: Deliverable[] = [
-  { id: "d1", name: "UI Design",         projectId: "p1" },
-  { id: "d2", name: "Backend API",       projectId: "p1" },
-  { id: "d3", name: "QA Testing",        projectId: "p1" },
-  { id: "d4", name: "Mobile App",        projectId: "p2" },
-  { id: "d5", name: "Analytics Module",  projectId: "p2" },
-  { id: "d6", name: "Reporting Engine",  projectId: "p3" },
-  { id: "d7", name: "Real-time Feed",    projectId: "p3" },
-  { id: "d8", name: "CRM Integration",   projectId: "p4" },
-  { id: "d9", name: "Email Automation",  projectId: "p4" },
+  { id: "d1", name: "Concept Design",        projectId: "p1" },
+  { id: "d2", name: "Structural Drawings",   projectId: "p1" },
+  { id: "d3", name: "Planning Submission",   projectId: "p1" },
+  { id: "d4", name: "Interior Layouts",      projectId: "p2" },
+  { id: "d5", name: "Landscape Plan",        projectId: "p2" },
+  { id: "d6", name: "Facade Design",         projectId: "p3" },
+  { id: "d7", name: "Acoustic Report",       projectId: "p3" },
+  { id: "d8", name: "Site Master Plan",      projectId: "p4" },
+  { id: "d9", name: "3D Visualisations",     projectId: "p4" },
 ];
 
 export const members: Member[] = [
-  { id: "m1", name: "Arjun Nair",    avatar: "AN", role: "Engineer"  },
-  { id: "m2", name: "Priya Menon",   avatar: "PM", role: "Designer"  },
-  { id: "m3", name: "Rohan Das",     avatar: "RD", role: "Manager"   },
-  { id: "m4", name: "Sneha Iyer",    avatar: "SI", role: "Analyst"   },
-  { id: "m5", name: "Vikram Pillai", avatar: "VP", role: "Engineer"  },
+  { id: "m1", name: "Arjun Nair",    avatar: "AN", role: "Architect"          },
+  { id: "m2", name: "Priya Menon",   avatar: "PM", role: "Interior Designer"  },
+  { id: "m3", name: "Rohan Das",     avatar: "RD", role: "Project Manager"    },
+  { id: "m4", name: "Sneha Iyer",    avatar: "SI", role: "Urban Planner"      },
+  { id: "m5", name: "Vikram Pillai", avatar: "VP", role: "Structural Engineer" },
 ];
 
-// ─── Pre-computed lookup maps (used by entry generator & page) ────────────────
-
-/** projectId → deliverable ids belonging to that project */
 export const deliverablesByProject: Record<string, string[]> = {};
 for (const d of deliverables) {
   (deliverablesByProject[d.projectId] ??= []).push(d.id);
 }
-
-// ─── Deterministic PRNG (mulberry32) — fast, no Math.sin, no allocation ──────
 
 function mulberry32(seed: number) {
   let s = seed;
@@ -97,8 +92,6 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 0xffffffff;
   };
 }
-
-// ─── Entry generation: Jan 2024 – Mar 2026 ───────────────────────────────────
 
 export const entries: Entry[] = (() => {
   const result: Entry[] = [];
@@ -114,7 +107,6 @@ export const entries: Entry[] = (() => {
 
     for (let month = 1; month <= lastMonth; month++) {
       const daysInMonth = new Date(year, month, 0).getDate();
-      // 15–25 entries per month (deterministic via rng)
       const count = 15 + Math.floor(rng() * 11);
 
       for (let i = 0; i < count; i++) {

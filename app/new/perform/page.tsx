@@ -15,7 +15,7 @@ import {
   weightedSkillScore,
   coverageFactor,
   assignmentEfficiency,
-  type Member,
+  type PerformanceMember,
   type RemarkLevel,
 } from "./data";
 
@@ -148,7 +148,7 @@ function SearchDropdown({
 
 // ─── Skill row ───────────────────────────────────────────────────────────────
 
-function SkillRow({ skill }: { skill: Member["skills"][0] }) {
+function SkillRow({ skill }: { skill: PerformanceMember["skills"][0] }) {
   const cfg = REMARK_CFG[skill.remark];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -173,7 +173,7 @@ function SkillRow({ skill }: { skill: Member["skills"][0] }) {
 
 // ─── Assignment card ─────────────────────────────────────────────────────────
 
-function AssignmentCard({ a }: { a: Member["assignments"][0] }) {
+function AssignmentCard({ a }: { a: PerformanceMember["assignments"][0] }) {
   const due      = new Date(a.dueAt);
   const done     = a.completedAt ? new Date(a.completedAt) : null;
   const assigned = new Date(a.assignedAt);
@@ -288,8 +288,8 @@ export default function PerformancePage() {
 
   const delivOptions = useMemo(() => {
     if (!orgId) return [];
-    const projects = projectId ? [projectId] : projectsByOrg(orgId).map(p => p.id);
-    return deliverablesByProjects(projects).map(d => ({ label: d.name, value: d.id }));
+    const projectIds = projectId ? [projectId] : projectsByOrg(orgId).map(p => p.id);
+    return deliverablesByProjects(projectIds).map(d => ({ label: d.name, value: d.id }));
   }, [orgId, projectId]);
 
   const memberOptions = useMemo(() => {
@@ -565,9 +565,9 @@ export default function PerformancePage() {
             {/* Stats */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
               {([
-                { label: "Completed",   color: "#10b981", filter: (a: Member["assignments"][0]) => a.status === "Completed"    },
-                { label: "In Progress", color: "#3b82f6", filter: (a: Member["assignments"][0]) => a.status === "In Progress"  },
-                { label: "Overdue",     color: "#ef4444", filter: (a: Member["assignments"][0]) => a.status === "Overdue"      },
+                { label: "Completed",   color: "#10b981", filter: (a: PerformanceMember["assignments"][0]) => a.status === "Completed"    },
+                { label: "In Progress", color: "#3b82f6", filter: (a: PerformanceMember["assignments"][0]) => a.status === "In Progress"  },
+                { label: "Overdue",     color: "#ef4444", filter: (a: PerformanceMember["assignments"][0]) => a.status === "Overdue"      },
               ]).map(({ label, color, filter }) => (
                 <div key={label} style={{ background: `${color}0d`, border: `1px solid ${color}22`,
                   borderRadius: 10, padding: isMobile ? "10px 10px" : "10px 14px" }}>
