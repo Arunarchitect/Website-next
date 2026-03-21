@@ -29,6 +29,7 @@ export type Member = {
 };
 
 export type ExpenseCategory =
+  | "salary"
   | "travel"
   | "food"
   | "accommodation"
@@ -36,6 +37,7 @@ export type ExpenseCategory =
   | "others";
 
 export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  salary:        "Salary",
   travel:        "Travel",
   food:          "Food",
   accommodation: "Accommodation",
@@ -43,22 +45,36 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   others:        "Others",
 };
 
-/** Matches Django's Expense model — NOT linked to a deliverable */
+export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
+  salary:        "#6366f1",
+  travel:        "#f59e0b",
+  food:          "#10b981",
+  accommodation: "#3b82f6",
+  stationery:    "#8b5cf6",
+  others:        "#6b7280",
+};
+
+/**
+ * Mirrors Django Expense model.
+ * NOT linked to a deliverable.
+ * `reimbursed` = whether the expense has been reimbursed/paid to the user.
+ */
 export type Expense = {
   id: string;
   date: string;          // "YYYY-MM-DD"
   userId: string;        // FK → Member (user)
   projectId: string;     // FK → Project
-  amount: number;        // DecimalField equivalent
+  amount: number;
   category: ExpenseCategory;
   remarks?: string;
-  createdAt: string;     // ISO timestamp
+  reimbursed: boolean;   // has the amount been reimbursed?
+  createdAt: string;     // ISO datetime
 };
 
-/** Legacy entry type kept for the revenue/spend analysis grid */
+/** Revenue/spend entry — linked to a deliverable */
 export type Entry = {
   id: string;
-  date: string;          // "YYYY-MM-DD"
+  date: string;
   projectId: string;
   deliverableId: string;
   memberId: string;
@@ -77,7 +93,7 @@ export const organisation: Organisation = {
   since: 2019,
 };
 
-// ─── Static data ──────────────────────────────────────────────────────────────
+// ─── Lookup data ──────────────────────────────────────────────────────────────
 
 export const projects: Project[] = [
   { id: "p1", name: "Meridian Tower",      color: "#6366f1" },
@@ -123,103 +139,115 @@ function mulberry32(seed: number) {
   };
 }
 
-// ─── Revenue/Spend Entries (linked to deliverables) ──────────────────────────
+// ─── Revenue/Spend Entries ────────────────────────────────────────────────────
 
 export const entries: Entry[] = (() => {
   const result: Entry[] = [];
-  const rng = mulberry32(0xdeadbeef);
-
+  const rng  = mulberry32(0xdeadbeef);
   const pIds = projects.map(p => p.id);
   const mIds = members.map(m => m.id);
-
   let idx = 0;
 
   for (let year = 2024; year <= 2026; year++) {
     const lastMonth = year === 2026 ? 3 : 12;
-
     for (let month = 1; month <= lastMonth; month++) {
-      const daysInMonth = new Date(year, month, 0).getDate();
+      const days = new Date(year, month, 0).getDate();
       const count = 15 + Math.floor(rng() * 11);
-
       for (let i = 0; i < count; i++) {
-        const day     = 1 + Math.floor(rng() * daysInMonth);
+        const day     = 1 + Math.floor(rng() * days);
         const pId     = pIds[Math.floor(rng() * pIds.length)];
         const dList   = deliverablesByProject[pId];
         const dId     = dList[Math.floor(rng() * dList.length)];
         const mId     = mIds[Math.floor(rng() * mIds.length)];
         const revenue = Math.round(rng() * 45_000 + 5_000);
         const spend   = Math.round(rng() * revenue * 0.7 + 1_000);
-
         result.push({
-          id:            `e${idx++}`,
-          date:          `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-          projectId:     pId,
-          deliverableId: dId,
-          memberId:      mId,
-          revenue,
-          spend,
+          id: `e${idx++}`,
+          date: `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`,
+          projectId: pId, deliverableId: dId, memberId: mId, revenue, spend,
         });
       }
     }
   }
-
   return result;
 })();
 
-// ─── Expenses (separate model — NOT linked to deliverables) ──────────────────
+// ─── Expenses ─────────────────────────────────────────────────────────────────
 
-const CATEGORIES: ExpenseCategory[] = [
-  "travel", "food", "accommodation", "stationery", "others",
-];
-
-const REMARKS_BY_CATEGORY: Record<ExpenseCategory, string[]> = {
+const REMARKS_MAP: Record<ExpenseCategory, string[]> = {
+  salary:        ["Monthly salary", "Salary advance", "Performance bonus", "Contract payment"],
   travel:        ["Site visit – Meridian Tower", "Client meeting travel", "Field survey transport", "Airport transfer"],
   food:          ["Team lunch", "Client dinner", "Working meal – deadline sprint", "Catering for presentation"],
   accommodation: ["Hotel – site inspection", "Overnight stay – outstation project", "Service apartment – long-term project"],
   stationery:    ["A3 printing – drawing sheets", "Marker set & trace paper", "Binding & lamination", "Plotter consumables"],
-  others:        ["Software licence renewal", "Courier – document dispatch", "Miscellaneous project expense", "Utilities – site office"],
+  others:        ["Software licence renewal", "Courier – document dispatch", "Utilities – site office", "Miscellaneous project expense"],
+};
+
+// Fixed monthly salary per member (INR)
+const MEMBER_SALARY: Record<string, number> = {
+  m1: 95_000,
+  m2: 82_000,
+  m3: 88_000,
+  m4: 78_000,
+  m5: 91_000,
 };
 
 export const expenses: Expense[] = (() => {
   const result: Expense[] = [];
-  const rng = mulberry32(0xcafebabe);
-
+  const rng  = mulberry32(0xcafebabe);
   const pIds = projects.map(p => p.id);
   const mIds = members.map(m => m.id);
-
   let idx = 0;
+
+  const nonSalaryCats: ExpenseCategory[] = ["travel","food","accommodation","stationery","others"];
 
   for (let year = 2024; year <= 2026; year++) {
     const lastMonth = year === 2026 ? 3 : 12;
-
     for (let month = 1; month <= lastMonth; month++) {
-      const daysInMonth = new Date(year, month, 0).getDate();
-      // 8–14 expense records per month
-      const count = 8 + Math.floor(rng() * 7);
+      const days = new Date(year, month, 0).getDate();
+      const ds = (day: number) =>
+        `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
 
+      // Salary — one per member every month, always reimbursed
+      for (const mId of mIds) {
+        result.push({
+          id:         `exp${idx++}`,
+          date:       ds(1),
+          userId:     mId,
+          projectId:  pIds[Math.floor(rng() * pIds.length)],
+          amount:     MEMBER_SALARY[mId],
+          category:   "salary",
+          remarks:    "Monthly salary",
+          reimbursed: true,
+          createdAt:  `${ds(1)}T09:00:00`,
+        });
+      }
+
+      // Other expenses — 7–13 per month
+      const count = 7 + Math.floor(rng() * 7);
       for (let i = 0; i < count; i++) {
-        const day      = 1 + Math.floor(rng() * daysInMonth);
-        const pId      = pIds[Math.floor(rng() * pIds.length)];
-        const uId      = mIds[Math.floor(rng() * mIds.length)];
-        const cat      = CATEGORIES[Math.floor(rng() * CATEGORIES.length)];
-        const amount   = Math.round(rng() * 8_000 + 200); // ₹200 – ₹8200
-        const remarksList = REMARKS_BY_CATEGORY[cat];
-        const remarks  = remarksList[Math.floor(rng() * remarksList.length)];
-        const dateStr  = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const day        = 1 + Math.floor(rng() * days);
+        const cat        = nonSalaryCats[Math.floor(rng() * nonSalaryCats.length)];
+        const mId        = mIds[Math.floor(rng() * mIds.length)];
+        const pId        = pIds[Math.floor(rng() * pIds.length)];
+        const amount     = Math.round(rng() * 8_000 + 200);
+        const remarks    = REMARKS_MAP[cat][Math.floor(rng() * REMARKS_MAP[cat].length)];
+        const reimbursed = rng() < 0.62; // ~62% reimbursed
 
         result.push({
-          id:        `exp${idx++}`,
-          date:      dateStr,
-          userId:    uId,
-          projectId: pId,
+          id:         `exp${idx++}`,
+          date:       ds(day),
+          userId:     mId,
+          projectId:  pId,
           amount,
-          category:  cat,
+          category:   cat,
           remarks,
-          createdAt: `${dateStr}T${String(Math.floor(rng() * 23)).padStart(2, "0")}:${String(Math.floor(rng() * 59)).padStart(2, "0")}:00`,
+          reimbursed,
+          createdAt:  `${ds(day)}T${String(Math.floor(rng()*22+1)).padStart(2,"0")}:${String(Math.floor(rng()*59)).padStart(2,"0")}:00`,
         });
       }
     }
   }
 
-  return result;
+  return result.sort((a, b) => b.date.localeCompare(a.date));
 })();
