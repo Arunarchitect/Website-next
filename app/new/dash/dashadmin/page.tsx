@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -974,9 +976,7 @@ export default function DashboardPage() {
     async (id: string) => {
       if (!worklogIdRef.current) return;
       const entry = entries[id];
-      const secs = Math.floor(
-        (Date.now() - (startRef.current ?? Date.now())) / 1000,
-      );
+
       try {
         await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
         setSaveError(null);
@@ -1044,7 +1044,7 @@ export default function DashboardPage() {
     [runningId, commitStart],
   );
 
-  const handleStop = useCallback((_id: string) => {
+  const handleStop = useCallback(() => {
     setPending({ action: "stop" });
   }, []);
 

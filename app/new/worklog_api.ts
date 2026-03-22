@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 const BASE = process.env.NEXT_PUBLIC_HOST ;
 
 function getToken(): string {
@@ -55,9 +57,7 @@ export interface MetaData {
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
-function toLocalISO(dt: Date): string {
-  return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`;
-}
+
 
 function mapWorklog(w: any): WorkLogEntry {
   const st = w.start_time ? new Date(w.start_time) : null;

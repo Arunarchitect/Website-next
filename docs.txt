@@ -1,0 +1,2 @@
+#For finding out if any build lintintg type error wihtout building
+npx tsc --noEmit 2>&1 | Select-Object -First 100
