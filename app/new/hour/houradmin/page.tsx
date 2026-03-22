@@ -8,7 +8,7 @@ import {
   currentUser,
   type WorklogEntry,
   type Assignment,
-} from "./data";
+} from "@/app/new/data";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MONTHS = ["January","February","March","April","May","June",

@@ -2,20 +2,45 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import {
-  worklogEntries, organisations, projects, deliverables, members,
-  projMap, delivMap, orgMap, memberMap,
-  quickAccessItems, addQuickAccess, removeQuickAccess,
+  worklogEntries,
+  organisations,
+  projects,
+  deliverables,
+  members,
+  projMap,
+  delivMap,
+  orgMap,
+  memberMap,
+  quickAccessItems,
+  addQuickAccess,
+  removeQuickAccess,
   currentUser,
   type WorklogEntry,
-} from "./data";
+} from "@/app/new/data";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const MONTHS = ["January","February","March","April","May","June",
-                "July","August","September","October","November","December"];
-const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
-function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
-function getFirstDay(y: number, m: number)    { return new Date(y, m, 1).getDay(); }
+function getDaysInMonth(y: number, m: number) {
+  return new Date(y, m + 1, 0).getDate();
+}
+function getFirstDay(y: number, m: number) {
+  return new Date(y, m, 1).getDay();
+}
 
 function useContainerWidth(ref: React.RefObject<HTMLElement>) {
   const [w, setW] = useState(9999);
@@ -31,41 +56,73 @@ function useContainerWidth(ref: React.RefObject<HTMLElement>) {
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
-  bg:      "#0f1117",
-  panel:   "rgba(255,255,255,0.025)",
-  panelB:  "rgba(255,255,255,0.07)",
-  panel2:  "rgba(255,255,255,0.04)",
+  bg: "#0f1117",
+  panel: "rgba(255,255,255,0.025)",
+  panelB: "rgba(255,255,255,0.07)",
+  panel2: "rgba(255,255,255,0.04)",
   panel2B: "rgba(255,255,255,0.1)",
-  rowHov:  "rgba(255,255,255,0.04)",
+  rowHov: "rgba(255,255,255,0.04)",
   divider: "rgba(255,255,255,0.06)",
-  t1: "#f8fafc", t2: "#f1f5f9", t3: "#94a3b8",
-  t4: "#64748b", t5: "#475569", t6: "#334155",
-  ac:      "#6366f1",
+  t1: "#f8fafc",
+  t2: "#f1f5f9",
+  t3: "#94a3b8",
+  t4: "#64748b",
+  t5: "#475569",
+  t6: "#334155",
+  ac: "#6366f1",
   acLight: "rgba(99,102,241,0.12)",
-  acMid:   "rgba(99,102,241,0.55)",
-  acText:  "#818cf8",
-  green:   "#10b981", greenBg: "rgba(16,185,129,0.12)",
-  red:     "#ef4444", redBg:   "rgba(239,68,68,0.12)",
-  pin:     "#f59e0b", pinBg:   "rgba(245,158,11,0.12)",
+  acMid: "rgba(99,102,241,0.55)",
+  acText: "#818cf8",
+  green: "#10b981",
+  greenBg: "rgba(16,185,129,0.12)",
+  red: "#ef4444",
+  redBg: "rgba(239,68,68,0.12)",
+  pin: "#f59e0b",
+  pinBg: "rgba(245,158,11,0.12)",
 };
 
 const Divider = () => <div style={{ height: 1, background: T.divider }} />;
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalGrid({ year, month, activeDates, selDates, onToggle }: {
-  year: number; month: number;
-  activeDates: Set<string>; selDates: Set<string>;
+function CalGrid({
+  year,
+  month,
+  activeDates,
+  selDates,
+  onToggle,
+}: {
+  year: number;
+  month: number;
+  activeDates: Set<string>;
+  selDates: Set<string>;
   onToggle: (d: string) => void;
 }) {
   const total = getDaysInMonth(year, month);
   const first = getFirstDay(year, month);
-  const cells: (number | null)[] = [...Array(first).fill(null), ...Array.from({ length: total }, (_, i) => i + 1)];
+  const cells: (number | null)[] = [
+    ...Array(first).fill(null),
+    ...Array.from({ length: total }, (_, i) => i + 1),
+  ];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
-      {DAYS.map(d => (
-        <div key={d} style={{ textAlign: "center", fontSize: 9, color: T.t5, fontWeight: 600,
-          letterSpacing: "0.06em", padding: "4px 0", textTransform: "uppercase" }}>{d}</div>
+    <div
+      style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}
+    >
+      {DAYS.map((d) => (
+        <div
+          key={d}
+          style={{
+            textAlign: "center",
+            fontSize: 9,
+            color: T.t5,
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            padding: "4px 0",
+            textTransform: "uppercase",
+          }}
+        >
+          {d}
+        </div>
       ))}
       {cells.map((day, i) => {
         if (!day) return <div key={`_${i}`} />;
@@ -73,22 +130,49 @@ function CalGrid({ year, month, activeDates, selDates, onToggle }: {
         const has = activeDates.has(iso);
         const sel = selDates.has(iso);
         return (
-          <button key={iso} onClick={() => onToggle(iso)} style={{
-            background: sel ? T.ac : "transparent",
-            border: `1px solid ${sel ? T.ac : "transparent"}`,
-            borderRadius: 6, cursor: "pointer",
-            color: sel ? "#fff" : has ? T.t2 : T.t4,
-            fontSize: 11, padding: "6px 0", textAlign: "center",
-            transition: "all 0.15s", width: "100%",
-            fontFamily: "'DM Sans',sans-serif", fontWeight: sel ? 600 : 400,
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
-          }}
-            onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = T.panel2; }}
-            onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          <button
+            key={iso}
+            onClick={() => onToggle(iso)}
+            style={{
+              background: sel ? T.ac : "transparent",
+              border: `1px solid ${sel ? T.ac : "transparent"}`,
+              borderRadius: 6,
+              cursor: "pointer",
+              color: sel ? "#fff" : has ? T.t2 : T.t4,
+              fontSize: 11,
+              padding: "6px 0",
+              textAlign: "center",
+              transition: "all 0.15s",
+              width: "100%",
+              fontFamily: "'DM Sans',sans-serif",
+              fontWeight: sel ? 600 : 400,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!sel)
+                (e.currentTarget as HTMLElement).style.background = T.panel2;
+            }}
+            onMouseLeave={(e) => {
+              if (!sel)
+                (e.currentTarget as HTMLElement).style.background =
+                  "transparent";
+            }}
           >
             {day}
-            {has && <span style={{ display: "block", width: 3, height: 3, borderRadius: "50%",
-              background: sel ? "#fff" : T.acText }} />}
+            {has && (
+              <span
+                style={{
+                  display: "block",
+                  width: 3,
+                  height: 3,
+                  borderRadius: "50%",
+                  background: sel ? "#fff" : T.acText,
+                }}
+              />
+            )}
           </button>
         );
       })}
@@ -97,52 +181,125 @@ function CalGrid({ year, month, activeDates, selDates, onToggle }: {
 }
 
 // ─── Delete confirm ───────────────────────────────────────────────────────────
-function DeleteConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+function DeleteConfirm({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onCancel(); };
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onCancel();
+    };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [onCancel]);
 
   return (
-    <div ref={ref} style={{
-      position: "absolute", top: "50%", right: "calc(100% + 8px)",
-      transform: "translateY(-50%)", zIndex: 100,
-      background: "#1a1d2e", border: `1px solid ${T.panel2B}`,
-      borderRadius: 12, padding: "14px 16px",
-      boxShadow: "0 12px 40px rgba(0,0,0,0.7)", minWidth: 210, whiteSpace: "nowrap",
-    }}>
-      <div style={{ position: "absolute", right: -6, top: "50%",
-        transform: "translateY(-50%) rotate(45deg)", width: 10, height: 10,
-        background: "#1a1d2e", borderTop: `1px solid ${T.panel2B}`, borderRight: `1px solid ${T.panel2B}` }} />
-      <p style={{ margin: "0 0 3px", fontSize: 12.5, fontWeight: 600, color: T.t2 }}>Delete this entry?</p>
-      <p style={{ margin: "0 0 12px", fontSize: 11.5, color: T.t4 }}>This action cannot be undone.</p>
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        top: "50%",
+        right: "calc(100% + 8px)",
+        transform: "translateY(-50%)",
+        zIndex: 100,
+        background: "#1a1d2e",
+        border: `1px solid ${T.panel2B}`,
+        borderRadius: 12,
+        padding: "14px 16px",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.7)",
+        minWidth: 210,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          right: -6,
+          top: "50%",
+          transform: "translateY(-50%) rotate(45deg)",
+          width: 10,
+          height: 10,
+          background: "#1a1d2e",
+          borderTop: `1px solid ${T.panel2B}`,
+          borderRight: `1px solid ${T.panel2B}`,
+        }}
+      />
+      <p
+        style={{
+          margin: "0 0 3px",
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: T.t2,
+        }}
+      >
+        Delete this entry?
+      </p>
+      <p style={{ margin: "0 0 12px", fontSize: 11.5, color: T.t4 }}>
+        This action cannot be undone.
+      </p>
       <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={onCancel} style={{ flex: 1, padding: "6px 0", fontSize: 11.5, borderRadius: 7,
-          background: T.panel2, border: `1px solid ${T.panel2B}`, color: T.t3, cursor: "pointer",
-          fontFamily: "'DM Sans',sans-serif" }}>Cancel</button>
-        <button onClick={onConfirm} style={{ flex: 1, padding: "6px 0", fontSize: 11.5, borderRadius: 7,
-          background: T.red, border: "none", color: "#fff", fontWeight: 600, cursor: "pointer",
-          fontFamily: "'DM Sans',sans-serif" }}>Yes, delete</button>
+        <button
+          onClick={onCancel}
+          style={{
+            flex: 1,
+            padding: "6px 0",
+            fontSize: 11.5,
+            borderRadius: 7,
+            background: T.panel2,
+            border: `1px solid ${T.panel2B}`,
+            color: T.t3,
+            cursor: "pointer",
+            fontFamily: "'DM Sans',sans-serif",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          style={{
+            flex: 1,
+            padding: "6px 0",
+            fontSize: 11.5,
+            borderRadius: 7,
+            background: T.red,
+            border: "none",
+            color: "#fff",
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "'DM Sans',sans-serif",
+          }}
+        >
+          Yes, delete
+        </button>
       </div>
     </div>
   );
 }
 
 // ─── Worklog row ──────────────────────────────────────────────────────────────
-function WorklogRow({ row, onSave, onDelete }: {
+function WorklogRow({
+  row,
+  onSave,
+  onDelete,
+}: {
   row: WorklogEntry;
   onSave: (id: string, data: WorklogEntry) => void;
   onDelete: (id: string) => void;
 }) {
-  const [draft, setDraft]     = useState<WorklogEntry>({ ...row });
-  const [dirty, setDirty]     = useState(false);
-  const [flash, setFlash]     = useState(false);
-  const [hovered, setHov]     = useState(false);
+  const [draft, setDraft] = useState<WorklogEntry>({ ...row });
+  const [dirty, setDirty] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const [hovered, setHov] = useState(false);
   const [showDel, setShowDel] = useState(false);
 
-  function patch(p: Partial<WorklogEntry>) { setDraft(d => ({ ...d, ...p })); setDirty(true); }
+  function patch(p: Partial<WorklogEntry>) {
+    setDraft((d) => ({ ...d, ...p }));
+    setDirty(true);
+  }
 
   function save() {
     onSave(row.id, draft);
@@ -151,104 +308,258 @@ function WorklogRow({ row, onSave, onDelete }: {
     setTimeout(() => setFlash(false), 900);
   }
 
-  const scopedDelivs = deliverables.filter(d => d.projectId === draft.projectId);
-  const delivValid   = scopedDelivs.some(d => d.id === draft.deliverableId);
-  const proj         = projMap[draft.projectId];
+  const scopedDelivs = deliverables.filter(
+    (d) => d.projectId === draft.projectId,
+  );
+  const delivValid = scopedDelivs.some((d) => d.id === draft.deliverableId);
+  const proj = projMap[draft.projectId];
 
   const inputStyle: React.CSSProperties = {
-    background: "transparent", border: "1px solid transparent",
-    borderRadius: 6, padding: "4px 6px", fontSize: 12, color: T.t2,
-    width: "100%", outline: "none", fontFamily: "'DM Sans',sans-serif", transition: "all 0.15s",
+    background: "transparent",
+    border: "1px solid transparent",
+    borderRadius: 6,
+    padding: "4px 6px",
+    fontSize: 12,
+    color: T.t2,
+    width: "100%",
+    outline: "none",
+    fontFamily: "'DM Sans',sans-serif",
+    transition: "all 0.15s",
   };
-  const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer", appearance: "none" as const };
-  const focusOn  = (e: React.FocusEvent<HTMLElement>) => { e.currentTarget.style.borderColor = T.acMid; e.currentTarget.style.background = T.panel2; };
-  const focusOff = (e: React.FocusEvent<HTMLElement>) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "transparent"; };
+  const selectStyle: React.CSSProperties = {
+    ...inputStyle,
+    cursor: "pointer",
+    appearance: "none" as const,
+  };
+  const focusOn = (e: React.FocusEvent<HTMLElement>) => {
+    e.currentTarget.style.borderColor = T.acMid;
+    e.currentTarget.style.background = T.panel2;
+  };
+  const focusOff = (e: React.FocusEvent<HTMLElement>) => {
+    e.currentTarget.style.borderColor = "transparent";
+    e.currentTarget.style.background = "transparent";
+  };
 
-  const rowBg = flash ? "rgba(16,185,129,0.08)" : dirty ? "rgba(245,158,11,0.04)" : hovered ? T.rowHov : "transparent";
+  const rowBg = flash
+    ? "rgba(16,185,129,0.08)"
+    : dirty
+      ? "rgba(245,158,11,0.04)"
+      : hovered
+        ? T.rowHov
+        : "transparent";
 
   return (
-    <tr onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{ borderBottom: `1px solid ${T.divider}`, transition: "background 0.15s", background: rowBg }}>
-
+    <tr
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        borderBottom: `1px solid ${T.divider}`,
+        transition: "background 0.15s",
+        background: rowBg,
+      }}
+    >
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <input type="date" value={draft.date} onChange={e => patch({ date: e.target.value })}
-          style={{ ...inputStyle, minWidth: 108, colorScheme: "dark" }} onFocus={focusOn} onBlur={focusOff} />
+        <input
+          type="date"
+          value={draft.date}
+          onChange={(e) => patch({ date: e.target.value })}
+          style={{ ...inputStyle, minWidth: 108, colorScheme: "dark" }}
+          onFocus={focusOn}
+          onBlur={focusOff}
+        />
       </td>
 
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <select value={draft.organisationId} onChange={e => patch({ organisationId: e.target.value })}
-          style={selectStyle} onFocus={focusOn} onBlur={focusOff}>
-          {organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+        <select
+          value={draft.organisationId}
+          onChange={(e) => patch({ organisationId: e.target.value })}
+          style={selectStyle}
+          onFocus={focusOn}
+          onBlur={focusOff}
+        >
+          {organisations.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
         </select>
       </td>
 
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: proj?.color ?? T.t6, flexShrink: 0 }} />
-          <select value={draft.projectId} onChange={e => patch({ projectId: e.target.value, deliverableId: "" })}
-            style={selectStyle} onFocus={focusOn} onBlur={focusOff}>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: proj?.color ?? T.t6,
+              flexShrink: 0,
+            }}
+          />
+          <select
+            value={draft.projectId}
+            onChange={(e) =>
+              patch({ projectId: e.target.value, deliverableId: "" })
+            }
+            style={selectStyle}
+            onFocus={focusOn}
+            onBlur={focusOff}
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
           </select>
         </div>
       </td>
 
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <select value={delivValid ? draft.deliverableId : ""} onChange={e => patch({ deliverableId: e.target.value })}
-          style={selectStyle} onFocus={focusOn} onBlur={focusOff}>
+        <select
+          value={delivValid ? draft.deliverableId : ""}
+          onChange={(e) => patch({ deliverableId: e.target.value })}
+          style={selectStyle}
+          onFocus={focusOn}
+          onBlur={focusOff}
+        >
           {!delivValid && <option value="">— select —</option>}
-          {scopedDelivs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          {scopedDelivs.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
         </select>
       </td>
 
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <select value={draft.memberId} onChange={e => patch({ memberId: e.target.value })}
-          style={selectStyle} onFocus={focusOn} onBlur={focusOff}>
-          {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        <select
+          value={draft.memberId}
+          onChange={(e) => patch({ memberId: e.target.value })}
+          style={selectStyle}
+          onFocus={focusOn}
+          onBlur={focusOff}
+        >
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
         </select>
       </td>
 
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <input type="time" value={draft.startTime} onChange={e => patch({ startTime: e.target.value })}
-          style={{ ...inputStyle, colorScheme: "dark" }} onFocus={focusOn} onBlur={focusOff} />
+        <input
+          type="time"
+          value={draft.startTime}
+          onChange={(e) => patch({ startTime: e.target.value })}
+          style={{ ...inputStyle, colorScheme: "dark" }}
+          onFocus={focusOn}
+          onBlur={focusOff}
+        />
       </td>
 
       <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <input type="time" value={draft.endTime} onChange={e => patch({ endTime: e.target.value })}
-          style={{ ...inputStyle, colorScheme: "dark" }} onFocus={focusOn} onBlur={focusOff} />
+        <input
+          type="time"
+          value={draft.endTime}
+          onChange={(e) => patch({ endTime: e.target.value })}
+          style={{ ...inputStyle, colorScheme: "dark" }}
+          onFocus={focusOn}
+          onBlur={focusOff}
+        />
       </td>
 
       {/* Save + Delete */}
-      <td style={{ padding: "8px 10px", verticalAlign: "middle", position: "relative" }}>
+      <td
+        style={{
+          padding: "8px 10px",
+          verticalAlign: "middle",
+          position: "relative",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <button onClick={save} title="Save" style={{
-            width: 28, height: 28, borderRadius: 7, border: "none",
-            background: dirty ? T.greenBg : "transparent", color: T.green,
-            cursor: dirty ? "pointer" : "default",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            opacity: dirty ? 1 : 0, transform: dirty ? "scale(1)" : "scale(0.6)",
-            transition: "opacity 0.2s, transform 0.2s", pointerEvents: dirty ? "auto" : "none", flexShrink: 0,
-          }}>
+          <button
+            onClick={save}
+            title="Save"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              border: "none",
+              background: dirty ? T.greenBg : "transparent",
+              color: T.green,
+              cursor: dirty ? "pointer" : "default",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: dirty ? 1 : 0,
+              transform: dirty ? "scale(1)" : "scale(0.6)",
+              transition: "opacity 0.2s, transform 0.2s",
+              pointerEvents: dirty ? "auto" : "none",
+              flexShrink: 0,
+            }}
+          >
             <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
-              <path d="M2 7l4 4 6-6" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+              <path
+                d="M2 7l4 4 6-6"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </button>
 
           <div style={{ position: "relative" }}>
-            <button onClick={() => setShowDel(true)} title="Delete" style={{
-              width: 28, height: 28, borderRadius: 7, border: "none",
-              background: showDel ? T.redBg : "transparent",
-              color: showDel ? T.red : T.t5, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "all 0.15s", flexShrink: 0,
-            }}
-              onMouseEnter={e => { if (!showDel) { (e.currentTarget as HTMLElement).style.background = T.redBg; (e.currentTarget as HTMLElement).style.color = T.red; }}}
-              onMouseLeave={e => { if (!showDel) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = T.t5; }}}
+            <button
+              onClick={() => setShowDel(true)}
+              title="Delete"
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 7,
+                border: "none",
+                background: showDel ? T.redBg : "transparent",
+                color: showDel ? T.red : T.t5,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.15s",
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                if (!showDel) {
+                  (e.currentTarget as HTMLElement).style.background = T.redBg;
+                  (e.currentTarget as HTMLElement).style.color = T.red;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!showDel) {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "transparent";
+                  (e.currentTarget as HTMLElement).style.color = T.t5;
+                }
+              }}
             >
               <svg width={11} height={11} viewBox="0 0 12 12" fill="none">
-                <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round"/>
+                <path
+                  d="M2 2l8 8M10 2l-8 8"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                />
               </svg>
             </button>
-            {showDel && <DeleteConfirm onConfirm={() => { setShowDel(false); onDelete(row.id); }} onCancel={() => setShowDel(false)} />}
+            {showDel && (
+              <DeleteConfirm
+                onConfirm={() => {
+                  setShowDel(false);
+                  onDelete(row.id);
+                }}
+                onCancel={() => setShowDel(false)}
+              />
+            )}
           </div>
         </div>
       </td>
@@ -257,27 +568,66 @@ function WorklogRow({ row, onSave, onDelete }: {
 }
 
 // ─── Sort header cell ─────────────────────────────────────────────────────────
-type SortField = "date" | "org" | "project" | "deliverable" | "member" | "startTime" | "endTime";
-type SortDir   = "asc" | "desc";
+type SortField =
+  | "date"
+  | "org"
+  | "project"
+  | "deliverable"
+  | "member"
+  | "startTime"
+  | "endTime";
+type SortDir = "asc" | "desc";
 
-function ThCell({ field, w, children, sortField, sortDir, onSort }: {
-  field: SortField; w: number; children: React.ReactNode;
-  sortField: SortField; sortDir: SortDir; onSort: (f: SortField) => void;
+function ThCell({
+  field,
+  w,
+  children,
+  sortField,
+  sortDir,
+  onSort,
+}: {
+  field: SortField;
+  w: number;
+  children: React.ReactNode;
+  sortField: SortField;
+  sortDir: SortDir;
+  onSort: (f: SortField) => void;
 }) {
   const active = sortField === field;
   return (
     <th style={{ width: w, padding: 0 }}>
-      <div onClick={() => onSort(field)} style={{
-        display: "flex", alignItems: "center", gap: 5, padding: "10px 10px 5px",
-        fontSize: 10.5, fontWeight: 600, color: active ? T.acText : T.t5,
-        letterSpacing: "0.07em", textTransform: "uppercase",
-        cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", transition: "color 0.15s",
-      }}
-        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.color = T.t3; }}
-        onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.color = T.t5; }}
+      <div
+        onClick={() => onSort(field)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "10px 10px 5px",
+          fontSize: 10.5,
+          fontWeight: 600,
+          color: active ? T.acText : T.t5,
+          letterSpacing: "0.07em",
+          textTransform: "uppercase",
+          cursor: "pointer",
+          userSelect: "none",
+          whiteSpace: "nowrap",
+          transition: "color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          if (!active) (e.currentTarget as HTMLElement).style.color = T.t3;
+        }}
+        onMouseLeave={(e) => {
+          if (!active) (e.currentTarget as HTMLElement).style.color = T.t5;
+        }}
       >
         {children}
-        <span style={{ fontSize: 9, opacity: active ? 1 : 0.3, color: active ? T.acText : T.t3 }}>
+        <span
+          style={{
+            fontSize: 9,
+            opacity: active ? 1 : 0.3,
+            color: active ? T.acText : T.t3,
+          }}
+        >
           {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
         </span>
       </div>
@@ -287,50 +637,72 @@ function ThCell({ field, w, children, sortField, sortDir, onSort }: {
 
 // ─── Pin Deliverable section ──────────────────────────────────────────────────
 function PinDeliverableSection({
-  qaIds, onToggle,
+  qaIds,
+  onToggle,
 }: {
   qaIds: Set<string>;
   onToggle: (deliverableId: string) => void;
 }) {
-  const [selOrg,   setSelOrg]   = useState("");
-  const [selProj,  setSelProj]  = useState("");
+  const [selOrg, setSelOrg] = useState("");
+  const [selProj, setSelProj] = useState("");
   const [selDeliv, setSelDeliv] = useState("");
 
   const filteredProjects = selOrg
-    ? projects.filter(p => p.organisationId === selOrg)
+    ? projects.filter((p) => p.organisationId === selOrg)
     : projects;
 
   const filteredDelivs = selProj
-    ? deliverables.filter(d => d.projectId === selProj)
+    ? deliverables.filter((d) => d.projectId === selProj)
     : selOrg
-      ? deliverables.filter(d => {
+      ? deliverables.filter((d) => {
           const p = projMap[d.projectId];
           return p?.organisationId === selOrg;
         })
       : deliverables;
 
   // What to actually list: filtered deliverables (show all matching, or just selected one)
-  const listDelivs = selDeliv
-    ? deliverables.filter(d => d.id === selDeliv)
-    : filteredDelivs;
+  const listDelivs = (
+    selDeliv ? deliverables.filter((d) => d.id === selDeliv) : filteredDelivs
+  ).filter((d) => d.stage != null); // ← exclude finance deliverables that have no stage/status
 
   const sel: React.CSSProperties = {
-    background: T.panel2, border: `1px solid ${T.panel2B}`,
-    borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: T.t2,
-    outline: "none", cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
-    appearance: "none" as const, flex: 1, minWidth: 0,
+    background: T.panel2,
+    border: `1px solid ${T.panel2B}`,
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 12.5,
+    color: T.t2,
+    outline: "none",
+    cursor: "pointer",
+    fontFamily: "'DM Sans',sans-serif",
+    appearance: "none" as const,
+    flex: 1,
+    minWidth: 0,
     transition: "border-color 0.2s",
   };
 
   return (
-    <div style={{
-      background: T.panel, border: `1px solid ${T.panelB}`,
-      borderRadius: 16, padding: "22px 24px",
-      display: "flex", flexDirection: "column", gap: 16,
-    }}>
+    <div
+      style={{
+        background: T.panel,
+        border: `1px solid ${T.panelB}`,
+        borderRadius: 16,
+        padding: "22px 24px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
       {/* Heading */}
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.t2, marginBottom: 2 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: T.t2,
+            marginBottom: 2,
+          }}
+        >
           Pin Deliverables to Quick Access
         </div>
         <div style={{ fontSize: 11.5, color: T.t5 }}>
@@ -344,43 +716,110 @@ function PinDeliverableSection({
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {/* Org */}
         <div style={{ flex: 1, minWidth: 140 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: T.t5, letterSpacing: "0.07em",
-            textTransform: "uppercase", marginBottom: 6 }}>Organisation</div>
-          <select value={selOrg} onChange={e => { setSelOrg(e.target.value); setSelProj(""); setSelDeliv(""); }}
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: T.t5,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Organisation
+          </div>
+          <select
+            value={selOrg}
+            onChange={(e) => {
+              setSelOrg(e.target.value);
+              setSelProj("");
+              setSelDeliv("");
+            }}
             style={sel}
-            onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = T.acMid; }}
-            onBlur={e  => { (e.currentTarget as HTMLElement).style.borderColor = T.panel2B; }}
+            onFocus={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
+            }}
+            onBlur={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
+            }}
           >
             <option value="">All</option>
-            {organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {organisations.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
           </select>
         </div>
 
         {/* Project */}
         <div style={{ flex: 1, minWidth: 140 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: T.t5, letterSpacing: "0.07em",
-            textTransform: "uppercase", marginBottom: 6 }}>Project</div>
-          <select value={selProj} onChange={e => { setSelProj(e.target.value); setSelDeliv(""); }}
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: T.t5,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Project
+          </div>
+          <select
+            value={selProj}
+            onChange={(e) => {
+              setSelProj(e.target.value);
+              setSelDeliv("");
+            }}
             style={sel}
-            onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = T.acMid; }}
-            onBlur={e  => { (e.currentTarget as HTMLElement).style.borderColor = T.panel2B; }}
+            onFocus={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
+            }}
+            onBlur={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
+            }}
           >
             <option value="">All</option>
-            {filteredProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {filteredProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
           </select>
         </div>
 
         {/* Deliverable */}
         <div style={{ flex: 1, minWidth: 140 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: T.t5, letterSpacing: "0.07em",
-            textTransform: "uppercase", marginBottom: 6 }}>Deliverable</div>
-          <select value={selDeliv} onChange={e => setSelDeliv(e.target.value)}
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: T.t5,
+              letterSpacing: "0.07em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Deliverable
+          </div>
+          <select
+            value={selDeliv}
+            onChange={(e) => setSelDeliv(e.target.value)}
             style={sel}
-            onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = T.acMid; }}
-            onBlur={e  => { (e.currentTarget as HTMLElement).style.borderColor = T.panel2B; }}
+            onFocus={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
+            }}
+            onBlur={(e) => {
+              (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
+            }}
           >
             <option value="">All</option>
-            {filteredDelivs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {filteredDelivs.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -388,28 +827,51 @@ function PinDeliverableSection({
       {/* Deliverable list */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {listDelivs.length === 0 && (
-          <div style={{ fontSize: 12, color: T.t6, padding: "12px 0" }}>No deliverables match.</div>
+          <div style={{ fontSize: 12, color: T.t6, padding: "12px 0" }}>
+            No deliverables match.
+          </div>
         )}
-        {listDelivs.map(d => {
+        {listDelivs.map((d) => {
           const proj = projMap[d.projectId];
-          const org  = orgMap[d.organisationId];
+          const org = orgMap[d.organisationId];
           const pinned = qaIds.has(d.id);
           return (
-            <div key={d.id} style={{
-              display: "flex", alignItems: "center", gap: 12,
-              padding: "10px 12px", borderRadius: 10,
-              background: pinned ? T.pinBg : T.panel2,
-              border: `1px solid ${pinned ? "rgba(245,158,11,0.3)" : T.panel2B}`,
-              transition: "all 0.15s",
-            }}>
+            <div
+              key={d.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: pinned ? T.pinBg : T.panel2,
+                border: `1px solid ${pinned ? "rgba(245,158,11,0.3)" : T.panel2B}`,
+                transition: "all 0.15s",
+              }}
+            >
               {/* Project colour dot */}
-              <span style={{ width: 7, height: 7, borderRadius: "50%",
-                background: proj?.color ?? T.t6, flexShrink: 0 }} />
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: proj?.color ?? T.t6,
+                  flexShrink: 0,
+                }}
+              />
 
               {/* Labels */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, color: T.t2, fontWeight: 500,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    color: T.t2,
+                    fontWeight: 500,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
                   {d.name}
                 </div>
                 <div style={{ fontSize: 11, color: T.t5, marginTop: 1 }}>
@@ -418,44 +880,70 @@ function PinDeliverableSection({
               </div>
 
               {/* Status badge */}
-              <span style={{
-                fontSize: 10, padding: "2px 8px", borderRadius: 20, fontWeight: 600,
-                background: d.status === "ongoing" ? T.greenBg : T.panel2B,
-                color: d.status === "ongoing" ? "#10b981" : T.t5,
-                textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0,
-              }}>
-                {d.status.replace("_", " ")}
+              <span
+                style={{
+                  fontSize: 10,
+                  padding: "2px 8px",
+                  borderRadius: 20,
+                  fontWeight: 600,
+                  background: d.status === "ongoing" ? T.greenBg : T.panel2B,
+                  color: d.status === "ongoing" ? "#10b981" : T.t5,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  flexShrink: 0,
+                }}
+              >
+                {d.status?.replace("_", " ") ?? "—"}
               </span>
 
               {/* Pin toggle */}
               <button
                 onClick={() => onToggle(d.id)}
-                title={pinned ? "Unpin from Quick Access" : "Pin to Quick Access"}
+                title={
+                  pinned ? "Unpin from Quick Access" : "Pin to Quick Access"
+                }
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "5px 12px", borderRadius: 7, border: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "5px 12px",
+                  borderRadius: 7,
+                  border: "none",
                   background: pinned ? "rgba(245,158,11,0.2)" : T.panel2B,
                   color: pinned ? T.pin : T.t4,
-                  fontSize: 11.5, fontWeight: 600, cursor: "pointer",
-                  fontFamily: "'DM Sans',sans-serif", flexShrink: 0,
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans',sans-serif",
+                  flexShrink: 0,
                   transition: "all 0.15s",
                 }}
-                onMouseEnter={e => {
+                onMouseEnter={(e) => {
                   if (!pinned) {
                     (e.currentTarget as HTMLElement).style.background = T.pinBg;
                     (e.currentTarget as HTMLElement).style.color = T.pin;
                   }
                 }}
-                onMouseLeave={e => {
+                onMouseLeave={(e) => {
                   if (!pinned) {
-                    (e.currentTarget as HTMLElement).style.background = T.panel2B;
+                    (e.currentTarget as HTMLElement).style.background =
+                      T.panel2B;
                     (e.currentTarget as HTMLElement).style.color = T.t4;
                   }
                 }}
               >
-                <svg width={11} height={11} viewBox="0 0 14 14"
-                  fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.5}>
-                  <path d="M9.5 1.5L12 4 8 6.5V10L6 12V8L2 5.5 4 3Z" strokeLinejoin="round"/>
+                <svg
+                  width={11}
+                  height={11}
+                  viewBox="0 0 14 14"
+                  fill={pinned ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    d="M9.5 1.5L12 4 8 6.5V10L6 12V8L2 5.5 4 3Z"
+                    strokeLinejoin="round"
+                  />
                 </svg>
                 {pinned ? "Pinned" : "Pin"}
               </button>
@@ -469,8 +957,13 @@ function PinDeliverableSection({
 
 // ─── Column filter inputs ─────────────────────────────────────────────────────
 interface ColFilters {
-  date: string; org: string; project: string;
-  deliverable: string; member: string; startTime: string; endTime: string;
+  date: string;
+  org: string;
+  project: string;
+  deliverable: string;
+  member: string;
+  startTime: string;
+  endTime: string;
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -480,63 +973,103 @@ export default function WorklogPage() {
   const isMobile = cw < 720;
 
   // Calendar
-  const [calYear,  setCalYear]  = useState(2025);
+  const [calYear, setCalYear] = useState(2025);
   const [calMonth, setCalMonth] = useState(2);
   const [selDates, setSelDates] = useState<Set<string>>(new Set());
   const [selMonth, setSelMonth] = useState<number | null>(null);
-  const [selYear,  setSelYear]  = useState<number | null>(null);
+  const [selYear, setSelYear] = useState<number | null>(null);
 
   // Rows
   const [rows, setRows] = useState<WorklogEntry[]>(worklogEntries);
 
   // Quick Access — local mirror
   const [qaIds, setQaIds] = useState<Set<string>>(
-    () => new Set(quickAccessItems.filter(q => q.userId === currentUser.id).map(q => q.deliverableId))
+    () =>
+      new Set(
+        quickAccessItems
+          .filter((q) => q.userId === currentUser.id)
+          .map((q) => q.deliverableId),
+      ),
   );
 
   // Column filters (in-table sub-header)
   const [filters, setFilters] = useState<ColFilters>({
-    date: "", org: "", project: "", deliverable: "", member: "", startTime: "", endTime: "",
+    date: "",
+    org: "",
+    project: "",
+    deliverable: "",
+    member: "",
+    startTime: "",
+    endTime: "",
   });
 
   // Sort
   const [sortField, setSortField] = useState<SortField>("date");
-  const [sortDir,   setSortDir]   = useState<SortDir>("desc");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const activeDates = useMemo(() => new Set(rows.map(r => r.date)), [rows]);
+  const activeDates = useMemo(() => new Set(rows.map((r) => r.date)), [rows]);
 
-  const calFiltered = useMemo(() => rows.filter(r => {
-    const d = new Date(r.date);
-    if (selDates.size > 0 && !selDates.has(r.date)) return false;
-    if (selMonth !== null && d.getMonth() !== selMonth) return false;
-    if (selYear  !== null && d.getFullYear() !== selYear) return false;
-    return true;
-  }), [rows, selDates, selMonth, selYear]);
+  const calFiltered = useMemo(
+    () =>
+      rows.filter((r) => {
+        const d = new Date(r.date);
+        if (selDates.size > 0 && !selDates.has(r.date)) return false;
+        if (selMonth !== null && d.getMonth() !== selMonth) return false;
+        if (selYear !== null && d.getFullYear() !== selYear) return false;
+        return true;
+      }),
+    [rows, selDates, selMonth, selYear],
+  );
 
   const displayRows = useMemo(() => {
-    const list = calFiltered.filter(r => {
-      if (filters.date        && !r.date.includes(filters.date)) return false;
-      if (filters.org         && r.organisationId !== filters.org) return false;
-      if (filters.project     && r.projectId !== filters.project) return false;
+    const list = calFiltered.filter((r) => {
+      if (filters.date && !r.date.includes(filters.date)) return false;
+      if (filters.org && r.organisationId !== filters.org) return false;
+      if (filters.project && r.projectId !== filters.project) return false;
       if (filters.deliverable) {
         const n = delivMap[r.deliverableId]?.name ?? "";
-        if (!n.toLowerCase().includes(filters.deliverable.toLowerCase())) return false;
+        if (!n.toLowerCase().includes(filters.deliverable.toLowerCase()))
+          return false;
       }
-      if (filters.member    && r.memberId !== filters.member) return false;
-      if (filters.startTime && !r.startTime.startsWith(filters.startTime)) return false;
-      if (filters.endTime   && !r.endTime.startsWith(filters.endTime)) return false;
+      if (filters.member && r.memberId !== filters.member) return false;
+      if (filters.startTime && !r.startTime.startsWith(filters.startTime))
+        return false;
+      if (filters.endTime && !r.endTime.startsWith(filters.endTime))
+        return false;
       return true;
     });
     list.sort((a, b) => {
-      let av = "", bv = "";
+      let av = "",
+        bv = "";
       switch (sortField) {
-        case "date":        av = a.date; bv = b.date; break;
-        case "org":         av = orgMap[a.organisationId]?.name ?? ""; bv = orgMap[b.organisationId]?.name ?? ""; break;
-        case "project":     av = projMap[a.projectId]?.name ?? ""; bv = projMap[b.projectId]?.name ?? ""; break;
-        case "deliverable": av = delivMap[a.deliverableId]?.name ?? ""; bv = delivMap[b.deliverableId]?.name ?? ""; break;
-        case "member":      av = memberMap[a.memberId]?.name ?? ""; bv = memberMap[b.memberId]?.name ?? ""; break;
-        case "startTime":   av = a.startTime; bv = b.startTime; break;
-        case "endTime":     av = a.endTime; bv = b.endTime; break;
+        case "date":
+          av = a.date;
+          bv = b.date;
+          break;
+        case "org":
+          av = orgMap[a.organisationId]?.name ?? "";
+          bv = orgMap[b.organisationId]?.name ?? "";
+          break;
+        case "project":
+          av = projMap[a.projectId]?.name ?? "";
+          bv = projMap[b.projectId]?.name ?? "";
+          break;
+        case "deliverable":
+          av = delivMap[a.deliverableId]?.name ?? "";
+          bv = delivMap[b.deliverableId]?.name ?? "";
+          break;
+        case "member":
+          av = memberMap[a.memberId]?.name ?? "";
+          bv = memberMap[b.memberId]?.name ?? "";
+          break;
+        case "startTime":
+          av = a.startTime;
+          bv = b.startTime;
+          break;
+        case "endTime":
+          av = a.endTime;
+          bv = b.endTime;
+          break;
       }
       return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
     });
@@ -544,62 +1077,117 @@ export default function WorklogPage() {
   }, [calFiltered, filters, sortField, sortDir]);
 
   function handleSort(f: SortField) {
-    if (sortField === f) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortField(f); setSortDir("asc"); }
+    if (sortField === f) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortField(f);
+      setSortDir("asc");
+    }
   }
-  function saveRow(id: string, data: WorklogEntry) { setRows(prev => prev.map(r => r.id === id ? data : r)); }
-  function deleteRow(id: string)                    { setRows(prev => prev.filter(r => r.id !== id)); }
+  function saveRow(id: string, data: WorklogEntry) {
+    setRows((prev) => prev.map((r) => (r.id === id ? data : r)));
+  }
+  function deleteRow(id: string) {
+    setRows((prev) => prev.filter((r) => r.id !== id));
+  }
 
   function togglePin(deliverableId: string) {
     const pinned = qaIds.has(deliverableId);
     if (pinned) {
       removeQuickAccess(currentUser.id, deliverableId);
-      setQaIds(prev => { const n = new Set(prev); n.delete(deliverableId); return n; });
+      setQaIds((prev) => {
+        const n = new Set(prev);
+        n.delete(deliverableId);
+        return n;
+      });
     } else {
       addQuickAccess(currentUser.id, deliverableId);
-      setQaIds(prev => new Set([...prev, deliverableId]));
+      setQaIds((prev) => new Set([...prev, deliverableId]));
     }
   }
 
   function toggleDate(iso: string) {
-    setSelDates(p => { const n = new Set(p); n.has(iso) ? n.delete(iso) : n.add(iso); return n; });
+    setSelDates((p) => {
+      const n = new Set(p);
+      n.has(iso) ? n.delete(iso) : n.add(iso);
+      return n;
+    });
   }
   function clearAll() {
-    setSelDates(new Set()); setSelMonth(null); setSelYear(null);
-    setFilters({ date: "", org: "", project: "", deliverable: "", member: "", startTime: "", endTime: "" });
+    setSelDates(new Set());
+    setSelMonth(null);
+    setSelYear(null);
+    setFilters({
+      date: "",
+      org: "",
+      project: "",
+      deliverable: "",
+      member: "",
+      startTime: "",
+      endTime: "",
+    });
   }
-  function prevMonth() { calMonth === 0 ? (setCalMonth(11), setCalYear(y => y - 1)) : setCalMonth(m => m - 1); }
-  function nextMonth() { calMonth === 11 ? (setCalMonth(0),  setCalYear(y => y + 1)) : setCalMonth(m => m + 1); }
+  function prevMonth() {
+    calMonth === 0
+      ? (setCalMonth(11), setCalYear((y) => y - 1))
+      : setCalMonth((m) => m - 1);
+  }
+  function nextMonth() {
+    calMonth === 11
+      ? (setCalMonth(0), setCalYear((y) => y + 1))
+      : setCalMonth((m) => m + 1);
+  }
 
-  const availableYears = useMemo(() =>
-    Array.from(new Set(rows.map(r => new Date(r.date).getFullYear()))).sort(), [rows]);
+  const availableYears = useMemo(
+    () =>
+      Array.from(
+        new Set(rows.map((r) => new Date(r.date).getFullYear())),
+      ).sort(),
+    [rows],
+  );
 
-  const totalMinutes = useMemo(() => displayRows.reduce((s, r) => {
-    const [sh, sm] = r.startTime.split(":").map(Number);
-    const [eh, em] = r.endTime.split(":").map(Number);
-    return s + (eh * 60 + em - (sh * 60 + sm));
-  }, 0), [displayRows]);
+  const totalMinutes = useMemo(
+    () =>
+      displayRows.reduce((s, r) => {
+        const [sh, sm] = r.startTime.split(":").map(Number);
+        const [eh, em] = r.endTime.split(":").map(Number);
+        return s + (eh * 60 + em - (sh * 60 + sm));
+      }, 0),
+    [displayRows],
+  );
 
-  const hasFilter = selDates.size > 0 || selMonth !== null || selYear !== null ||
-    Object.values(filters).some(v => v !== "");
+  const hasFilter =
+    selDates.size > 0 ||
+    selMonth !== null ||
+    selYear !== null ||
+    Object.values(filters).some((v) => v !== "");
 
-  const orgOpts  = organisations.map(o => ({ label: o.name, value: o.id }));
-  const projOpts = projects.map(p      => ({ label: p.name, value: p.id }));
-  const memOpts  = members.map(m       => ({ label: m.name, value: m.id }));
+  const orgOpts = organisations.map((o) => ({ label: o.name, value: o.id }));
+  const projOpts = projects.map((p) => ({ label: p.name, value: p.id }));
+  const memOpts = members.map((m) => ({ label: m.name, value: m.id }));
 
   const fi: React.CSSProperties = {
-    width: "100%", background: "rgba(255,255,255,0.04)",
-    border: `1px solid ${T.divider}`, borderRadius: 6,
-    padding: "5px 8px", fontSize: 11, color: T.t2,
-    outline: "none", fontFamily: "'DM Sans',sans-serif",
+    width: "100%",
+    background: "rgba(255,255,255,0.04)",
+    border: `1px solid ${T.divider}`,
+    borderRadius: 6,
+    padding: "5px 8px",
+    fontSize: 11,
+    color: T.t2,
+    outline: "none",
+    fontFamily: "'DM Sans',sans-serif",
   };
 
   return (
-    <div ref={containerRef} style={{
-      minHeight: "100vh", background: T.bg, color: T.t2,
-      fontFamily: "'DM Sans','Sora',sans-serif",
-      padding: isMobile ? "20px 16px 48px" : "32px 32px 56px",
-    }}>
+    <div
+      ref={containerRef}
+      style={{
+        minHeight: "100vh",
+        background: T.bg,
+        color: T.t2,
+        fontFamily: "'DM Sans','Sora',sans-serif",
+        padding: isMobile ? "20px 16px 48px" : "32px 32px 56px",
+      }}
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Sora:wght@400;600;700&display=swap');
         * { box-sizing: border-box; }
@@ -612,49 +1200,117 @@ export default function WorklogPage() {
 
       {/* Header */}
       <div style={{ marginBottom: isMobile ? 18 : 26 }}>
-        <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700,
-          fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em", color: T.t1, margin: 0 }}>
+        <h1
+          style={{
+            fontSize: isMobile ? 22 : 26,
+            fontWeight: 700,
+            fontFamily: "'Sora',sans-serif",
+            letterSpacing: "-0.03em",
+            color: T.t1,
+            margin: 0,
+          }}
+        >
           Worklog
         </h1>
-        <p style={{ color: T.t5, fontSize: 13, margin: "4px 0 0" }}>Session tracker &amp; time log</p>
+        <p style={{ color: T.t5, fontSize: 13, margin: "4px 0 0" }}>
+          Session tracker &amp; time log
+        </p>
       </div>
 
       {/* Two-column layout: calendar left, table right */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "260px 1fr",
-        gap: isMobile ? 16 : 20, alignItems: "start",
-        marginBottom: 20,
-      }}>
-
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "260px 1fr",
+          gap: isMobile ? 16 : 20,
+          alignItems: "start",
+          marginBottom: 20,
+        }}
+      >
         {/* ── LEFT: Calendar panel ── */}
-        <div style={{
-          background: T.panel, border: `1px solid ${T.panelB}`,
-          borderRadius: 16, padding: isMobile ? "18px 16px" : "22px 20px",
-          display: "flex", flexDirection: "column", gap: 16,
-        }}>
+        <div
+          style={{
+            background: T.panel,
+            border: `1px solid ${T.panelB}`,
+            borderRadius: 16,
+            padding: isMobile ? "18px 16px" : "22px 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
           {/* Month nav */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <button onClick={prevMonth} style={{
-              width: 30, height: 30, borderRadius: 8, background: T.panel2,
-              border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
-              fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center",
-            }}>‹</button>
-            <span style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
-            <button onClick={nextMonth} style={{
-              width: 30, height: 30, borderRadius: 8, background: T.panel2,
-              border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
-              fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center",
-            }}>›</button>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <button
+              onClick={prevMonth}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                background: T.panel2,
+                border: `1px solid ${T.panel2B}`,
+                color: T.t4,
+                cursor: "pointer",
+                fontSize: 15,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ‹
+            </button>
+            <span style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
+              {MONTHS[calMonth]} {calYear}
+            </span>
+            <button
+              onClick={nextMonth}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 8,
+                background: T.panel2,
+                border: `1px solid ${T.panel2B}`,
+                color: T.t4,
+                cursor: "pointer",
+                fontSize: 15,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ›
+            </button>
           </div>
 
-          <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
+          <CalGrid
+            year={calYear}
+            month={calMonth}
+            activeDates={activeDates}
+            selDates={selDates}
+            onToggle={toggleDate}
+          />
 
           {selDates.size > 0 && (
             <div style={{ textAlign: "center", fontSize: 11, color: T.acText }}>
               {selDates.size} date{selDates.size > 1 ? "s" : ""} selected &nbsp;
-              <button onClick={() => setSelDates(new Set())}
-                style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11 }}>✕</button>
+              <button
+                onClick={() => setSelDates(new Set())}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: T.red,
+                  cursor: "pointer",
+                  fontSize: 11,
+                }}
+              >
+                ✕
+              </button>
             </div>
           )}
 
@@ -662,35 +1318,82 @@ export default function WorklogPage() {
 
           {/* Month pills */}
           <div>
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5, letterSpacing: "0.07em",
-              textTransform: "uppercase", marginBottom: 8 }}>Filter by Month</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 4 }}>
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: T.t5,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              Filter by Month
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4,1fr)",
+                gap: 4,
+              }}
+            >
               {MONTHS.map((m, i) => (
-                <button key={m} onClick={() => setSelMonth(selMonth === i ? null : i)} style={{
-                  background: selMonth === i ? T.acLight : T.panel2,
-                  border: `1px solid ${selMonth === i ? T.acMid : T.panel2B}`,
-                  borderRadius: 6, color: selMonth === i ? T.acText : T.t4,
-                  fontSize: 10, padding: "5px 0", cursor: "pointer",
-                  textTransform: "uppercase", letterSpacing: "0.04em",
-                  fontWeight: selMonth === i ? 600 : 400, transition: "all 0.15s",
-                }}>{m.slice(0, 3)}</button>
+                <button
+                  key={m}
+                  onClick={() => setSelMonth(selMonth === i ? null : i)}
+                  style={{
+                    background: selMonth === i ? T.acLight : T.panel2,
+                    border: `1px solid ${selMonth === i ? T.acMid : T.panel2B}`,
+                    borderRadius: 6,
+                    color: selMonth === i ? T.acText : T.t4,
+                    fontSize: 10,
+                    padding: "5px 0",
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    fontWeight: selMonth === i ? 600 : 400,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {m.slice(0, 3)}
+                </button>
               ))}
             </div>
           </div>
 
           {/* Year pills */}
           <div>
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5, letterSpacing: "0.07em",
-              textTransform: "uppercase", marginBottom: 8 }}>Filter by Year</div>
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: T.t5,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              Filter by Year
+            </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {availableYears.map(y => (
-                <button key={y} onClick={() => setSelYear(selYear === y ? null : y)} style={{
-                  background: selYear === y ? T.acLight : T.panel2,
-                  border: `1px solid ${selYear === y ? T.acMid : T.panel2B}`,
-                  borderRadius: 6, color: selYear === y ? T.acText : T.t4,
-                  fontSize: 10, padding: "5px 10px", cursor: "pointer",
-                  fontWeight: selYear === y ? 600 : 400, transition: "all 0.15s",
-                }}>{y}</button>
+              {availableYears.map((y) => (
+                <button
+                  key={y}
+                  onClick={() => setSelYear(selYear === y ? null : y)}
+                  style={{
+                    background: selYear === y ? T.acLight : T.panel2,
+                    border: `1px solid ${selYear === y ? T.acMid : T.panel2B}`,
+                    borderRadius: 6,
+                    color: selYear === y ? T.acText : T.t4,
+                    fontSize: 10,
+                    padding: "5px 10px",
+                    cursor: "pointer",
+                    fontWeight: selYear === y ? 600 : 400,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {y}
+                </button>
               ))}
             </div>
           </div>
@@ -699,16 +1402,41 @@ export default function WorklogPage() {
 
           {/* Stats */}
           <div>
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5, letterSpacing: "0.07em",
-              textTransform: "uppercase", marginBottom: 10 }}>Current View</div>
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: T.t5,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              Current View
+            </div>
             {[
-              { label: "Entries",     val: String(displayRows.length) },
-              { label: "Total Hours", val: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` },
-              { label: "Pinned",      val: String(qaIds.size) },
+              { label: "Entries", val: String(displayRows.length) },
+              {
+                label: "Total Hours",
+                val: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
+              },
+              { label: "Pinned", val: String(qaIds.size) },
             ].map(({ label, val }) => (
-              <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
                 <span style={{ fontSize: 12, color: T.t4 }}>{label}</span>
-                <span style={{ fontSize: 13, color: T.acText, fontWeight: 600 }}>{val}</span>
+                <span
+                  style={{ fontSize: 13, color: T.acText, fontWeight: 600 }}
+                >
+                  {val}
+                </span>
               </div>
             ))}
           </div>
@@ -716,74 +1444,279 @@ export default function WorklogPage() {
           {hasFilter && (
             <>
               <Divider />
-              <button onClick={clearAll} style={{
-                background: "transparent", border: `1px solid ${T.panel2B}`,
-                borderRadius: 8, padding: "7px 0", fontSize: 12, color: T.t4,
-                cursor: "pointer", width: "100%",
-              }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.t2; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; }}
-              >✕ &nbsp;Clear all filters</button>
+              <button
+                onClick={clearAll}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${T.panel2B}`,
+                  borderRadius: 8,
+                  padding: "7px 0",
+                  fontSize: 12,
+                  color: T.t4,
+                  cursor: "pointer",
+                  width: "100%",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.color = T.t2;
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.color = T.t4;
+                }}
+              >
+                ✕ &nbsp;Clear all filters
+              </button>
             </>
           )}
         </div>
 
         {/* ── RIGHT: Table ── */}
-        <div style={{
-          background: T.panel, border: `1px solid ${T.panelB}`,
-          borderRadius: 16, overflow: "hidden",
-        }}>
+        <div
+          style={{
+            background: T.panel,
+            border: `1px solid ${T.panelB}`,
+            borderRadius: 16,
+            overflow: "hidden",
+          }}
+        >
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 820,
+              }}
+            >
               <thead>
-                <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: `1px solid ${T.panel2B}` }}>
-                  <ThCell field="date"        w={122} sortField={sortField} sortDir={sortDir} onSort={handleSort}>Date</ThCell>
-                  <ThCell field="org"         w={148} sortField={sortField} sortDir={sortDir} onSort={handleSort}>Organisation</ThCell>
-                  <ThCell field="project"     w={148} sortField={sortField} sortDir={sortDir} onSort={handleSort}>Project</ThCell>
-                  <ThCell field="deliverable" w={155} sortField={sortField} sortDir={sortDir} onSort={handleSort}>Deliverable</ThCell>
-                  <ThCell field="member"      w={138} sortField={sortField} sortDir={sortDir} onSort={handleSort}>Member</ThCell>
-                  <ThCell field="startTime"   w={88}  sortField={sortField} sortDir={sortDir} onSort={handleSort}>Start</ThCell>
-                  <ThCell field="endTime"     w={88}  sortField={sortField} sortDir={sortDir} onSort={handleSort}>End</ThCell>
+                <tr
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    borderBottom: `1px solid ${T.panel2B}`,
+                  }}
+                >
+                  <ThCell
+                    field="date"
+                    w={122}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    Date
+                  </ThCell>
+                  <ThCell
+                    field="org"
+                    w={148}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    Organisation
+                  </ThCell>
+                  <ThCell
+                    field="project"
+                    w={148}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    Project
+                  </ThCell>
+                  <ThCell
+                    field="deliverable"
+                    w={155}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    Deliverable
+                  </ThCell>
+                  <ThCell
+                    field="member"
+                    w={138}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    Member
+                  </ThCell>
+                  <ThCell
+                    field="startTime"
+                    w={88}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    Start
+                  </ThCell>
+                  <ThCell
+                    field="endTime"
+                    w={88}
+                    sortField={sortField}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  >
+                    End
+                  </ThCell>
                   <th style={{ width: 72, padding: "10px 10px 5px" }}>
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: T.t5, letterSpacing: "0.07em", textTransform: "uppercase" }}>Actions</span>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        color: T.t5,
+                        letterSpacing: "0.07em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Actions
+                    </span>
                   </th>
                 </tr>
                 {/* Column filter sub-row */}
-                <tr style={{ background: "rgba(255,255,255,0.02)", borderBottom: `1px solid ${T.divider}` }}>
-                  {([
-                    <input key="d"  style={fi} placeholder="YYYY-MM" value={filters.date}        onChange={e => setFilters(f => ({ ...f, date: e.target.value }))} />,
-                    <select key="o" style={fi} value={filters.org}    onChange={e => setFilters(f => ({ ...f, org: e.target.value }))}>
-                      <option value="">All</option>{orgOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>,
-                    <select key="p" style={fi} value={filters.project} onChange={e => setFilters(f => ({ ...f, project: e.target.value }))}>
-                      <option value="">All</option>{projOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>,
-                    <input key="dv" style={fi} placeholder="Search…"  value={filters.deliverable} onChange={e => setFilters(f => ({ ...f, deliverable: e.target.value }))} />,
-                    <select key="m" style={fi} value={filters.member}  onChange={e => setFilters(f => ({ ...f, member: e.target.value }))}>
-                      <option value="">All</option>{memOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>,
-                    <input key="st" style={fi} placeholder="HH" value={filters.startTime} onChange={e => setFilters(f => ({ ...f, startTime: e.target.value }))} />,
-                    <input key="et" style={fi} placeholder="HH" value={filters.endTime}   onChange={e => setFilters(f => ({ ...f, endTime: e.target.value }))} />,
-                    <div key="act" />,
-                  ] as React.ReactNode[]).map((el, i) => (
-                    <td key={i} style={{ padding: "5px 8px" }}>{el}</td>
+                <tr
+                  style={{
+                    background: "rgba(255,255,255,0.02)",
+                    borderBottom: `1px solid ${T.divider}`,
+                  }}
+                >
+                  {(
+                    [
+                      <input
+                        key="d"
+                        style={fi}
+                        placeholder="YYYY-MM"
+                        value={filters.date}
+                        onChange={(e) =>
+                          setFilters((f) => ({ ...f, date: e.target.value }))
+                        }
+                      />,
+                      <select
+                        key="o"
+                        style={fi}
+                        value={filters.org}
+                        onChange={(e) =>
+                          setFilters((f) => ({ ...f, org: e.target.value }))
+                        }
+                      >
+                        <option value="">All</option>
+                        {orgOpts.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>,
+                      <select
+                        key="p"
+                        style={fi}
+                        value={filters.project}
+                        onChange={(e) =>
+                          setFilters((f) => ({ ...f, project: e.target.value }))
+                        }
+                      >
+                        <option value="">All</option>
+                        {projOpts.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>,
+                      <input
+                        key="dv"
+                        style={fi}
+                        placeholder="Search…"
+                        value={filters.deliverable}
+                        onChange={(e) =>
+                          setFilters((f) => ({
+                            ...f,
+                            deliverable: e.target.value,
+                          }))
+                        }
+                      />,
+                      <select
+                        key="m"
+                        style={fi}
+                        value={filters.member}
+                        onChange={(e) =>
+                          setFilters((f) => ({ ...f, member: e.target.value }))
+                        }
+                      >
+                        <option value="">All</option>
+                        {memOpts.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>,
+                      <input
+                        key="st"
+                        style={fi}
+                        placeholder="HH"
+                        value={filters.startTime}
+                        onChange={(e) =>
+                          setFilters((f) => ({
+                            ...f,
+                            startTime: e.target.value,
+                          }))
+                        }
+                      />,
+                      <input
+                        key="et"
+                        style={fi}
+                        placeholder="HH"
+                        value={filters.endTime}
+                        onChange={(e) =>
+                          setFilters((f) => ({ ...f, endTime: e.target.value }))
+                        }
+                      />,
+                      <div key="act" />,
+                    ] as React.ReactNode[]
+                  ).map((el, i) => (
+                    <td key={i} style={{ padding: "5px 8px" }}>
+                      {el}
+                    </td>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {displayRows.length === 0 ? (
-                  <tr><td colSpan={8}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
-                      justifyContent: "center", minHeight: 200, gap: 10, color: T.t6 }}>
-                      <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}>
-                        <circle cx={12} cy={12} r={10}/><path d="M12 6v6l4 2"/>
-                      </svg>
-                      <span style={{ fontSize: 13.5 }}>No entries for this selection</span>
-                    </div>
-                  </td></tr>
-                ) : displayRows.map(row => (
-                  <WorklogRow key={row.id} row={row} onSave={saveRow} onDelete={deleteRow} />
-                ))}
+                  <tr>
+                    <td colSpan={8}>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minHeight: 200,
+                          gap: 10,
+                          color: T.t6,
+                        }}
+                      >
+                        <svg
+                          width={32}
+                          height={32}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke={T.t6}
+                          strokeWidth={1.2}
+                        >
+                          <circle cx={12} cy={12} r={10} />
+                          <path d="M12 6v6l4 2" />
+                        </svg>
+                        <span style={{ fontSize: 13.5 }}>
+                          No entries for this selection
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  displayRows.map((row) => (
+                    <WorklogRow
+                      key={row.id}
+                      row={row}
+                      onSave={saveRow}
+                      onDelete={deleteRow}
+                    />
+                  ))
+                )}
               </tbody>
             </table>
           </div>

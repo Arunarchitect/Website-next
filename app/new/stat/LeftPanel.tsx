@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { entries, organisation } from "./data";
+import { entries, organisation } from "@/app/new/data";
 import { MONTHS, fmtDate, type DateFilter } from "./shared";
 
 const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];

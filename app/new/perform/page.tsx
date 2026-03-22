@@ -17,7 +17,7 @@ import {
   assignmentEfficiency,
   type PerformanceMember,
   type RemarkLevel,
-} from "./data";
+} from "@/app/new/data";
 
 // ─── Design tokens ───────────────────────────────────────────────────────────
 

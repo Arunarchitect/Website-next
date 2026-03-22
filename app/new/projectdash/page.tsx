@@ -11,7 +11,7 @@ import {
   type ProjectDetail,
   type ProjectStatus,
   type DeliverableStatus,
-} from "./projectDashData";
+} from "@/app/new/data";
 
 // ---------------------------------------------------------------------------
 // Responsive hook

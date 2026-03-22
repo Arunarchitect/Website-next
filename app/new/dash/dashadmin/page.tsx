@@ -11,7 +11,7 @@ import {
   getOrganisation,
   type Assignment,
   type QuickAccess,
-} from "./dashboardData";
+} from "@/app/new/data";
 
 // ---------------------------------------------------------------------------
 // Format helpers  (24-hour, date included)

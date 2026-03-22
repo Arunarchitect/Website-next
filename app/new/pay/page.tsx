@@ -12,7 +12,7 @@ import SalaryExpenses   from "./salary-expenses";
 import {
   memberRates, projectFees, stageFees, fundAllocations,
   type MemberRate, type ProjectFee, type StageFee, type FundAllocation,
-} from "./data";
+} from "@/app/new/data";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MONTHS = ["January","February","March","April","May","June",

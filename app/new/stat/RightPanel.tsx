@@ -5,7 +5,7 @@ import {
   entries, expenses, projects, deliverables, members,
   EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_COLORS,
   type ExpenseCategory,
-} from "./data";
+} from "@/app/new/data";
 import { fmt, fmtDate, applyDateFilter, MONTHS, type DateFilter } from "./shared";
 
 // ─── Reusable SearchDropdown ───────────────────────────────────────────────────

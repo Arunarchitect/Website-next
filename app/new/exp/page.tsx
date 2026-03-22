@@ -9,7 +9,7 @@ import {
   EXPENSE_CATEGORY_COLORS,
   type Expense,
   type ExpenseCategory,
-} from "./data";
+} from "@/app/new/data";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MONTHS = [
