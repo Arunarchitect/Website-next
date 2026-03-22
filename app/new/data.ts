@@ -1,40 +1,168 @@
 // data.ts — single source of truth for all pages
+//
+// Field naming convention throughout this file:
+//   camelCase in TypeScript  ↔  snake_case on the Django REST API
+//   e.g. organisationId      ↔  organisation (FK id)
+//        startDate           ↔  start_date
+//        createdAt           ↔  created_at
+//
+// When you swap hardcoded arrays for fetch() calls, the serialiser should
+// return camelCase keys (use djangorestframework-camel-case or a custom
+// to_representation) so these types stay valid without transformation.
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CORE TYPES
+// CORE TYPES  — mirrors Django models exactly
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Organisation ─────────────────────────────────────────────────────────────
+// Django: Organisation  +  tagline/logo/industry/since need adding (see models note)
 
 export interface Organisation {
   id: string;
   name: string;
-  tagline?: string;
-  logo?: string;
-  industry?: string;
-  since?: number;
+  tagline?: string;   // add to Django model
+  logo?: string;      // add to Django model (2-char initials or URL)
+  industry?: string;  // add to Django model
+  since?: number;     // add to Django model (year founded)
 }
+
+// ─── OrganisationMembership ───────────────────────────────────────────────────
+// Django: OrganisationMembership — already exists, mirrored exactly
+
+export type MembershipRole = "admin" | "manager" | "member" | "client";
+
+export interface OrganisationMembership {
+  id: string;
+  organisationId: string;
+  userId: string;
+  role: MembershipRole;
+}
+
+// ─── Project ──────────────────────────────────────────────────────────────────
+// Django: Project — has location, clientName, currentStage; missing color
+// Frontend previously ignored location/clientName/currentStage — now included.
+// `color` needs adding to the Django model (used for UI only).
+
+export type ProjectStage = "1" | "2" | "3" | "4" | "5";
 
 export interface Project {
   id: string;
   organisationId: string;
   name: string;
-  color: string;
+  location: string;       // Django: location
+  clientName: string;     // Django: client_name
+  currentStage: ProjectStage; // Django: current_stage
+  color: string;          // add to Django model (UI colour, e.g. "#6366f1")
 }
+
+// ─── Deliverable ──────────────────────────────────────────────────────────────
+// Django: Deliverable — fully featured; frontend was missing most fields.
+
+export type DeliverableStatus =
+  | "not_started"
+  | "ongoing"
+  | "ready"
+  | "passed"
+  | "failed"
+  | "discrepancy";
 
 export interface Deliverable {
   id: string;
   projectId: string;
-  organisationId: string;
+  organisationId: string;  // denormalised for fast frontend filtering
   name: string;
-  stage?: "1" | "2" | "3" | "4" | "5";
-  status?: "not_started" | "ongoing" | "ready" | "passed" | "failed" | "discrepancy";
+  stage: ProjectStage;     // required — every deliverable belongs to a stage
+  status: DeliverableStatus;
+  remarks?: string;        // Django: remarks (blank=True)
+  startDate?: string;      // Django: start_date  "YYYY-MM-DD"
+  endDate?: string;        // Django: end_date    "YYYY-MM-DD"
+  assigneeId?: string;     // Django: assignee FK → User
+  validatorId?: string;    // Django: validator FK → User
+  validationDate?: string; // Django: validation_date ISO datetime
 }
+
+// ─── Member ───────────────────────────────────────────────────────────────────
+// Django: User (auth) + OrganisationMembership.role
+// `avatar` and `role` are UI conveniences — role comes from membership.
 
 export interface Member {
   id: string;
   name: string;
-  role: string;
-  avatar: string;
+  role: string;   // from OrganisationMembership.role or a profile field
+  avatar: string; // 2-char initials — derived on frontend, not stored in Django
 }
+
+// ─── WorklogEntry ─────────────────────────────────────────────────────────────
+// Django: WorkLog — uses full DateTimeField for start_time/end_time.
+// Frontend splits these into date + time strings for the calendar/time UI.
+// On save, recombine: `${date}T${startTime}:00` → Django start_time.
+
+export interface WorklogEntry {
+  id: string;
+  organisationId: string; // denormalised from deliverable.project.organisation
+  projectId: string;      // denormalised from deliverable.project
+  deliverableId: string;  // Django: deliverable FK
+  memberId: string;       // Django: employee FK
+  date: string;           // "YYYY-MM-DD" — extracted from start_time
+  startTime: string;      // "HH:MM"     — extracted from start_time
+  endTime: string;        // "HH:MM"     — extracted from end_time
+  notes?: string;         // Django: remarks
+  enteredAt?: string;     // Django: entered_time ISO datetime (read-only)
+  editedAt?: string;      // Django: edited_time  ISO datetime (read-only)
+}
+
+// ─── Expense ──────────────────────────────────────────────────────────────────
+// Django: Expense — CATEGORY_CHOICES does NOT include "salary".
+// `salary` is a frontend-only category used by the finance/payroll component
+// for the seeded demo data. It should NOT be sent to the backend.
+// `reimbursed` needs adding to the Django model.
+// `organisationId` is denormalised for fast filtering.
+
+export type ExpenseCategory =
+  | "travel"
+  | "food"
+  | "accommodation"
+  | "stationery"
+  | "others"
+  | "salary";  // frontend/demo only — not a Django CATEGORY_CHOICE
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  travel:        "Travel",
+  food:          "Food",
+  accommodation: "Accommodation",
+  stationery:    "Stationery",
+  others:        "Others",
+  salary:        "Salary",  // finance component display only
+};
+
+export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
+  travel:        "#f59e0b",
+  food:          "#10b981",
+  accommodation: "#3b82f6",
+  stationery:    "#8b5cf6",
+  others:        "#6b7280",
+  salary:        "#6366f1",
+};
+
+export interface Expense {
+  id: string;
+  organisationId: string; // denormalised — not on Django model
+  memberId: string;       // Django: user FK
+  projectId: string;      // Django: project FK
+  amount: number;         // Django: amount DecimalField
+  category: ExpenseCategory;
+  remarks: string;        // Django: remarks (blank=True, null=True)
+  date: string;           // "YYYY-MM-DD" — Django: date
+  createdAt: string;      // ISO datetime — Django: created_at (auto_now_add)
+  reimbursed: boolean;    // add to Django model (default False)
+}
+
+// ─── Assignment ───────────────────────────────────────────────────────────────
+// Django: no dedicated Assignment model — assignee is a single FK on Deliverable.
+// The frontend uses a richer Assignment entity with startDate/dueDate.
+// Add an Assignment model to Django (see models note below) OR
+// map startDate → Deliverable.start_date and dueDate → Deliverable.end_date
+// if one-assignee-per-deliverable is sufficient.
 
 export interface Assignment {
   id: string;
@@ -44,6 +172,9 @@ export interface Assignment {
   dueDate: string;   // "YYYY-MM-DD"
 }
 
+// ─── QuickAccess ──────────────────────────────────────────────────────────────
+// Django: no model — needs adding (see models note).
+
 export interface QuickAccess {
   id: string;
   userId: string;
@@ -51,69 +182,19 @@ export interface QuickAccess {
   position: number;
 }
 
-export interface WorklogEntry {
-  id: string;
-  organisationId: string;
-  projectId: string;
-  deliverableId: string;
-  memberId: string;
-  date: string;      // "YYYY-MM-DD"
-  startTime: string; // "HH:MM"
-  endTime: string;   // "HH:MM"
-  notes?: string;
-}
+// ─── User / current user ──────────────────────────────────────────────────────
 
 export interface User {
   id: string;
   name: string;
 }
 
-// ─── Expense ──────────────────────────────────────────────────────────────────
-// Mirrors Django Expense model.
-// `organisationId` is denormalised for fast filtering (inferred from project).
-// `memberId` maps to User FK on the Django model.
-// `reimbursed`: true = company has already paid back; false = pending.
+export const currentUser: User = { id: "m6", name: "Arun Ravikumar" };
 
-export type ExpenseCategory =
-  | "salary"        // finance/payroll component only
-  | "travel"
-  | "food"
-  | "accommodation"
-  | "stationery"
-  | "others";
+// ─── Revenue/spend Entry ──────────────────────────────────────────────────────
+// Django: no model — needs adding if the finance component is real data.
+// Currently seeded/demo only.
 
-export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
-  salary:        "Salary",
-  travel:        "Travel",
-  food:          "Food",
-  accommodation: "Accommodation",
-  stationery:    "Stationery",
-  others:        "Others",
-};
-
-export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
-  salary:        "#6366f1",
-  travel:        "#f59e0b",
-  food:          "#10b981",
-  accommodation: "#3b82f6",
-  stationery:    "#8b5cf6",
-  others:        "#6b7280",
-};
-
-export interface Expense {
-  id: string;
-  organisationId: string;
-  memberId: string;   // FK → Member  (was `userId` in older finance file)
-  projectId: string;  // FK → Project
-  amount: number;
-  category: ExpenseCategory;
-  remarks: string;
-  date: string;       // "YYYY-MM-DD"
-  createdAt: string;  // ISO datetime
-  reimbursed: boolean;
-}
-
-/** Revenue/spend entry — linked to a deliverable (finance component) */
 export interface Entry {
   id: string;
   date: string;
@@ -124,14 +205,20 @@ export interface Entry {
   spend: number;
 }
 
-// ─── Salary-calculator types ──────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// SALARY CALCULATOR TYPES
+// Django: no models — needs MemberRate, ProjectFee, StageFee, FundAllocation
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export interface MemberRate     { memberId: string; hourlyRate: number; }
 export interface ProjectFee     { projectId: string; totalFee: number; }
-export interface StageFee       { id: string; projectId: string; stage: "1"|"2"|"3"|"4"|"5"; label: string; fee: number; }
+export interface StageFee       { id: string; projectId: string; stage: ProjectStage; label: string; fee: number; }
 export interface FundAllocation { id: string; projectId: string; label: string; memberId?: string; percentage: number; color?: string; }
 
-// ─── Performance types ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE TYPES
+// Django: no models — needs MemberSkill
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export type RemarkLevel = "Excellent" | "Good" | "Average" | "Needs Improvement";
 
@@ -154,101 +241,99 @@ export interface PerformanceMember {
   }[];
 }
 
-// ─── Project dashboard types ──────────────────────────────────────────────────
-// These types serve the project dashboard component exclusively.
-// `DeliverableStatus` uses display-friendly casing ("Not Started" etc.)
-// which differs from the core Deliverable.status snake_case convention.
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROJECT DASHBOARD TYPES
+// `ProjectStatus` maps to a field needed on the Django Project model.
+// `ProjectDetail` is a richer read-only view — compose from Project + Deliverables
+// in a Django serialiser rather than storing separately.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-export type ProjectStatus     = "Active" | "On Hold" | "Completed" | "Cancelled";
-export type DeliverableStatus = "Not Started" | "In Progress" | "Review" | "Done";
+export type ProjectStatus = "Active" | "On Hold" | "Completed" | "Cancelled";
+
+// `DeliverableStatus` — display-friendly version of DeliverableStatus above.
+// Used only in the project dashboard for rendered badges.
+export type DeliverableStatusDisplay = "Not Started" | "In Progress" | "Review" | "Done";
 
 export interface Client {
-  name: string;
-  contact: string;   // email or phone
-  location: string;  // city, country
+  name: string;    // Django: Project.client_name
+  contact: string; // add to Django model: Project.client_contact
+  location: string;// Django: Project.location
 }
 
 export interface DeliverableItem {
   id: string;
   name: string;
-  assignedTo: string;  // member name string (display only)
-  status: DeliverableStatus;
-  dueDate: string;     // "YYYY-MM-DD"
-  hoursLogged: number;
+  assignedTo: string;           // display name — resolved from assigneeId
+  status: DeliverableStatusDisplay;
+  dueDate: string;              // "YYYY-MM-DD"
+  hoursLogged: number;          // computed from WorkLog durations
 }
 
 export interface ProjectDetail {
-  id: string;           // matches Project.id where applicable
+  id: string;
   name: string;
-  organisation: string; // org name string (display only)
-  status: ProjectStatus;
+  organisation: string;         // org name string (display only)
+  status: ProjectStatus;        // add to Django model: Project.status
   client: Client;
-  startDate: string;    // "YYYY-MM-DD"
-  endDate: string;      // "YYYY-MM-DD"
-  revenue: number;      // INR
-  currency: string;
-  description: string;
-  tags: string[];
+  startDate: string;            // "YYYY-MM-DD" — add to Django: Project.start_date
+  endDate: string;              // "YYYY-MM-DD" — add to Django: Project.end_date
+  revenue: number;              // add to Django: Project.revenue (or compute from entries)
+  currency: string;             // add to Django: Project.currency (default "INR")
+  description: string;          // add to Django: Project.description
+  tags: string[];               // add to Django: Project.tags (ArrayField or M2M Tag)
   deliverables: DeliverableItem[];
-  teamMembers: string[]; // member name strings (display only)
+  teamMembers: string[];        // display names — resolved from memberships
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // REFERENCE DATA
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── Current user ─────────────────────────────────────────────────────────────
-// ID mapping: user-1 → m6, user-2 → m2, user-3 → m3
-
-export const currentUser: User = { id: "m6", name: "Arun Ravikumar" };
-
 // ─── Organisations ────────────────────────────────────────────────────────────
 
 export const organisations: Organisation[] = [
-  // Finance component org (Stonemark Studio)
-  { id: "org1", name: "Stonemark Studio", tagline: "Designing spaces that endure", logo: "SM", industry: "Architecture & Urban Design", since: 2019 },
-  // Worklog / salary / performance / dashboard orgs
+  { id: "org1",  name: "Stonemark Studio",       tagline: "Designing spaces that endure", logo: "SM", industry: "Architecture & Urban Design", since: 2019 },
   { id: "org-1", name: "Sunilkumar Associates" },
   { id: "org-2", name: "Test Corp"             },
   { id: "org-3", name: "Greenfield Ltd"        },
   { id: "org-4", name: "Horizon Builders"      },
 ];
 
-// Alias used by performance page
-export const ORGANISATIONS = organisations;
-
-// Singular alias used by the finance/stat component (LeftPanel etc.)
-export const organisation = organisations.find(o => o.id === "org1")!;
+export const ORGANISATIONS = organisations; // alias for performance page
+export const organisation  = organisations.find(o => o.id === "org1")!; // alias for finance/stat component
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
+// location, clientName, currentStage now present to match Django model.
+// Finance projects (p1–p4) have placeholder values for the new fields.
 
 export const projects: Project[] = [
-  // Finance component projects (org: "org1")
-  { id: "p1", organisationId: "org1", name: "Meridian Tower",      color: "#6366f1" },
-  { id: "p2", organisationId: "org1", name: "Harlow Residences",   color: "#f59e0b" },
-  { id: "p3", organisationId: "org1", name: "Civic Arts Pavilion", color: "#10b981" },
-  { id: "p4", organisationId: "org1", name: "Vantage Mixed-Use",   color: "#ef4444" },
+  // Finance component projects
+  { id: "p1", organisationId: "org1", name: "Meridian Tower",      location: "Mumbai, Maharashtra",        clientName: "Meridian Developers",    currentStage: "2", color: "#6366f1" },
+  { id: "p2", organisationId: "org1", name: "Harlow Residences",   location: "Pune, Maharashtra",          clientName: "Harlow Housing Ltd",      currentStage: "1", color: "#f59e0b" },
+  { id: "p3", organisationId: "org1", name: "Civic Arts Pavilion", location: "Chennai, Tamil Nadu",        clientName: "Civic Trust Board",       currentStage: "3", color: "#10b981" },
+  { id: "p4", organisationId: "org1", name: "Vantage Mixed-Use",   location: "Hyderabad, Telangana",       clientName: "Vantage Realty",          currentStage: "1", color: "#ef4444" },
   // Worklog / salary / performance / dashboard projects
-  { id: "proj-1", organisationId: "org-1", name: "Sunilkumar Residence", color: "#6366f1" },
-  { id: "proj-2", organisationId: "org-2", name: "Test Office Block",    color: "#f59e0b" },
-  { id: "proj-3", organisationId: "org-3", name: "Greenfield Mall",      color: "#10b981" },
-  { id: "proj-4", organisationId: "org-4", name: "Horizon Villa Complex", color: "#8b5cf6" },
+  { id: "proj-1", organisationId: "org-1", name: "Sunilkumar Residence", location: "Thiruvananthapuram, Kerala", clientName: "Sunil Kumar",            currentStage: "1", color: "#6366f1" },
+  { id: "proj-2", organisationId: "org-2", name: "Test Office Block",    location: "Kochi, Kerala",             clientName: "Rajesh Menon",           currentStage: "2", color: "#f59e0b" },
+  { id: "proj-3", organisationId: "org-3", name: "Greenfield Mall",      location: "Bangalore, Karnataka",      clientName: "Greenfield Developers",  currentStage: "3", color: "#10b981" },
+  { id: "proj-4", organisationId: "org-4", name: "Horizon Villa Complex",location: "Kozhikode, Kerala",         clientName: "Horizon Builders Pvt Ltd",currentStage: "5", color: "#8b5cf6" },
 ];
 
 // ─── Deliverables ─────────────────────────────────────────────────────────────
+// stage and status are now required on all deliverables (matching Django model).
 
 export const deliverables: Deliverable[] = [
-  // Finance component deliverables (no stage/status — finance page doesn't need them)
-  { id: "d1", projectId: "p1", organisationId: "org1", name: "Concept Design"      },
-  { id: "d2", projectId: "p1", organisationId: "org1", name: "Structural Drawings" },
-  { id: "d3", projectId: "p1", organisationId: "org1", name: "Planning Submission" },
-  { id: "d4", projectId: "p2", organisationId: "org1", name: "Interior Layouts"    },
-  { id: "d5", projectId: "p2", organisationId: "org1", name: "Landscape Plan"      },
-  { id: "d6", projectId: "p3", organisationId: "org1", name: "Facade Design"       },
-  { id: "d7", projectId: "p3", organisationId: "org1", name: "Acoustic Report"     },
-  { id: "d8", projectId: "p4", organisationId: "org1", name: "Site Master Plan"    },
-  { id: "d9", projectId: "p4", organisationId: "org1", name: "3D Visualisations"   },
-  // Worklog / salary / performance deliverables (have stage + status)
+  // Finance component deliverables
+  { id: "d1", projectId: "p1", organisationId: "org1", name: "Concept Design",      stage: "1", status: "passed"      },
+  { id: "d2", projectId: "p1", organisationId: "org1", name: "Structural Drawings", stage: "2", status: "ongoing"     },
+  { id: "d3", projectId: "p1", organisationId: "org1", name: "Planning Submission", stage: "2", status: "not_started" },
+  { id: "d4", projectId: "p2", organisationId: "org1", name: "Interior Layouts",    stage: "1", status: "ongoing"     },
+  { id: "d5", projectId: "p2", organisationId: "org1", name: "Landscape Plan",      stage: "1", status: "not_started" },
+  { id: "d6", projectId: "p3", organisationId: "org1", name: "Facade Design",       stage: "3", status: "ready"       },
+  { id: "d7", projectId: "p3", organisationId: "org1", name: "Acoustic Report",     stage: "3", status: "ongoing"     },
+  { id: "d8", projectId: "p4", organisationId: "org1", name: "Site Master Plan",    stage: "1", status: "ongoing"     },
+  { id: "d9", projectId: "p4", organisationId: "org1", name: "3D Visualisations",   stage: "1", status: "not_started" },
+  // Worklog / salary / performance deliverables
   { id: "del-1", projectId: "proj-1", organisationId: "org-1", name: "Floor Plan",        stage: "1", status: "not_started" },
   { id: "del-2", projectId: "proj-1", organisationId: "org-1", name: "Elevation Drawing", stage: "1", status: "not_started" },
   { id: "del-3", projectId: "proj-2", organisationId: "org-2", name: "Site Layout",       stage: "2", status: "not_started" },
@@ -416,10 +501,6 @@ export const MEMBERS: PerformanceMember[] = [
 ];
 
 // ─── Project dashboard data ───────────────────────────────────────────────────
-// `ProjectDetail.id` matches `Project.id` for proj-1/2/3.
-// `proj-4` (Horizon Villa Complex) is dashboard-only — completed project,
-// not present in the worklog/performance dataset.
-// `teamMembers` and `DeliverableItem.assignedTo` use name strings (display only).
 
 export const projectDetails: ProjectDetail[] = [
   {
@@ -428,10 +509,8 @@ export const projectDetails: ProjectDetail[] = [
     organisation: "Sunilkumar Associates",
     status: "Active",
     client: { name: "Sunil Kumar", contact: "sunil@example.com", location: "Thiruvananthapuram, Kerala" },
-    startDate: "2025-01-10",
-    endDate: "2025-08-31",
-    revenue: 1_850_000,
-    currency: "INR",
+    startDate: "2025-01-10", endDate: "2025-08-31",
+    revenue: 1_850_000, currency: "INR",
     description: "Design and documentation for a 3-bedroom luxury residence including landscaping, interior layouts, and structural drawings.",
     tags: ["Residential", "Luxury", "Kerala"],
     teamMembers: ["Arun Ravikumar", "Meera Nair", "Jithin Thomas"],
@@ -448,17 +527,15 @@ export const projectDetails: ProjectDetail[] = [
     organisation: "Test Corp",
     status: "On Hold",
     client: { name: "Rajesh Menon", contact: "+91 98765 43210", location: "Kochi, Kerala" },
-    startDate: "2024-11-01",
-    endDate: "2025-06-30",
-    revenue: 3_200_000,
-    currency: "INR",
+    startDate: "2024-11-01", endDate: "2025-06-30",
+    revenue: 3_200_000, currency: "INR",
     description: "Commercial office block — 6 floors, open-plan with modular workstations. Structural, MEP, and façade documentation.",
     tags: ["Commercial", "Office", "MEP"],
     teamMembers: ["Arun Ravikumar", "Priya Krishnan"],
     deliverables: [
-      { id: "del-3",  name: "Site Layout",      assignedTo: "Arun Ravikumar",  status: "Done",        dueDate: "2024-12-15", hoursLogged: 30 },
-      { id: "del-4",  name: "Structural Report", assignedTo: "Priya Krishnan", status: "In Progress", dueDate: "2025-03-30", hoursLogged: 14 },
-      { id: "del-4b", name: "MEP Drawings",      assignedTo: "Priya Krishnan", status: "Not Started", dueDate: "2025-05-15", hoursLogged:  0 },
+      { id: "del-3",  name: "Site Layout",       assignedTo: "Arun Ravikumar",  status: "Done",        dueDate: "2024-12-15", hoursLogged: 30 },
+      { id: "del-4",  name: "Structural Report", assignedTo: "Priya Krishnan",  status: "In Progress", dueDate: "2025-03-30", hoursLogged: 14 },
+      { id: "del-4b", name: "MEP Drawings",      assignedTo: "Priya Krishnan",  status: "Not Started", dueDate: "2025-05-15", hoursLogged:  0 },
     ],
   },
   {
@@ -467,18 +544,16 @@ export const projectDetails: ProjectDetail[] = [
     organisation: "Greenfield Ltd",
     status: "Active",
     client: { name: "Greenfield Developers", contact: "projects@greenfield.in", location: "Bangalore, Karnataka" },
-    startDate: "2025-02-01",
-    endDate: "2026-03-31",
-    revenue: 8_750_000,
-    currency: "INR",
+    startDate: "2025-02-01", endDate: "2026-03-31",
+    revenue: 8_750_000, currency: "INR",
     description: "Large-format retail mall — 3 levels, 120 tenants. Full architectural, structural, and interior design package.",
     tags: ["Retail", "Large-scale", "Interior"],
     teamMembers: ["Arun Ravikumar", "Meera Nair", "Deepak Pillai", "Asha Varma"],
     deliverables: [
-      { id: "del-5", name: "3D Render",        assignedTo: "Arun Ravikumar", status: "In Progress", dueDate: "2025-04-30", hoursLogged: 11 },
-      { id: "del-6", name: "Tenant Layout Plan", assignedTo: "Meera Nair",   status: "Not Started", dueDate: "2025-07-01", hoursLogged:  0 },
-      { id: "del-7", name: "Façade Design",    assignedTo: "Deepak Pillai",  status: "Not Started", dueDate: "2025-08-15", hoursLogged:  0 },
-      { id: "del-8", name: "Interior Concept", assignedTo: "Asha Varma",     status: "Review",      dueDate: "2025-05-20", hoursLogged: 28 },
+      { id: "del-5", name: "3D Render",          assignedTo: "Arun Ravikumar", status: "In Progress", dueDate: "2025-04-30", hoursLogged: 11 },
+      { id: "del-6", name: "Tenant Layout Plan", assignedTo: "Meera Nair",     status: "Not Started", dueDate: "2025-07-01", hoursLogged:  0 },
+      { id: "del-7", name: "Façade Design",      assignedTo: "Deepak Pillai",  status: "Not Started", dueDate: "2025-08-15", hoursLogged:  0 },
+      { id: "del-8", name: "Interior Concept",   assignedTo: "Asha Varma",     status: "Review",      dueDate: "2025-05-20", hoursLogged: 28 },
     ],
   },
   {
@@ -487,22 +562,20 @@ export const projectDetails: ProjectDetail[] = [
     organisation: "Horizon Builders",
     status: "Completed",
     client: { name: "Horizon Builders Pvt Ltd", contact: "info@horizonbuilders.com", location: "Kozhikode, Kerala" },
-    startDate: "2024-03-01",
-    endDate: "2024-12-31",
-    revenue: 5_100_000,
-    currency: "INR",
+    startDate: "2024-03-01", endDate: "2024-12-31",
+    revenue: 5_100_000, currency: "INR",
     description: "Cluster of 8 premium villas with shared amenities — pool, gym, and landscaped gardens. Full documentation delivered.",
     tags: ["Residential", "Villa", "Completed"],
     teamMembers: ["Arun Ravikumar", "Jithin Thomas"],
     deliverables: [
-      { id: "del-9",  name: "Master Site Plan",  assignedTo: "Arun Ravikumar", status: "Done", dueDate: "2024-05-01", hoursLogged: 35 },
-      { id: "del-10", name: "Villa Floor Plans",  assignedTo: "Jithin Thomas",  status: "Done", dueDate: "2024-07-01", hoursLogged: 48 },
-      { id: "del-11", name: "Landscape & Pool",   assignedTo: "Arun Ravikumar", status: "Done", dueDate: "2024-10-01", hoursLogged: 20 },
+      { id: "del-9",  name: "Master Site Plan", assignedTo: "Arun Ravikumar", status: "Done", dueDate: "2024-05-01", hoursLogged: 35 },
+      { id: "del-10", name: "Villa Floor Plans", assignedTo: "Jithin Thomas",  status: "Done", dueDate: "2024-07-01", hoursLogged: 48 },
+      { id: "del-11", name: "Landscape & Pool",  assignedTo: "Arun Ravikumar", status: "Done", dueDate: "2024-10-01", hoursLogged: 20 },
     ],
   },
 ];
 
-// ─── Project dashboard status colours ─────────────────────────────────────────
+// ─── Status colour maps ───────────────────────────────────────────────────────
 
 export const STATUS_COLOR: Record<ProjectStatus, { bg: string; text: string; dot: string }> = {
   Active:    { bg: "#e8f5e9", text: "#2e7d32", dot: "#43a047" },
@@ -511,7 +584,7 @@ export const STATUS_COLOR: Record<ProjectStatus, { bg: string; text: string; dot
   Cancelled: { bg: "#fce4ec", text: "#b71c1c", dot: "#ef5350" },
 };
 
-export const DELIVERABLE_STATUS_COLOR: Record<DeliverableStatus, { bg: string; text: string }> = {
+export const DELIVERABLE_STATUS_COLOR: Record<DeliverableStatusDisplay, { bg: string; text: string }> = {
   "Not Started": { bg: "#f5f5f5", text: "#757575" },
   "In Progress": { bg: "#fff3e0", text: "#e65100" },
   Review:        { bg: "#f3e5f5", text: "#6a1b9a" },
@@ -519,25 +592,22 @@ export const DELIVERABLE_STATUS_COLOR: Record<DeliverableStatus, { bg: string; t
 };
 
 // ─── Hand-written real expenses (salary-calculator / expense-tracker page) ────
-// Exported as `expenseRecords` to distinguish from the seeded `expenses` array.
+// `salary` category NOT included here — that is finance/demo only.
+// memberId remapped: user-1 → m6, user-2 → m2, user-3 → m3
 
 export const expenseRecords: Expense[] = [
-  // m6 (Arun) — proj-1 (Sunilkumar Residence)
   { id: "exp-1",  organisationId: "org-1", memberId: "m6", projectId: "proj-1", amount: 1800, category: "travel",        remarks: "Site visit cab fare",          date: "2025-01-08", createdAt: "2025-01-08T09:00:00Z", reimbursed: true  },
   { id: "exp-2",  organisationId: "org-1", memberId: "m6", projectId: "proj-1", amount:  650, category: "food",          remarks: "Client lunch meeting",         date: "2025-01-15", createdAt: "2025-01-15T14:00:00Z", reimbursed: true  },
   { id: "exp-3",  organisationId: "org-1", memberId: "m6", projectId: "proj-1", amount: 4200, category: "accommodation", remarks: "Overnight stay — site review",  date: "2025-02-05", createdAt: "2025-02-05T18:00:00Z", reimbursed: false },
   { id: "exp-4",  organisationId: "org-1", memberId: "m6", projectId: "proj-1", amount:  320, category: "stationery",    remarks: "Printing drawings A1",          date: "2025-02-12", createdAt: "2025-02-12T11:00:00Z", reimbursed: true  },
   { id: "exp-5",  organisationId: "org-1", memberId: "m6", projectId: "proj-1", amount:  950, category: "travel",        remarks: "Fuel — client meetings",        date: "2025-03-10", createdAt: "2025-03-10T10:00:00Z", reimbursed: false },
   { id: "exp-6",  organisationId: "org-1", memberId: "m6", projectId: "proj-1", amount: 2100, category: "others",        remarks: "Survey equipment rental",       date: "2025-03-18", createdAt: "2025-03-18T09:30:00Z", reimbursed: false },
-  // m6 (Arun) — proj-3 (Greenfield Mall)
   { id: "exp-7",  organisationId: "org-3", memberId: "m6", projectId: "proj-3", amount: 5500, category: "travel",        remarks: "Flight — Greenfield site",      date: "2025-02-17", createdAt: "2025-02-17T06:00:00Z", reimbursed: true  },
   { id: "exp-8",  organisationId: "org-3", memberId: "m6", projectId: "proj-3", amount: 7800, category: "accommodation", remarks: "Hotel 2 nights",                date: "2025-02-17", createdAt: "2025-02-17T18:00:00Z", reimbursed: false },
-  // m2 (Priya) — proj-2 (Test Office Block)
   { id: "exp-9",  organisationId: "org-2", memberId: "m2", projectId: "proj-2", amount: 1200, category: "travel",        remarks: "Train tickets — client visit",  date: "2025-01-10", createdAt: "2025-01-10T08:00:00Z", reimbursed: true  },
   { id: "exp-10", organisationId: "org-2", memberId: "m2", projectId: "proj-2", amount:  480, category: "food",          remarks: "Team lunch",                    date: "2025-01-20", createdAt: "2025-01-20T13:00:00Z", reimbursed: true  },
   { id: "exp-11", organisationId: "org-2", memberId: "m2", projectId: "proj-2", amount:  850, category: "stationery",    remarks: "Report printing & binding",     date: "2025-02-14", createdAt: "2025-02-14T10:00:00Z", reimbursed: false },
   { id: "exp-12", organisationId: "org-2", memberId: "m2", projectId: "proj-2", amount: 3600, category: "accommodation", remarks: "Client city hotel — 1 night",   date: "2025-03-05", createdAt: "2025-03-05T20:00:00Z", reimbursed: false },
-  // m3 (Rohan) — proj-2 (Test Office Block)
   { id: "exp-13", organisationId: "org-2", memberId: "m3", projectId: "proj-2", amount:  760, category: "travel",        remarks: "Cab to structural lab",         date: "2025-01-12", createdAt: "2025-01-12T09:00:00Z", reimbursed: true  },
   { id: "exp-14", organisationId: "org-2", memberId: "m3", projectId: "proj-2", amount: 2400, category: "others",        remarks: "Soil testing fee",              date: "2025-01-22", createdAt: "2025-01-22T11:00:00Z", reimbursed: true  },
   { id: "exp-15", organisationId: "org-2", memberId: "m3", projectId: "proj-2", amount:  540, category: "food",          remarks: "Site team snacks",              date: "2025-03-12", createdAt: "2025-03-12T16:00:00Z", reimbursed: false },
@@ -553,7 +623,7 @@ export const projMap   = Object.fromEntries(projects.map(p => [p.id, p]));
 export const delivMap  = Object.fromEntries(deliverables.map(d => [d.id, d]));
 export const memberMap = Object.fromEntries(members.map(m => [m.id, m]));
 
-// Record-form lookup used by the seeded Entry generator below.
+// Record-form lookup used by the seeded Entry generator.
 // Named `deliverablesByProjectMap` to avoid collision with the
 // function `deliverablesByProject` used by the performance page.
 export const deliverablesByProjectMap: Record<string, string[]> = {};
@@ -632,11 +702,11 @@ export function searchProjects(query: string): ProjectDetail[] {
   const q = query.toLowerCase().trim();
   if (!q) return projectDetails;
   return projectDetails.filter(p =>
-    p.name.toLowerCase().includes(q)         ||
-    p.organisation.toLowerCase().includes(q) ||
-    p.client.name.toLowerCase().includes(q)  ||
+    p.name.toLowerCase().includes(q)            ||
+    p.organisation.toLowerCase().includes(q)    ||
+    p.client.name.toLowerCase().includes(q)     ||
     p.client.location.toLowerCase().includes(q) ||
-    p.status.toLowerCase().includes(q)       ||
+    p.status.toLowerCase().includes(q)          ||
     p.tags.some(t => t.toLowerCase().includes(q))
   );
 }
@@ -653,6 +723,7 @@ export function formatDate(iso: string): string {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SEEDED GENERATED DATA  (finance component — uses finance projects p1–p4)
+// Replace with fetch() calls when connecting to the backend.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function mulberry32(seed: number) {
@@ -665,7 +736,6 @@ function mulberry32(seed: number) {
   };
 }
 
-// Revenue/spend entries
 export const entries: Entry[] = (() => {
   const result: Entry[] = [];
   const rng   = mulberry32(0xdeadbeef);
@@ -696,7 +766,6 @@ export const entries: Entry[] = (() => {
   return result;
 })();
 
-// Seeded salary + misc expenses (finance component)
 const REMARKS_MAP: Record<ExpenseCategory, string[]> = {
   salary:        ["Monthly salary", "Salary advance", "Performance bonus", "Contract payment"],
   travel:        ["Site visit – Meridian Tower", "Client meeting travel", "Field survey transport", "Airport transfer"],
