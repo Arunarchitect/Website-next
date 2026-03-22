@@ -42,7 +42,7 @@ export default function useLogin() {
 
         // Add delay before routing (3 seconds to match toast duration)
         setTimeout(() => {
-          router.push("/dashboard");
+          router.push("/new/dash/dashnormal");
         }, 3000);
       })
       .catch((error) => {

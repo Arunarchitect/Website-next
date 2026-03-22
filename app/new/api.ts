@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_HOST ?? "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_HOST ;
 
 function getToken(): string {
   if (typeof window === "undefined") return "";

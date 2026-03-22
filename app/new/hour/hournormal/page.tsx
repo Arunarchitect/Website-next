@@ -2,177 +2,100 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import {
-  worklogEntries,
-  organisations,
-  projects,
-  deliverables,
-  members,
-  projMap,
-  delivMap,
-  orgMap,
-  memberMap,
-  quickAccessItems,
-  addQuickAccess,
-  removeQuickAccess,
-  currentUser,
-  type WorklogEntry,
-} from "@/app/new/data";
+  fetchMyWorkLogs, fetchMeta, fetchMyPinnedIds,
+  fetchDeliverablesByProject, fetchInitialDeliverables,
+  createWorkLog, editWorkLog, deleteWorkLog,
+  pinDeliverable, unpinDeliverable, currentWeekRange,
+  type WorkLogEntry, type WorkLogPage, type MetaData,
+  type DeliverableOption, type OrgOption, type ProjectOption,
+} from "@/app/new/worklog_api";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-
-function getDaysInMonth(y: number, m: number) {
-  return new Date(y, m + 1, 0).getDate();
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
+function getFirstDay(y: number, m: number)    { return new Date(y, m, 1).getDay(); }
+function pad(n: number) { return String(n).padStart(2, "0"); }
+function toLocalISO(dt: Date) { return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`; }
+function monthRange(year: number, month: number) {
+  return {
+    from: `${year}-${pad(month+1)}-01`,
+    to:   `${year}-${pad(month+1)}-${pad(new Date(year, month+1, 0).getDate())}`,
+  };
 }
-function getFirstDay(y: number, m: number) {
-  return new Date(y, m, 1).getDay();
-}
-
-function useContainerWidth(ref: React.RefObject<HTMLElement>) {
-  const [w, setW] = useState(9999);
+function useWindowWidth() {
+  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
   useEffect(() => {
-    if (!ref.current) return;
-    const ro = new ResizeObserver(([e]) => setW(e.contentRect.width));
-    ro.observe(ref.current);
-    setW(ref.current.getBoundingClientRect().width);
-    return () => ro.disconnect();
-  }, [ref]);
+    const h = () => setW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
   return w;
 }
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
-  bg: "#0f1117",
-  panel: "rgba(255,255,255,0.025)",
-  panelB: "rgba(255,255,255,0.07)",
-  panel2: "rgba(255,255,255,0.04)",
-  panel2B: "rgba(255,255,255,0.1)",
-  rowHov: "rgba(255,255,255,0.04)",
-  divider: "rgba(255,255,255,0.06)",
-  t1: "#f8fafc",
-  t2: "#f1f5f9",
-  t3: "#94a3b8",
-  t4: "#64748b",
-  t5: "#475569",
-  t6: "#334155",
-  ac: "#6366f1",
-  acLight: "rgba(99,102,241,0.12)",
-  acMid: "rgba(99,102,241,0.55)",
-  acText: "#818cf8",
-  green: "#10b981",
-  greenBg: "rgba(16,185,129,0.12)",
-  red: "#ef4444",
-  redBg: "rgba(239,68,68,0.12)",
-  pin: "#f59e0b",
-  pinBg: "rgba(245,158,11,0.12)",
+  bg:"#0f1117", panel:"rgba(255,255,255,0.025)", panelB:"rgba(255,255,255,0.07)",
+  panel2:"rgba(255,255,255,0.04)", panel2B:"rgba(255,255,255,0.1)",
+  divider:"rgba(255,255,255,0.06)",
+  t1:"#f8fafc", t2:"#f1f5f9", t3:"#94a3b8", t4:"#64748b", t5:"#475569", t6:"#334155",
+  ac:"#6366f1", acLight:"rgba(99,102,241,0.12)", acMid:"rgba(99,102,241,0.55)", acText:"#818cf8",
+  green:"#10b981", greenBg:"rgba(16,185,129,0.12)",
+  red:"#ef4444", redBg:"rgba(239,68,68,0.12)",
+  pin:"#f59e0b", pinBg:"rgba(245,158,11,0.12)",
 };
 
-const Divider = () => <div style={{ height: 1, background: T.divider }} />;
+const Divider = () => <div style={{ height:1, background:T.divider }} />;
+
+// ─── Progress bar ─────────────────────────────────────────────────────────────
+function ProgressBar({ loading }: { loading: boolean }) {
+  const [pct, setPct]         = useState(0);
+  const [visible, setVisible] = useState(false);
+  const ref = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (loading) {
+      setVisible(true); setPct(0); let c = 0;
+      ref.current = setInterval(() => {
+        c += Math.random() * 18;
+        if (c >= 90) { c = 90; clearInterval(ref.current!); }
+        setPct(c);
+      }, 120);
+    } else {
+      clearInterval(ref.current!); setPct(100);
+      const t = setTimeout(() => { setVisible(false); setPct(0); }, 350);
+      return () => clearTimeout(t);
+    }
+    return () => clearInterval(ref.current!);
+  }, [loading]);
+  if (!visible) return null;
+  return (
+    <div style={{ position:"fixed", top:0, left:0, right:0, zIndex:9999, height:3 }}>
+      <div style={{ height:"100%", width:`${pct}%`, background:`linear-gradient(90deg,${T.ac},#a78bfa)`, transition:pct===100?"width 0.2s,opacity 0.3s":"width 0.12s", opacity:pct===100?0:1, borderRadius:"0 2px 2px 0", boxShadow:`0 0 8px ${T.ac}` }} />
+    </div>
+  );
+}
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalGrid({
-  year,
-  month,
-  activeDates,
-  selDates,
-  onToggle,
-}: {
-  year: number;
-  month: number;
-  activeDates: Set<string>;
-  selDates: Set<string>;
-  onToggle: (d: string) => void;
+function CalGrid({ year, month, activeDates, selDates, onToggle }: {
+  year:number; month:number; activeDates:Set<string>; selDates:Set<string>; onToggle:(d:string)=>void;
 }) {
   const total = getDaysInMonth(year, month);
   const first = getFirstDay(year, month);
-  const cells: (number | null)[] = [
-    ...Array(first).fill(null),
-    ...Array.from({ length: total }, (_, i) => i + 1),
-  ];
-
+  const cells: (number|null)[] = [...Array(first).fill(null), ...Array.from({length:total},(_,i)=>i+1)];
   return (
-    <div
-      style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}
-    >
-      {DAYS.map((d) => (
-        <div
-          key={d}
-          style={{
-            textAlign: "center",
-            fontSize: 9,
-            color: T.t5,
-            fontWeight: 600,
-            letterSpacing: "0.06em",
-            padding: "4px 0",
-            textTransform: "uppercase",
-          }}
-        >
-          {d}
-        </div>
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+      {DAYS.map(d => (
+        <div key={d} style={{ textAlign:"center", fontSize:9, color:T.t5, fontWeight:600, letterSpacing:"0.06em", padding:"4px 0", textTransform:"uppercase" }}>{d}</div>
       ))}
       {cells.map((day, i) => {
         if (!day) return <div key={`_${i}`} />;
-        const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        const has = activeDates.has(iso);
-        const sel = selDates.has(iso);
+        const iso = `${year}-${pad(month+1)}-${pad(day)}`;
+        const has = activeDates.has(iso), sel = selDates.has(iso);
         return (
-          <button
-            key={iso}
-            onClick={() => onToggle(iso)}
-            style={{
-              background: sel ? T.ac : "transparent",
-              border: `1px solid ${sel ? T.ac : "transparent"}`,
-              borderRadius: 6,
-              cursor: "pointer",
-              color: sel ? "#fff" : has ? T.t2 : T.t4,
-              fontSize: 11,
-              padding: "6px 0",
-              textAlign: "center",
-              transition: "all 0.15s",
-              width: "100%",
-              fontFamily: "'DM Sans',sans-serif",
-              fontWeight: sel ? 600 : 400,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 1,
-            }}
-            onMouseEnter={(e) => {
-              if (!sel)
-                (e.currentTarget as HTMLElement).style.background = T.panel2;
-            }}
-            onMouseLeave={(e) => {
-              if (!sel)
-                (e.currentTarget as HTMLElement).style.background =
-                  "transparent";
-            }}
-          >
+          <button key={iso} onClick={() => onToggle(iso)}
+            style={{ background:sel?T.ac:"transparent", border:`1px solid ${sel?T.ac:"transparent"}`, borderRadius:6, cursor:"pointer", color:sel?"#fff":has?T.t2:T.t4, fontSize:11, padding:"6px 0", width:"100%", fontFamily:"'DM Sans',sans-serif", fontWeight:sel?600:400, display:"flex", flexDirection:"column", alignItems:"center", gap:1, transition:"all 0.15s" }}
+            onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = T.panel2; }}
+            onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
             {day}
-            {has && (
-              <span
-                style={{
-                  display: "block",
-                  width: 3,
-                  height: 3,
-                  borderRadius: "50%",
-                  background: sel ? "#fff" : T.acText,
-                }}
-              />
-            )}
+            {has && <span style={{ display:"block", width:3, height:3, borderRadius:"50%", background:sel?"#fff":T.acText }} />}
           </button>
         );
       })}
@@ -180,1551 +103,771 @@ function CalGrid({
   );
 }
 
-// ─── Delete confirm ───────────────────────────────────────────────────────────
-function DeleteConfirm({
-  onConfirm,
-  onCancel,
-}: {
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onCancel();
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [onCancel]);
-
+// ─── Delete modal ─────────────────────────────────────────────────────────────
+function DeleteModal({ onConfirm, onCancel }: { onConfirm:()=>void; onCancel:()=>void }) {
   return (
-    <div
-      ref={ref}
-      style={{
-        position: "absolute",
-        top: "50%",
-        right: "calc(100% + 8px)",
-        transform: "translateY(-50%)",
-        zIndex: 100,
-        background: "#1a1d2e",
-        border: `1px solid ${T.panel2B}`,
-        borderRadius: 12,
-        padding: "14px 16px",
-        boxShadow: "0 12px 40px rgba(0,0,0,0.7)",
-        minWidth: 210,
-        whiteSpace: "nowrap",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          right: -6,
-          top: "50%",
-          transform: "translateY(-50%) rotate(45deg)",
-          width: 10,
-          height: 10,
-          background: "#1a1d2e",
-          borderTop: `1px solid ${T.panel2B}`,
-          borderRight: `1px solid ${T.panel2B}`,
-        }}
-      />
-      <p
-        style={{
-          margin: "0 0 3px",
-          fontSize: 12.5,
-          fontWeight: 600,
-          color: T.t2,
-        }}
-      >
-        Delete this entry?
-      </p>
-      <p style={{ margin: "0 0 12px", fontSize: 11.5, color: T.t4 }}>
-        This action cannot be undone.
-      </p>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button
-          onClick={onCancel}
-          style={{
-            flex: 1,
-            padding: "6px 0",
-            fontSize: 11.5,
-            borderRadius: 7,
-            background: T.panel2,
-            border: `1px solid ${T.panel2B}`,
-            color: T.t3,
-            cursor: "pointer",
-            fontFamily: "'DM Sans',sans-serif",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          style={{
-            flex: 1,
-            padding: "6px 0",
-            fontSize: 11.5,
-            borderRadius: 7,
-            background: T.red,
-            border: "none",
-            color: "#fff",
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "'DM Sans',sans-serif",
-          }}
-        >
-          Yes, delete
-        </button>
+    <>
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:199 }} onClick={onCancel} />
+      <div style={{ position:"fixed", top:"50%", left:"50%", transform:"translate(-50%,-50%)", zIndex:200, background:"#1a1d2e", border:`1px solid ${T.panel2B}`, borderRadius:14, padding:"24px", boxShadow:"0 12px 40px rgba(0,0,0,0.7)", minWidth:260, maxWidth:"90vw" }}>
+        <p style={{ margin:"0 0 6px", fontSize:14, fontWeight:600, color:T.t2 }}>Delete this entry?</p>
+        <p style={{ margin:"0 0 18px", fontSize:12, color:T.t4 }}>This action cannot be undone.</p>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onCancel}  style={{ flex:1, padding:"9px 0", fontSize:13, borderRadius:8, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t3, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>Cancel</button>
+          <button onClick={onConfirm} style={{ flex:1, padding:"9px 0", fontSize:13, borderRadius:8, background:T.red, border:"none", color:"#fff", fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>Yes, delete</button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-// ─── Worklog row ──────────────────────────────────────────────────────────────
-function WorklogRow({
-  row,
-  onSave,
-  onDelete,
-}: {
-  row: WorklogEntry;
-  onSave: (id: string, data: WorklogEntry) => void;
-  onDelete: (id: string) => void;
+// ─── Worklog card ─────────────────────────────────────────────────────────────
+function WorklogCard({ row, meta, deliverables, onSave, onDelete }: {
+  row:WorkLogEntry; meta:MetaData; deliverables:DeliverableOption[];
+  onSave:(id:number,data:WorkLogEntry)=>void; onDelete:(id:number)=>void;
 }) {
-  const [draft, setDraft] = useState<WorklogEntry>({ ...row });
-  const [dirty, setDirty] = useState(false);
-  const [flash, setFlash] = useState(false);
-  const [hovered, setHov] = useState(false);
-  const [showDel, setShowDel] = useState(false);
+  const [editing,       setEditing]       = useState(false);
+  const [draft,         setDraft]         = useState({...row});
+  const [saving,        setSaving]        = useState(false);
+  const [flash,         setFlash]         = useState(false);
+  const [showDel,       setShowDel]       = useState(false);
+  const [rowDelivs,     setRowDelivs]     = useState<DeliverableOption[]>(deliverables.filter(d => d.project_id === row.project_id));
+  const [loadingDelivs, setLoadingDelivs] = useState(false);
+  const [error,         setError]         = useState("");
 
-  function patch(p: Partial<WorklogEntry>) {
-    setDraft((d) => ({ ...d, ...p }));
-    setDirty(true);
+  function patch(p: Partial<typeof draft>) { setDraft(d => ({...d, ...p})); }
+
+  async function handleProjectChange(projId: number) {
+    patch({ project_id:projId, deliverable:0 });
+    setLoadingDelivs(true);
+    try { setRowDelivs(await fetchDeliverablesByProject(projId)); }
+    finally { setLoadingDelivs(false); }
   }
 
-  function save() {
-    onSave(row.id, draft);
-    setDirty(false);
-    setFlash(true);
-    setTimeout(() => setFlash(false), 900);
+  function cancelEdit() { setDraft({...row}); setEditing(false); setError(""); }
+
+  async function save() {
+    const st = new Date(`${draft.start_date_fmt}T${draft.start_time_fmt}`);
+    const et = draft.end_time_fmt ? new Date(`${draft.end_date_fmt}T${draft.end_time_fmt}`) : null;
+    if (et && et <= st) { setError("End time must be after start time."); return; }
+    setSaving(true); setError("");
+    try {
+      const updated = await editWorkLog(row.id, {
+        deliverable: draft.deliverable,
+        start_time:  `${draft.start_date_fmt}T${draft.start_time_fmt}:00`,
+        end_time:    et ? `${draft.end_date_fmt}T${draft.end_time_fmt}:00` : undefined,
+        remarks:     draft.remarks ?? "",
+      });
+      onSave(row.id, updated);
+      setEditing(false); setFlash(true);
+      setTimeout(() => setFlash(false), 900);
+    } catch(e:any) { setError(e.message); }
+    finally { setSaving(false); }
   }
 
-  const scopedDelivs = deliverables.filter(
-    (d) => d.projectId === draft.projectId,
-  );
-  const delivValid = scopedDelivs.some((d) => d.id === draft.deliverableId);
-  const proj = projMap[draft.projectId];
-
-  const inputStyle: React.CSSProperties = {
-    background: "transparent",
-    border: "1px solid transparent",
-    borderRadius: 6,
-    padding: "4px 6px",
-    fontSize: 12,
-    color: T.t2,
-    width: "100%",
-    outline: "none",
-    fontFamily: "'DM Sans',sans-serif",
-    transition: "all 0.15s",
-  };
-  const selectStyle: React.CSSProperties = {
-    ...inputStyle,
-    cursor: "pointer",
-    appearance: "none" as const,
-  };
-  const focusOn = (e: React.FocusEvent<HTMLElement>) => {
-    e.currentTarget.style.borderColor = T.acMid;
-    e.currentTarget.style.background = T.panel2;
-  };
-  const focusOff = (e: React.FocusEvent<HTMLElement>) => {
-    e.currentTarget.style.borderColor = "transparent";
-    e.currentTarget.style.background = "transparent";
-  };
-
-  const rowBg = flash
-    ? "rgba(16,185,129,0.08)"
-    : dirty
-      ? "rgba(245,158,11,0.04)"
-      : hovered
-        ? T.rowHov
-        : "transparent";
+  const inp: React.CSSProperties = { background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:6, padding:"7px 10px", fontSize:12, color:T.t2, width:"100%", outline:"none", fontFamily:"'DM Sans',sans-serif", boxSizing:"border-box" };
+  const sel: React.CSSProperties = { ...inp, cursor:"pointer", appearance:"none" as const };
+  const bg     = flash ? "rgba(16,185,129,0.08)" : editing ? "rgba(99,102,241,0.06)" : T.panel2;
+  const border = flash ? `1px solid ${T.green}` : editing ? `1px solid ${T.acMid}` : `1px solid ${T.panel2B}`;
 
   return (
-    <tr
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        borderBottom: `1px solid ${T.divider}`,
-        transition: "background 0.15s",
-        background: rowBg,
-      }}
-    >
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <input
-          type="date"
-          value={draft.date}
-          onChange={(e) => patch({ date: e.target.value })}
-          style={{ ...inputStyle, minWidth: 108, colorScheme: "dark" }}
-          onFocus={focusOn}
-          onBlur={focusOff}
-        />
-      </td>
+    <>
+      {showDel && <DeleteModal onConfirm={() => { setShowDel(false); deleteWorkLog(row.id).then(() => onDelete(row.id)).catch(e => setError(e.message)); }} onCancel={() => setShowDel(false)} />}
+      <div style={{ background:bg, border, borderRadius:12, padding:"12px 14px", transition:"all 0.15s" }}>
+        <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:10 }}>
+          {/* Action buttons LEFT */}
+          <div style={{ display:"flex", gap:4, flexShrink:0, paddingTop:2 }}>
+            {editing ? (
+              <>
+                <button onClick={save} disabled={saving} title="Save"
+                  style={{ width:30, height:30, borderRadius:8, border:"none", background:T.greenBg, color:T.green, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <svg width={13} height={13} viewBox="0 0 14 14" fill="none"><path d="M2 7l4 4 6-6" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <button onClick={cancelEdit} title="Cancel"
+                  style={{ width:30, height:30, borderRadius:8, border:"none", background:T.panel2B, color:T.t4, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <svg width={11} height={11} viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"/></svg>
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setEditing(true)} title="Edit"
+                  style={{ width:30, height:30, borderRadius:8, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = T.acLight; (e.currentTarget as HTMLElement).style.color = T.acText; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = T.t5; }}>
+                  <svg width={12} height={12} viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round"/></svg>
+                </button>
+                <button onClick={() => setShowDel(true)} title="Delete"
+                  style={{ width:30, height:30, borderRadius:8, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = T.redBg; (e.currentTarget as HTMLElement).style.color = T.red; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = T.t5; }}>
+                  <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
+                    <path d="M2 4h10M5 4V2.5h4V4M5.5 4v7M8.5 4v7M3 4l.5 7.5a1 1 0 001 .5h5a1 1 0 001-.5L11 4" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
 
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <select
-          value={draft.organisationId}
-          onChange={(e) => patch({ organisationId: e.target.value })}
-          style={selectStyle}
-          onFocus={focusOn}
-          onBlur={focusOff}
-        >
-          {organisations.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      </td>
-
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: proj?.color ?? T.t6,
-              flexShrink: 0,
-            }}
-          />
-          <select
-            value={draft.projectId}
-            onChange={(e) =>
-              patch({ projectId: e.target.value, deliverableId: "" })
-            }
-            style={selectStyle}
-            onFocus={focusOn}
-            onBlur={focusOff}
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </td>
-
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <select
-          value={delivValid ? draft.deliverableId : ""}
-          onChange={(e) => patch({ deliverableId: e.target.value })}
-          style={selectStyle}
-          onFocus={focusOn}
-          onBlur={focusOff}
-        >
-          {!delivValid && <option value="">— select —</option>}
-          {scopedDelivs.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-      </td>
-
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <select
-          value={draft.memberId}
-          onChange={(e) => patch({ memberId: e.target.value })}
-          style={selectStyle}
-          onFocus={focusOn}
-          onBlur={focusOff}
-        >
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
-        </select>
-      </td>
-
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <input
-          type="time"
-          value={draft.startTime}
-          onChange={(e) => patch({ startTime: e.target.value })}
-          style={{ ...inputStyle, colorScheme: "dark" }}
-          onFocus={focusOn}
-          onBlur={focusOff}
-        />
-      </td>
-
-      <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-        <input
-          type="time"
-          value={draft.endTime}
-          onChange={(e) => patch({ endTime: e.target.value })}
-          style={{ ...inputStyle, colorScheme: "dark" }}
-          onFocus={focusOn}
-          onBlur={focusOff}
-        />
-      </td>
-
-      {/* Save + Delete */}
-      <td
-        style={{
-          padding: "8px 10px",
-          verticalAlign: "middle",
-          position: "relative",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <button
-            onClick={save}
-            title="Save"
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              border: "none",
-              background: dirty ? T.greenBg : "transparent",
-              color: T.green,
-              cursor: dirty ? "pointer" : "default",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: dirty ? 1 : 0,
-              transform: dirty ? "scale(1)" : "scale(0.6)",
-              transition: "opacity 0.2s, transform 0.2s",
-              pointerEvents: dirty ? "auto" : "none",
-              flexShrink: 0,
-            }}
-          >
-            <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
-              <path
-                d="M2 7l4 4 6-6"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-
-          <div style={{ position: "relative" }}>
-            <button
-              onClick={() => setShowDel(true)}
-              title="Delete"
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 7,
-                border: "none",
-                background: showDel ? T.redBg : "transparent",
-                color: showDel ? T.red : T.t5,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "all 0.15s",
-                flexShrink: 0,
-              }}
-              onMouseEnter={(e) => {
-                if (!showDel) {
-                  (e.currentTarget as HTMLElement).style.background = T.redBg;
-                  (e.currentTarget as HTMLElement).style.color = T.red;
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!showDel) {
-                  (e.currentTarget as HTMLElement).style.background =
-                    "transparent";
-                  (e.currentTarget as HTMLElement).style.color = T.t5;
-                }
-              }}
-            >
-              <svg width={11} height={11} viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M2 2l8 8M10 2l-8 8"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-            {showDel && (
-              <DeleteConfirm
-                onConfirm={() => {
-                  setShowDel(false);
-                  onDelete(row.id);
-                }}
-                onCancel={() => setShowDel(false)}
-              />
+          <div style={{ flex:1, minWidth:0 }}>
+            {editing ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                  <div>
+                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
+                    <select value={draft.organisation_id} onChange={e => patch({organisation_id:Number(e.target.value)})} style={sel}>
+                      {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
+                    <select value={draft.project_id} onChange={e => handleProjectChange(Number(e.target.value))} style={sel}>
+                      {meta.projects.filter(p => p.organisation_id === draft.organisation_id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
+                  {loadingDelivs
+                    ? <div style={{ fontSize:11, color:T.t5 }}>Loading…</div>
+                    : <select value={rowDelivs.some(d => d.id === draft.deliverable) ? draft.deliverable : ""} onChange={e => patch({deliverable:Number(e.target.value)})} style={sel}>
+                        {!rowDelivs.some(d => d.id === draft.deliverable) && <option value="">— select —</option>}
+                        {rowDelivs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                  }
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize:13, fontWeight:600, color:T.t2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{row.deliverable_name}</div>
+                <div style={{ fontSize:11, color:T.t5, marginTop:2 }}>{row.organisation_name} · {row.project_name}</div>
+              </>
             )}
           </div>
         </div>
-      </td>
-    </tr>
-  );
-}
 
-// ─── Sort header cell ─────────────────────────────────────────────────────────
-type SortField =
-  | "date"
-  | "org"
-  | "project"
-  | "deliverable"
-  | "member"
-  | "startTime"
-  | "endTime";
-type SortDir = "asc" | "desc";
-
-function ThCell({
-  field,
-  w,
-  children,
-  sortField,
-  sortDir,
-  onSort,
-}: {
-  field: SortField;
-  w: number;
-  children: React.ReactNode;
-  sortField: SortField;
-  sortDir: SortDir;
-  onSort: (f: SortField) => void;
-}) {
-  const active = sortField === field;
-  return (
-    <th style={{ width: w, padding: 0 }}>
-      <div
-        onClick={() => onSort(field)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          padding: "10px 10px 5px",
-          fontSize: 10.5,
-          fontWeight: 600,
-          color: active ? T.acText : T.t5,
-          letterSpacing: "0.07em",
-          textTransform: "uppercase",
-          cursor: "pointer",
-          userSelect: "none",
-          whiteSpace: "nowrap",
-          transition: "color 0.15s",
-        }}
-        onMouseEnter={(e) => {
-          if (!active) (e.currentTarget as HTMLElement).style.color = T.t3;
-        }}
-        onMouseLeave={(e) => {
-          if (!active) (e.currentTarget as HTMLElement).style.color = T.t5;
-        }}
-      >
-        {children}
-        <span
-          style={{
-            fontSize: 9,
-            opacity: active ? 1 : 0.3,
-            color: active ? T.acText : T.t3,
-          }}
-        >
-          {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
-        </span>
-      </div>
-    </th>
-  );
-}
-
-// ─── Pin Deliverable section ──────────────────────────────────────────────────
-function PinDeliverableSection({
-  qaIds,
-  onToggle,
-}: {
-  qaIds: Set<string>;
-  onToggle: (deliverableId: string) => void;
-}) {
-  const [selOrg, setSelOrg] = useState("");
-  const [selProj, setSelProj] = useState("");
-  const [selDeliv, setSelDeliv] = useState("");
-
-  const filteredProjects = selOrg
-    ? projects.filter((p) => p.organisationId === selOrg)
-    : projects;
-
-  const filteredDelivs = selProj
-    ? deliverables.filter((d) => d.projectId === selProj)
-    : selOrg
-      ? deliverables.filter((d) => {
-          const p = projMap[d.projectId];
-          return p?.organisationId === selOrg;
-        })
-      : deliverables;
-
-  // What to actually list: filtered deliverables (show all matching, or just selected one)
-  const listDelivs = (
-    selDeliv ? deliverables.filter((d) => d.id === selDeliv) : filteredDelivs
-  ).filter((d) => d.stage != null); // ← exclude finance deliverables that have no stage/status
-
-  const sel: React.CSSProperties = {
-    background: T.panel2,
-    border: `1px solid ${T.panel2B}`,
-    borderRadius: 8,
-    padding: "8px 12px",
-    fontSize: 12.5,
-    color: T.t2,
-    outline: "none",
-    cursor: "pointer",
-    fontFamily: "'DM Sans',sans-serif",
-    appearance: "none" as const,
-    flex: 1,
-    minWidth: 0,
-    transition: "border-color 0.2s",
-  };
-
-  return (
-    <div
-      style={{
-        background: T.panel,
-        border: `1px solid ${T.panelB}`,
-        borderRadius: 16,
-        padding: "22px 24px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-      }}
-    >
-      {/* Heading */}
-      <div>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: T.t2,
-            marginBottom: 2,
-          }}
-        >
-          Pin Deliverables to Quick Access
-        </div>
-        <div style={{ fontSize: 11.5, color: T.t5 }}>
-          Filter by organisation / project, then pin individual deliverables.
-        </div>
-      </div>
-
-      <Divider />
-
-      {/* Selectors row */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {/* Org */}
-        <div style={{ flex: 1, minWidth: 140 }}>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: T.t5,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              marginBottom: 6,
-            }}
-          >
-            Organisation
+        {editing ? (
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+              <div>
+                <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Date</div>
+                <input type="date" value={draft.start_date_fmt} onChange={e => patch({start_date_fmt:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+              </div>
+              <div>
+                <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Time</div>
+                <input type="time" value={draft.start_time_fmt} onChange={e => patch({start_time_fmt:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+              </div>
+              <div>
+                <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>End Date</div>
+                <input type="date" value={draft.end_date_fmt??""} onChange={e => patch({end_date_fmt:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+              </div>
+              <div>
+                <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>End Time</div>
+                <input type="time" value={draft.end_time_fmt??""} onChange={e => patch({end_time_fmt:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Remarks</div>
+              <input value={draft.remarks??""} onChange={e => patch({remarks:e.target.value})} placeholder="Add note…" style={inp} />
+            </div>
+            {error && <div style={{ fontSize:11, color:T.red }}>⚠ {error}</div>}
           </div>
-          <select
-            value={selOrg}
-            onChange={(e) => {
-              setSelOrg(e.target.value);
-              setSelProj("");
-              setSelDeliv("");
-            }}
-            style={sel}
-            onFocus={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
-            }}
-            onBlur={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
-            }}
-          >
-            <option value="">All</option>
-            {organisations.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Project */}
-        <div style={{ flex: 1, minWidth: 140 }}>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: T.t5,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              marginBottom: 6,
-            }}
-          >
-            Project
-          </div>
-          <select
-            value={selProj}
-            onChange={(e) => {
-              setSelProj(e.target.value);
-              setSelDeliv("");
-            }}
-            style={sel}
-            onFocus={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
-            }}
-            onBlur={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
-            }}
-          >
-            <option value="">All</option>
-            {filteredProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Deliverable */}
-        <div style={{ flex: 1, minWidth: 140 }}>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: T.t5,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              marginBottom: 6,
-            }}
-          >
-            Deliverable
-          </div>
-          <select
-            value={selDeliv}
-            onChange={(e) => setSelDeliv(e.target.value)}
-            style={sel}
-            onFocus={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
-            }}
-            onBlur={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
-            }}
-          >
-            <option value="">All</option>
-            {filteredDelivs.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Deliverable list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {listDelivs.length === 0 && (
-          <div style={{ fontSize: 12, color: T.t6, padding: "12px 0" }}>
-            No deliverables match.
+        ) : (
+          <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"center" }}>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start</div>
+              <div style={{ fontSize:12, color:T.t2, fontVariantNumeric:"tabular-nums" }}>{row.start_date_fmt} {row.start_time_fmt}</div>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>End</div>
+              <div style={{ fontSize:12, color:T.t2, fontVariantNumeric:"tabular-nums" }}>
+                {row.end_date_fmt ? `${row.end_date_fmt} ${row.end_time_fmt}` : "—"}
+              </div>
+            </div>
+            {row.remarks && (
+              <div style={{ flex:1, minWidth:80 }}>
+                <div style={{ fontSize:10, color:T.t5, marginBottom:2, textTransform:"uppercase", letterSpacing:"0.05em" }}>Remarks</div>
+                <div style={{ fontSize:12, color:T.t3 }}>{row.remarks}</div>
+              </div>
+            )}
+            <div style={{ marginLeft:"auto", fontSize:11, color:T.t5 }}>{row.employee_name}</div>
           </div>
         )}
-        {listDelivs.map((d) => {
-          const proj = projMap[d.projectId];
-          const org = orgMap[d.organisationId];
-          const pinned = qaIds.has(d.id);
-          return (
-            <div
-              key={d.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "10px 12px",
-                borderRadius: 10,
-                background: pinned ? T.pinBg : T.panel2,
-                border: `1px solid ${pinned ? "rgba(245,158,11,0.3)" : T.panel2B}`,
-                transition: "all 0.15s",
-              }}
-            >
-              {/* Project colour dot */}
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: proj?.color ?? T.t6,
-                  flexShrink: 0,
-                }}
-              />
-
-              {/* Labels */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: T.t2,
-                    fontWeight: 500,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {d.name}
-                </div>
-                <div style={{ fontSize: 11, color: T.t5, marginTop: 1 }}>
-                  {org?.name} · {proj?.name} · Stage {d.stage}
-                </div>
-              </div>
-
-              {/* Status badge */}
-              <span
-                style={{
-                  fontSize: 10,
-                  padding: "2px 8px",
-                  borderRadius: 20,
-                  fontWeight: 600,
-                  background: d.status === "ongoing" ? T.greenBg : T.panel2B,
-                  color: d.status === "ongoing" ? "#10b981" : T.t5,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                  flexShrink: 0,
-                }}
-              >
-                {d.status?.replace("_", " ") ?? "—"}
-              </span>
-
-              {/* Pin toggle */}
-              <button
-                onClick={() => onToggle(d.id)}
-                title={
-                  pinned ? "Unpin from Quick Access" : "Pin to Quick Access"
-                }
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "5px 12px",
-                  borderRadius: 7,
-                  border: "none",
-                  background: pinned ? "rgba(245,158,11,0.2)" : T.panel2B,
-                  color: pinned ? T.pin : T.t4,
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  fontFamily: "'DM Sans',sans-serif",
-                  flexShrink: 0,
-                  transition: "all 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  if (!pinned) {
-                    (e.currentTarget as HTMLElement).style.background = T.pinBg;
-                    (e.currentTarget as HTMLElement).style.color = T.pin;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!pinned) {
-                    (e.currentTarget as HTMLElement).style.background =
-                      T.panel2B;
-                    (e.currentTarget as HTMLElement).style.color = T.t4;
-                  }
-                }}
-              >
-                <svg
-                  width={11}
-                  height={11}
-                  viewBox="0 0 14 14"
-                  fill={pinned ? "currentColor" : "none"}
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    d="M9.5 1.5L12 4 8 6.5V10L6 12V8L2 5.5 4 3Z"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                {pinned ? "Pinned" : "Pin"}
-              </button>
-            </div>
-          );
-        })}
       </div>
+    </>
+  );
+}
+
+// ─── Add worklog form ─────────────────────────────────────────────────────────
+function AddWorklogForm({ meta, initialDeliverables, onAdd }: {
+  meta:MetaData; initialDeliverables:DeliverableOption[]; onAdd:(w:WorkLogEntry)=>void;
+}) {
+  const today    = new Date();
+  const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+  const [open,   setOpen]   = useState(false);
+  const [draft,  setDraft]  = useState({ start_date:todayStr, start_time:"", end_date:todayStr, end_time:"", organisation_id:meta.organisations[0]?.id??0, project_id:0, deliverable:0, remarks:"" });
+  const [saving,        setSaving]        = useState(false);
+  const [deliverables,  setDeliverables]  = useState<DeliverableOption[]>(initialDeliverables);
+  const [loadingDelivs, setLoadingDelivs] = useState(false);
+  const [error,         setError]         = useState("");
+
+  function patch(p: Partial<typeof draft>) { setDraft(d => ({...d, ...p})); }
+
+  async function handleProjectChange(projId: number) {
+    patch({ project_id:projId, deliverable:0 });
+    setLoadingDelivs(true);
+    try { setDeliverables(await fetchDeliverablesByProject(projId)); }
+    finally { setLoadingDelivs(false); }
+  }
+
+  async function handleAdd() {
+    if (!draft.deliverable || !draft.start_time) { setError("Please select a deliverable and start time."); return; }
+    if (draft.end_time) {
+      const st = new Date(`${draft.start_date}T${draft.start_time}`);
+      const et = new Date(`${draft.end_date}T${draft.end_time}`);
+      if (et <= st) { setError("End time must be after start time."); return; }
+    }
+    setSaving(true); setError("");
+    try {
+      const created = await createWorkLog({
+        deliverable: draft.deliverable,
+        start_time:  `${draft.start_date}T${draft.start_time}:00`,
+        end_time:    draft.end_time ? `${draft.end_date}T${draft.end_time}:00` : undefined,
+        remarks:     draft.remarks || undefined,
+      });
+      onAdd(created);
+      setDraft({ start_date:todayStr, start_time:"", end_date:todayStr, end_time:"", organisation_id:meta.organisations[0]?.id??0, project_id:0, deliverable:0, remarks:"" });
+      setDeliverables(initialDeliverables);
+      setOpen(false);
+    } catch(e:any) { setError(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const filteredProjects = meta.projects.filter(p => p.organisation_id === draft.organisation_id);
+  const inp: React.CSSProperties = { background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:7, padding:"8px 10px", fontSize:12, color:T.t2, width:"100%", outline:"none", fontFamily:"'DM Sans',sans-serif", boxSizing:"border-box" };
+  const sel: React.CSSProperties = { ...inp, cursor:"pointer", appearance:"none" as const };
+
+  return (
+    <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:14, overflow:"hidden" }}>
+      <button onClick={() => setOpen(o => !o)}
+        style={{ width:"100%", padding:"13px 16px", background:"transparent", border:"none", color:T.acText, fontSize:13, fontWeight:600, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:8, fontFamily:"'DM Sans',sans-serif" }}>
+        <svg width={14} height={14} viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth={2} strokeLinecap="round"/></svg>
+        Add Worklog
+        <svg width={10} height={10} viewBox="0 0 10 10" fill="none" style={{ marginLeft:"auto", transform:open?"rotate(180deg)":"none", transition:"transform 0.2s" }}>
+          <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+      {open && (
+        <div style={{ padding:"0 16px 16px", display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
+              <select value={draft.organisation_id} onChange={e => patch({organisation_id:Number(e.target.value),project_id:0,deliverable:0})} style={sel}>
+                <option value={0}>— select —</option>
+                {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
+              <select value={draft.project_id} onChange={e => handleProjectChange(Number(e.target.value))} style={sel}>
+                <option value={0}>— select —</option>
+                {filteredProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
+            {loadingDelivs
+              ? <div style={{ fontSize:12, color:T.t5 }}>Loading…</div>
+              : <select value={draft.deliverable} onChange={e => patch({deliverable:Number(e.target.value)})} style={sel}>
+                  <option value={0}>— select —</option>
+                  {deliverables.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+            }
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Date</div>
+              <input type="date" value={draft.start_date} onChange={e => patch({start_date:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Time</div>
+              <input type="time" value={draft.start_time} onChange={e => patch({start_time:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>End Date</div>
+              <input type="date" value={draft.end_date} onChange={e => patch({end_date:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+            </div>
+            <div>
+              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>End Time</div>
+              <input type="time" value={draft.end_time} onChange={e => patch({end_time:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Remarks</div>
+            <input value={draft.remarks} onChange={e => patch({remarks:e.target.value})} placeholder="Optional…" style={inp} />
+          </div>
+          {error && <div style={{ fontSize:12, color:T.red, padding:"6px 10px", background:T.redBg, borderRadius:7 }}>⚠ {error}</div>}
+          <button onClick={handleAdd} disabled={saving}
+            style={{ padding:"10px 0", borderRadius:9, border:"none", background:T.ac, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", opacity:saving?0.6:1, marginTop:2 }}>
+            {saving ? "Saving…" : "Add Worklog"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Column filter inputs ─────────────────────────────────────────────────────
-interface ColFilters {
-  date: string;
-  org: string;
-  project: string;
-  deliverable: string;
-  member: string;
-  startTime: string;
-  endTime: string;
+// ─── Pin section with paginated deliverable list ──────────────────────────────
+const PIN_PAGE_SIZE = 10;
+
+function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
+  meta:MetaData; pinnedIds:Set<number>; onToggle:(id:number)=>void;
+}) {
+  const [selOrg,       setSelOrg]       = useState(0);
+  const [selProj,      setSelProj]      = useState(0);
+  const [deliverables, setDeliverables] = useState<DeliverableOption[]>([]);
+  const [loading,      setLoading]      = useState(false);
+  const [loaded,       setLoaded]       = useState(false);
+  const [page,         setPage]         = useState(1);
+  const [search,       setSearch]       = useState("");
+
+  async function handleOrgChange(orgId: number) {
+    setSelOrg(orgId); setSelProj(0); setDeliverables([]); setPage(1); setSearch("");
+    if (!orgId) { setLoaded(false); return; }
+    setLoading(true);
+    try { setDeliverables(await fetchDeliverablesByProject()); }
+    finally { setLoading(false); setLoaded(true); }
+  }
+
+  async function handleProjChange(projId: number) {
+    setSelProj(projId); setPage(1); setSearch(""); setLoading(true);
+    try { setDeliverables(await fetchDeliverablesByProject(projId || undefined)); }
+    finally { setLoading(false); setLoaded(true); }
+  }
+
+  const filteredProjects = selOrg ? meta.projects.filter(p => p.organisation_id === selOrg) : meta.projects;
+
+  const filteredDelivs = useMemo(() => {
+    let list = selOrg
+      ? deliverables.filter(d => {
+          const p = meta.projects.find(p => p.id === d.project_id);
+          return (!selOrg || p?.organisation_id === selOrg) && (!selProj || d.project_id === selProj);
+        })
+      : [];
+    if (search.trim()) {
+      list = list.filter(d => d.name.toLowerCase().includes(search.toLowerCase()));
+    }
+    return list;
+  }, [deliverables, selOrg, selProj, search, meta.projects]);
+
+  const totalPages  = Math.max(1, Math.ceil(filteredDelivs.length / PIN_PAGE_SIZE));
+  const pagedDelivs = filteredDelivs.slice((page-1)*PIN_PAGE_SIZE, page*PIN_PAGE_SIZE);
+
+  const sel: React.CSSProperties = {
+    background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:8,
+    padding:"8px 10px", fontSize:12, color:T.t2, outline:"none", cursor:"pointer",
+    fontFamily:"'DM Sans',sans-serif", appearance:"none" as const, width:"100%",
+    transition:"border-color 0.2s",
+  };
+  const inp: React.CSSProperties = {
+    background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:8,
+    padding:"8px 10px", fontSize:12, color:T.t2, outline:"none",
+    fontFamily:"'DM Sans',sans-serif", width:"100%", boxSizing:"border-box" as const,
+  };
+
+  return (
+    <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:16, padding:"20px", display:"flex", flexDirection:"column", gap:14 }}>
+      <div>
+        <div style={{ fontSize:13, fontWeight:600, color:T.t2, marginBottom:2 }}>Pin Deliverables to Quick Access</div>
+        <div style={{ fontSize:11.5, color:T.t5 }}>Select an organisation to browse and pin deliverables.</div>
+      </div>
+      <Divider />
+
+      {/* Filters */}
+      <div style={{ display:"grid", gridTemplateColumns:selOrg ? "1fr 1fr" : "1fr", gap:10 }}>
+        <div>
+          <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Organisation</div>
+          <select value={selOrg} onChange={e => handleOrgChange(Number(e.target.value))} style={sel}>
+            <option value={0}>— select org —</option>
+            {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+        {selOrg > 0 && (
+          <div>
+            <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Project</div>
+            <select value={selProj} onChange={e => handleProjChange(Number(e.target.value))} style={sel}>
+              <option value={0}>All projects</option>
+              {filteredProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Loading bar */}
+      {loading && (
+        <div style={{ height:3, background:T.panel2B, borderRadius:2, overflow:"hidden" }}>
+          <div style={{ height:"100%", background:`linear-gradient(90deg,${T.ac},#a78bfa)`, borderRadius:2, animation:"pulse 1s ease-in-out infinite alternate" }} />
+          <style>{`@keyframes pulse{from{width:20%;margin-left:0}to{width:60%;margin-left:30%}}`}</style>
+        </div>
+      )}
+
+      {!selOrg && (
+        <div style={{ fontSize:12, color:T.t6 }}>Select an organisation to see deliverables.</div>
+      )}
+
+      {selOrg > 0 && !loading && loaded && (
+        <>
+          {/* Search */}
+          <input
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search deliverables…"
+            style={inp}
+          />
+
+          {/* Count + pagination info */}
+          {filteredDelivs.length > 0 && (
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:6 }}>
+              <span style={{ fontSize:11, color:T.t5 }}>
+                {filteredDelivs.length} deliverable{filteredDelivs.length !== 1 ? "s" : ""}
+                {totalPages > 1 && ` · page ${page} of ${totalPages}`}
+              </span>
+              {totalPages > 1 && (
+                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                  <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page===1}
+                    style={{ width:26, height:26, borderRadius:6, border:`1px solid ${T.panel2B}`, background:T.panel2, color:page===1?T.t6:T.t3, cursor:page===1?"default":"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+                  {Array.from({length:totalPages},(_,i)=>i+1)
+                    .filter(p => p===1 || p===totalPages || Math.abs(p-page)<=1)
+                    .reduce<(number|"…")[]>((acc,p,i,arr) => {
+                      if (i>0 && (p as number)-(arr[i-1] as number)>1) acc.push("…");
+                      acc.push(p); return acc;
+                    },[])
+                    .map((p,i) => p==="…"
+                      ? <span key={`e${i}`} style={{ fontSize:11, color:T.t5, padding:"0 2px" }}>…</span>
+                      : <button key={p} onClick={() => setPage(p as number)}
+                          style={{ width:26, height:26, borderRadius:6, border:`1px solid ${page===p?T.acMid:T.panel2B}`, background:page===p?T.acLight:T.panel2, color:page===p?T.acText:T.t3, cursor:"pointer", fontSize:11, fontWeight:page===p?600:400 }}>
+                          {p}
+                        </button>
+                    )
+                  }
+                  <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page===totalPages}
+                    style={{ width:26, height:26, borderRadius:6, border:`1px solid ${T.panel2B}`, background:T.panel2, color:page===totalPages?T.t6:T.t3, cursor:page===totalPages?"default":"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Deliverable list — paginated */}
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {pagedDelivs.length === 0 && (
+              <div style={{ fontSize:12, color:T.t6, padding:"8px 0" }}>
+                {search ? "No deliverables match your search." : "No deliverables found."}
+              </div>
+            )}
+            {pagedDelivs.map(d => {
+              const pinned = pinnedIds.has(d.id);
+              return (
+                <div key={d.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderRadius:10, background:pinned?T.pinBg:T.panel2, border:`1px solid ${pinned?"rgba(245,158,11,0.3)":T.panel2B}`, transition:"all 0.15s", flexWrap:"wrap" }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, color:T.t2, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.name}</div>
+                    <div style={{ fontSize:10, color:T.t5, marginTop:2 }}>{d.org_name} · {d.project_name} · Stage {d.stage}</div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                    <span style={{ fontSize:10, padding:"2px 6px", borderRadius:20, fontWeight:600, background:d.status==="ongoing"?T.greenBg:T.panel2B, color:d.status==="ongoing"?T.green:T.t5, textTransform:"uppercase" }}>
+                      {d.status?.replace("_"," ") ?? "—"}
+                    </span>
+                    <button onClick={() => onToggle(d.id)}
+                      style={{ display:"flex", alignItems:"center", gap:4, padding:"5px 10px", borderRadius:7, border:"none", background:pinned?"rgba(245,158,11,0.2)":T.panel2B, color:pinned?T.pin:T.t4, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s", whiteSpace:"nowrap" }}
+                      onMouseEnter={e => { if (!pinned) { (e.currentTarget as HTMLElement).style.background = T.pinBg; (e.currentTarget as HTMLElement).style.color = T.pin; } }}
+                      onMouseLeave={e => { if (!pinned) { (e.currentTarget as HTMLElement).style.background = T.panel2B; (e.currentTarget as HTMLElement).style.color = T.t4; } }}>
+                      <svg width={10} height={10} viewBox="0 0 14 14" fill={pinned?"currentColor":"none"} stroke="currentColor" strokeWidth={1.5}><path d="M9.5 1.5L12 4 8 6.5V10L6 12V8L2 5.5 4 3Z" strokeLinejoin="round"/></svg>
+                      {pinned ? "Pinned" : "Pin"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Bottom pagination repeat for long lists */}
+          {totalPages > 1 && (
+            <div style={{ display:"flex", gap:4, alignItems:"center", justifyContent:"center", paddingTop:4 }}>
+              <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page===1}
+                style={{ padding:"5px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:page===1?T.t6:T.t3, cursor:page===1?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>‹ Prev</button>
+              <span style={{ fontSize:12, color:T.t5 }}>{page} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page===totalPages}
+                style={{ padding:"5px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:page===totalPages?T.t6:T.t3, cursor:page===totalPages?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>Next ›</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function WorklogPage() {
-  const containerRef = useRef<HTMLDivElement>(null!);
-  const cw = useContainerWidth(containerRef);
-  const isMobile = cw < 720;
+  const w        = useWindowWidth();
+  const isMobile = w < 700;
+  const today    = new Date();
 
-  // Calendar
-  const [calYear, setCalYear] = useState(2025);
-  const [calMonth, setCalMonth] = useState(2);
+  const [calYear,  setCalYear]  = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth());
   const [selDates, setSelDates] = useState<Set<string>>(new Set());
-  const [selMonth, setSelMonth] = useState<number | null>(null);
-  const [selYear, setSelYear] = useState<number | null>(null);
+  const [selMonth, setSelMonth] = useState<number|null>(null);
+  const [selYear,  setSelYear]  = useState<number|null>(null);
 
-  // Rows
-  const [rows, setRows] = useState<WorklogEntry[]>(worklogEntries);
+  const [rows,                setRows]                = useState<WorkLogEntry[]>([]);
+  const [totalPages,          setTotalPages]          = useState(1);
+  const [totalCount,          setTotalCount]          = useState(0);
+  const [currentPage,         setCurrentPage]         = useState(1);
+  const [meta,                setMeta]                = useState<MetaData>({organisations:[],projects:[],members:[]});
+  const [initialDeliverables, setInitialDeliverables] = useState<DeliverableOption[]>([]);
+  const [pinnedIds,           setPinnedIds]           = useState<Set<number>>(new Set());
+  const [loading,             setLoading]             = useState(true);
+  const [rowsLoading,         setRowsLoading]         = useState(false);
+  const [error,               setError]               = useState<string|null>(null);
 
-  // Quick Access — local mirror
-  const [qaIds, setQaIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        quickAccessItems
-          .filter((q) => q.userId === currentUser.id)
-          .map((q) => q.deliverableId),
-      ),
-  );
+  const dateRangeRef = useRef<{from?:string;to?:string}>({});
 
-  // Column filters (in-table sub-header)
-  const [filters, setFilters] = useState<ColFilters>({
-    date: "",
-    org: "",
-    project: "",
-    deliverable: "",
-    member: "",
-    startTime: "",
-    endTime: "",
-  });
-
-  // Sort
-  const [sortField, setSortField] = useState<SortField>("date");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  const activeDates = useMemo(() => new Set(rows.map((r) => r.date)), [rows]);
-
-  const calFiltered = useMemo(
-    () =>
-      rows.filter((r) => {
-        const d = new Date(r.date);
-        if (selDates.size > 0 && !selDates.has(r.date)) return false;
-        if (selMonth !== null && d.getMonth() !== selMonth) return false;
-        if (selYear !== null && d.getFullYear() !== selYear) return false;
-        return true;
-      }),
-    [rows, selDates, selMonth, selYear],
-  );
-
-  const displayRows = useMemo(() => {
-    const list = calFiltered.filter((r) => {
-      if (filters.date && !r.date.includes(filters.date)) return false;
-      if (filters.org && r.organisationId !== filters.org) return false;
-      if (filters.project && r.projectId !== filters.project) return false;
-      if (filters.deliverable) {
-        const n = delivMap[r.deliverableId]?.name ?? "";
-        if (!n.toLowerCase().includes(filters.deliverable.toLowerCase()))
-          return false;
-      }
-      if (filters.member && r.memberId !== filters.member) return false;
-      if (filters.startTime && !r.startTime.startsWith(filters.startTime))
-        return false;
-      if (filters.endTime && !r.endTime.startsWith(filters.endTime))
-        return false;
-      return true;
-    });
-    list.sort((a, b) => {
-      let av = "",
-        bv = "";
-      switch (sortField) {
-        case "date":
-          av = a.date;
-          bv = b.date;
-          break;
-        case "org":
-          av = orgMap[a.organisationId]?.name ?? "";
-          bv = orgMap[b.organisationId]?.name ?? "";
-          break;
-        case "project":
-          av = projMap[a.projectId]?.name ?? "";
-          bv = projMap[b.projectId]?.name ?? "";
-          break;
-        case "deliverable":
-          av = delivMap[a.deliverableId]?.name ?? "";
-          bv = delivMap[b.deliverableId]?.name ?? "";
-          break;
-        case "member":
-          av = memberMap[a.memberId]?.name ?? "";
-          bv = memberMap[b.memberId]?.name ?? "";
-          break;
-        case "startTime":
-          av = a.startTime;
-          bv = b.startTime;
-          break;
-        case "endTime":
-          av = a.endTime;
-          bv = b.endTime;
-          break;
-      }
-      return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
-    });
-    return list;
-  }, [calFiltered, filters, sortField, sortDir]);
-
-  function handleSort(f: SortField) {
-    if (sortField === f) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortField(f);
-      setSortDir("asc");
-    }
-  }
-  function saveRow(id: string, data: WorklogEntry) {
-    setRows((prev) => prev.map((r) => (r.id === id ? data : r)));
-  }
-  function deleteRow(id: string) {
-    setRows((prev) => prev.filter((r) => r.id !== id));
+  async function loadRows(params:{from?:string;to?:string;page?:number}) {
+    dateRangeRef.current = {from:params.from, to:params.to};
+    setRowsLoading(true);
+    try {
+      const data = await fetchMyWorkLogs(params);
+      setRows(data.results); setTotalPages(data.pages);
+      setTotalCount(data.count); setCurrentPage(data.page);
+    } catch(e:any) { setError(e.message); }
+    finally { setRowsLoading(false); }
   }
 
-  function togglePin(deliverableId: string) {
-    const pinned = qaIds.has(deliverableId);
-    if (pinned) {
-      removeQuickAccess(currentUser.id, deliverableId);
-      setQaIds((prev) => {
-        const n = new Set(prev);
-        n.delete(deliverableId);
-        return n;
-      });
+  useEffect(() => {
+    const {from, to} = currentWeekRange();
+    fetchMyWorkLogs({from, to, page:1}).then(async data => {
+      setRows(data.results); setTotalPages(data.pages);
+      setTotalCount(data.count); setCurrentPage(1);
+      setLoading(false); dateRangeRef.current = {from, to};
+      setInitialDeliverables(await fetchInitialDeliverables(data.results[0]??null));
+    }).catch(e => { setError(e.message); setLoading(false); });
+    Promise.all([fetchMeta(), fetchMyPinnedIds()])
+      .then(([m, pins]) => { setMeta(m); setPinnedIds(new Set(pins)); })
+      .catch(e => setError(e.message));
+  }, []);
+
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    let from:string, to:string;
+    if (selDates.size > 0) {
+      const s = Array.from(selDates).sort(); from = s[0]; to = s[s.length-1];
     } else {
-      addQuickAccess(currentUser.id, deliverableId);
-      setQaIds((prev) => new Set([...prev, deliverableId]));
+      const year = selYear ?? today.getFullYear(), month = selMonth ?? today.getMonth();
+      ({from, to} = monthRange(year, month));
     }
+    loadRows({from, to, page:1});
+  }, [selDates, selMonth, selYear]);
+
+  function goToPage(p:number) { loadRows({...dateRangeRef.current, page:p}); }
+
+  const activeDates  = useMemo(() => new Set(rows.map(r => r.end_date_fmt ?? r.start_date_fmt).filter(Boolean) as string[]), [rows]);
+  const totalMinutes = useMemo(() => rows.reduce((s,r) => {
+    if (!r.start_time || !r.end_time) return s;
+    return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
+  }, 0), [rows]);
+  const availableYears = useMemo(() => Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort(), [rows]);
+  const hasFilter      = selDates.size > 0 || selMonth !== null || selYear !== null;
+
+  function saveRow(id:number, data:WorkLogEntry) { setRows(p => p.map(r => r.id===id ? data : r)); }
+  function deleteRow(id:number)                  { setRows(p => p.filter(r => r.id!==id)); setTotalCount(c => c-1); }
+  function addRow(w:WorkLogEntry)                { setRows(p => [w, ...p.slice(0,9)]); setTotalCount(c => c+1); }
+
+  async function togglePin(deliverableId:number) {
+    const pinned = pinnedIds.has(deliverableId);
+    try {
+      if (pinned) { await unpinDeliverable(deliverableId); setPinnedIds(p => { const n=new Set(p); n.delete(deliverableId); return n; }); }
+      else        { await pinDeliverable(deliverableId);   setPinnedIds(p => new Set([...p, deliverableId])); }
+    } catch(e:any) { alert(e.message); }
   }
 
-  function toggleDate(iso: string) {
-    setSelDates((p) => {
-      const n = new Set(p);
-      n.has(iso) ? n.delete(iso) : n.add(iso);
-      return n;
-    });
-  }
-  function clearAll() {
-    setSelDates(new Set());
-    setSelMonth(null);
-    setSelYear(null);
-    setFilters({
-      date: "",
-      org: "",
-      project: "",
-      deliverable: "",
-      member: "",
-      startTime: "",
-      endTime: "",
-    });
-  }
+  function toggleDate(iso:string) { setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; }); }
   function prevMonth() {
-    calMonth === 0
-      ? (setCalMonth(11), setCalYear((y) => y - 1))
-      : setCalMonth((m) => m - 1);
+    const m=calMonth===0?11:calMonth-1, y=calMonth===0?calYear-1:calYear;
+    setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
   }
   function nextMonth() {
-    calMonth === 11
-      ? (setCalMonth(0), setCalYear((y) => y + 1))
-      : setCalMonth((m) => m + 1);
+    const m=calMonth===11?0:calMonth+1, y=calMonth===11?calYear+1:calYear;
+    setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
   }
+  function clearAll() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
 
-  const availableYears = useMemo(
-    () =>
-      Array.from(
-        new Set(rows.map((r) => new Date(r.date).getFullYear())),
-      ).sort(),
-    [rows],
-  );
-
-  const totalMinutes = useMemo(
-    () =>
-      displayRows.reduce((s, r) => {
-        const [sh, sm] = r.startTime.split(":").map(Number);
-        const [eh, em] = r.endTime.split(":").map(Number);
-        return s + (eh * 60 + em - (sh * 60 + sm));
-      }, 0),
-    [displayRows],
-  );
-
-  const hasFilter =
-    selDates.size > 0 ||
-    selMonth !== null ||
-    selYear !== null ||
-    Object.values(filters).some((v) => v !== "");
-
-  const orgOpts = organisations.map((o) => ({ label: o.name, value: o.id }));
-  const projOpts = projects.map((p) => ({ label: p.name, value: p.id }));
-  const memOpts = members.map((m) => ({ label: m.name, value: m.id }));
-
-  const fi: React.CSSProperties = {
-    width: "100%",
-    background: "rgba(255,255,255,0.04)",
-    border: `1px solid ${T.divider}`,
-    borderRadius: 6,
-    padding: "5px 8px",
-    fontSize: 11,
-    color: T.t2,
-    outline: "none",
-    fontFamily: "'DM Sans',sans-serif",
-  };
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        minHeight: "100vh",
-        background: T.bg,
-        color: T.t2,
-        fontFamily: "'DM Sans','Sora',sans-serif",
-        padding: isMobile ? "20px 16px 48px" : "32px 32px 56px",
-      }}
-    >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Sora:wght@400;600;700&display=swap');
-        * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
-        input[type=date]::-webkit-calendar-picker-indicator,
-        input[type=time]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
-        select option { background: #1a1d2e; color: #f1f5f9; }
-      `}</style>
-
-      {/* Header */}
-      <div style={{ marginBottom: isMobile ? 18 : 26 }}>
-        <h1
-          style={{
-            fontSize: isMobile ? 22 : 26,
-            fontWeight: 700,
-            fontFamily: "'Sora',sans-serif",
-            letterSpacing: "-0.03em",
-            color: T.t1,
-            margin: 0,
-          }}
-        >
-          Worklog
-        </h1>
-        <p style={{ color: T.t5, fontSize: 13, margin: "4px 0 0" }}>
-          Session tracker &amp; time log
-        </p>
+  if (loading) return (
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, fontFamily:"'DM Sans',sans-serif" }}>
+      <div style={{ width:220, height:3, background:T.panel2B, borderRadius:2, overflow:"hidden" }}>
+        <div style={{ height:"100%", background:`linear-gradient(90deg,${T.ac},#a78bfa)`, animation:"initload 1.2s ease-in-out infinite alternate" }} />
       </div>
+      <span style={{ fontSize:12, color:T.t5 }}>Loading worklogs…</span>
+      <style>{`@keyframes initload{from{width:15%;margin-left:0}to{width:60%;margin-left:35%}}`}</style>
+    </div>
+  );
+  if (error) return (
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", color:T.red, fontFamily:"'DM Sans',sans-serif" }}>{error}</div>
+  );
 
-      {/* Two-column layout: calendar left, table right */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "260px 1fr",
-          gap: isMobile ? 16 : 20,
-          alignItems: "start",
-          marginBottom: 20,
-        }}
-      >
-        {/* ── LEFT: Calendar panel ── */}
-        <div
-          style={{
-            background: T.panel,
-            border: `1px solid ${T.panelB}`,
-            borderRadius: 16,
-            padding: isMobile ? "18px 16px" : "22px 20px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-          }}
-        >
-          {/* Month nav */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <button
-              onClick={prevMonth}
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                background: T.panel2,
-                border: `1px solid ${T.panel2B}`,
-                color: T.t4,
-                cursor: "pointer",
-                fontSize: 15,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              ‹
+  // ── Calendar panel (shared between mobile/desktop) ────────────────────────
+  const CalendarPanel = (
+    <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:16, padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <button onClick={prevMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+        <span style={{ fontSize:12, fontWeight:600, color:T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
+        <button onClick={nextMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+      </div>
+      <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
+      {selDates.size > 0 && (
+        <div style={{ textAlign:"center", fontSize:11, color:T.acText }}>
+          {selDates.size} date{selDates.size>1?"s":""} selected &nbsp;
+          <button onClick={() => setSelDates(new Set())} style={{ background:"none", border:"none", color:T.red, cursor:"pointer", fontSize:11 }}>✕</button>
+        </div>
+      )}
+      <Divider />
+      <div>
+        <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Month</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3 }}>
+          {MONTHS.map((m,i) => (
+            <button key={m} onClick={() => { const n=selMonth===i?null:i; setSelMonth(n); if(n!==null){setCalMonth(n);setSelDates(new Set());} }}
+              style={{ background:selMonth===i?T.acLight:T.panel2, border:`1px solid ${selMonth===i?T.acMid:T.panel2B}`, borderRadius:5, color:selMonth===i?T.acText:T.t4, fontSize:9, padding:"4px 0", cursor:"pointer", textTransform:"uppercase", fontWeight:selMonth===i?600:400, transition:"all 0.15s" }}>
+              {m.slice(0,3)}
             </button>
-            <span style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
-              {MONTHS[calMonth]} {calYear}
-            </span>
-            <button
-              onClick={nextMonth}
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                background: T.panel2,
-                border: `1px solid ${T.panel2B}`,
-                color: T.t4,
-                cursor: "pointer",
-                fontSize: 15,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              ›
-            </button>
-          </div>
-
-          <CalGrid
-            year={calYear}
-            month={calMonth}
-            activeDates={activeDates}
-            selDates={selDates}
-            onToggle={toggleDate}
-          />
-
-          {selDates.size > 0 && (
-            <div style={{ textAlign: "center", fontSize: 11, color: T.acText }}>
-              {selDates.size} date{selDates.size > 1 ? "s" : ""} selected &nbsp;
-              <button
-                onClick={() => setSelDates(new Set())}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: T.red,
-                  cursor: "pointer",
-                  fontSize: 11,
-                }}
-              >
-                ✕
+          ))}
+        </div>
+      </div>
+      {availableYears.length > 0 && (
+        <div>
+          <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Year</div>
+          <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+            {availableYears.map(y => (
+              <button key={y} onClick={() => { const n=selYear===y?null:y; setSelYear(n); if(n!==null){setCalYear(n);setSelDates(new Set());} }}
+                style={{ background:selYear===y?T.acLight:T.panel2, border:`1px solid ${selYear===y?T.acMid:T.panel2B}`, borderRadius:5, color:selYear===y?T.acText:T.t4, fontSize:9, padding:"4px 8px", cursor:"pointer", fontWeight:selYear===y?600:400, transition:"all 0.15s" }}>
+                {y}
               </button>
-            </div>
-          )}
-
-          <Divider />
-
-          {/* Month pills */}
-          <div>
-            <div
-              style={{
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: T.t5,
-                letterSpacing: "0.07em",
-                textTransform: "uppercase",
-                marginBottom: 8,
-              }}
-            >
-              Filter by Month
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4,1fr)",
-                gap: 4,
-              }}
-            >
-              {MONTHS.map((m, i) => (
-                <button
-                  key={m}
-                  onClick={() => setSelMonth(selMonth === i ? null : i)}
-                  style={{
-                    background: selMonth === i ? T.acLight : T.panel2,
-                    border: `1px solid ${selMonth === i ? T.acMid : T.panel2B}`,
-                    borderRadius: 6,
-                    color: selMonth === i ? T.acText : T.t4,
-                    fontSize: 10,
-                    padding: "5px 0",
-                    cursor: "pointer",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                    fontWeight: selMonth === i ? 600 : 400,
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {m.slice(0, 3)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Year pills */}
-          <div>
-            <div
-              style={{
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: T.t5,
-                letterSpacing: "0.07em",
-                textTransform: "uppercase",
-                marginBottom: 8,
-              }}
-            >
-              Filter by Year
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {availableYears.map((y) => (
-                <button
-                  key={y}
-                  onClick={() => setSelYear(selYear === y ? null : y)}
-                  style={{
-                    background: selYear === y ? T.acLight : T.panel2,
-                    border: `1px solid ${selYear === y ? T.acMid : T.panel2B}`,
-                    borderRadius: 6,
-                    color: selYear === y ? T.acText : T.t4,
-                    fontSize: 10,
-                    padding: "5px 10px",
-                    cursor: "pointer",
-                    fontWeight: selYear === y ? 600 : 400,
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {y}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* Stats */}
-          <div>
-            <div
-              style={{
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: T.t5,
-                letterSpacing: "0.07em",
-                textTransform: "uppercase",
-                marginBottom: 10,
-              }}
-            >
-              Current View
-            </div>
-            {[
-              { label: "Entries", val: String(displayRows.length) },
-              {
-                label: "Total Hours",
-                val: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
-              },
-              { label: "Pinned", val: String(qaIds.size) },
-            ].map(({ label, val }) => (
-              <div
-                key={label}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 8,
-                }}
-              >
-                <span style={{ fontSize: 12, color: T.t4 }}>{label}</span>
-                <span
-                  style={{ fontSize: 13, color: T.acText, fontWeight: 600 }}
-                >
-                  {val}
-                </span>
-              </div>
             ))}
           </div>
-
-          {hasFilter && (
-            <>
-              <Divider />
-              <button
-                onClick={clearAll}
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${T.panel2B}`,
-                  borderRadius: 8,
-                  padding: "7px 0",
-                  fontSize: 12,
-                  color: T.t4,
-                  cursor: "pointer",
-                  width: "100%",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = T.t2;
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.color = T.t4;
-                }}
-              >
-                ✕ &nbsp;Clear all filters
-              </button>
-            </>
-          )}
         </div>
-
-        {/* ── RIGHT: Table ── */}
-        <div
-          style={{
-            background: T.panel,
-            border: `1px solid ${T.panelB}`,
-            borderRadius: 16,
-            overflow: "hidden",
-          }}
-        >
-          <div style={{ overflowX: "auto" }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 820,
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    background: "rgba(255,255,255,0.03)",
-                    borderBottom: `1px solid ${T.panel2B}`,
-                  }}
-                >
-                  <ThCell
-                    field="date"
-                    w={122}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    Date
-                  </ThCell>
-                  <ThCell
-                    field="org"
-                    w={148}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    Organisation
-                  </ThCell>
-                  <ThCell
-                    field="project"
-                    w={148}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    Project
-                  </ThCell>
-                  <ThCell
-                    field="deliverable"
-                    w={155}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    Deliverable
-                  </ThCell>
-                  <ThCell
-                    field="member"
-                    w={138}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    Member
-                  </ThCell>
-                  <ThCell
-                    field="startTime"
-                    w={88}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    Start
-                  </ThCell>
-                  <ThCell
-                    field="endTime"
-                    w={88}
-                    sortField={sortField}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  >
-                    End
-                  </ThCell>
-                  <th style={{ width: 72, padding: "10px 10px 5px" }}>
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        color: T.t5,
-                        letterSpacing: "0.07em",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Actions
-                    </span>
-                  </th>
-                </tr>
-                {/* Column filter sub-row */}
-                <tr
-                  style={{
-                    background: "rgba(255,255,255,0.02)",
-                    borderBottom: `1px solid ${T.divider}`,
-                  }}
-                >
-                  {(
-                    [
-                      <input
-                        key="d"
-                        style={fi}
-                        placeholder="YYYY-MM"
-                        value={filters.date}
-                        onChange={(e) =>
-                          setFilters((f) => ({ ...f, date: e.target.value }))
-                        }
-                      />,
-                      <select
-                        key="o"
-                        style={fi}
-                        value={filters.org}
-                        onChange={(e) =>
-                          setFilters((f) => ({ ...f, org: e.target.value }))
-                        }
-                      >
-                        <option value="">All</option>
-                        {orgOpts.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>,
-                      <select
-                        key="p"
-                        style={fi}
-                        value={filters.project}
-                        onChange={(e) =>
-                          setFilters((f) => ({ ...f, project: e.target.value }))
-                        }
-                      >
-                        <option value="">All</option>
-                        {projOpts.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>,
-                      <input
-                        key="dv"
-                        style={fi}
-                        placeholder="Search…"
-                        value={filters.deliverable}
-                        onChange={(e) =>
-                          setFilters((f) => ({
-                            ...f,
-                            deliverable: e.target.value,
-                          }))
-                        }
-                      />,
-                      <select
-                        key="m"
-                        style={fi}
-                        value={filters.member}
-                        onChange={(e) =>
-                          setFilters((f) => ({ ...f, member: e.target.value }))
-                        }
-                      >
-                        <option value="">All</option>
-                        {memOpts.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>,
-                      <input
-                        key="st"
-                        style={fi}
-                        placeholder="HH"
-                        value={filters.startTime}
-                        onChange={(e) =>
-                          setFilters((f) => ({
-                            ...f,
-                            startTime: e.target.value,
-                          }))
-                        }
-                      />,
-                      <input
-                        key="et"
-                        style={fi}
-                        placeholder="HH"
-                        value={filters.endTime}
-                        onChange={(e) =>
-                          setFilters((f) => ({ ...f, endTime: e.target.value }))
-                        }
-                      />,
-                      <div key="act" />,
-                    ] as React.ReactNode[]
-                  ).map((el, i) => (
-                    <td key={i} style={{ padding: "5px 8px" }}>
-                      {el}
-                    </td>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {displayRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8}>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          minHeight: 200,
-                          gap: 10,
-                          color: T.t6,
-                        }}
-                      >
-                        <svg
-                          width={32}
-                          height={32}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke={T.t6}
-                          strokeWidth={1.2}
-                        >
-                          <circle cx={12} cy={12} r={10} />
-                          <path d="M12 6v6l4 2" />
-                        </svg>
-                        <span style={{ fontSize: 13.5 }}>
-                          No entries for this selection
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  displayRows.map((row) => (
-                    <WorklogRow
-                      key={row.id}
-                      row={row}
-                      onSave={saveRow}
-                      onDelete={deleteRow}
-                    />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+      )}
+      <Divider />
+      {[
+        {label:"Entries",    val:`${rows.length}/${totalCount}`},
+        {label:"Hours",      val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
+        {label:"Pinned",     val:String(pinnedIds.size)},
+      ].map(({label,val}) => (
+        <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ fontSize:11, color:T.t4 }}>{label}</span>
+          <span style={{ fontSize:12, color:T.acText, fontWeight:600 }}>{val}</span>
         </div>
-      </div>
-
-      {/* ── Pin Deliverables section (full width, below the two-column layout) ── */}
-      <PinDeliverableSection qaIds={qaIds} onToggle={togglePin} />
+      ))}
+      {hasFilter && (
+        <>
+          <Divider />
+          <button onClick={clearAll}
+            style={{ background:"transparent", border:`1px solid ${T.panel2B}`, borderRadius:7, padding:"6px 0", fontSize:11, color:T.t4, cursor:"pointer", width:"100%" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.t2; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; }}>
+            ✕ &nbsp;Clear filters
+          </button>
+        </>
+      )}
     </div>
+  );
+
+  // ── Worklog list ──────────────────────────────────────────────────────────
+  const WorklogList = (
+    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+      {rows.length === 0 ? (
+        <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"40px 16px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, color:T.t6 }}>
+          <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><circle cx={12} cy={12} r={10}/><path d="M12 6v6l4 2"/></svg>
+          <span style={{ fontSize:13 }}>No entries for this selection</span>
+        </div>
+      ) : rows.map(row => (
+        <WorklogCard key={row.id} row={row} meta={meta} deliverables={initialDeliverables} onSave={saveRow} onDelete={deleteRow} />
+      ))}
+    </div>
+  );
+
+  // ── Pagination controls ───────────────────────────────────────────────────
+  const PaginationControls = totalPages > 1 ? (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, paddingTop:4, flexWrap:"wrap" }}>
+      <button onClick={() => goToPage(currentPage-1)} disabled={currentPage===1}
+        style={{ padding:"6px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:currentPage===1?T.t6:T.t3, cursor:currentPage===1?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>
+        ‹ Prev
+      </button>
+      {Array.from({length:totalPages},(_,i)=>i+1)
+        .filter(p => p===1 || p===totalPages || Math.abs(p-currentPage)<=1)
+        .reduce<(number|"…")[]>((acc,p,i,arr) => {
+          if (i>0 && (p as number)-(arr[i-1] as number)>1) acc.push("…");
+          acc.push(p); return acc;
+        },[])
+        .map((p,i) => p==="…"
+          ? <span key={`e${i}`} style={{ color:T.t5, fontSize:12 }}>…</span>
+          : <button key={p} onClick={() => goToPage(p as number)}
+              style={{ width:32, height:32, borderRadius:7, border:`1px solid ${currentPage===p?T.acMid:T.panel2B}`, background:currentPage===p?T.acLight:T.panel2, color:currentPage===p?T.acText:T.t3, cursor:"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif", fontWeight:currentPage===p?600:400 }}>
+              {p}
+            </button>
+        )}
+      <button onClick={() => goToPage(currentPage+1)} disabled={currentPage===totalPages}
+        style={{ padding:"6px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:currentPage===totalPages?T.t6:T.t3, cursor:currentPage===totalPages?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>
+        Next ›
+      </button>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <ProgressBar loading={rowsLoading} />
+      <div style={{ minHeight:"100vh", background:T.bg, color:T.t2, fontFamily:"'DM Sans','Sora',sans-serif", padding:isMobile?"14px 12px 48px":"28px 28px 56px" }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Sora:wght@400;600;700&display=swap');
+          *{box-sizing:border-box;}
+          ::-webkit-scrollbar{width:4px;height:4px}
+          ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:99px}
+          input[type=date]::-webkit-calendar-picker-indicator,
+          input[type=time]::-webkit-calendar-picker-indicator{filter:invert(0.6);cursor:pointer}
+          select option{background:#1a1d2e;color:#f1f5f9}
+          select{max-width:100%;overflow:hidden;text-overflow:ellipsis;}
+          input,select{font-size:12px !important;}
+          @media(max-width:700px){
+            input,select{font-size:16px !important;}
+          }
+        `}</style>
+
+        <div style={{ marginBottom:isMobile?14:22 }}>
+          <h1 style={{ fontSize:isMobile?20:24, fontWeight:700, fontFamily:"'Sora',sans-serif", letterSpacing:"-0.03em", color:T.t1, margin:0 }}>Worklog</h1>
+          <p style={{ color:T.t5, fontSize:12, margin:"3px 0 0" }}>Current week · {totalCount} total entries</p>
+        </div>
+
+        {isMobile ? (
+          // ── MOBILE: Calendar → Worklogs → Pin ────────────────────────────
+          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+            {CalendarPanel}
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              <AddWorklogForm meta={meta} initialDeliverables={initialDeliverables} onAdd={addRow} />
+              {WorklogList}
+              {PaginationControls}
+            </div>
+            <PinDeliverableSection meta={meta} pinnedIds={pinnedIds} onToggle={togglePin} />
+          </div>
+        ) : (
+          // ── DESKTOP: two-column ───────────────────────────────────────────
+          <>
+            <div style={{ display:"grid", gridTemplateColumns:"240px 1fr", gap:20, alignItems:"start", marginBottom:20 }}>
+              {CalendarPanel}
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <AddWorklogForm meta={meta} initialDeliverables={initialDeliverables} onAdd={addRow} />
+                {WorklogList}
+                {PaginationControls}
+              </div>
+            </div>
+            <PinDeliverableSection meta={meta} pinnedIds={pinnedIds} onToggle={togglePin} />
+          </>
+        )}
+      </div>
+    </>
   );
 }
