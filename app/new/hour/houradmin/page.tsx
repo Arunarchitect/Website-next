@@ -9,7 +9,6 @@ import {
   type AssignmentEntry, type MemberOption, type DeliverableOption,
 } from "@/app/new/manager_api";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
@@ -31,7 +30,6 @@ function useWindowWidth() {
   return w;
 }
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
   bg:"#0f1117", panel:"rgba(255,255,255,0.025)", panelB:"rgba(255,255,255,0.07)",
   panel2:"rgba(255,255,255,0.04)", panel2B:"rgba(255,255,255,0.1)",
@@ -119,6 +117,124 @@ function DeleteModal({ onConfirm, onCancel, message = "Delete this entry?" }: {
   );
 }
 
+// ─── Cascading filter bar ─────────────────────────────────────────────────────
+interface CascadeFilters {
+  org_id:         number;
+  member_id:      number;
+  project_id:     number;
+  deliverable_id: number;
+}
+
+function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLoading }: {
+  meta: MetaData;
+  filters: CascadeFilters;
+  onChange: (f: Partial<CascadeFilters>) => void;
+  deliverableOptions: DeliverableOption[];
+  delivLoading: boolean;
+}) {
+  const sel: React.CSSProperties = {
+    background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:7,
+    padding:"7px 10px", fontSize:12, color:T.t2, outline:"none", cursor:"pointer",
+    fontFamily:"'DM Sans',sans-serif", appearance:"none" as const, width:"100%",
+    transition:"border-color 0.15s",
+  };
+
+  // Members filtered by org
+  const visibleMembers = filters.org_id
+    ? meta.members.filter(m => {
+        // We don't have org→member mapping directly in MetaData,
+        // but worklogs/assignments will already be filtered by org server-side.
+        // Show all members when org selected — server enforces org membership.
+        return true;
+      })
+    : meta.members;
+
+  // Projects filtered by org
+  const visibleProjects = filters.org_id
+    ? meta.projects.filter(p => p.organisation_id === filters.org_id)
+    : meta.projects;
+
+  // Deliverables filtered by project (already fetched when project changes)
+  const visibleDelivs = deliverableOptions;
+
+  const labels = ["Organisation", "Member", "Project", "Deliverable"];
+
+  return (
+    <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:10 }}>
+      <div style={{ fontSize:11, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase" }}>Filters</div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:8 }}>
+        {/* Org */}
+        <div>
+          <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
+          <select value={filters.org_id} onChange={e => onChange({ org_id:Number(e.target.value), member_id:0, project_id:0, deliverable_id:0 })} style={sel}>
+            <option value={0}>All</option>
+            {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+        {/* Member */}
+        <div>
+          <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Member</div>
+          <select value={filters.member_id} onChange={e => onChange({ member_id:Number(e.target.value) })} style={sel}>
+            <option value={0}>All</option>
+            {visibleMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        {/* Project */}
+        <div>
+          <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
+          <select value={filters.project_id} onChange={e => onChange({ project_id:Number(e.target.value), deliverable_id:0 })} style={sel}>
+            <option value={0}>All</option>
+            {visibleProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        {/* Deliverable */}
+        <div>
+          <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
+          {delivLoading ? (
+            <div style={{ fontSize:11, color:T.t5, padding:"8px 0" }}>Loading…</div>
+          ) : (
+            <select value={filters.deliverable_id} onChange={e => onChange({ deliverable_id:Number(e.target.value) })} style={sel}>
+              <option value={0}>All</option>
+              {visibleDelivs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Active filter chips */}
+      {(filters.org_id || filters.member_id || filters.project_id || filters.deliverable_id) ? (
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+          {filters.org_id > 0 && (
+            <Chip label={meta.organisations.find(o => o.id===filters.org_id)?.name ?? ""} onRemove={() => onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0})} />
+          )}
+          {filters.member_id > 0 && (
+            <Chip label={meta.members.find(m => m.id===filters.member_id)?.name ?? ""} onRemove={() => onChange({member_id:0})} />
+          )}
+          {filters.project_id > 0 && (
+            <Chip label={meta.projects.find(p => p.id===filters.project_id)?.name ?? ""} onRemove={() => onChange({project_id:0,deliverable_id:0})} />
+          )}
+          {filters.deliverable_id > 0 && (
+            <Chip label={visibleDelivs.find(d => d.id===filters.deliverable_id)?.name ?? ""} onRemove={() => onChange({deliverable_id:0})} />
+          )}
+          <button onClick={() => onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0})}
+            style={{ fontSize:11, color:T.red, background:"none", border:"none", cursor:"pointer", padding:"2px 6px" }}>
+            Clear all
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"3px 8px", borderRadius:20, background:T.acLight, border:`1px solid ${T.acMid}`, fontSize:11, color:T.acText }}>
+      {label}
+      <button onClick={onRemove} style={{ background:"none", border:"none", color:T.acText, cursor:"pointer", padding:0, lineHeight:1, fontSize:12 }}>✕</button>
+    </span>
+  );
+}
+
 // ─── Worklog view card (read-only) ────────────────────────────────────────────
 function WorklogViewCard({ row }: { row: MemberWorkLogEntry }) {
   return (
@@ -152,8 +268,7 @@ function WorklogViewCard({ row }: { row: MemberWorkLogEntry }) {
 
 // ─── Assignment card (editable) ───────────────────────────────────────────────
 function AssignmentCard({ assignment, meta, onSave, onDelete }: {
-  assignment: AssignmentEntry;
-  meta: MetaData;
+  assignment: AssignmentEntry; meta: MetaData;
   onSave: (id: number, data: AssignmentEntry) => void;
   onDelete: (id: number) => void;
 }) {
@@ -178,7 +293,6 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
 
   async function startEdit() {
     setEditing(true);
-    // Load deliverables for current project
     setLoadingDelivs(true);
     try { setDeliverables(await fetchDeliverablesByProject(assignment.project_id)); }
     finally { setLoadingDelivs(false); }
@@ -212,7 +326,6 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
       {showDel && <DeleteModal message="Delete this assignment?" onConfirm={() => { setShowDel(false); deleteAssignment(assignment.id).then(() => onDelete(assignment.id)).catch(e => setError(e.message)); }} onCancel={() => setShowDel(false)} />}
       <div style={{ background:bg, border, borderRadius:12, padding:"12px 14px", transition:"all 0.15s" }}>
         <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:editing?10:0 }}>
-          {/* Action buttons LEFT */}
           <div style={{ display:"flex", gap:4, flexShrink:0, paddingTop:2 }}>
             {editing ? (
               <>
@@ -327,18 +440,15 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
 
 // ─── Add assignment form ──────────────────────────────────────────────────────
 function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
-  meta: MetaData;
-  selectedMemberId: number;
-  onAdd: (a: AssignmentEntry) => void;
+  meta: MetaData; selectedMemberId: number; onAdd: (a: AssignmentEntry) => void;
 }) {
-  const [open,   setOpen]   = useState(false);
-  const [draft,  setDraft]  = useState({ name:"", organisation_id:meta.organisations[0]?.id??0, project_id:0, deliverable_id:0, assigned_to:selectedMemberId, start_date:"", due_date:"" });
+  const [open,          setOpen]          = useState(false);
+  const [draft,         setDraft]         = useState({ name:"", organisation_id:meta.organisations[0]?.id??0, project_id:0, deliverable_id:0, assigned_to:selectedMemberId, start_date:"", due_date:"" });
   const [saving,        setSaving]        = useState(false);
   const [deliverables,  setDeliverables]  = useState<DeliverableOption[]>([]);
   const [loadingDelivs, setLoadingDelivs] = useState(false);
   const [error,         setError]         = useState("");
 
-  // sync assigned_to when selectedMember changes
   useEffect(() => { setDraft(d => ({...d, assigned_to:selectedMemberId})); }, [selectedMemberId]);
 
   function patch(p: Partial<typeof draft>) { setDraft(d => ({...d, ...p})); }
@@ -365,8 +475,7 @@ function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
       });
       onAdd(created);
       setDraft({ name:"", organisation_id:meta.organisations[0]?.id??0, project_id:0, deliverable_id:0, assigned_to:selectedMemberId, start_date:"", due_date:"" });
-      setDeliverables([]);
-      setOpen(false);
+      setDeliverables([]); setOpen(false);
     } catch(e:any) { setError(e.message); }
     finally { setSaving(false); }
   }
@@ -445,26 +554,6 @@ function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
   );
 }
 
-// ─── Member selector ──────────────────────────────────────────────────────────
-function MemberSelector({ members, selectedId, onSelect }: {
-  members: MemberOption[]; selectedId: number; onSelect: (id: number) => void;
-}) {
-  return (
-    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-      <button onClick={() => onSelect(0)}
-        style={{ padding:"6px 14px", borderRadius:20, border:`1px solid ${selectedId===0?T.acMid:T.panel2B}`, background:selectedId===0?T.acLight:"transparent", color:selectedId===0?T.acText:T.t4, fontSize:12, fontWeight:selectedId===0?600:400, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s" }}>
-        All Members
-      </button>
-      {members.map(m => (
-        <button key={m.id} onClick={() => onSelect(m.id)}
-          style={{ padding:"6px 14px", borderRadius:20, border:`1px solid ${selectedId===m.id?T.acMid:T.panel2B}`, background:selectedId===m.id?T.acLight:"transparent", color:selectedId===m.id?T.acText:T.t4, fontSize:12, fontWeight:selectedId===m.id?600:400, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s" }}>
-          {m.name}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ManagerPage() {
   const w        = useWindowWidth();
@@ -478,18 +567,35 @@ export default function ManagerPage() {
   const [selMonth, setSelMonth] = useState<number|null>(null);
   const [selYear,  setSelYear]  = useState<number|null>(null);
 
+  // ── Shared cascade filters ────────────────────────────────────────────────
+  const [filters, setFilters] = useState<CascadeFilters>({ org_id:0, member_id:0, project_id:0, deliverable_id:0 });
+  const [filterDelivs,   setFilterDelivs]   = useState<DeliverableOption[]>([]);
+  const [filterDelivLoad,setFilterDelivLoad] = useState(false);
+
+  function updateFilters(partial: Partial<CascadeFilters>) {
+    setFilters(prev => ({ ...prev, ...partial }));
+  }
+
+  // Load deliverables when project filter changes
+  useEffect(() => {
+    if (!filters.project_id) { setFilterDelivs([]); return; }
+    setFilterDelivLoad(true);
+    fetchDeliverablesByProject(filters.project_id)
+      .then(setFilterDelivs)
+      .finally(() => setFilterDelivLoad(false));
+  }, [filters.project_id]);
+
   // ── Data ──────────────────────────────────────────────────────────────────
-  const [meta,           setMeta]           = useState<MetaData>({organisations:[],projects:[],members:[]});
-  const [selectedMember, setSelectedMember] = useState(0);
-  const [rows,           setRows]           = useState<MemberWorkLogEntry[]>([]);
-  const [totalPages,     setTotalPages]     = useState(1);
-  const [totalCount,     setTotalCount]     = useState(0);
-  const [currentPage,    setCurrentPage]    = useState(1);
-  const [assignments,    setAssignments]    = useState<AssignmentEntry[]>([]);
-  const [loading,        setLoading]        = useState(true);
-  const [rowsLoading,    setRowsLoading]    = useState(false);
-  const [assignLoading,  setAssignLoading]  = useState(false);
-  const [error,          setError]          = useState<string|null>(null);
+  const [meta,          setMeta]          = useState<MetaData>({organisations:[],projects:[],members:[]});
+  const [rows,          setRows]          = useState<MemberWorkLogEntry[]>([]);
+  const [totalPages,    setTotalPages]    = useState(1);
+  const [totalCount,    setTotalCount]    = useState(0);
+  const [currentPage,   setCurrentPage]  = useState(1);
+  const [assignments,   setAssignments]  = useState<AssignmentEntry[]>([]);
+  const [loading,       setLoading]      = useState(true);
+  const [rowsLoading,   setRowsLoading]  = useState(false);
+  const [assignLoading, setAssignLoading]= useState(false);
+  const [error,         setError]        = useState<string|null>(null);
 
   const dateRangeRef = useRef<{from?:string;to?:string}>({});
 
@@ -504,9 +610,9 @@ export default function ManagerPage() {
     finally { setRowsLoading(false); }
   }
 
-  async function loadAssignments(memberId: number) {
+  async function loadAssignments(memberId?: number) {
     setAssignLoading(true);
-    try { setAssignments(await fetchAssignments(memberId || undefined)); }
+    try { setAssignments(await fetchAssignments(memberId)); }
     catch(e:any) { setError(e.message); }
     finally { setAssignLoading(false); }
   }
@@ -514,21 +620,18 @@ export default function ManagerPage() {
   // Initial load
   useEffect(() => {
     const {from, to} = currentWeekRange();
-    Promise.all([
-      fetchMeta(),
-      fetchMemberWorkLogs({from, to, page:1}),
-      fetchAssignments(),
-    ]).then(([m, worklogs, assigns]) => {
-      setMeta(m);
-      setRows(worklogs.results); setTotalPages(worklogs.pages);
-      setTotalCount(worklogs.count); setCurrentPage(1);
-      setAssignments(assigns);
-      dateRangeRef.current = {from, to};
-      setLoading(false);
-    }).catch(e => { setError(e.message); setLoading(false); });
+    Promise.all([fetchMeta(), fetchMemberWorkLogs({from, to, page:1}), fetchAssignments()])
+      .then(([m, worklogs, assigns]) => {
+        setMeta(m);
+        setRows(worklogs.results); setTotalPages(worklogs.pages);
+        setTotalCount(worklogs.count); setCurrentPage(1);
+        setAssignments(assigns);
+        dateRangeRef.current = {from, to};
+        setLoading(false);
+      }).catch(e => { setError(e.message); setLoading(false); });
   }, []);
 
-  // Re-fetch when member or date filter changes
+  // Refetch worklogs when date or member filter changes
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
@@ -539,16 +642,18 @@ export default function ManagerPage() {
       const year = selYear ?? today.getFullYear(), month = selMonth ?? today.getMonth();
       ({from, to} = monthRange(year, month));
     }
-    loadRows({from, to, page:1, member_id:selectedMember||undefined});
-  }, [selDates, selMonth, selYear, selectedMember]);
+    loadRows({from, to, page:1, member_id:filters.member_id||undefined});
+  }, [selDates, selMonth, selYear, filters.member_id]);
 
-  // Re-fetch assignments when member changes
+  // Refetch assignments when member filter changes
   useEffect(() => {
     if (isFirstRender.current) return;
-    loadAssignments(selectedMember);
-  }, [selectedMember]);
+    loadAssignments(filters.member_id || undefined);
+  }, [filters.member_id]);
 
-  function goToPage(p:number) { loadRows({...dateRangeRef.current, page:p, member_id:selectedMember||undefined}); }
+  function goToPage(p:number) {
+    loadRows({...dateRangeRef.current, page:p, member_id:filters.member_id||undefined});
+  }
 
   const activeDates  = useMemo(() => new Set(rows.map(r => r.end_date_fmt ?? r.start_date_fmt).filter(Boolean) as string[]), [rows]);
   const totalMinutes = useMemo(() => rows.reduce((s,r) => {
@@ -556,7 +661,23 @@ export default function ManagerPage() {
     return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
   }, 0), [rows]);
   const availableYears = useMemo(() => Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort(), [rows]);
-  const hasFilter = selDates.size > 0 || selMonth !== null || selYear !== null;
+  const hasCalFilter   = selDates.size > 0 || selMonth !== null || selYear !== null;
+
+  // ── Client-side filtering on top of server results ────────────────────────
+  const filteredRows = useMemo(() => rows.filter(r => {
+    if (filters.org_id         && r.organisation_id !== filters.org_id)        return false;
+    if (filters.project_id     && r.project_id      !== filters.project_id)    return false;
+    if (filters.deliverable_id && r.deliverable      !== filters.deliverable_id) return false;
+    return true;
+  }), [rows, filters]);
+
+  const filteredAssignments = useMemo(() => assignments.filter(a => {
+    if (filters.org_id         && a.organisation_id  !== filters.org_id)         return false;
+    if (filters.member_id      && a.assigned_to_id   !== filters.member_id)      return false;
+    if (filters.project_id     && a.project_id       !== filters.project_id)     return false;
+    if (filters.deliverable_id && a.deliverable_id   !== filters.deliverable_id) return false;
+    return true;
+  }), [assignments, filters]);
 
   function saveAssignment(id:number, data:AssignmentEntry) { setAssignments(p => p.map(a => a.id===id ? data : a)); }
   function deleteAssignmentLocal(id:number) { setAssignments(p => p.filter(a => a.id!==id)); }
@@ -571,12 +692,7 @@ export default function ManagerPage() {
     const m=calMonth===11?0:calMonth+1, y=calMonth===11?calYear+1:calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
   }
-  function clearAll() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
-
-  // Filtered assignments for selected member
-  const filteredAssignments = useMemo(() =>
-    selectedMember ? assignments.filter(a => a.assigned_to_id === selectedMember) : assignments,
-  [assignments, selectedMember]);
+  function clearCal() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, fontFamily:"'DM Sans',sans-serif" }}>
@@ -591,7 +707,7 @@ export default function ManagerPage() {
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", color:T.red, fontFamily:"'DM Sans',sans-serif" }}>{error}</div>
   );
 
-  // ── Shared calendar panel ─────────────────────────────────────────────────
+  // ── Calendar panel ────────────────────────────────────────────────────────
   const CalendarPanel = (
     <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:16, padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -633,23 +749,23 @@ export default function ManagerPage() {
       )}
       <Divider />
       {[
-        {label:"Entries",    val:`${rows.length}/${totalCount}`},
-        {label:"Hours",      val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
-        {label:"Assignments",val:String(filteredAssignments.length)},
+        {label:"Worklogs",    val:`${filteredRows.length}/${totalCount}`},
+        {label:"Hours",       val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
+        {label:"Assignments", val:String(filteredAssignments.length)},
       ].map(({label,val}) => (
         <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <span style={{ fontSize:11, color:T.t4 }}>{label}</span>
           <span style={{ fontSize:12, color:T.acText, fontWeight:600 }}>{val}</span>
         </div>
       ))}
-      {hasFilter && (
+      {hasCalFilter && (
         <>
           <Divider />
-          <button onClick={clearAll}
+          <button onClick={clearCal}
             style={{ background:"transparent", border:`1px solid ${T.panel2B}`, borderRadius:7, padding:"6px 0", fontSize:11, color:T.t4, cursor:"pointer", width:"100%" }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.t2; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; }}>
-            ✕ &nbsp;Clear filters
+            ✕ &nbsp;Clear calendar
           </button>
         </>
       )}
@@ -679,28 +795,33 @@ export default function ManagerPage() {
     </div>
   ) : null;
 
-  // ── Right panel content ───────────────────────────────────────────────────
+  // ── Right panel ───────────────────────────────────────────────────────────
   const RightPanel = (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
-      {/* Member selector */}
-      <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:14, padding:"14px 16px" }}>
-        <div style={{ fontSize:11, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:10 }}>Filter by Member</div>
-        <MemberSelector members={meta.members} selectedId={selectedMember} onSelect={id => { setSelectedMember(id); }} />
-      </div>
+      {/* Cascade filter bar — shared for both sections */}
+      <CascadeFilterBar
+        meta={meta}
+        filters={filters}
+        onChange={updateFilters}
+        deliverableOptions={filterDelivs}
+        delivLoading={filterDelivLoad}
+      />
 
-      {/* Worklogs section */}
+      {/* ── Worklogs ── */}
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>
             Worklogs
-            {selectedMember > 0 && (
+            {filters.member_id > 0 && (
               <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>
-                — {meta.members.find(m => m.id===selectedMember)?.name}
+                — {meta.members.find(m => m.id===filters.member_id)?.name}
               </span>
             )}
           </div>
-          <span style={{ fontSize:11, color:T.t5 }}>{totalCount} total</span>
+          <span style={{ fontSize:11, color:T.t5 }}>
+            {filteredRows.length}{totalCount > rows.length ? `/${totalCount}` : ""} entries
+          </span>
         </div>
 
         {rowsLoading ? (
@@ -710,32 +831,31 @@ export default function ManagerPage() {
             </div>
             <style>{`@keyframes pulse{from{width:20%;margin-left:0}to{width:60%;margin-left:30%}}`}</style>
           </div>
-        ) : rows.length === 0 ? (
+        ) : filteredRows.length === 0 ? (
           <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"40px 16px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, color:T.t6 }}>
             <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><circle cx={12} cy={12} r={10}/><path d="M12 6v6l4 2"/></svg>
             <span style={{ fontSize:13 }}>No worklogs for this selection</span>
           </div>
-        ) : rows.map(row => <WorklogViewCard key={row.id} row={row} />)}
+        ) : filteredRows.map(row => <WorklogViewCard key={row.id} row={row} />)}
 
         {PaginationControls}
       </div>
 
-      {/* Assignments section */}
+      {/* ── Assignments ── */}
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>
-          Assignments
-          {selectedMember > 0 && (
-            <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>
-              — {meta.members.find(m => m.id===selectedMember)?.name}
-            </span>
-          )}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>
+            Assignments
+            {filters.member_id > 0 && (
+              <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>
+                — {meta.members.find(m => m.id===filters.member_id)?.name}
+              </span>
+            )}
+          </div>
+          <span style={{ fontSize:11, color:T.t5 }}>{filteredAssignments.length} entries</span>
         </div>
 
-        <AddAssignmentForm
-          meta={meta}
-          selectedMemberId={selectedMember}
-          onAdd={addAssignment}
-        />
+        <AddAssignmentForm meta={meta} selectedMemberId={filters.member_id} onAdd={addAssignment} />
 
         {assignLoading ? (
           <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"24px 16px", display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -746,7 +866,7 @@ export default function ManagerPage() {
         ) : filteredAssignments.length === 0 ? (
           <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"32px 16px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, color:T.t6 }}>
             <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><rect x={3} y={3} width={18} height={18} rx={3}/><path d="M9 9h6M9 13h4"/></svg>
-            <span style={{ fontSize:13 }}>No assignments yet</span>
+            <span style={{ fontSize:13 }}>No assignments for this selection</span>
           </div>
         ) : filteredAssignments.map(a => (
           <AssignmentCard key={a.id} assignment={a} meta={meta} onSave={saveAssignment} onDelete={deleteAssignmentLocal} />
