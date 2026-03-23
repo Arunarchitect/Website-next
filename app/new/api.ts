@@ -1,14 +1,14 @@
-const BASE = process.env.NEXT_PUBLIC_HOST ;
+const BASE = process.env.NEXT_PUBLIC_HOST;
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem("access") ?? "";
 }
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${getToken()}`,
+    Authorization: `Bearer ${getToken()}`,
   };
 }
 
@@ -63,29 +63,35 @@ export interface StartWorkLogResult {
 }
 
 export async function fetchDashboard(): Promise<DashboardData> {
-  const res = await fetch(`${BASE}/api/v2/dashboard/`, { headers: authHeaders() });
+  const res = await fetch(`${BASE}/api/v2/dashboard/`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`Dashboard fetch failed: ${res.status}`);
-  return res.json();
+  return res.json() as Promise<DashboardData>;
 }
 
 export async function fetchActiveWorkLog(): Promise<ActiveWorkLog | null> {
-  const res = await fetch(`${BASE}/api/v2/worklogs/active/`, { headers: authHeaders() });
+  const res = await fetch(`${BASE}/api/v2/worklogs/active/`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`Active worklog fetch failed: ${res.status}`);
-  const data = await res.json();
+  const data: ActiveWorkLog | null = await res.json();
   return data ?? null;
 }
 
-export async function startWorkLog(deliverableId: number): Promise<StartWorkLogResult> {
+export async function startWorkLog(
+  deliverableId: number
+): Promise<StartWorkLogResult> {
   const res = await fetch(`${BASE}/api/v2/worklogs/start/`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ deliverable: deliverableId }),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({})) as { error?: string };
     throw new Error(data.error ?? `Worklog start failed: ${res.status}`);
   }
-  return res.json();
+  return res.json() as Promise<StartWorkLogResult>;
 }
 
 export async function endWorkLog(id: number, remarks: string): Promise<void> {
@@ -105,19 +111,25 @@ export async function discardWorkLog(id: number): Promise<void> {
   if (!res.ok) throw new Error(`Worklog discard failed: ${res.status}`);
 }
 
-export async function updateWorkLogEndTime(id: number, endTime: Date): Promise<void> {
+export async function updateWorkLogEndTime(
+  id: number,
+  endTime: Date
+): Promise<void> {
   const res = await fetch(`${BASE}/api/v2/worklogs/${id}/update-end/`, {
     method: "PATCH",
     headers: authHeaders(),
     body: JSON.stringify({ end_time: endTime.toISOString() }),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({})) as { error?: string };
     throw new Error(data.error ?? `Update end time failed: ${res.status}`);
   }
 }
 
-export async function updateWorkLogRemarks(id: number, remarks: string): Promise<void> {
+export async function updateWorkLogRemarks(
+  id: number,
+  remarks: string
+): Promise<void> {
   const res = await fetch(`${BASE}/api/v2/worklogs/${id}/update-remarks/`, {
     method: "PATCH",
     headers: authHeaders(),
