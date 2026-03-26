@@ -1,372 +1,1077 @@
-// "use client";
+// app/new/pay/page.tsx
+"use client";
 
-// // salary.tsx — main page
-// // Owns the left calendar/date-filter panel and shared filter state.
-// // Mounts SalaryCalculator (right panel, top) and SalaryExpenses (below, full-width).
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  fetchOrganisations,
+  fetchProjectsByOrg,
+  fetchDeliverablesByProject,
+  fetchUsersByOrg,
+  fetchSalaryReport,
+  type SalaryReport,
+  type OrganisationOption,
+  type ProjectOption,
+  type DeliverableOption,
+  type UserOption,
+} from "@/app/new/salaryApi";
 
-// import { useState, useMemo, useRef, useEffect } from "react";
-// import { worklogEntries } from "./data";
-// import { T, fmtHours } from "./salary-shared";
-// import SalaryCalculator from "./salary-calculator";
-// import SalaryExpenses   from "./salary-expenses";
-// import {
-//   memberRates, projectFees, stageFees, fundAllocations,
-//   type MemberRate, type ProjectFee, type StageFee, type FundAllocation,
-// } from "@/app/new/data";
+// ─── Constants ────────────────────────────────────────────────────────────────
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const AVAILABLE_YEARS = [2022, 2023, 2024, 2025, 2026, 2027];
 
-// // ─── Constants ────────────────────────────────────────────────────────────────
-// const MONTHS = ["January","February","March","April","May","June",
-//                 "July","August","September","October","November","December"];
-// const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+function fmtINR(n: number) {
+  return "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
 
-// function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
-// function getFirstDay(y: number, m: number)    { return new Date(y, m, 1).getDay(); }
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  bg: "#07080f",
+  panel: "rgba(255,255,255,0.028)",
+  panelB: "rgba(255,255,255,0.065)",
+  panel2: "rgba(255,255,255,0.038)",
+  panel2B: "rgba(255,255,255,0.08)",
+  divider: "rgba(255,255,255,0.05)",
+  t1: "#f0f4ff", t2: "#d8e0f0", t3: "#8a9ab8",
+  t4: "#55657e", t5: "#39475a", t6: "#1f2733",
+  ac: "#4c7cf3", acGlow: "rgba(76,124,243,0.15)",
+  acLight: "rgba(76,124,243,0.1)", acMid: "rgba(76,124,243,0.45)",
+  acText: "#7ba4ff",
+  green: "#1ec99a", red: "#f0686a", redBg: "rgba(240,104,106,0.09)",
+  purple: "#9b79f5", purpleBg: "rgba(155,121,245,0.09)",
+  blue: "#4c7cf3", blueBg: "rgba(76,124,243,0.09)",
+  orange: "#f5a623", orangeBg: "rgba(245,166,35,0.09)",
+};
 
-// function useContainerWidth(ref: React.RefObject<HTMLElement>) {
-//   const [w, setW] = useState(9999);
-//   useEffect(() => {
-//     if (!ref.current) return;
-//     const ro = new ResizeObserver(([e]) => setW(e.contentRect.width));
-//     ro.observe(ref.current);
-//     setW(ref.current.getBoundingClientRect().width);
-//     return () => ro.disconnect();
-//   }, [ref]);
-//   return w;
-// }
+// ─── Small components ─────────────────────────────────────────────────────────
+const Divider = () => <div style={{ height: 1, background: T.divider }} />;
 
-// // ─── Calendar grid ────────────────────────────────────────────────────────────
-// function CalGrid({ year, month, activeDates, selDates, onToggle }: {
-//   year: number; month: number;
-//   activeDates: Set<string>; selDates: Set<string>;
-//   onToggle: (d: string) => void;
-// }) {
-//   const total = getDaysInMonth(year, month);
-//   const first = getFirstDay(year, month);
-//   const cells: (number | null)[] = [
-//     ...Array(first).fill(null),
-//     ...Array.from({ length: total }, (_, i) => i + 1),
-//   ];
-//   return (
-//     <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
-//       {DAYS.map(d => (
-//         <div key={d} style={{ textAlign: "center", fontSize: 9, color: T.t5, fontWeight: 600,
-//           letterSpacing: "0.06em", padding: "4px 0", textTransform: "uppercase" }}>{d}</div>
-//       ))}
-//       {cells.map((day, i) => {
-//         if (!day) return <div key={`_${i}`} />;
-//         const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-//         const has = activeDates.has(iso), sel = selDates.has(iso);
-//         return (
-//           <button key={iso} onClick={() => onToggle(iso)} style={{
-//             background: sel ? T.ac : "transparent",
-//             border: `1px solid ${sel ? T.ac : "transparent"}`,
-//             borderRadius: 6, cursor: "pointer",
-//             color: sel ? "#fff" : has ? T.t2 : T.t4,
-//             fontSize: 11, padding: "6px 0", transition: "all 0.15s", width: "100%",
-//             fontFamily: "'DM Sans',sans-serif", fontWeight: sel ? 600 : 400,
-//             display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
-//           }}
-//             onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = T.panel2; }}
-//             onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-//           >
-//             {day}
-//             {has && <span style={{ display: "block", width: 3, height: 3, borderRadius: "50%",
-//               background: sel ? "#fff" : T.acText }} />}
-//           </button>
-//         );
-//       })}
-//     </div>
-//   );
-// }
-
-// // ─── Page ─────────────────────────────────────────────────────────────────────
-// export default function SalaryPage() {
-//   const containerRef = useRef<HTMLDivElement>(null!);
-//   const cw       = useContainerWidth(containerRef);
-//   const isMobile = cw < 760;
-
-//   // ── Calendar / date-range state ────────────────────────────────────────────
-//   const [calYear,  setCalYear]  = useState(2025);
-//   const [calMonth, setCalMonth] = useState(2);
-//   const [selDates, setSelDates] = useState<Set<string>>(new Set());
-//   const [selMonth, setSelMonth] = useState<number | null>(null);
-//   const [selYear,  setSelYear]  = useState<number | null>(null);
-//   const [dateFrom, setDateFrom] = useState("");
-//   const [dateTo,   setDateTo]   = useState("");
-
-//   // ── Editable salary data (owned here, passed to child panels) ─────────────
-//   const [rates,  setRates]  = useState<MemberRate[]>(() => memberRates.map(r => ({ ...r })));
-//   const [fees,   setFees]   = useState<ProjectFee[]>(() => projectFees.map(f => ({ ...f })));
-//   const [stages, setStages] = useState<StageFee[]>(() => stageFees.map(s => ({ ...s })));
-//   const [allocs, setAllocs] = useState<FundAllocation[]>(() => fundAllocations.map(a => ({ ...a })));
-
-//   function updateRate(memberId: string, rate: number) {
-//     setRates(prev => prev.map(r => r.memberId === memberId ? { ...r, hourlyRate: rate } : r));
-//   }
-//   function updateAlloc(id: string, pct: number) {
-//     setAllocs(prev => prev.map(a => a.id === id ? { ...a, percentage: pct } : a));
-//   }
-
-//   // ── Active filters — set when Run Analysis fires in the calculator ─────────
-//   // These are passed down to SalaryExpenses to pre-populate its filter dropdowns.
-//   const [analysisRan,    setAnalysisRan]    = useState(false);
-//   const [activeFilters,  setActiveFilters]  = useState({ memberId: "", orgId: "", projId: "" });
-
-//   function handleAnalysisRun(filters: { memberId: string; orgId: string; projId: string }) {
-//     setActiveFilters(filters);
-//     setAnalysisRan(true);
-//   }
-
-//   // ── Calendar derived ───────────────────────────────────────────────────────
-//   const allDates = useMemo(() => new Set(worklogEntries.map(e => e.date)), []);
-//   const availableYears = useMemo(() =>
-//     Array.from(new Set(worklogEntries.map(e => new Date(e.date).getFullYear()))).sort(), []);
-
-//   // All entries filtered by the calendar/date controls.
-//   // Member/project filters are applied inside SalaryCalculator at run-time.
-//   const calFilteredEntries = useMemo(() => worklogEntries.filter(e => {
-//     const d = new Date(e.date);
-//     if (selDates.size > 0 && !selDates.has(e.date))       return false;
-//     if (selMonth !== null && d.getMonth()    !== selMonth) return false;
-//     if (selYear  !== null && d.getFullYear() !== selYear)  return false;
-//     if (dateFrom && e.date < dateFrom)                     return false;
-//     if (dateTo   && e.date > dateTo)                       return false;
-//     return true;
-//   }), [selDates, selMonth, selYear, dateFrom, dateTo]);
-
-//   const calTotalMins = useMemo(() => calFilteredEntries.reduce((s, e) => {
-//     const [sh, sm] = e.startTime.split(":").map(Number);
-//     const [eh, em] = e.endTime.split(":").map(Number);
-//     return s + (eh * 60 + em - (sh * 60 + sm));
-//   }, 0), [calFilteredEntries]);
-
-//   function toggleDate(iso: string) {
-//     setSelDates(p => { const n = new Set(p); n.has(iso) ? n.delete(iso) : n.add(iso); return n; });
-//   }
-//   function prevMonth() { calMonth === 0  ? (setCalMonth(11), setCalYear(y => y - 1)) : setCalMonth(m => m - 1); }
-//   function nextMonth() { calMonth === 11 ? (setCalMonth(0),  setCalYear(y => y + 1)) : setCalMonth(m => m + 1); }
-//   function clearAll()  {
-//     setSelDates(new Set()); setSelMonth(null); setSelYear(null);
-//     setDateFrom(""); setDateTo("");
-//   }
-
-//   const hasCalFilter = selDates.size > 0 || selMonth !== null || selYear !== null || !!dateFrom || !!dateTo;
-
-//   const dateInpStyle: React.CSSProperties = {
-//     background: T.panel2, border: `1px solid ${T.panel2B}`,
-//     borderRadius: 7, padding: "7px 10px", fontSize: 12, color: T.t2,
-//     outline: "none", fontFamily: "'DM Sans',sans-serif",
-//     colorScheme: "dark", cursor: "pointer", transition: "border-color 0.15s", flex: 1,
-//   };
-
-//   return (
-//     <div ref={containerRef} style={{
-//       minHeight: "100vh", background: T.bg, color: T.t2,
-//       fontFamily: "'DM Sans','Sora',sans-serif",
-//       padding: isMobile ? "20px 16px 48px" : "32px 32px 56px",
-//     }}>
-//       <style>{`
-//         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Sora:wght@400;600;700&display=swap');
-//         * { box-sizing: border-box; }
-//         ::-webkit-scrollbar { width: 4px; height: 4px; }
-//         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
-//         input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
-//         select option { background: #1a1d2e; color: #f1f5f9; }
-//       `}</style>
-
-//       {/* ── Page header ── */}
-//       <div style={{ marginBottom: isMobile ? 18 : 26 }}>
-//         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
-//           <div style={{ width: 34, height: 34, borderRadius: 10, background: T.greenBg,
-//             border: `1px solid ${T.green}33`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-//             <svg width={16} height={16} viewBox="0 0 20 20" fill="none">
-//               <circle cx={10} cy={10} r={8} stroke={T.green} strokeWidth={1.4}/>
-//               <path d="M10 6v1.5m0 5V14m-2.5-5.5h4a1 1 0 0 1 0 2h-3a1 1 0 0 0 0 2H12"
-//                 stroke={T.green} strokeWidth={1.4} strokeLinecap="round"/>
-//             </svg>
-//           </div>
-//           <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700,
-//             fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em", color: T.t1, margin: 0 }}>
-//             Salary Calculator
-//           </h1>
-//         </div>
-//         <p style={{ color: T.t5, fontSize: 13, margin: 0 }}>
-//           Select a date period on the left, pick a member, then run the analysis
-//         </p>
-//       </div>
-
-//       {/* ── Two-column: calendar + calculator ── */}
-//       <div style={{ display: "grid",
-//         gridTemplateColumns: isMobile ? "1fr" : "268px 1fr",
-//         gap: isMobile ? 16 : 20, alignItems: "start",
-//         marginBottom: 20 }}>
-
-//         {/* ════ LEFT: Calendar / date filters ════ */}
-//         <div style={{ background: T.panel, border: `1px solid ${T.panelB}`,
-//           borderRadius: 16, padding: "22px 20px",
-//           display: "flex", flexDirection: "column", gap: 16 }}>
-
-//           {/* Month nav */}
-//           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-//             <button onClick={prevMonth} style={{ width: 30, height: 30, borderRadius: 8, background: T.panel2,
-//               border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
-//               fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
-//             <span style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
-//             <button onClick={nextMonth} style={{ width: 30, height: 30, borderRadius: 8, background: T.panel2,
-//               border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
-//               fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
-//           </div>
-
-//           <CalGrid year={calYear} month={calMonth}
-//             activeDates={allDates} selDates={selDates} onToggle={toggleDate} />
-
-//           {selDates.size > 0 && (
-//             <div style={{ textAlign: "center", fontSize: 11, color: T.acText }}>
-//               {selDates.size} date{selDates.size > 1 ? "s" : ""} selected &nbsp;
-//               <button onClick={() => setSelDates(new Set())}
-//                 style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11 }}>✕</button>
-//             </div>
-//           )}
-
-//           <div style={{ height: 1, background: T.divider }} />
-
-//           {/* Month pills */}
-//           <div>
-//             <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5,
-//               letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 8 }}>Filter by Month</div>
-//             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 4 }}>
-//               {MONTHS.map((m, i) => (
-//                 <button key={m} onClick={() => setSelMonth(selMonth === i ? null : i)} style={{
-//                   background: selMonth === i ? T.acLight : T.panel2,
-//                   border: `1px solid ${selMonth === i ? T.acMid : T.panel2B}`,
-//                   borderRadius: 6, color: selMonth === i ? T.acText : T.t4,
-//                   fontSize: 10, padding: "5px 0", cursor: "pointer",
-//                   textTransform: "uppercase", letterSpacing: "0.04em",
-//                   fontWeight: selMonth === i ? 600 : 400, transition: "all 0.15s",
-//                 }}>{m.slice(0, 3)}</button>
-//               ))}
-//             </div>
-//           </div>
-
-//           {/* Year pills */}
-//           <div>
-//             <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5,
-//               letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 8 }}>Filter by Year</div>
-//             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-//               {availableYears.map(y => (
-//                 <button key={y} onClick={() => setSelYear(selYear === y ? null : y)} style={{
-//                   background: selYear === y ? T.acLight : T.panel2,
-//                   border: `1px solid ${selYear === y ? T.acMid : T.panel2B}`,
-//                   borderRadius: 6, color: selYear === y ? T.acText : T.t4,
-//                   fontSize: 10, padding: "5px 10px", cursor: "pointer",
-//                   fontWeight: selYear === y ? 600 : 400, transition: "all 0.15s",
-//                 }}>{y}</button>
-//               ))}
-//             </div>
-//           </div>
-
-//           {/* Date range */}
-//           <div>
-//             <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5,
-//               letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 8 }}>Date Range</div>
-//             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-//               {([
-//                 { label: "From", value: dateFrom, set: (v: string) => { setDateFrom(v); if (dateTo && v > dateTo) setDateTo(""); } },
-//                 { label: "To",   value: dateTo,   set: (v: string) => setDateTo(v) },
-//               ] as const).map(({ label, value, set }) => (
-//                 <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-//                   <span style={{ fontSize: 10.5, color: T.t5, width: 26, flexShrink: 0 }}>{label}</span>
-//                   <input type="date" value={value}
-//                     min={label === "To" && dateFrom ? dateFrom : undefined}
-//                     onChange={e => set(e.target.value)}
-//                     style={dateInpStyle}
-//                     onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = T.acMid; }}
-//                     onBlur={e  => { (e.currentTarget as HTMLElement).style.borderColor = T.panel2B; }}
-//                   />
-//                   {value && (
-//                     <button onClick={() => set("")} style={{
-//                       background: "none", border: "none", color: T.t5,
-//                       cursor: "pointer", fontSize: 12, padding: 0, flexShrink: 0 }}>✕</button>
-//                   )}
-//                 </div>
-//               ))}
-//               {dateFrom && dateTo && (
-//                 <div style={{ fontSize: 10.5, color: T.acText, marginLeft: 34 }}>
-//                   {Math.ceil((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) + 1} days
-//                 </div>
-//               )}
-//             </div>
-//           </div>
-
-//           <div style={{ height: 1, background: T.divider }} />
-
-//           {/* Period stats */}
-//           <div>
-//             <div style={{ fontSize: 10.5, fontWeight: 600, color: T.t5,
-//               letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10 }}>Period Stats</div>
-//             {[
-//               { label: "Sessions",    val: String(calFilteredEntries.length) },
-//               { label: "Total Hours", val: fmtHours(calTotalMins) },
-//             ].map(({ label, val }) => (
-//               <div key={label} style={{ display: "flex", justifyContent: "space-between",
-//                 alignItems: "center", marginBottom: 8 }}>
-//                 <span style={{ fontSize: 12, color: T.t4 }}>{label}</span>
-//                 <span style={{ fontSize: 13, color: T.acText, fontWeight: 600 }}>{val}</span>
-//               </div>
-//             ))}
-//           </div>
-
-//           {hasCalFilter && (
-//             <>
-//               <div style={{ height: 1, background: T.divider }} />
-//               <button onClick={clearAll} style={{
-//                 background: "transparent", border: `1px solid ${T.panel2B}`,
-//                 borderRadius: 8, padding: "8px 0", fontSize: 12, color: T.t4,
-//                 cursor: "pointer", width: "100%", fontFamily: "'DM Sans',sans-serif",
-//                 transition: "color 0.15s",
-//               }}
-//                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.t2; }}
-//                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; }}
-//               >✕ &nbsp;Clear date filters</button>
-//             </>
-//           )}
-//         </div>
-
-//         {/* ════ RIGHT: Salary Calculator ════ */}
-//         <SalaryCalculator
-//           calFilteredEntries={calFilteredEntries}
-//           dateFrom={dateFrom}
-//           dateTo={dateTo}
-//           rates={rates}
-//           fees={fees}
-//           stages={stages}
-//           allocs={allocs}
-//           onRateChange={updateRate}
-//           onAllocChange={updateAlloc}
-//           onAnalysisRun={handleAnalysisRun}
-//         />
-//       </div>
-
-//       {/* ════ BELOW: Expenses (full width) ════ */}
-//       <SalaryExpenses
-//         dateFrom={dateFrom}
-//         dateTo={dateTo}
-//         inheritedFilters={activeFilters}
-//         analysisRan={analysisRan}
-//       />
-//     </div>
-//   );
-// }
-
-
-
-
-
-
-export default function ExpensePage() {
+function SelectField({
+  label, value, onChange, disabled, children, required,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  disabled?: boolean; children: React.ReactNode; required?: boolean;
+}) {
   return (
-    <div style={{ minHeight: "100vh", background: "#0f1117", display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", fontFamily: "sans-serif" }}>
-      <p>Expenses — coming soon</p>
+    <div>
+      <div style={{
+        fontSize: 9.5, fontWeight: 700, color: T.t5,
+        letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 5,
+      }}>
+        {label}{required && <span style={{ color: T.red }}> *</span>}
+      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        style={{
+          width: "100%",
+          backgroundColor: disabled ? "rgba(255,255,255,0.02)" : T.panel2,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2339475a'/%3E%3C/svg%3E")`,
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "calc(100% - 10px) center",
+          border: `1px solid ${T.panel2B}`,
+          borderRadius: 7, padding: "8px 32px 8px 10px",
+          fontSize: 13, color: disabled ? T.t5 : T.t2,
+          outline: "none", fontFamily: "'DM Sans',sans-serif",
+          cursor: disabled ? "not-allowed" : "pointer",
+          appearance: "none", WebkitAppearance: "none",
+          transition: "border-color 0.12s", minHeight: 44,
+        }}
+      >
+        {children}
+      </select>
+    </div>
+  );
+}
+
+function DateRangePicker({
+  startDate, endDate, onStartChange, onEndChange, onClear,
+}: {
+  startDate: string; endDate: string;
+  onStartChange: (d: string) => void;
+  onEndChange: (d: string) => void;
+  onClear: () => void;
+}) {
+  const hasDateRange = startDate || endDate;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{
+        fontSize: 9.5, fontWeight: 700, color: T.t5,
+        letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 8,
+      }}>
+        Date Range
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          type="date" value={startDate}
+          onChange={(e) => onStartChange(e.target.value)}
+          style={{
+            flex: 1, background: T.panel2, border: `1px solid ${T.panel2B}`,
+            borderRadius: 7, padding: "8px 10px", fontSize: 12, color: T.t2,
+            outline: "none", fontFamily: "'DM Sans',sans-serif", minHeight: 40,
+          }}
+        />
+        <span style={{ color: T.t5, fontSize: 12 }}>→</span>
+        <input
+          type="date" value={endDate}
+          onChange={(e) => onEndChange(e.target.value)}
+          style={{
+            flex: 1, background: T.panel2, border: `1px solid ${T.panel2B}`,
+            borderRadius: 7, padding: "8px 10px", fontSize: 12, color: T.t2,
+            outline: "none", fontFamily: "'DM Sans',sans-serif", minHeight: 40,
+          }}
+        />
+        {hasDateRange && (
+          <button onClick={onClear} style={{
+            background: T.panel2, border: `1px solid ${T.panel2B}`,
+            borderRadius: 7, padding: "8px 12px", fontSize: 12,
+            color: T.red, cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+            whiteSpace: "nowrap", minHeight: 40, display: "flex", alignItems: "center", gap: 4,
+          }}>✕ Clear</button>
+        )}
+      </div>
+      {hasDateRange && (
+        <div style={{ fontSize: 10, color: T.acText, marginTop: 6 }}>
+          {startDate && endDate
+            ? `${startDate} → ${endDate}`
+            : startDate ? `From ${startDate}` : `Until ${endDate}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Avatar({ name }: { name: string }) {
+  const initials = (name || "?")
+    .split(" ").map((w: string) => w[0] || "").join("").slice(0, 2).toUpperCase();
+  return (
+    <div style={{
+      width: 34, height: 34, borderRadius: "50%",
+      background: T.acLight, border: `1px solid ${T.acMid}`,
+      color: T.acText, fontSize: 11, fontWeight: 700, flexShrink: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>{initials}</div>
+  );
+}
+
+function Shimmer({ w, h = 14 }: { w: number | string; h?: number }) {
+  return (
+    <div style={{
+      height: h, width: w, borderRadius: 4,
+      background: "rgba(255,255,255,0.06)",
+      animation: "pulse 1.4s ease-in-out infinite",
+    }} />
+  );
+}
+
+function StatCard({
+  label, value, color, loading, subtitle,
+}: {
+  label: string; value: string; color: string; loading?: boolean; subtitle?: string;
+}) {
+  return (
+    <div style={{
+      flex: "1 1 130px", padding: "14px 16px",
+      background: T.panel2, border: `1px solid ${T.panel2B}`, borderRadius: 10,
+    }}>
+      <div style={{ fontSize: 11, color: T.t4, marginBottom: 6 }}>{label}</div>
+      {loading ? <Shimmer w={80} h={20} /> : (
+        <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
+      )}
+      {subtitle && <div style={{ fontSize: 10, color: T.t5, marginTop: 4 }}>{subtitle}</div>}
+    </div>
+  );
+}
+
+function ViewToggle({
+  view, setView,
+}: {
+  view: "hourly" | "percentage"; setView: (v: "hourly" | "percentage") => void;
+}) {
+  return (
+    <div style={{
+      display: "inline-flex", background: T.panel2,
+      border: `1px solid ${T.panel2B}`, borderRadius: 10, padding: 2,
+    }}>
+      {(["hourly", "percentage"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => setView(v)}
+          style={{
+            padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+            background: view === v ? T.ac : "transparent",
+            color: view === v ? "#fff" : T.t4,
+            border: "none", cursor: "pointer", transition: "all 0.12s",
+          }}
+        >
+          {v === "hourly" ? "💰 Hourly" : "📊 % Share"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Employee card (mobile) ───────────────────────────────────────────────────
+function EmployeeCard({
+  emp, view, selectedProject,
+}: { emp: any; view: "hourly" | "percentage"; selectedProject?: number | null }) {
+  const hourly = emp.hourly_amount ?? 0;
+  const pct = emp.percentage_amount ?? 0;
+  const showPct = view === "percentage" && !!selectedProject && pct > 0;
+
+  const displayAmount = view === "hourly" ? hourly : showPct ? pct : 0;
+  const displayColor = view === "hourly" ? T.blue : showPct ? T.purple : T.t5;
+  const displayLabel =
+    view === "hourly" ? "Hourly Salary"
+    : showPct ? "% Share"
+    : selectedProject ? "No % data"
+    : "Select a project";
+
+  return (
+    <div style={{
+      background: T.panel2, border: `1px solid ${T.panel2B}`, borderRadius: 12,
+      padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10,
+      animation: "fadeUp 0.18s ease both",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Avatar name={emp.user.name} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 14, fontWeight: 600, color: T.t2,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>{emp.user.name}</div>
+          <div style={{
+            fontSize: 11, color: T.t5,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>{emp.user.email}</div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 10, color: T.t5, marginBottom: 2 }}>{displayLabel}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: displayColor }}>
+            {displayAmount > 0 ? fmtINR(displayAmount) : "—"}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7 }}>
+        {[
+          { label: "Hours", val: `${emp.total_hours.toFixed(1)} h`, color: T.t2, bg: T.blueBg },
+          { label: "Hourly", val: fmtINR(hourly), color: T.blue, bg: T.blueBg },
+          { label: "% Share", val: pct > 0 ? fmtINR(pct) : "—", color: pct > 0 ? T.purple : T.t5, bg: T.purpleBg },
+        ].map(({ label, val, color, bg }) => (
+          <div key={label} style={{ background: bg, borderRadius: 8, padding: "8px 10px" }}>
+            <div style={{ fontSize: 9, color: T.t5, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>{label}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {view === "percentage" && showPct && emp.percentage_details?.length > 0 && (
+        <div style={{
+          borderTop: `1px solid ${T.divider}`, paddingTop: 7,
+          display: "flex", flexDirection: "column", gap: 3,
+        }}>
+          {emp.percentage_details.map((d: any, i: number) => (
+            <div key={i} style={{
+              display: "flex", justifyContent: "space-between", fontSize: 11, color: T.t4,
+            }}>
+              <span>{d.share_type_display} · {d.percentage}% of {fmtINR(d.revenue_base)} ({d.scope_name})</span>
+              <span style={{ color: T.purple, fontWeight: 600, marginLeft: 8 }}>{fmtINR(d.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <span style={{
+          padding: "3px 10px", borderRadius: 20,
+          background: T.acLight, color: T.acText, fontSize: 11, fontWeight: 600,
+        }}>{emp.work_logs_count} logs</span>
+      </div>
+    </div>
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <tr key={i} style={{ borderBottom: `1px solid ${T.divider}` }}>
+          <td style={{ padding: "14px 18px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%",
+                background: "rgba(255,255,255,0.06)",
+                animation: "pulse 1.4s ease-in-out infinite",
+              }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <Shimmer w={120} /><Shimmer w={90} h={11} />
+              </div>
+            </div>
+          </td>
+          {[60, 80, 80, 50].map((w, j) => (
+            <td key={j} style={{ padding: "14px 18px", textAlign: "right" }}>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}><Shimmer w={w} /></div>
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function MobileDrawer({
+  open, onClose, children,
+}: { open: boolean; onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    document.body.style.overflow = open ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: "fixed", inset: 0, zIndex: 40,
+        background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none",
+        transition: "opacity 0.22s",
+      }} />
+      <div style={{
+        position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 50,
+        width: "min(88vw, 320px)", background: "#0d0f1c",
+        borderRight: `1px solid ${T.panelB}`, overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+        transform: open ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.26s cubic-bezier(0.32,0,0.25,1)",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 16px 12px", borderBottom: `1px solid ${T.divider}`,
+          position: "sticky", top: 0, background: "#0d0f1c", zIndex: 1,
+        }}>
+          <span style={{
+            fontSize: 11, fontWeight: 700, color: T.t3,
+            letterSpacing: "0.08em", textTransform: "uppercase",
+          }}>Filters</span>
+          <button onClick={onClose} style={{
+            width: 36, height: 36, borderRadius: 8, background: T.panel2,
+            border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
+            fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center",
+          }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </>
+  );
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+function Sidebar(props: any) {
+  const {
+    organisations, selectedOrg, setSelectedOrg,
+    selectedYear, setSelectedYear, selectedMonth, setSelectedMonth,
+    startDate, setStartDate, endDate, setEndDate, clearDateRange,
+    projects, selectedProject, setSelectedProject, loadingProjects,
+    deliverables, selectedDeliverable, setSelectedDeliverable, loadingDeliverables,
+    users, selectedUser, setSelectedUser, loadingUsers,
+    activeFilterCount, onClearAll,
+  } = props;
+
+  const isDateRangeActive = !!(startDate || endDate);
+
+  return (
+    <>
+      <div style={{ padding: "16px 14px 12px" }}>
+        <SelectField label="Organisation" required
+          value={selectedOrg ? String(selectedOrg) : ""}
+          onChange={(v) => setSelectedOrg(v ? Number(v) : null)}
+        >
+          <option value="">Select organisation</option>
+          {organisations.map((o: OrganisationOption) => (
+            <option key={o.id} value={o.id}>{o.name}</option>
+          ))}
+        </SelectField>
+      </div>
+
+      <Divider />
+
+      {/* Date Range */}
+      <div style={{ padding: "12px 14px" }}>
+        <DateRangePicker
+          startDate={startDate} endDate={endDate}
+          onStartChange={setStartDate} onEndChange={setEndDate} onClear={clearDateRange}
+        />
+      </div>
+
+      <Divider />
+
+      {/* Year & Month — disabled when date range active */}
+      <div style={{
+        padding: "12px 14px 8px",
+        opacity: isDateRangeActive ? 0.45 : 1,
+        pointerEvents: isDateRangeActive ? "none" : "auto",
+      }}>
+        <div style={{
+          fontSize: 9, fontWeight: 700, color: T.t5,
+          letterSpacing: "0.09em", textTransform: "uppercase",
+          marginBottom: 10, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          Year &amp; Month
+          {isDateRangeActive && (
+            <span style={{ fontSize: 9, color: T.orange, fontWeight: 400 }}>
+              (disabled — date range active)
+            </span>
+          )}
+        </div>
+
+        {/* Year chips */}
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
+          {AVAILABLE_YEARS.map((y) => (
+            <button key={y} onClick={() => {
+              // Toggle: clicking the same year de-selects it
+              setSelectedYear(selectedYear === y ? null : y);
+            }} style={{
+              flex: "1 1 0", minHeight: 40,
+              background: selectedYear === y ? T.acLight : "transparent",
+              border: `1px solid ${selectedYear === y ? T.acMid : T.divider}`,
+              borderRadius: 6,
+              color: selectedYear === y ? T.acText : T.t5,
+              fontSize: 12, cursor: "pointer",
+              fontWeight: selectedYear === y ? 700 : 400,
+            }}>{y}</button>
+          ))}
+        </div>
+
+        {/* Month chips — only shown when a year is selected */}
+        {selectedYear !== null && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
+            {MONTHS.map((m, i) => (
+              <button key={m} onClick={() => {
+                // Toggle: clicking the same month de-selects it
+                setSelectedMonth(selectedMonth === i ? null : i);
+              }} style={{
+                background: selectedMonth === i ? T.acLight : "transparent",
+                border: `1px solid ${selectedMonth === i ? T.acMid : T.divider}`,
+                borderRadius: 6,
+                color: selectedMonth === i ? T.acText : T.t5,
+                fontSize: 11, padding: "9px 4px", cursor: "pointer",
+                fontWeight: selectedMonth === i ? 600 : 400,
+              }}>{m.slice(0, 3)}</button>
+            ))}
+          </div>
+        )}
+
+        {selectedYear === null && (
+          <p style={{ fontSize: 11, color: T.t6, fontStyle: "italic", margin: 0 }}>
+            Select a year to enable month filter
+          </p>
+        )}
+      </div>
+
+      <Divider />
+
+      <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{
+          fontSize: 9, fontWeight: 700, color: T.t5,
+          letterSpacing: "0.09em", textTransform: "uppercase",
+        }}>
+          Filters <span style={{ color: T.t6 }}>(optional)</span>
+        </div>
+
+        <SelectField label="Project"
+          value={selectedProject ? String(selectedProject) : ""}
+          onChange={(v) => setSelectedProject(v ? Number(v) : null)}
+          disabled={!selectedOrg || loadingProjects}
+        >
+          <option value="">{loadingProjects ? "Loading…" : "All projects"}</option>
+          {projects.map((p: ProjectOption) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </SelectField>
+
+        <SelectField label="Deliverable"
+          value={selectedDeliverable ? String(selectedDeliverable) : ""}
+          onChange={(v) => setSelectedDeliverable(v ? Number(v) : null)}
+          disabled={!selectedProject || loadingDeliverables}
+        >
+          <option value="">{loadingDeliverables ? "Loading…" : "All deliverables"}</option>
+          {deliverables.map((d: DeliverableOption) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </SelectField>
+
+        <SelectField label="User"
+          value={selectedUser ? String(selectedUser) : ""}
+          onChange={(v) => setSelectedUser(v ? Number(v) : null)}
+          disabled={!selectedOrg || loadingUsers}
+        >
+          <option value="">{loadingUsers ? "Loading…" : "All users"}</option>
+          {users.map((u: UserOption) => (
+            <option key={u.id} value={u.id}>{u.name}</option>
+          ))}
+        </SelectField>
+      </div>
+
+      {activeFilterCount > 0 && (
+        <>
+          <Divider />
+          <div style={{ padding: "12px 14px 20px", display: "flex", gap: 8 }}>
+            {isDateRangeActive && (
+              <button onClick={clearDateRange} style={{
+                flex: 1, background: "transparent",
+                border: `1px solid ${T.orange}40`, borderRadius: 7,
+                padding: "10px 0", fontSize: 11, color: T.orange,
+                cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+              }}>📅 Clear Dates</button>
+            )}
+            <button onClick={onClearAll} style={{
+              flex: 1, background: "transparent",
+              border: `1px solid ${T.divider}`, borderRadius: 7,
+              padding: "10px 0", fontSize: 11, color: T.t5,
+              cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+            }}>✕ Clear All</button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+export default function SalaryReportPage() {
+  const containerRef = useRef<HTMLDivElement>(null!);
+  const [cw, setCw] = useState(9999);
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(([e]) => setCw(e.contentRect.width));
+    ro.observe(containerRef.current);
+    setCw(containerRef.current.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+  const isMobile = cw < 740;
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [view, setView] = useState<"hourly" | "percentage">("hourly");
+
+  // ── Data state ─────────────────────────────────────────────────────────────
+  const [organisations, setOrganisations] = useState<OrganisationOption[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [deliverables, setDeliverables] = useState<DeliverableOption[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [report, setReport] = useState<SalaryReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingDeliverables, setLoadingDeliverables] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // ── Filter state ───────────────────────────────────────────────────────────
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  const [selectedOrg, setSelectedOrg] = useState<number | null>(null);
+  const [selectedProject, setSelectedProject] = useState<number | null>(null);
+  const [selectedDeliverable, setSelectedDeliverable] = useState<number | null>(null);
+  const [selectedUser, setSelectedUser] = useState<number | null>(null);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
+  const clearDateRange = () => { setStartDate(""); setEndDate(""); };
+
+  // ── Load organisations ─────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchOrganisations()
+      .then(setOrganisations)
+      .catch((e) => console.error("orgs:", e));
+  }, []);
+
+  // ── Load projects when org changes ─────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedOrg) { setProjects([]); setSelectedProject(null); return; }
+    setLoadingProjects(true);
+    fetchProjectsByOrg(selectedOrg)
+      .then((d) => { setProjects(d); setSelectedProject(null); setSelectedDeliverable(null); setDeliverables([]); })
+      .catch(() => setError("Failed to load projects"))
+      .finally(() => setLoadingProjects(false));
+  }, [selectedOrg]);
+
+  // ── Load deliverables when project changes ─────────────────────────────────
+  useEffect(() => {
+    if (!selectedProject) { setDeliverables([]); setSelectedDeliverable(null); return; }
+    setLoadingDeliverables(true);
+    fetchDeliverablesByProject(selectedProject)
+      .then((d) => { setDeliverables(d); setSelectedDeliverable(null); })
+      .catch(() => setError("Failed to load deliverables"))
+      .finally(() => setLoadingDeliverables(false));
+  }, [selectedProject]);
+
+  // ── Load users when org changes ────────────────────────────────────────────
+  useEffect(() => {
+    setSelectedUser(null);
+    if (!selectedOrg) { setUsers([]); return; }
+    setLoadingUsers(true);
+    fetchUsersByOrg(selectedOrg)
+      .then(setUsers).catch(() => setUsers([]))
+      .finally(() => setLoadingUsers(false));
+  }, [selectedOrg]);
+
+  // ── Core fetch ─────────────────────────────────────────────────────────────
+  const fetchReport = useCallback(async () => {
+    if (!selectedOrg) { setError("Please select an organisation"); return; }
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchSalaryReport({
+        // Date range takes priority; only send year/month when no range set
+        from: startDate || undefined,
+        to: endDate || undefined,
+        // Only send year when set and no date range active
+        year: (!startDate && !endDate && selectedYear !== null) ? selectedYear : undefined,
+        // Only send month when year AND month are both selected (no date range)
+        month: (!startDate && !endDate && selectedYear !== null && selectedMonth !== null)
+          ? selectedMonth + 1   // convert 0-indexed UI → 1-indexed API
+          : undefined,
+        organisation_id: selectedOrg,
+        project_id: selectedProject || undefined,
+        deliverable_id: selectedDeliverable || undefined,
+        user_id: selectedUser || undefined,
+        view_all: true,
+      });
+      setReport(data);
+    } catch (e: any) {
+      setError(e.message ?? "Failed to load report");
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    selectedYear, selectedMonth, selectedOrg,
+    selectedProject, selectedDeliverable, selectedUser,
+    startDate, endDate,
+  ]);
+
+  // ── Debounced auto-fetch ───────────────────────────────────────────────────
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!selectedOrg) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(fetchReport, 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [fetchReport]);
+
+  const clearAllFilters = () => {
+    setSelectedOrg(null); setSelectedProject(null);
+    setSelectedDeliverable(null); setSelectedUser(null);
+    setSelectedYear(null); setSelectedMonth(null);
+    setStartDate(""); setEndDate("");
+    setDrawerOpen(false); setReport(null);
+  };
+
+  const activeFilterCount = [
+    !!selectedOrg, !!selectedProject, !!selectedDeliverable, !!selectedUser,
+    !!startDate, !!endDate, selectedYear !== null, selectedMonth !== null,
+  ].filter(Boolean).length;
+
+  const selectedOrgName = organisations.find((o) => o.id === selectedOrg)?.name;
+  const selectedProjectName = projects.find((p) => p.id === selectedProject)?.name;
+
+  // ── Period display ─────────────────────────────────────────────────────────
+  const getPeriodDisplay = () => {
+    if (startDate && endDate) return `${startDate} → ${endDate}`;
+    if (startDate) return `From ${startDate}`;
+    if (endDate) return `Until ${endDate}`;
+    if (selectedYear !== null && selectedMonth !== null)
+      return `${MONTHS[selectedMonth]} ${selectedYear}`;
+    if (selectedYear !== null) return `Full year ${selectedYear}`;
+    return "All time (no date filter)";
+  };
+
+  // ── Totals ─────────────────────────────────────────────────────────────────
+  let totalAmount = 0, totalLabel = "", totalColor = T.t4, subtitle = "";
+  if (view === "hourly") {
+    totalAmount = report?.total_hourly_amount ?? 0;
+    totalLabel = "Total Hourly Salary";
+    totalColor = T.blue;
+    subtitle = `${report?.total_employees || 0} employees × hourly rates`;
+  } else {
+    if (selectedProject) {
+      totalAmount = report?.total_percentage_amount ?? 0;
+      totalLabel = `Total % Share — ${selectedProjectName || "Project"}`;
+      totalColor = T.purple;
+      subtitle = "Revenue × share %";
+    } else {
+      totalLabel = "Select a project"; totalColor = T.t5;
+      subtitle = "% share requires project selection";
+    }
+  }
+
+  const sidebarProps = {
+    organisations, selectedOrg, setSelectedOrg,
+    selectedYear, setSelectedYear, selectedMonth, setSelectedMonth,
+    startDate, setStartDate, endDate, setEndDate, clearDateRange,
+    projects, selectedProject, setSelectedProject, loadingProjects,
+    deliverables, selectedDeliverable, setSelectedDeliverable, loadingDeliverables,
+    users, selectedUser, setSelectedUser, loadingUsers,
+    activeFilterCount, onClearAll: clearAllFilters,
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        minHeight: "100vh", background: T.bg, color: T.t2,
+        fontFamily: "'DM Sans','Sora',sans-serif",
+        padding: isMobile ? "16px 12px 80px" : "28px 24px 60px",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=Sora:wght@600;700&display=swap');
+        *{box-sizing:border-box;margin:0;}
+        ::-webkit-scrollbar{width:3px;height:3px;}
+        ::-webkit-scrollbar-thumb{background:rgba(76,124,243,0.25);border-radius:99px;}
+        select option{background:#0d0f1c;color:#d8e0f0;}
+        @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.7}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .trow:hover{background:rgba(255,255,255,0.022)!important;}
+        button,select,input{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+      `}</style>
+
+      {isMobile && (
+        <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+          <Sidebar {...sidebarProps} />
+        </MobileDrawer>
+      )}
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 18, gap: 12, flexWrap: "wrap",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: 11, flexShrink: 0,
+            background: `linear-gradient(135deg, ${T.acLight}, ${T.acGlow})`,
+            border: `1px solid ${T.acMid}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <svg width={19} height={19} viewBox="0 0 20 20" fill="none">
+              <path d="M3 10h14M3 6h14M3 14h8" stroke={T.acText} strokeWidth={1.7} strokeLinecap="round" />
+              <circle cx={15} cy={14} r={3} stroke={T.acText} strokeWidth={1.5} />
+            </svg>
+          </div>
+          <div>
+            <h1 style={{
+              fontSize: isMobile ? 17 : 22, fontWeight: 700,
+              fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em",
+              color: T.t1, lineHeight: 1.2,
+            }}>Salary Report</h1>
+            <p style={{ color: T.t5, fontSize: 12, marginTop: 2 }}>
+              {selectedOrgName ? `${selectedOrgName} · ` : ""}
+              {getPeriodDisplay()}
+              {selectedProjectName && view === "percentage" && ` · ${selectedProjectName}`}
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <ViewToggle view={view} setView={setView} />
+          {isMobile && (
+            <button onClick={() => setDrawerOpen(true)} style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: T.panel, border: `1px solid ${T.panelB}`,
+              borderRadius: 9, padding: "10px 14px",
+              color: T.t3, fontSize: 13, fontWeight: 600, cursor: "pointer",
+              position: "relative",
+            }}>
+              <svg width={14} height={14} viewBox="0 0 20 20" fill="none">
+                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" />
+              </svg>
+              Filters
+              {activeFilterCount > 0 && (
+                <span style={{
+                  position: "absolute", top: -6, right: -6,
+                  background: T.ac, color: "#fff", width: 17, height: 17,
+                  borderRadius: "50%", fontSize: 9, fontWeight: 800,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  border: `2px solid ${T.bg}`,
+                }}>{activeFilterCount}</span>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Layout ───────────────────────────────────────────────────────── */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "290px 1fr",
+        gap: 18, alignItems: "start",
+      }}>
+        {/* Desktop sidebar */}
+        {!isMobile && (
+          <div style={{
+            background: T.panel, border: `1px solid ${T.panelB}`,
+            borderRadius: 14, overflow: "hidden",
+            position: "sticky", top: 20,
+            maxHeight: "calc(100vh - 48px)", overflowY: "auto",
+          }}>
+            <Sidebar {...sidebarProps} />
+          </div>
+        )}
+
+        {/* Main content */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+
+          {/* Empty / no org selected */}
+          {!selectedOrg && !loading && (
+            <div style={{
+              padding: "52px 20px", textAlign: "center",
+              background: T.panel, borderRadius: 14, border: `1px solid ${T.panelB}`,
+            }}>
+              <svg width={46} height={46} viewBox="0 0 24 24" fill="none" stroke={T.t5} strokeWidth={1}>
+                <rect x={3} y={3} width={18} height={18} rx={2} />
+                <path d="M3 9h18M9 21v-12" />
+              </svg>
+              <p style={{ marginTop: 14, color: T.t4, fontSize: 13 }}>
+                Select an organisation to view the salary report
+              </p>
+            </div>
+          )}
+
+          {/* % share warning — needs project */}
+          {view === "percentage" && selectedOrg && !selectedProject && (
+            <div style={{
+              padding: "12px 16px", color: T.orange, fontSize: 13,
+              background: T.orangeBg, borderRadius: 10,
+              border: `1px solid ${T.orange}30`,
+              display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span>⚠️</span>
+              <span>Select a specific project to view percentage share calculations</span>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              padding: "11px 16px", color: T.red, fontSize: 13,
+              background: T.redBg, borderRadius: 10, border: `1px solid ${T.red}30`,
+            }}>⚠ {error}</div>
+          )}
+
+          {/* Report card */}
+          {selectedOrg && (
+            <div style={{
+              background: T.panel, border: `1px solid ${T.panelB}`,
+              borderRadius: 14, overflow: "hidden",
+            }}>
+              {/* Summary stats */}
+              <div style={{
+                padding: isMobile ? "14px" : "18px 22px",
+                background: `linear-gradient(135deg, ${T.panel2}, transparent)`,
+                borderBottom: `1px solid ${T.divider}`,
+              }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                  <StatCard
+                    loading={loading} label={totalLabel}
+                    value={totalAmount > 0 ? fmtINR(totalAmount) : "₹0"}
+                    color={totalColor} subtitle={subtitle}
+                  />
+                  <StatCard
+                    loading={loading} label="Employees"
+                    value={String(report?.total_employees ?? 0)} color={T.acText}
+                  />
+                  {/* Cross-reference stat */}
+                  {view === "percentage" && selectedProject && report?.total_hourly_amount !== undefined && (
+                    <StatCard
+                      loading={loading} label="Hourly (reference)"
+                      value={fmtINR(report.total_hourly_amount)} color={T.blue}
+                    />
+                  )}
+                  {view === "hourly" && (report?.total_percentage_amount ?? 0) > 0 && (
+                    <StatCard
+                      loading={loading} label="% Share (reference)"
+                      value={fmtINR(report!.total_percentage_amount)} color={T.purple}
+                    />
+                  )}
+                </div>
+                {report && !loading && (
+                  <div style={{ fontSize: 11, color: T.t5 }}>
+                    Period: {report.report_period.start_date} – {report.report_period.end_date}
+                  </div>
+                )}
+              </div>
+
+              {/* Employee list */}
+              {isMobile ? (
+                <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: 9 }}>
+                  {loading
+                    ? Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} style={{
+                          background: T.panel2, border: `1px solid ${T.panel2B}`,
+                          borderRadius: 12, padding: 14,
+                          display: "flex", flexDirection: "column", gap: 10,
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{
+                              width: 34, height: 34, borderRadius: "50%",
+                              background: "rgba(255,255,255,0.06)",
+                              animation: "pulse 1.4s ease-in-out infinite",
+                            }} />
+                            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                              <Shimmer w={140} /><Shimmer w={100} h={11} />
+                            </div>
+                            <Shimmer w={60} h={20} />
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7 }}>
+                            {[1, 2, 3].map((j) => (
+                              <div key={j} style={{ background: T.blueBg, borderRadius: 8, padding: "8px 10px" }}>
+                                <Shimmer w={30} h={9} />
+                                <div style={{ marginTop: 5 }}><Shimmer w={50} /></div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    : (report?.employees.length === 0)
+                      ? <div style={{ textAlign: "center", padding: "40px 0", color: T.t5, fontSize: 13 }}>
+                          No salary data found for the selected filters
+                        </div>
+                      : report?.employees.map((emp) => (
+                          <EmployeeCard key={emp.user.id} emp={emp} view={view} selectedProject={selectedProject} />
+                        ))
+                  }
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
+                        <th style={{ padding: "12px 18px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>Employee</th>
+                        <th style={{ padding: "12px 18px", textAlign: "right", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>Hours</th>
+                        <th style={{ padding: "12px 18px", textAlign: "right", fontSize: 10.5, fontWeight: 700, color: view === "hourly" ? T.blue : T.purple }}>
+                          {view === "hourly" ? "Hourly Salary" : `% Share${selectedProject && selectedProjectName ? ` (${selectedProjectName})` : ""}`}
+                        </th>
+                        <th style={{ padding: "12px 18px", textAlign: "right", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>
+                          {view === "hourly" ? "% Share ref." : "Hourly ref."}
+                        </th>
+                        <th style={{ padding: "12px 18px", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>Logs</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading ? (
+                        <TableSkeleton />
+                      ) : report?.employees.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ padding: "52px 20px", textAlign: "center", color: T.t6, fontSize: 13 }}>
+                            No salary data found for the selected filters
+                          </td>
+                        </tr>
+                      ) : (
+                        report?.employees.map((emp, idx) => {
+                          const hourly = emp.hourly_amount ?? 0;
+                          const pct = emp.percentage_amount ?? 0;
+                          // Percentage only meaningful when a project is selected
+                          const showPct = view === "percentage" && !!selectedProject && pct > 0;
+
+                          const mainVal = view === "hourly" ? hourly : showPct ? pct : 0;
+                          const mainColor = view === "hourly" ? T.blue : showPct ? T.purple : T.t5;
+                          const refVal = view === "hourly" ? pct : hourly;
+                          const refColor = view === "hourly" ? T.purple : T.blue;
+
+                          return (
+                            <tr key={emp.user.id} className="trow" style={{
+                              borderBottom: `1px solid ${T.divider}`,
+                              animation: `fadeUp 0.18s ease ${idx * 0.02}s both`,
+                            }}>
+                              <td style={{ padding: "13px 18px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <Avatar name={emp.user.name} />
+                                  <div>
+                                    <div style={{ fontSize: 13, fontWeight: 500, color: T.t2 }}>{emp.user.name}</div>
+                                    <div style={{ fontSize: 11, color: T.t5 }}>{emp.user.email}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ padding: "13px 18px", textAlign: "right" }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
+                                  {emp.total_hours.toFixed(1)} hrs
+                                </span>
+                              </td>
+                              <td style={{ padding: "13px 18px", textAlign: "right" }}>
+                                <span style={{ fontSize: 15, fontWeight: 700, color: mainColor }}>
+                                  {mainVal > 0 ? fmtINR(mainVal) : "—"}
+                                </span>
+                                {view === "percentage" && showPct && emp.percentage_details?.length > 0 && (
+                                  <div style={{ fontSize: 9, color: T.t5, marginTop: 2 }}>
+                                    {emp.percentage_details
+                                      .map((d: any) => `${d.percentage}% of ${fmtINR(d.revenue_base)}`)
+                                      .join(", ")}
+                                  </div>
+                                )}
+                                {view === "percentage" && !selectedProject && (
+                                  <div style={{ fontSize: 10, color: T.t6, marginTop: 2 }}>select project</div>
+                                )}
+                              </td>
+                              <td style={{ padding: "13px 18px", textAlign: "right" }}>
+                                <span style={{ fontSize: 12, color: refColor }}>
+                                  {refVal > 0 ? fmtINR(refVal) : "—"}
+                                </span>
+                              </td>
+                              <td style={{ padding: "13px 18px", textAlign: "center" }}>
+                                <span style={{
+                                  padding: "3px 10px", borderRadius: 20,
+                                  background: T.acLight, color: T.acText, fontSize: 11, fontWeight: 600,
+                                }}>{emp.work_logs_count}</span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div style={{
+                padding: "11px 18px", borderTop: `1px solid ${T.divider}`,
+                display: "flex", justifyContent: "space-between",
+                alignItems: "center", flexWrap: "wrap", gap: 10,
+              }}>
+                <div style={{ fontSize: 11, color: T.t5 }}>
+                  {view === "hourly"
+                    ? "💰 Hourly = work logs × hourly rate (all projects)"
+                    : selectedProject
+                      ? `📊 % Share = revenue from ${selectedProjectName} × share %`
+                      : "📌 Select a project to enable % share view"}
+                </div>
+                <button
+                  onClick={fetchReport}
+                  disabled={loading}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 7,
+                    background: "transparent", border: `1px solid ${T.divider}`,
+                    borderRadius: 8, padding: "8px 14px", fontSize: 12,
+                    color: loading ? T.t6 : T.t4,
+                    cursor: loading ? "not-allowed" : "pointer",
+                    opacity: loading ? 0.5 : 1,
+                  }}
+                >
+                  <svg width={13} height={13} viewBox="0 0 20 20" fill="none"
+                    style={{ animation: loading ? "spin 0.9s linear infinite" : "none" }}>
+                    <path d="M17 10a7 7 0 1 1-7-7M10 3v4h4" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                  </svg>
+                  {loading ? "Loading…" : "Refresh"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
