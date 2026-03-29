@@ -127,14 +127,17 @@ interface CascadeFilters {
   member_id:      number;
   project_id:     number;
   deliverable_id: number;
+  date_from:      string;
+  date_to:        string;
 }
 
-function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLoading }: {
+function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLoading, onApplyDateRange }: {
   meta: MetaData;
   filters: CascadeFilters;
   onChange: (f: Partial<CascadeFilters>) => void;
   deliverableOptions: DeliverableOption[];
   delivLoading: boolean;
+  onApplyDateRange: () => void;
 }) {
   const sel: React.CSSProperties = {
     background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:7,
@@ -142,30 +145,108 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
     fontFamily:"'DM Sans',sans-serif", appearance:"none" as const, width:"100%",
     transition:"border-color 0.15s",
   };
+  const inp: React.CSSProperties = {
+    ...sel, cursor:"text", colorScheme:"dark" as any,
+  };
 
-  // Members filtered by org
-  const visibleMembers = filters.org_id
-    ? meta.members.filter(m => {
-        // We don't have org→member mapping directly in MetaData,
-        // but worklogs/assignments will already be filtered by org server-side.
-        // Show all members when org selected — server enforces org membership.
-        return true;
-      })
-    : meta.members;
-
-  // Projects filtered by org
+  const visibleMembers = meta.members;
   const visibleProjects = filters.org_id
     ? meta.projects.filter(p => p.organisation_id === filters.org_id)
     : meta.projects;
-
-  // Deliverables filtered by project (already fetched when project changes)
   const visibleDelivs = deliverableOptions;
 
-  const labels = ["Organisation", "Member", "Project", "Deliverable"];
+  const hasDateFilter = !!(filters.date_from || filters.date_to);
 
   return (
     <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:10 }}>
       <div style={{ fontSize:11, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase" }}>Filters</div>
+
+      {/* ── Date range row ── */}
+      <div>
+        <div style={{ fontSize:10, color:T.t5, marginBottom:6, textTransform:"uppercase", letterSpacing:"0.05em", fontWeight:600 }}>Date Range</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <div>
+            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>From</div>
+            <input
+              type="date"
+              value={filters.date_from}
+              onChange={e => onChange({ date_from: e.target.value })}
+              style={inp}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>To</div>
+            <input
+              type="date"
+              value={filters.date_to}
+              onChange={e => onChange({ date_to: e.target.value })}
+              style={inp}
+            />
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:6, marginTop:8 }}>
+          <button
+            onClick={onApplyDateRange}
+            disabled={!filters.date_from && !filters.date_to}
+            style={{
+              flex:1, padding:"7px 0", borderRadius:7, border:"none",
+              background: (filters.date_from || filters.date_to) ? T.ac : T.panel2B,
+              color: (filters.date_from || filters.date_to) ? "#fff" : T.t5,
+              fontSize:12, fontWeight:600, cursor: (filters.date_from || filters.date_to) ? "pointer" : "default",
+              fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s",
+            }}
+          >
+            Apply Date Range
+          </button>
+          {hasDateFilter && (
+            <button
+              onClick={() => { onChange({ date_from:"", date_to:"" }); onApplyDateRange(); }}
+              style={{
+                padding:"7px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`,
+                background:"transparent", color:T.red, fontSize:12,
+                cursor:"pointer", fontFamily:"'DM Sans',sans-serif",
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Quick presets */}
+        <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:6 }}>
+          {[
+            { label:"This week", fn: () => {
+              const { from, to } = currentWeekRange();
+              onChange({ date_from: from, date_to: to });
+            }},
+            { label:"This month", fn: () => {
+              const now = new Date();
+              const { from, to } = (() => {
+                const y = now.getFullYear(), m = now.getMonth();
+                return { from: `${y}-${pad(m+1)}-01`, to: `${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}` };
+              })();
+              onChange({ date_from: from, date_to: to });
+            }},
+            { label:"Last month", fn: () => {
+              const now = new Date();
+              const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+              const y = d.getFullYear(), m = d.getMonth();
+              onChange({ date_from: `${y}-${pad(m+1)}-01`, date_to: `${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}` });
+            }},
+          ].map(({ label, fn }) => (
+            <button key={label} onClick={() => { fn(); setTimeout(onApplyDateRange, 0); }}
+              style={{ padding:"4px 9px", borderRadius:5, border:`1px solid ${T.panel2B}`, background:T.panel2, color:T.t4, fontSize:10, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.acText; (e.currentTarget as HTMLElement).style.borderColor = T.acMid; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; (e.currentTarget as HTMLElement).style.borderColor = T.panel2B; }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Divider />
+
+      {/* ── Cascade selects ── */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:8 }}>
         {/* Org */}
         <div>
@@ -206,8 +287,14 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
       </div>
 
       {/* Active filter chips */}
-      {(filters.org_id || filters.member_id || filters.project_id || filters.deliverable_id) ? (
+      {(filters.org_id || filters.member_id || filters.project_id || filters.deliverable_id || filters.date_from || filters.date_to) ? (
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+          {filters.date_from && (
+            <Chip label={`From: ${filters.date_from}`} onRemove={() => { onChange({ date_from:"" }); onApplyDateRange(); }} />
+          )}
+          {filters.date_to && (
+            <Chip label={`To: ${filters.date_to}`} onRemove={() => { onChange({ date_to:"" }); onApplyDateRange(); }} />
+          )}
           {filters.org_id > 0 && (
             <Chip label={meta.organisations.find(o => o.id===filters.org_id)?.name ?? ""} onRemove={() => onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0})} />
           )}
@@ -220,7 +307,7 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
           {filters.deliverable_id > 0 && (
             <Chip label={visibleDelivs.find(d => d.id===filters.deliverable_id)?.name ?? ""} onRemove={() => onChange({deliverable_id:0})} />
           )}
-          <button onClick={() => onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0})}
+          <button onClick={() => { onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0,date_from:"",date_to:""}); onApplyDateRange(); }}
             style={{ fontSize:11, color:T.red, background:"none", border:"none", cursor:"pointer", padding:"2px 6px" }}>
             Clear all
           </button>
@@ -571,10 +658,13 @@ export default function ManagerPage() {
   const [selMonth, setSelMonth] = useState<number|null>(null);
   const [selYear,  setSelYear]  = useState<number|null>(null);
 
-  // ── Shared cascade filters ────────────────────────────────────────────────
-  const [filters, setFilters] = useState<CascadeFilters>({ org_id:0, member_id:0, project_id:0, deliverable_id:0 });
-  const [filterDelivs,   setFilterDelivs]   = useState<DeliverableOption[]>([]);
-  const [filterDelivLoad,setFilterDelivLoad] = useState(false);
+  // ── Shared cascade filters (including date range) ─────────────────────────
+  const [filters, setFilters] = useState<CascadeFilters>({
+    org_id:0, member_id:0, project_id:0, deliverable_id:0,
+    date_from:"", date_to:"",
+  });
+  const [filterDelivs,    setFilterDelivs]    = useState<DeliverableOption[]>([]);
+  const [filterDelivLoad, setFilterDelivLoad] = useState(false);
 
   function updateFilters(partial: Partial<CascadeFilters>) {
     setFilters(prev => ({ ...prev, ...partial }));
@@ -621,9 +711,11 @@ export default function ManagerPage() {
     finally { setAssignLoading(false); }
   }
 
-  // Initial load
+  // Initial load — default to current week
   useEffect(() => {
     const {from, to} = currentWeekRange();
+    // Pre-fill filter date inputs to match initial load
+    setFilters(f => ({ ...f, date_from: from, date_to: to }));
     Promise.all([fetchMeta(), fetchMemberWorkLogs({from, to, page:1}), fetchAssignments()])
       .then(([m, worklogs, assigns]) => {
         setMeta(m);
@@ -635,28 +727,61 @@ export default function ManagerPage() {
       }).catch(e => { setError(e.message); setLoading(false); });
   }, []);
 
-  // Refetch worklogs when date or member filter changes
+  // ── Date range resolution (priority: date filter > calendar > default week) ─
+  // Returns the effective from/to for a load call
+  function resolveRange(overrideFrom?: string, overrideTo?: string): {from:string;to:string} {
+    const f = overrideFrom ?? filters.date_from;
+    const t = overrideTo   ?? filters.date_to;
+
+    // 1. Explicit date range filter wins
+    if (f || t) return { from: f || "", to: t || "" };
+
+    // 2. Calendar date selections
+    if (selDates.size > 0) {
+      const s = Array.from(selDates).sort();
+      return { from: s[0], to: s[s.length-1] };
+    }
+
+    // 3. Calendar month/year selection
+    if (selMonth !== null || selYear !== null) {
+      const year  = selYear  ?? today.getFullYear();
+      const month = selMonth ?? today.getMonth();
+      return monthRange(year, month);
+    }
+
+    // 4. Default: current week
+    return currentWeekRange();
+  }
+
+  // Called when user clicks "Apply Date Range" button
+  function applyDateRange() {
+    // Clear calendar selections so date range takes over
+    setSelDates(new Set()); setSelMonth(null); setSelYear(null);
+    const { from, to } = resolveRange(filters.date_from, filters.date_to);
+    loadRows({ from, to, page:1, member_id: filters.member_id || undefined });
+  }
+
+  // Refetch worklogs when calendar selections change (calendar still works independently)
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
-    let from:string, to:string;
-    if (selDates.size > 0) {
-      const s = Array.from(selDates).sort(); from = s[0]; to = s[s.length-1];
-    } else {
-      const year = selYear ?? today.getFullYear(), month = selMonth ?? today.getMonth();
-      ({from, to} = monthRange(year, month));
-    }
-    loadRows({from, to, page:1, member_id:filters.member_id||undefined});
-  }, [selDates, selMonth, selYear, filters.member_id]);
+    // Only react to calendar changes when no explicit date range filter is active
+    if (filters.date_from || filters.date_to) return;
+    const { from, to } = resolveRange();
+    loadRows({ from, to, page:1, member_id: filters.member_id || undefined });
+  }, [selDates, selMonth, selYear]);
 
-  // Refetch assignments when member filter changes
+  // Refetch when member filter changes
   useEffect(() => {
     if (isFirstRender.current) return;
+    const { from, to } = resolveRange();
+    loadRows({ from, to, page:1, member_id: filters.member_id || undefined });
     loadAssignments(filters.member_id || undefined);
   }, [filters.member_id]);
 
   function goToPage(p:number) {
-    loadRows({...dateRangeRef.current, page:p, member_id:filters.member_id||undefined});
+    const { from, to } = resolveRange();
+    loadRows({ from, to, page:p, member_id: filters.member_id || undefined });
   }
 
   const activeDates  = useMemo(() => new Set(rows.map(r => r.end_date_fmt ?? r.start_date_fmt).filter(Boolean) as string[]), [rows]);
@@ -666,11 +791,12 @@ export default function ManagerPage() {
   }, 0), [rows]);
   const availableYears = useMemo(() => Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort(), [rows]);
   const hasCalFilter   = selDates.size > 0 || selMonth !== null || selYear !== null;
+  const hasDateFilter  = !!(filters.date_from || filters.date_to);
 
-  // ── Client-side filtering on top of server results ────────────────────────
+  // ── Client-side filtering ─────────────────────────────────────────────────
   const filteredRows = useMemo(() => rows.filter(r => {
-    if (filters.org_id         && r.organisation_id !== filters.org_id)        return false;
-    if (filters.project_id     && r.project_id      !== filters.project_id)    return false;
+    if (filters.org_id         && r.organisation_id !== filters.org_id)         return false;
+    if (filters.project_id     && r.project_id      !== filters.project_id)     return false;
     if (filters.deliverable_id && r.deliverable      !== filters.deliverable_id) return false;
     return true;
   }), [rows, filters]);
@@ -687,14 +813,22 @@ export default function ManagerPage() {
   function deleteAssignmentLocal(id:number) { setAssignments(p => p.filter(a => a.id!==id)); }
   function addAssignment(a:AssignmentEntry) { setAssignments(p => [a, ...p]); }
 
-  function toggleDate(iso:string) { setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; }); }
+  function toggleDate(iso:string) {
+    // Clear date range filter when using calendar
+    if (filters.date_from || filters.date_to) {
+      updateFilters({ date_from:"", date_to:"" });
+    }
+    setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; });
+  }
   function prevMonth() {
     const m=calMonth===0?11:calMonth-1, y=calMonth===0?calYear-1:calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
+    updateFilters({ date_from:"", date_to:"" });
   }
   function nextMonth() {
     const m=calMonth===11?0:calMonth+1, y=calMonth===11?calYear+1:calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
+    updateFilters({ date_from:"", date_to:"" });
   }
   function clearCal() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
 
@@ -719,8 +853,19 @@ export default function ManagerPage() {
         <span style={{ fontSize:12, fontWeight:600, color:T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
         <button onClick={nextMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
       </div>
-      <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
-      {selDates.size > 0 && (
+
+      {/* Dim calendar when date range filter is active */}
+      <div style={{ opacity: hasDateFilter ? 0.4 : 1, pointerEvents: hasDateFilter ? "none" : "auto", transition:"opacity 0.2s" }}>
+        <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
+      </div>
+
+      {hasDateFilter && (
+        <div style={{ textAlign:"center", fontSize:11, color:T.acText, padding:"4px 8px", background:T.acLight, borderRadius:6 }}>
+          Date range filter active
+        </div>
+      )}
+
+      {selDates.size > 0 && !hasDateFilter && (
         <div style={{ textAlign:"center", fontSize:11, color:T.acText }}>
           {selDates.size} date{selDates.size>1?"s":""} selected &nbsp;
           <button onClick={() => setSelDates(new Set())} style={{ background:"none", border:"none", color:T.red, cursor:"pointer", fontSize:11 }}>✕</button>
@@ -729,9 +874,9 @@ export default function ManagerPage() {
       <Divider />
       <div>
         <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Month</div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, opacity: hasDateFilter ? 0.4 : 1, pointerEvents: hasDateFilter ? "none" : "auto" }}>
           {MONTHS.map((m,i) => (
-            <button key={m} onClick={() => { const n=selMonth===i?null:i; setSelMonth(n); if(n!==null){setCalMonth(n);setSelDates(new Set());} }}
+            <button key={m} onClick={() => { const n=selMonth===i?null:i; setSelMonth(n); if(n!==null){setCalMonth(n);setSelDates(new Set());updateFilters({date_from:"",date_to:""}); } }}
               style={{ background:selMonth===i?T.acLight:T.panel2, border:`1px solid ${selMonth===i?T.acMid:T.panel2B}`, borderRadius:5, color:selMonth===i?T.acText:T.t4, fontSize:9, padding:"4px 0", cursor:"pointer", textTransform:"uppercase", fontWeight:selMonth===i?600:400, transition:"all 0.15s" }}>
               {m.slice(0,3)}
             </button>
@@ -741,9 +886,9 @@ export default function ManagerPage() {
       {availableYears.length > 0 && (
         <div>
           <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Year</div>
-          <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+          <div style={{ display:"flex", gap:4, flexWrap:"wrap", opacity: hasDateFilter ? 0.4 : 1, pointerEvents: hasDateFilter ? "none" : "auto" }}>
             {availableYears.map(y => (
-              <button key={y} onClick={() => { const n=selYear===y?null:y; setSelYear(n); if(n!==null){setCalYear(n);setSelDates(new Set());} }}
+              <button key={y} onClick={() => { const n=selYear===y?null:y; setSelYear(n); if(n!==null){setCalYear(n);setSelDates(new Set());updateFilters({date_from:"",date_to:""});} }}
                 style={{ background:selYear===y?T.acLight:T.panel2, border:`1px solid ${selYear===y?T.acMid:T.panel2B}`, borderRadius:5, color:selYear===y?T.acText:T.t4, fontSize:9, padding:"4px 8px", cursor:"pointer", fontWeight:selYear===y?600:400, transition:"all 0.15s" }}>
                 {y}
               </button>
@@ -762,14 +907,14 @@ export default function ManagerPage() {
           <span style={{ fontSize:12, color:T.acText, fontWeight:600 }}>{val}</span>
         </div>
       ))}
-      {hasCalFilter && (
+      {(hasCalFilter || hasDateFilter) && (
         <>
           <Divider />
-          <button onClick={clearCal}
+          <button onClick={() => { clearCal(); updateFilters({date_from:"",date_to:""}); applyDateRange(); }}
             style={{ background:"transparent", border:`1px solid ${T.panel2B}`, borderRadius:7, padding:"6px 0", fontSize:11, color:T.t4, cursor:"pointer", width:"100%" }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.t2; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; }}>
-            ✕ &nbsp;Clear calendar
+            ✕ &nbsp;Clear all date filters
           </button>
         </>
       )}
@@ -800,21 +945,34 @@ export default function ManagerPage() {
   ) : null;
 
   // ── Right panel ───────────────────────────────────────────────────────────
+  // Active range label for display
+  const activeRangeLabel = (() => {
+    if (filters.date_from && filters.date_to) return `${filters.date_from} → ${filters.date_to}`;
+    if (filters.date_from) return `From ${filters.date_from}`;
+    if (filters.date_to)   return `Until ${filters.date_to}`;
+    if (selDates.size > 0) {
+      const s = Array.from(selDates).sort();
+      return selDates.size === 1 ? s[0] : `${s[0]} → ${s[s.length-1]}`;
+    }
+    if (selMonth !== null) return `${MONTHS[selMonth]}${selYear ? " "+selYear:""}`;
+    return "This week";
+  })();
+
   const RightPanel = (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
-      {/* Cascade filter bar — shared for both sections */}
       <CascadeFilterBar
         meta={meta}
         filters={filters}
         onChange={updateFilters}
         deliverableOptions={filterDelivs}
         delivLoading={filterDelivLoad}
+        onApplyDateRange={applyDateRange}
       />
 
       {/* ── Worklogs ── */}
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:6 }}>
           <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>
             Worklogs
             {filters.member_id > 0 && (
@@ -823,9 +981,14 @@ export default function ManagerPage() {
               </span>
             )}
           </div>
-          <span style={{ fontSize:11, color:T.t5 }}>
-            {filteredRows.length}{totalCount > rows.length ? `/${totalCount}` : ""} entries
-          </span>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:10, color:T.t5, background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:5, padding:"3px 8px" }}>
+              📅 {activeRangeLabel}
+            </span>
+            <span style={{ fontSize:11, color:T.t5 }}>
+              {filteredRows.length}{totalCount > rows.length ? `/${totalCount}` : ""} entries
+            </span>
+          </div>
         </div>
 
         {rowsLoading ? (

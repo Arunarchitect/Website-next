@@ -312,7 +312,7 @@ function TableSkeleton() {
               </div>
             </div>
           </td>
-          {[60, 80, 80, 50].map((w, j) => (
+          {[60, 80, 50].map((w, j) => (
             <td key={j} style={{ padding: "14px 18px", textAlign: "right" }}>
               <div style={{ display: "flex", justifyContent: "flex-end" }}><Shimmer w={w} /></div>
             </td>
@@ -431,7 +431,6 @@ function Sidebar(props: any) {
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 12 }}>
           {AVAILABLE_YEARS.map((y) => (
             <button key={y} onClick={() => {
-              // Toggle: clicking the same year de-selects it
               setSelectedYear(selectedYear === y ? null : y);
             }} style={{
               flex: "1 1 0", minHeight: 40,
@@ -450,7 +449,6 @@ function Sidebar(props: any) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
             {MONTHS.map((m, i) => (
               <button key={m} onClick={() => {
-                // Toggle: clicking the same month de-selects it
                 setSelectedMonth(selectedMonth === i ? null : i);
               }} style={{
                 background: selectedMonth === i ? T.acLight : "transparent",
@@ -624,14 +622,11 @@ export default function SalaryReportPage() {
 
     try {
       const data = await fetchSalaryReport({
-        // Date range takes priority; only send year/month when no range set
         from: startDate || undefined,
         to: endDate || undefined,
-        // Only send year when set and no date range active
         year: (!startDate && !endDate && selectedYear !== null) ? selectedYear : undefined,
-        // Only send month when year AND month are both selected (no date range)
         month: (!startDate && !endDate && selectedYear !== null && selectedMonth !== null)
-          ? selectedMonth + 1   // convert 0-indexed UI → 1-indexed API
+          ? selectedMonth + 1
           : undefined,
         organisation_id: selectedOrg,
         project_id: selectedProject || undefined,
@@ -884,17 +879,11 @@ export default function SalaryReportPage() {
                     loading={loading} label="Employees"
                     value={String(report?.total_employees ?? 0)} color={T.acText}
                   />
-                  {/* Cross-reference stat */}
+                  {/* Cross-reference stat — only shown in % view */}
                   {view === "percentage" && selectedProject && report?.total_hourly_amount !== undefined && (
                     <StatCard
                       loading={loading} label="Hourly (reference)"
                       value={fmtINR(report.total_hourly_amount)} color={T.blue}
-                    />
-                  )}
-                  {view === "hourly" && (report?.total_percentage_amount ?? 0) > 0 && (
-                    <StatCard
-                      loading={loading} label="% Share (reference)"
-                      value={fmtINR(report!.total_percentage_amount)} color={T.purple}
                     />
                   )}
                 </div>
@@ -947,7 +936,7 @@ export default function SalaryReportPage() {
                 </div>
               ) : (
                 <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 580 }}>
                     <thead>
                       <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
                         <th style={{ padding: "12px 18px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>Employee</th>
@@ -955,9 +944,11 @@ export default function SalaryReportPage() {
                         <th style={{ padding: "12px 18px", textAlign: "right", fontSize: 10.5, fontWeight: 700, color: view === "hourly" ? T.blue : T.purple }}>
                           {view === "hourly" ? "Hourly Salary" : `% Share${selectedProject && selectedProjectName ? ` (${selectedProjectName})` : ""}`}
                         </th>
-                        <th style={{ padding: "12px 18px", textAlign: "right", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>
-                          {view === "hourly" ? "% Share ref." : "Hourly ref."}
-                        </th>
+                        {view === "percentage" && (
+                          <th style={{ padding: "12px 18px", textAlign: "right", fontSize: 10.5, fontWeight: 700, color: T.blue }}>
+                            Hourly ref.
+                          </th>
+                        )}
                         <th style={{ padding: "12px 18px", textAlign: "center", fontSize: 10.5, fontWeight: 700, color: T.t4 }}>Logs</th>
                       </tr>
                     </thead>
@@ -966,7 +957,7 @@ export default function SalaryReportPage() {
                         <TableSkeleton />
                       ) : report?.employees.length === 0 ? (
                         <tr>
-                          <td colSpan={5} style={{ padding: "52px 20px", textAlign: "center", color: T.t6, fontSize: 13 }}>
+                          <td colSpan={view === "percentage" ? 5 : 4} style={{ padding: "52px 20px", textAlign: "center", color: T.t6, fontSize: 13 }}>
                             No salary data found for the selected filters
                           </td>
                         </tr>
@@ -974,13 +965,10 @@ export default function SalaryReportPage() {
                         report?.employees.map((emp, idx) => {
                           const hourly = emp.hourly_amount ?? 0;
                           const pct = emp.percentage_amount ?? 0;
-                          // Percentage only meaningful when a project is selected
                           const showPct = view === "percentage" && !!selectedProject && pct > 0;
 
                           const mainVal = view === "hourly" ? hourly : showPct ? pct : 0;
                           const mainColor = view === "hourly" ? T.blue : showPct ? T.purple : T.t5;
-                          const refVal = view === "hourly" ? pct : hourly;
-                          const refColor = view === "hourly" ? T.purple : T.blue;
 
                           return (
                             <tr key={emp.user.id} className="trow" style={{
@@ -1016,11 +1004,13 @@ export default function SalaryReportPage() {
                                   <div style={{ fontSize: 10, color: T.t6, marginTop: 2 }}>select project</div>
                                 )}
                               </td>
-                              <td style={{ padding: "13px 18px", textAlign: "right" }}>
-                                <span style={{ fontSize: 12, color: refColor }}>
-                                  {refVal > 0 ? fmtINR(refVal) : "—"}
-                                </span>
-                              </td>
+                              {view === "percentage" && (
+                                <td style={{ padding: "13px 18px", textAlign: "right" }}>
+                                  <span style={{ fontSize: 12, color: T.blue }}>
+                                    {hourly > 0 ? fmtINR(hourly) : "—"}
+                                  </span>
+                                </td>
+                              )}
                               <td style={{ padding: "13px 18px", textAlign: "center" }}>
                                 <span style={{
                                   padding: "3px 10px", borderRadius: 20,
