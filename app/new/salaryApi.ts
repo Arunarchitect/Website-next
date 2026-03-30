@@ -46,6 +46,26 @@ export interface SalaryReportEmployee {
   work_logs_count: number;
 }
 
+export interface FetchSalaryReportParams {
+  year?: number;
+  month?: number;
+  organisation_id?: number;
+  project_id?: number;
+  deliverable_id?: number;
+  user_id?: number;
+  from?: string;
+  to?: string;
+  view_all?: boolean;
+  include_all_projects?: boolean;   // ← NEW
+}
+
+export interface ProjectOption {
+  id: number;
+  name: string;
+  organisation_id: number;
+  billing_type: 'hourly' | 'percentage_share';   // ← new
+}
+
 export interface SalaryReport {
   report_period: {
     year: number;
@@ -178,9 +198,13 @@ export async function fetchSalaryReport(
   if (params.user_id) qs.set("user_id", String(params.user_id));
   if (params.view_all) qs.set("view_all", "true");
 
+  if (params.view_all) qs.set("view_all", "true");
+  if (params.include_all_projects) qs.set("include_all_projects", "true");
+
   const res = await fetch(`${BASE}/api/v2/salary-report/?${qs}`, {
     headers: authHeaders(),
   });
+
 
   if (!res.ok) {
     const error = await res
