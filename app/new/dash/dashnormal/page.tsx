@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import {
   fetchDashboard,
   fetchActiveWorkLog,
@@ -613,7 +612,7 @@ interface PendingAction {
 // ---------------------------------------------------------------------------
 export default function DashboardPage() {
   const isMobile = useWindowWidth() < 700;
-  const router = useRouter();
+
 
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -744,7 +743,7 @@ export default function DashboardPage() {
     setPending({ action: "switch", nextId: id });
   }, [runningId, commitStart]);
 
-  const handleStop = useCallback((_id: string) => { setPending({ action: "stop" }); }, []);
+  const handleStop = useCallback(() => { setPending({ action: "stop" }); }, []);
 
   const handleEndChange = useCallback((id: string, v: string) => {
     const parsed = parseDateTimeLocal(v);

@@ -9,6 +9,7 @@ import {
   fetchUsersByOrg,
   fetchSalaryReport,
   type SalaryReport,
+  type SalaryReportEmployee,   // ← add this
   type OrganisationOption,
   type ProjectOption,
   type DeliverableOption,
@@ -282,7 +283,7 @@ function BillingBadge({ type }: { type: "hourly" | "percentage_share" }) {
 function EmployeeCard({
   emp, view, selectedProject, includeAllProjects,
 }: {
-  emp: any;
+  emp: SalaryReportEmployee;
   view: "hourly" | "percentage";
   selectedProject?: number | null;
   includeAllProjects?: boolean;
