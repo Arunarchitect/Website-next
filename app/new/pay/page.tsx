@@ -10,7 +10,7 @@ import {
   fetchUsersByOrg,
   fetchSalaryReport,
   type SalaryReport,
-  type SalaryReportEmployee, // ← add this
+  type SalaryReportEmployee,
   type OrganisationOption,
   type ProjectOption,
   type DeliverableOption,
@@ -397,7 +397,6 @@ function AllProjectsToggle({
         color: enabled ? T.green : T.t4,
       }}
     >
-      {/* Animated pill */}
       <span
         style={{
           display: "inline-flex",
@@ -583,9 +582,10 @@ function EmployeeCard({
         </div>
       )}
 
+      {/* ── FIX: use (?? 0) so TS sees number, not number|undefined ── */}
       {view === "percentage" &&
         showPct &&
-        emp.percentage_details?.length > 0 && (
+        (emp.percentage_details?.length ?? 0) > 0 && (
           <div
             style={{
               borderTop: `1px solid ${T.divider}`,
@@ -595,27 +595,38 @@ function EmployeeCard({
               gap: 3,
             }}
           >
-            {emp.percentage_details.map((d: any, i: number) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 11,
-                  color: T.t4,
-                }}
-              >
-                <span>
-                  {d.share_type_display} · {d.percentage}% of{" "}
-                  {fmtINR(d.revenue_base)} ({d.scope_name})
-                </span>
-                <span
-                  style={{ color: T.purple, fontWeight: 600, marginLeft: 8 }}
+            {emp.percentage_details!.map(
+              (
+                d: {
+                  share_type_display: string;
+                  percentage: number;
+                  revenue_base: number;
+                  scope_name: string;
+                  amount: number;
+                },
+                i: number,
+              ) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 11,
+                    color: T.t4,
+                  }}
                 >
-                  {fmtINR(d.amount)}
-                </span>
-              </div>
-            ))}
+                  <span>
+                    {d.share_type_display} · {d.percentage}% of{" "}
+                    {fmtINR(d.revenue_base)} ({d.scope_name})
+                  </span>
+                  <span
+                    style={{ color: T.purple, fontWeight: 600, marginLeft: 8 }}
+                  >
+                    {fmtINR(d.amount)}
+                  </span>
+                </div>
+              ),
+            )}
           </div>
         )}
 
@@ -778,7 +789,34 @@ function MobileDrawer({
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar(props: any) {
+function Sidebar(props: {
+  organisations: OrganisationOption[];
+  selectedOrg: number | null;
+  setSelectedOrg: (v: number | null) => void;
+  selectedYear: number | null;
+  setSelectedYear: (v: number | null) => void;
+  selectedMonth: number | null;
+  setSelectedMonth: (v: number | null) => void;
+  startDate: string;
+  setStartDate: (v: string) => void;
+  endDate: string;
+  setEndDate: (v: string) => void;
+  clearDateRange: () => void;
+  projects: ProjectOption[];
+  selectedProject: number | null;
+  setSelectedProject: (v: number | null) => void;
+  loadingProjects: boolean;
+  deliverables: DeliverableOption[];
+  selectedDeliverable: number | null;
+  setSelectedDeliverable: (v: number | null) => void;
+  loadingDeliverables: boolean;
+  users: UserOption[];
+  selectedUser: number | null;
+  setSelectedUser: (v: number | null) => void;
+  loadingUsers: boolean;
+  activeFilterCount: number;
+  onClearAll: () => void;
+}) {
   const {
     organisations,
     selectedOrg,
@@ -811,10 +849,10 @@ function Sidebar(props: any) {
   const isDateRangeActive = !!(startDate || endDate);
 
   const hourlyProjectCount = projects.filter(
-    (p: ProjectOption) => p.billing_type === "hourly",
+    (p) => p.billing_type === "hourly",
   ).length;
   const pctShareProjectCount = projects.filter(
-    (p: ProjectOption) => p.billing_type === "percentage_share",
+    (p) => p.billing_type === "percentage_share",
   ).length;
 
   return (
@@ -827,7 +865,7 @@ function Sidebar(props: any) {
           onChange={(v) => setSelectedOrg(v ? Number(v) : null)}
         >
           <option value="">Select organisation</option>
-          {organisations.map((o: OrganisationOption) => (
+          {organisations.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
             </option>
@@ -983,7 +1021,7 @@ function Sidebar(props: any) {
             <option value="">
               {loadingProjects ? "Loading…" : "All projects"}
             </option>
-            {projects.map((p: ProjectOption) => (
+            {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.billing_type === "percentage_share" ? "📊 " : "💰 "}
                 {p.name}
@@ -1015,7 +1053,7 @@ function Sidebar(props: any) {
           <option value="">
             {loadingDeliverables ? "Loading…" : "All deliverables"}
           </option>
-          {deliverables.map((d: DeliverableOption) => (
+          {deliverables.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
             </option>
@@ -1029,7 +1067,7 @@ function Sidebar(props: any) {
           disabled={!selectedOrg || loadingUsers}
         >
           <option value="">{loadingUsers ? "Loading…" : "All users"}</option>
-          {users.map((u: UserOption) => (
+          {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}
             </option>
@@ -1096,11 +1134,6 @@ export default function SalaryReportPage() {
   const isMobile = cw < 740;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [view, setView] = useState<"hourly" | "percentage">("hourly");
-
-  // ── Override toggle ────────────────────────────────────────────────────────
-  // When ON: backend skips the billing_type='hourly' filter, counting
-  // hours from ALL projects (including % share ones) toward hourly salary.
-  // Only relevant in hourly view with no specific project selected.
   const [includeAllProjects, setIncludeAllProjects] = useState(false);
 
   // ── Data state ─────────────────────────────────────────────────────────────
@@ -1120,9 +1153,7 @@ export default function SalaryReportPage() {
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [selectedOrg, setSelectedOrg] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
-  const [selectedDeliverable, setSelectedDeliverable] = useState<number | null>(
-    null,
-  );
+  const [selectedDeliverable, setSelectedDeliverable] = useState<number | null>(null);
   const [selectedUser, setSelectedUser] = useState<number | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -1190,7 +1221,6 @@ export default function SalaryReportPage() {
   }, [selectedOrg]);
 
   // ── Core fetch ─────────────────────────────────────────────────────────────
-  // ── Core fetch ─────────────────────────────────────────────────────────────
   const fetchReport = useCallback(async () => {
     if (!selectedOrg) {
       setError("Please select an organisation");
@@ -1199,8 +1229,6 @@ export default function SalaryReportPage() {
     setLoading(true);
     setError(null);
     try {
-      // Only include project_id for hourly view to filter work logs
-      // For percentage view, use revenue_project_id instead
       const shouldIncludeProjectId =
         view === "hourly" ? selectedProject : undefined;
       const shouldUseRevenueProjectId =
@@ -1221,33 +1249,19 @@ export default function SalaryReportPage() {
             ? selectedMonth + 1
             : undefined,
         organisation_id: selectedOrg,
-        project_id: shouldIncludeProjectId,
+        project_id: shouldIncludeProjectId ?? undefined,
         revenue_project_id: shouldUseRevenueProjectId,
-        deliverable_id: selectedDeliverable || undefined,
-        user_id: selectedUser || undefined,
+        deliverable_id: selectedDeliverable ?? undefined,
+        user_id: selectedUser ?? undefined,
         view_all: true,
         include_all_projects: includeAllProjects && !selectedProject,
       });
 
-      console.log("=== Salary Report Debug ===");
-      console.log("View mode:", view);
-      console.log("Selected project:", selectedProject);
-      console.log("Total percentage amount:", data.total_percentage_amount);
-      if (data.employees && data.employees.length > 0) {
-        console.log(
-          "First employee percentage:",
-          data.employees[0]?.percentage_amount,
-        );
-        console.log(
-          "Percentage details:",
-          data.employees[0]?.percentage_details,
-        );
-      }
-      console.log("===========================");
-
       setReport(data);
-    } catch (e: any) {
-      setError(e.message ?? "Failed to load report");
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error ? e.message : "Failed to load report",
+      );
     } finally {
       setLoading(false);
     }
@@ -1301,15 +1315,9 @@ export default function SalaryReportPage() {
   ].filter(Boolean).length;
 
   const selectedOrgName = organisations.find((o) => o.id === selectedOrg)?.name;
-  const selectedProjectName = projects.find(
-    (p) => p.id === selectedProject,
-  )?.name;
-  const selectedProjectType = projects.find(
-    (p) => p.id === selectedProject,
-  )?.billing_type;
+  const selectedProjectName = projects.find((p) => p.id === selectedProject)?.name;
+  const selectedProjectType = projects.find((p) => p.id === selectedProject)?.billing_type;
 
-  // Whether the toggle should be visible:
-  // only in hourly view, no specific project selected, org is chosen
   const showAllProjectsToggle =
     view === "hourly" && !selectedProject && !!selectedOrg;
 
@@ -1466,13 +1474,7 @@ export default function SalaryReportPage() {
                 strokeWidth={1.7}
                 strokeLinecap="round"
               />
-              <circle
-                cx={15}
-                cy={14}
-                r={3}
-                stroke={T.acText}
-                strokeWidth={1.5}
-              />
+              <circle cx={15} cy={14} r={3} stroke={T.acText} strokeWidth={1.5} />
             </svg>
           </div>
           <div>
@@ -1508,7 +1510,6 @@ export default function SalaryReportPage() {
         >
           <ViewToggle view={view} setView={setView} />
 
-          {/* All-projects override toggle — only in hourly view, no project selected */}
           {showAllProjectsToggle && (
             <AllProjectsToggle
               enabled={includeAllProjects}
@@ -1635,7 +1636,7 @@ export default function SalaryReportPage() {
             </div>
           )}
 
-          {/* Hourly-only notice — toggle is OFF */}
+          {/* Hourly-only notice */}
           {view === "hourly" &&
             selectedOrg &&
             !selectedProject &&
@@ -1656,16 +1657,14 @@ export default function SalaryReportPage() {
                 <span>💰</span>
                 <span>
                   Showing{" "}
-                  <strong style={{ color: T.blue }}>
-                    hourly projects only
-                  </strong>
+                  <strong style={{ color: T.blue }}>hourly projects only</strong>
                   . Toggle <em>All projects</em> above to include % share
                   projects in the hourly total.
                 </span>
               </div>
             )}
 
-          {/* Override active notice — toggle is ON */}
+          {/* Override active notice */}
           {view === "hourly" &&
             selectedOrg &&
             !selectedProject &&
@@ -1691,7 +1690,7 @@ export default function SalaryReportPage() {
               </div>
             )}
 
-          {/* % share warning — needs project */}
+          {/* % share warning */}
           {view === "percentage" && selectedOrg && !selectedProject && (
             <div
               style={{
@@ -1773,13 +1772,10 @@ export default function SalaryReportPage() {
                   borderBottom: `1px solid ${T.divider}`,
                 }}
               >
-                {/* Selected project billing type pill */}
                 {selectedProject && selectedProjectType && (
                   <div style={{ marginBottom: 10 }}>
                     <BillingBadge
-                      type={
-                        selectedProjectType as "hourly" | "percentage_share"
-                      }
+                      type={selectedProjectType as "hourly" | "percentage_share"}
                     />
                     <span style={{ fontSize: 11, color: T.t5, marginLeft: 8 }}>
                       {selectedProjectName}
@@ -1787,28 +1783,25 @@ export default function SalaryReportPage() {
                   </div>
                 )}
 
-                {/* Override mode pill — shown when toggle is ON */}
-                {!selectedProject &&
-                  includeAllProjects &&
-                  view === "hourly" && (
-                    <div style={{ marginBottom: 10 }}>
-                      <span
-                        style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          letterSpacing: "0.07em",
-                          textTransform: "uppercase",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                          background: T.greenBg,
-                          color: T.green,
-                          border: `1px solid ${T.green}40`,
-                        }}
-                      >
-                        ✅ All projects override
-                      </span>
-                    </div>
-                  )}
+                {!selectedProject && includeAllProjects && view === "hourly" && (
+                  <div style={{ marginBottom: 10 }}>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: "0.07em",
+                        textTransform: "uppercase",
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        background: T.greenBg,
+                        color: T.green,
+                        border: `1px solid ${T.green}40`,
+                      }}
+                    >
+                      ✅ All projects override
+                    </span>
+                  </div>
+                )}
 
                 <div
                   style={{
@@ -1831,7 +1824,6 @@ export default function SalaryReportPage() {
                     value={String(report?.total_employees ?? 0)}
                     color={T.acText}
                   />
-                  {/* Cross-reference stat — only shown in % view with project selected */}
                   {view === "percentage" &&
                     selectedProject &&
                     report?.total_hourly_amount !== undefined && (
@@ -1959,10 +1951,7 @@ export default function SalaryReportPage() {
                 </div>
               ) : (
                 <div
-                  style={{
-                    overflowX: "auto",
-                    WebkitOverflowScrolling: "touch",
-                  }}
+                  style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}
                 >
                   <table
                     style={{
@@ -2106,7 +2095,6 @@ export default function SalaryReportPage() {
                                     <div style={{ fontSize: 11, color: T.t5 }}>
                                       {emp.user.email}
                                     </div>
-                                    {/* Billing note row */}
                                     {!selectedProject &&
                                       emp.billing_note &&
                                       view === "hourly" && (
@@ -2159,9 +2147,10 @@ export default function SalaryReportPage() {
                                 >
                                   {mainVal > 0 ? fmtINR(mainVal) : "—"}
                                 </span>
+                                {/* ── FIX: (?? 0) prevents undefined comparison ── */}
                                 {view === "percentage" &&
                                   showPct &&
-                                  emp.percentage_details?.length > 0 && (
+                                  (emp.percentage_details?.length ?? 0) > 0 && (
                                     <div
                                       style={{
                                         fontSize: 9,
@@ -2169,12 +2158,13 @@ export default function SalaryReportPage() {
                                         marginTop: 2,
                                       }}
                                     >
-                                      {emp.percentage_details
-                                        .map(
-                                          (d: any) =>
-                                            `${d.percentage}% of ${fmtINR(d.revenue_base)}`,
-                                        )
-                                        .join(", ")}
+                                      {emp.percentage_details!.map(
+                                        (d: {
+                                          percentage: number;
+                                          revenue_base: number;
+                                        }) =>
+                                          `${d.percentage}% of ${fmtINR(d.revenue_base)}`,
+                                      ).join(", ")}
                                     </div>
                                   )}
                                 {view === "percentage" && !selectedProject && (

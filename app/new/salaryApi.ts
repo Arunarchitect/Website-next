@@ -108,6 +108,26 @@ export interface FetchSalaryReportParams {
   include_all_projects?: boolean;
 }
 
+// Add type for revenue items
+export interface RevenueItem {
+  id: number;
+  amount: number;
+  source: string;
+  source_display: string;
+  date: string;
+  organisation: number;
+  organisation_name?: string;
+  project?: number | null;
+  project_name?: string | null;
+  remarks?: string;
+  created_at?: string;
+}
+
+export interface ProjectRevenueResponse {
+  total: number;
+  results?: RevenueItem[];
+}
+
 // ─── API Calls ─────────────────────────────────────────────────────────────
 
 export async function fetchOrganisations(): Promise<OrganisationOption[]> {
@@ -119,44 +139,47 @@ export async function fetchOrganisations(): Promise<OrganisationOption[]> {
 }
 
 export async function fetchProjectsByOrg(
-  orgId: number
+  orgId: number,
 ): Promise<ProjectOption[]> {
-  const res = await fetch(
-    `${BASE}/api/v2/projects/?organisation_id=${orgId}`,
-    { headers: authHeaders() }
-  );
+  const res = await fetch(`${BASE}/api/v2/projects/?organisation_id=${orgId}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`Failed to fetch projects: ${res.status}`);
   return res.json();
 }
 
 export async function fetchDeliverablesByProject(
-  projectId: number
+  projectId: number,
 ): Promise<DeliverableOption[]> {
   const res = await fetch(
     `${BASE}/api/v2/hour/deliverables/?project_id=${projectId}`,
-    { headers: authHeaders() }
+    { headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`Failed to fetch deliverables: ${res.status}`);
   return res.json();
 }
 
-export async function fetchUsersByOrg(): Promise<UserOption[]> {
-  try {
-    const res = await fetch(`${BASE}/api/v2/salary-meta/`, {
-      headers: authHeaders(),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.users || [];
-    }
-  } catch {
-    console.log("Failed to fetch users from meta endpoint");
+export async function fetchUsersByOrg(orgId: number): Promise<UserOption[]> {
+  const response = await fetch(
+    `/api/salary/users-by-org/?organisation_id=${orgId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch users");
   }
-  return [];
+
+  return response.json();
 }
 
 export async function fetchSalaryReport(
-  params: FetchSalaryReportParams
+  params: FetchSalaryReportParams,
 ): Promise<SalaryReport> {
   const qs = new URLSearchParams();
 
@@ -187,11 +210,9 @@ export async function fetchSalaryReport(
   });
 
   if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ error: "Unknown error" }));
+    const error = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(
-      error.error || `Failed to fetch salary report: ${res.status}`
+      error.error || `Failed to fetch salary report: ${res.status}`,
     );
   }
   return res.json();
@@ -201,25 +222,25 @@ export async function fetchSalaryReport(
 export async function fetchProjectRevenue(
   projectId: number,
   from?: string,
-  to?: string
-): Promise<{ total: number; revenue_items?: any[] }> {
+  to?: string,
+): Promise<ProjectRevenueResponse> {
   const qs = new URLSearchParams();
   qs.set("project_id", String(projectId));
-  
+
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
-  
+
   const res = await fetch(`${BASE}/api/v2/revenue/?${qs}`, {
     headers: authHeaders(),
   });
-  
+
   if (!res.ok) {
     throw new Error(`Failed to fetch revenue: ${res.status}`);
   }
-  
+
   const data = await res.json();
   return {
     total: data.total || 0,
-    revenue_items: data.results || [],
+    results: data.results || [],
   };
 }

@@ -1,4 +1,5 @@
 // app/new/revenueExpenseApi.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const BASE = process.env.NEXT_PUBLIC_HOST;
 
@@ -95,11 +96,17 @@ export interface BalanceSheetSummary {
   }>;
 }
 
+// In app/new/revenueExpenseApi.ts
+
 export interface BalanceSheetResponse {
   summary: BalanceSheetSummary;
   revenues: RevenueRow[];
   expenses: ExpenseRow[];
   credits?: CreditRow[];
+  meta?: {  // ← Add this meta property
+    users_in_org?: Array<{ id: number; name: string; role: string }>;
+    [key: string]: any; // For any other meta fields
+  };
 }
 
 export interface BalanceSheetParams {
