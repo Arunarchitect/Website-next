@@ -1,206 +1,681 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   fetchOrganisations,
   fetchProjectsByOrg,
-  fetchBalanceSheet,
-  type BalanceSheetResponse,
-  type BalanceSheetParams,
+  fetchDeliverablesByProject,
+  fetchUsersByOrg,
+  fetchSalaryReport,
+  type SalaryReport,
+  type SalaryReportEmployee,
   type OrganisationOption,
   type ProjectOption,
-  type CreditRow,
-  type RevenueRow,
-  type ExpenseRow,
-} from "@/app/new/revenueExpenseApi";
+  type DeliverableOption,
+  type UserOption,
+} from "@/app/new/salaryApi";
+
+type PercentageDetail = NonNullable<
+  SalaryReportEmployee["percentage_details"]
+>[number];
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MONTHS = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
-const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const AVAILABLE_YEARS = [2022, 2023, 2024, 2025, 2026, 2027];
 
-function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
-function getFirstDay(y: number, m: number)    { return new Date(y, m, 1).getDay(); }
 function fmtINR(n: number) {
-  return "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 });
-}
-
-// ─── Design Tokens ────────────────────────────────────────────────────────────
-const T = {
-  bg:      "#07080f",
-  panel:   "rgba(255,255,255,0.028)",
-  panelB:  "rgba(255,255,255,0.065)",
-  panel2:  "rgba(255,255,255,0.038)",
-  panel2B: "rgba(255,255,255,0.08)",
-  divider: "rgba(255,255,255,0.05)",
-  t1: "#f0f4ff", t2: "#d8e0f0", t3: "#8a9ab8",
-  t4: "#55657e", t5: "#39475a", t6: "#1f2733",
-  ac:      "#4c7cf3",
-  acGlow:  "rgba(76,124,243,0.15)",
-  acLight: "rgba(76,124,243,0.1)",
-  acMid:   "rgba(76,124,243,0.45)",
-  acText:  "#7ba4ff",
-  green:    "#1ec99a", greenBg:  "rgba(30,201,154,0.09)",
-  red:      "#f0686a", redBg:    "rgba(240,104,106,0.09)",
-  amber:    "#f5a623", amberBg:  "rgba(245,166,35,0.09)",
-  purple:   "#9b79f5", purpleBg: "rgba(155,121,245,0.09)",
-  teal:     "#2ec4b6",
-};
-
-const AVAILABLE_YEARS = [2022, 2023, 2024, 2025, 2026];
-
-// ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalGrid({ year, month, selDates, activeDates, onToggle }: {
-  year: number; month: number;
-  selDates: Set<string>; activeDates: Set<string>;
-  onToggle: (d: string) => void;
-}) {
-  const total = getDaysInMonth(year, month);
-  const first = getFirstDay(year, month);
-  const cells: (number | null)[] = [
-    ...Array(first).fill(null),
-    ...Array.from({ length: total }, (_, i) => i + 1),
-  ];
-  const today = new Date().toISOString().slice(0, 10);
-
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1 }}>
-      {DAYS.map(d => (
-        <div key={d} style={{
-          textAlign: "center", fontSize: 9, color: T.t5, fontWeight: 700,
-          letterSpacing: "0.08em", paddingBottom: 5, textTransform: "uppercase",
-        }}>{d}</div>
-      ))}
-      {cells.map((day, i) => {
-        if (!day) return <div key={`_${i}`} />;
-        const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        const sel = selDates.has(iso);
-        const has = activeDates.has(iso);
-        const isToday = iso === today;
-        return (
-          <button key={iso} onClick={() => onToggle(iso)} style={{
-            background: sel ? T.ac : "transparent",
-            border: `1.5px solid ${sel ? T.ac : isToday ? T.acMid : "transparent"}`,
-            borderRadius: 6, cursor: "pointer",
-            color: sel ? "#fff" : has ? T.t2 : T.t5,
-            fontSize: 11, padding: "5px 0", width: "100%",
-            fontFamily: "'DM Sans',sans-serif", fontWeight: sel ? 700 : 400,
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-            transition: "all 0.12s",
-            boxShadow: sel ? `0 2px 8px ${T.acGlow}` : "none",
-          }}>
-            {day}
-            {has && (
-              <span style={{
-                width: 3, height: 3, borderRadius: "50%",
-                background: sel ? "#fff" : T.acText, opacity: 0.8,
-              }} />
-            )}
-          </button>
-        );
-      })}
-    </div>
+    "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })
   );
 }
 
-// ─── Small helpers ────────────────────────────────────────────────────────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const T = {
+  bg: "#07080f",
+  panel: "rgba(255,255,255,0.028)",
+  panelB: "rgba(255,255,255,0.065)",
+  panel2: "rgba(255,255,255,0.038)",
+  panel2B: "rgba(255,255,255,0.08)",
+  divider: "rgba(255,255,255,0.05)",
+  t1: "#f0f4ff",
+  t2: "#d8e0f0",
+  t3: "#8a9ab8",
+  t4: "#55657e",
+  t5: "#39475a",
+  t6: "#1f2733",
+  ac: "#4c7cf3",
+  acGlow: "rgba(76,124,243,0.15)",
+  acLight: "rgba(76,124,243,0.1)",
+  acMid: "rgba(76,124,243,0.45)",
+  acText: "#7ba4ff",
+  green: "#1ec99a",
+  greenBg: "rgba(30,201,154,0.09)",
+  red: "#f0686a",
+  redBg: "rgba(240,104,106,0.09)",
+  purple: "#9b79f5",
+  purpleBg: "rgba(155,121,245,0.09)",
+  blue: "#4c7cf3",
+  blueBg: "rgba(76,124,243,0.09)",
+  orange: "#f5a623",
+  orangeBg: "rgba(245,166,35,0.09)",
+};
+
+// ─── Small components ─────────────────────────────────────────────────────────
 const Divider = () => <div style={{ height: 1, background: T.divider }} />;
 
-function FSel({ label, value, onChange, disabled, children }: {
-  label: string; value: string; onChange: (v: string) => void;
-  disabled?: boolean; children: React.ReactNode;
+function SelectField({
+  label,
+  value,
+  onChange,
+  disabled,
+  children,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+  required?: boolean;
 }) {
   return (
     <div>
-      <div style={{ fontSize: 9.5, fontWeight: 700, color: T.t5, letterSpacing: "0.09em",
-        textTransform: "uppercase", marginBottom: 5 }}>{label}</div>
-      <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled} style={{
-        width: "100%", background: disabled ? "rgba(255,255,255,0.02)" : T.panel2,
-        border: `1px solid ${T.panel2B}`, borderRadius: 7, padding: "8px 32px 8px 10px",
-        fontSize: 12, color: disabled ? T.t5 : T.t2, outline: "none",
-        fontFamily: "'DM Sans',sans-serif", cursor: disabled ? "not-allowed" : "pointer",
-        appearance: "none", WebkitAppearance: "none",
-        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2339475a'/%3E%3C/svg%3E")`,
-        backgroundRepeat: "no-repeat", backgroundPosition: "calc(100% - 10px) center",
-        transition: "all 0.12s",
-        // Prevent zooming on iOS by setting min font-size
-        minHeight: 40,
-      }}>
+      <div
+        style={{
+          fontSize: 9.5,
+          fontWeight: 700,
+          color: T.t5,
+          letterSpacing: "0.09em",
+          textTransform: "uppercase",
+          marginBottom: 5,
+        }}
+      >
+        {label}
+        {required && <span style={{ color: T.red }}> *</span>}
+      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        style={{
+          width: "100%",
+          backgroundColor: disabled ? "rgba(255,255,255,0.02)" : T.panel2,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2339475a'/%3E%3C/svg%3E")`,
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "calc(100% - 10px) center",
+          border: `1px solid ${T.panel2B}`,
+          borderRadius: 7,
+          padding: "8px 32px 8px 10px",
+          fontSize: 13,
+          color: disabled ? T.t5 : T.t2,
+          outline: "none",
+          fontFamily: "'DM Sans',sans-serif",
+          cursor: disabled ? "not-allowed" : "pointer",
+          appearance: "none",
+          WebkitAppearance: "none",
+          transition: "border-color 0.12s",
+          minHeight: 44,
+        }}
+      >
         {children}
       </select>
     </div>
   );
 }
 
-function CatBadge({ label, color }: { label: string; color: string }) {
+function DateRangePicker({
+  startDate,
+  endDate,
+  onStartChange,
+  onEndChange,
+  onClear,
+}: {
+  startDate: string;
+  endDate: string;
+  onStartChange: (d: string) => void;
+  onEndChange: (d: string) => void;
+  onClear: () => void;
+}) {
+  const hasDateRange = startDate || endDate;
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 4,
-      padding: "2px 8px 2px 6px", borderRadius: 5,
-      background: color + "18", border: `1px solid ${color}30`,
-      fontSize: 10.5, fontWeight: 600, color,
-      textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
-    }}>
-      <span style={{ width: 4, height: 4, borderRadius: "50%", background: color, flexShrink: 0 }} />
-      {label}
-    </span>
-  );
-}
-
-function RepaidBadge({ repaid, date }: { repaid: boolean; date?: string | null }) {
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
-      borderRadius: 5,
-      background: repaid ? T.greenBg : T.amberBg,
-      border: `1px solid ${repaid ? T.green + "30" : T.amber + "30"}`,
-      color: repaid ? T.green : T.amber,
-      fontSize: 10, fontWeight: 700,
-      textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
-    }}>
-      {repaid ? `✓ Repaid${date ? ` · ${date}` : ""}` : "Outstanding"}
-    </span>
-  );
-}
-
-function Avatar({ name }: { name: string }) {
-  const initials = (name || "?").split(" ").map((w: string) => w[0] || "").join("").slice(0, 2).toUpperCase();
-  return (
-    <div style={{
-      width: 22, height: 22, borderRadius: "50%",
-      background: T.acLight, border: `1px solid ${T.acMid}`,
-      color: T.acText, fontSize: 8, fontWeight: 700, flexShrink: 0,
-      display: "flex", alignItems: "center", justifyContent: "center",
-    }}>{initials}</div>
-  );
-}
-
-function ProgressBar({ pct, color }: { pct: number; color: string }) {
-  return (
-    <div style={{ height: 3, borderRadius: 99, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-      <div style={{
-        height: "100%", borderRadius: 99, background: color,
-        width: `${Math.min(100, pct)}%`, transition: "width 0.5s",
-        boxShadow: `0 0 6px ${color}60`,
-      }} />
+    <div style={{ marginBottom: 12 }}>
+      <div
+        style={{
+          fontSize: 9.5,
+          fontWeight: 700,
+          color: T.t5,
+          letterSpacing: "0.09em",
+          textTransform: "uppercase",
+          marginBottom: 8,
+        }}
+      >
+        Date Range
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <input
+          type="date"
+          value={startDate}
+          onChange={(e) => onStartChange(e.target.value)}
+          style={{
+            flex: 1,
+            background: T.panel2,
+            border: `1px solid ${T.panel2B}`,
+            borderRadius: 7,
+            padding: "8px 10px",
+            fontSize: 12,
+            color: T.t2,
+            outline: "none",
+            fontFamily: "'DM Sans',sans-serif",
+            minHeight: 40,
+            colorScheme: "dark",
+          }}
+        />
+        <span style={{ color: T.t5, fontSize: 12 }}>→</span>
+        <input
+          type="date"
+          value={endDate}
+          onChange={(e) => onEndChange(e.target.value)}
+          style={{
+            flex: 1,
+            background: T.panel2,
+            border: `1px solid ${T.panel2B}`,
+            borderRadius: 7,
+            padding: "8px 10px",
+            fontSize: 12,
+            color: T.t2,
+            outline: "none",
+            fontFamily: "'DM Sans',sans-serif",
+            minHeight: 40,
+            colorScheme: "dark",
+          }}
+        />
+        {hasDateRange && (
+          <button
+            onClick={onClear}
+            style={{
+              background: T.panel2,
+              border: `1px solid ${T.panel2B}`,
+              borderRadius: 7,
+              padding: "8px 12px",
+              fontSize: 12,
+              color: T.red,
+              cursor: "pointer",
+              fontFamily: "'DM Sans',sans-serif",
+              whiteSpace: "nowrap",
+              minHeight: 40,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            ✕ Clear
+          </button>
+        )}
+      </div>
+      {hasDateRange && (
+        <div style={{ fontSize: 10, color: T.acText, marginTop: 6 }}>
+          {startDate && endDate
+            ? `${startDate} → ${endDate}`
+            : startDate
+              ? `From ${startDate}`
+              : `Until ${endDate}`}
+        </div>
+      )}
     </div>
   );
 }
 
-function TableSkeleton({ cols = 5 }: { cols?: number }) {
+function Avatar({ name }: { name: string }) {
+  const initials = (name || "?")
+    .split(" ")
+    .map((w: string) => w[0] || "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return (
+    <div
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: "50%",
+        background: T.acLight,
+        border: `1px solid ${T.acMid}`,
+        color: T.acText,
+        fontSize: 11,
+        fontWeight: 700,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {initials}
+    </div>
+  );
+}
+
+function Shimmer({ w, h = 14 }: { w: number | string; h?: number }) {
+  return (
+    <div
+      style={{
+        height: h,
+        width: w,
+        borderRadius: 4,
+        background: "rgba(255,255,255,0.06)",
+        animation: "pulse 1.4s ease-in-out infinite",
+      }}
+    />
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  color,
+  loading,
+  subtitle,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  loading?: boolean;
+  subtitle?: string;
+}) {
+  return (
+    <div
+      style={{
+        flex: "1 1 130px",
+        padding: "14px 16px",
+        background: T.panel2,
+        border: `1px solid ${T.panel2B}`,
+        borderRadius: 10,
+      }}
+    >
+      <div style={{ fontSize: 11, color: T.t4, marginBottom: 6 }}>{label}</div>
+      {loading ? (
+        <Shimmer w={80} h={20} />
+      ) : (
+        <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
+      )}
+      {subtitle && (
+        <div style={{ fontSize: 10, color: T.t5, marginTop: 4 }}>
+          {subtitle}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ViewToggle({
+  view,
+  setView,
+}: {
+  view: "hourly" | "percentage";
+  setView: (v: "hourly" | "percentage") => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        background: T.panel2,
+        border: `1px solid ${T.panel2B}`,
+        borderRadius: 10,
+        padding: 2,
+      }}
+    >
+      {(["hourly", "percentage"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => setView(v)}
+          style={{
+            padding: "6px 16px",
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            background: view === v ? T.ac : "transparent",
+            color: view === v ? "#fff" : T.t4,
+            border: "none",
+            cursor: "pointer",
+            transition: "all 0.12s",
+            fontFamily: "'DM Sans',sans-serif",
+          }}
+        >
+          {v === "hourly" ? "💰 Hourly" : "📊 % Share"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── All-projects toggle ──────────────────────────────────────────────────────
+function AllProjectsToggle({
+  enabled,
+  onToggle,
+}: {
+  enabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      title={
+        enabled
+          ? "Currently including ALL projects — click to revert to hourly-only"
+          : "Currently hourly projects only — click to include % share projects in hourly calc"
+      }
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        padding: "7px 13px",
+        borderRadius: 9,
+        fontSize: 12,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'DM Sans',sans-serif",
+        transition: "all 0.15s",
+        border: `1px solid ${enabled ? T.green + "60" : T.divider}`,
+        background: enabled ? T.greenBg : T.panel,
+        color: enabled ? T.green : T.t4,
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          width: 28,
+          height: 16,
+          borderRadius: 99,
+          background: enabled ? T.green : T.t6,
+          padding: "0 2px",
+          transition: "background 0.15s",
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            width: 12,
+            height: 12,
+            borderRadius: "50%",
+            background: "#fff",
+            transform: enabled ? "translateX(12px)" : "translateX(0)",
+            transition: "transform 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+            display: "block",
+          }}
+        />
+      </span>
+      All projects
+    </button>
+  );
+}
+
+// ─── Billing type badge ───────────────────────────────────────────────────────
+function BillingBadge({ type }: { type: "hourly" | "percentage_share" }) {
+  const isHourly = type === "hourly";
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: "0.07em",
+        textTransform: "uppercase",
+        padding: "2px 6px",
+        borderRadius: 4,
+        background: isHourly ? T.blueBg : T.purpleBg,
+        color: isHourly ? T.blue : T.purple,
+        border: `1px solid ${isHourly ? T.acMid : "rgba(155,121,245,0.35)"}`,
+      }}
+    >
+      {isHourly ? "💰 Hourly" : "📊 % Share"}
+    </span>
+  );
+}
+
+// ─── Employee card (mobile) ───────────────────────────────────────────────────
+function EmployeeCard({
+  emp,
+  view,
+  selectedProject,
+  includeAllProjects,
+}: {
+  emp: SalaryReportEmployee;
+  view: "hourly" | "percentage";
+  selectedProject?: number | null;
+  includeAllProjects?: boolean;
+}) {
+  const hourly = emp.hourly_amount ?? 0;
+  const pct = emp.percentage_amount ?? 0;
+  const showPct = view === "percentage" && !!selectedProject && pct > 0;
+
+  const displayAmount = view === "hourly" ? hourly : showPct ? pct : 0;
+  const displayColor = view === "hourly" ? T.blue : showPct ? T.purple : T.t5;
+  const displayLabel =
+    view === "hourly"
+      ? "Hourly Salary"
+      : showPct
+        ? "% Share"
+        : selectedProject
+          ? "No % data"
+          : "Select a project";
+
+  return (
+    <div
+      style={{
+        background: T.panel2,
+        border: `1px solid ${T.panel2B}`,
+        borderRadius: 12,
+        padding: "14px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        animation: "fadeUp 0.18s ease both",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Avatar name={emp.user.name} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: T.t2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {emp.user.name}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: T.t5,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {emp.user.email}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 10, color: T.t5, marginBottom: 2 }}>
+            {displayLabel}
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: displayColor }}>
+            {displayAmount > 0 ? fmtINR(displayAmount) : "—"}
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7 }}
+      >
+        {[
+          {
+            label: "Hours",
+            val: `${emp.total_hours.toFixed(1)} h`,
+            color: T.t2,
+            bg: T.blueBg,
+          },
+          {
+            label: "Hourly",
+            val: hourly > 0 ? fmtINR(hourly) : "—",
+            color: T.blue,
+            bg: T.blueBg,
+          },
+          {
+            label: "% Share",
+            val: pct > 0 ? fmtINR(pct) : "—",
+            color: pct > 0 ? T.purple : T.t5,
+            bg: T.purpleBg,
+          },
+        ].map(({ label, val, color, bg }) => (
+          <div
+            key={label}
+            style={{ background: bg, borderRadius: 8, padding: "8px 10px" }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                color: T.t5,
+                textTransform: "uppercase",
+                letterSpacing: "0.07em",
+                marginBottom: 3,
+              }}
+            >
+              {label}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {view === "hourly" && !selectedProject && emp.billing_note && (
+        <div
+          style={{
+            fontSize: 10,
+            fontStyle: "italic",
+            color: includeAllProjects ? T.green : T.t5,
+          }}
+        >
+          {includeAllProjects ? "✅" : "ℹ"} {emp.billing_note}
+        </div>
+      )}
+
+      {view === "percentage" &&
+        showPct &&
+        emp.percentage_details &&
+        emp.percentage_details.length > 0 && (
+          <div
+            style={{
+              borderTop: `1px solid ${T.divider}`,
+              paddingTop: 7,
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
+          >
+            {emp.percentage_details.map((d: PercentageDetail, i: number) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11,
+                  color: T.t4,
+                }}
+              >
+                <span>
+                  {d.share_type_display} · {d.percentage}% of{" "}
+                  {fmtINR(d.revenue_base)} ({d.scope_name})
+                </span>
+                <span
+                  style={{ color: T.purple, fontWeight: 600, marginLeft: 8 }}
+                >
+                  {fmtINR(d.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontSize: 10, color: T.t5 }}>
+          {emp.work_logs_count} log{emp.work_logs_count !== 1 ? "s" : ""}
+        </span>
+        <span
+          style={{
+            padding: "3px 10px",
+            borderRadius: 20,
+            background: T.acLight,
+            color: T.acText,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {emp.work_logs_count} logs
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TableSkeleton() {
   return (
     <>
       {Array.from({ length: 5 }).map((_, i) => (
         <tr key={i} style={{ borderBottom: `1px solid ${T.divider}` }}>
-          {Array.from({ length: cols }).map((__, j) => (
-            <td key={j} style={{ padding: "10px 12px" }}>
-              <div style={{
-                height: 11, width: [90, 120, 100, 80, 110][j % 5], borderRadius: 4,
-                background: "rgba(255,255,255,0.05)",
-                animation: "pulse 1.5s ease-in-out infinite",
-              }} />
+          <td style={{ padding: "14px 18px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.06)",
+                  animation: "pulse 1.4s ease-in-out infinite",
+                }}
+              />
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <Shimmer w={120} />
+                <Shimmer w={90} h={11} />
+              </div>
+            </div>
+          </td>
+          {[60, 80, 50].map((w, j) => (
+            <td key={j} style={{ padding: "14px 18px", textAlign: "right" }}>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <Shimmer w={w} />
+              </div>
             </td>
           ))}
         </tr>
@@ -209,111 +684,95 @@ function TableSkeleton({ cols = 5 }: { cols?: number }) {
   );
 }
 
-// ─── Reusable detail-table shell ──────────────────────────────────────────────
-function DetailTable({ accentColor, accentBg, icon, title, count, headers, loading, empty, children }: {
-  accentColor: string; accentBg: string; icon: string; title: string;
-  count?: number; headers: { label: string; right?: boolean }[];
-  loading: boolean; empty: string; children: React.ReactNode;
+function MobileDrawer({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
 }) {
-  return (
-    <div style={{ borderRadius: 10, border: `1px solid ${T.panel2B}`, overflow: "hidden" }}>
-      <div style={{
-        padding: "10px 14px", borderBottom: `1px solid ${T.divider}`,
-        display: "flex", alignItems: "center", gap: 8, background: accentBg,
-      }}>
-        <span style={{ fontSize: 14 }}>{icon}</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: accentColor,
-          letterSpacing: "0.05em", textTransform: "uppercase" }}>{title}</span>
-        {count !== undefined && (
-          <span style={{ marginLeft: "auto", fontSize: 10, color: T.t4 }}>
-            {count} {count === 1 ? "entry" : "entries"}
-          </span>
-        )}
-      </div>
-      {/* Always wrap in scrollable container for mobile */}
-      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
-              {headers.map(h => (
-                <th key={h.label} style={{
-                  padding: "8px 12px", textAlign: h.right ? "right" : "left",
-                  fontSize: 10, fontWeight: 700, color: T.t5,
-                  letterSpacing: "0.07em", textTransform: "uppercase",
-                  whiteSpace: "nowrap",
-                }}>{h.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? <TableSkeleton cols={headers.length} /> : children}
-            {!loading && count === 0 && (
-              <tr><td colSpan={headers.length} style={{
-                padding: "32px 16px", textAlign: "center", color: T.t6, fontSize: 12,
-              }}>{empty}</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─── Mobile Drawer for Sidebar ────────────────────────────────────────────────
-function MobileDrawer({ open, onClose, children }: {
-  open: boolean; onClose: () => void; children: React.ReactNode;
-}) {
-  // Lock body scroll when open
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = "hidden";
-    } else {
+    document.body.style.overflow = open ? "hidden" : "";
+    return () => {
       document.body.style.overflow = "";
-    }
-    return () => { document.body.style.overflow = ""; };
+    };
   }, [open]);
 
   return (
     <>
-      {/* Backdrop */}
       <div
         onClick={onClose}
         style={{
-          position: "fixed", inset: 0, zIndex: 40,
+          position: "fixed",
+          inset: 0,
+          zIndex: 40,
           background: "rgba(0,0,0,0.6)",
           backdropFilter: "blur(4px)",
           opacity: open ? 1 : 0,
           pointerEvents: open ? "auto" : "none",
-          transition: "opacity 0.25s",
+          transition: "opacity 0.22s",
         }}
       />
-      {/* Drawer */}
-      <div style={{
-        position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 50,
-        width: "min(85vw, 300px)",
-        background: "#0d0f1c",
-        borderRight: `1px solid ${T.panelB}`,
-        overflowY: "auto", WebkitOverflowScrolling: "touch",
-        transform: open ? "translateX(0)" : "translateX(-100%)",
-        transition: "transform 0.28s cubic-bezier(0.32,0,0.25,1)",
-        boxShadow: open ? "8px 0 40px rgba(0,0,0,0.6)" : "none",
-      }}>
-        {/* Drawer header */}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px 14px 12px",
-          borderBottom: `1px solid ${T.divider}`,
-          position: "sticky", top: 0,
-          background: "#0d0f1c", zIndex: 1,
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: T.t3,
-            letterSpacing: "0.08em", textTransform: "uppercase" }}>Filters & Calendar</span>
-          <button onClick={onClose} style={{
-            width: 28, height: 28, borderRadius: 6,
-            background: T.panel2, border: `1px solid ${T.panel2B}`,
-            color: T.t4, cursor: "pointer", fontSize: 16,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>✕</button>
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          zIndex: 50,
+          width: "min(88vw, 320px)",
+          background: "#0d0f1c",
+          borderRight: `1px solid ${T.panelB}`,
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          transform: open ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.26s cubic-bezier(0.32,0,0.25,1)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 16px 12px",
+            borderBottom: `1px solid ${T.divider}`,
+            position: "sticky",
+            top: 0,
+            background: "#0d0f1c",
+            zIndex: 1,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: T.t3,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            Filters
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 8,
+              background: T.panel2,
+              border: `1px solid ${T.panel2B}`,
+              color: T.t4,
+              cursor: "pointer",
+              fontSize: 18,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ✕
+          </button>
         </div>
         {children}
       </div>
@@ -321,8 +780,341 @@ function MobileDrawer({ open, onClose, children }: {
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-export default function RevenueExpensePage() {
+// ─── Sidebar props type ───────────────────────────────────────────────────────
+interface SidebarProps {
+  organisations: OrganisationOption[];
+  selectedOrg: number | null;
+  setSelectedOrg: (v: number | null) => void;
+  selectedYear: number | null;
+  setSelectedYear: (v: number | null) => void;
+  selectedMonth: number | null;
+  setSelectedMonth: (v: number | null) => void;
+  startDate: string;
+  setStartDate: (v: string) => void;
+  endDate: string;
+  setEndDate: (v: string) => void;
+  clearDateRange: () => void;
+  projects: ProjectOption[];
+  selectedProject: number | null;
+  setSelectedProject: (v: number | null) => void;
+  loadingProjects: boolean;
+  deliverables: DeliverableOption[];
+  selectedDeliverable: number | null;
+  setSelectedDeliverable: (v: number | null) => void;
+  loadingDeliverables: boolean;
+  users: UserOption[];
+  selectedUser: number | null;
+  setSelectedUser: (v: number | null) => void;
+  loadingUsers: boolean;
+  activeFilterCount: number;
+  onClearAll: () => void;
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+function Sidebar({
+  organisations,
+  selectedOrg,
+  setSelectedOrg,
+  selectedYear,
+  setSelectedYear,
+  selectedMonth,
+  setSelectedMonth,
+  startDate,
+  setStartDate,
+  endDate,
+  setEndDate,
+  clearDateRange,
+  projects,
+  selectedProject,
+  setSelectedProject,
+  loadingProjects,
+  deliverables,
+  selectedDeliverable,
+  setSelectedDeliverable,
+  loadingDeliverables,
+  users,
+  selectedUser,
+  setSelectedUser,
+  loadingUsers,
+  activeFilterCount,
+  onClearAll,
+}: SidebarProps) {
+  const isDateRangeActive = !!(startDate || endDate);
+
+  const hourlyProjectCount = projects.filter(
+    (p) => p.billing_type === "hourly",
+  ).length;
+  const pctShareProjectCount = projects.filter(
+    (p) => p.billing_type === "percentage_share",
+  ).length;
+
+  return (
+    <>
+      <div style={{ padding: "16px 14px 12px" }}>
+        <SelectField
+          label="Organisation"
+          required
+          value={selectedOrg ? String(selectedOrg) : ""}
+          onChange={(v) => setSelectedOrg(v ? Number(v) : null)}
+        >
+          <option value="">Select organisation</option>
+          {organisations.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </SelectField>
+      </div>
+
+      <Divider />
+
+      <div style={{ padding: "12px 14px" }}>
+        <DateRangePicker
+          startDate={startDate}
+          endDate={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+          onClear={clearDateRange}
+        />
+      </div>
+
+      <Divider />
+
+      <div
+        style={{
+          padding: "12px 14px 8px",
+          opacity: isDateRangeActive ? 0.45 : 1,
+          pointerEvents: isDateRangeActive ? "none" : "auto",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            color: T.t5,
+            letterSpacing: "0.09em",
+            textTransform: "uppercase",
+            marginBottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          Year &amp; Month
+          {isDateRangeActive && (
+            <span style={{ fontSize: 9, color: T.orange, fontWeight: 400 }}>
+              (disabled — date range active)
+            </span>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 5,
+            flexWrap: "wrap",
+            marginBottom: 12,
+          }}
+        >
+          {AVAILABLE_YEARS.map((y) => (
+            <button
+              key={y}
+              onClick={() => setSelectedYear(selectedYear === y ? null : y)}
+              style={{
+                flex: "1 1 0",
+                minHeight: 40,
+                background: selectedYear === y ? T.acLight : "transparent",
+                border: `1px solid ${selectedYear === y ? T.acMid : T.divider}`,
+                borderRadius: 6,
+                color: selectedYear === y ? T.acText : T.t5,
+                fontSize: 12,
+                cursor: "pointer",
+                fontWeight: selectedYear === y ? 700 : 400,
+                fontFamily: "'DM Sans',sans-serif",
+              }}
+            >
+              {y}
+            </button>
+          ))}
+        </div>
+
+        {selectedYear !== null && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3,1fr)",
+              gap: 6,
+            }}
+          >
+            {MONTHS.map((m, i) => (
+              <button
+                key={m}
+                onClick={() => setSelectedMonth(selectedMonth === i ? null : i)}
+                style={{
+                  background: selectedMonth === i ? T.acLight : "transparent",
+                  border: `1px solid ${selectedMonth === i ? T.acMid : T.divider}`,
+                  borderRadius: 6,
+                  color: selectedMonth === i ? T.acText : T.t5,
+                  fontSize: 11,
+                  padding: "9px 4px",
+                  cursor: "pointer",
+                  fontWeight: selectedMonth === i ? 600 : 400,
+                  fontFamily: "'DM Sans',sans-serif",
+                }}
+              >
+                {m.slice(0, 3)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedYear === null && (
+          <p
+            style={{
+              fontSize: 11,
+              color: T.t6,
+              fontStyle: "italic",
+              margin: 0,
+            }}
+          >
+            Select a year to enable month filter
+          </p>
+        )}
+      </div>
+
+      <Divider />
+
+      <div
+        style={{
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            color: T.t5,
+            letterSpacing: "0.09em",
+            textTransform: "uppercase",
+          }}
+        >
+          Filters <span style={{ color: T.t6 }}>(optional)</span>
+        </div>
+
+        <div>
+          <SelectField
+            label="Project"
+            value={selectedProject ? String(selectedProject) : ""}
+            onChange={(v) => setSelectedProject(v ? Number(v) : null)}
+            disabled={!selectedOrg || loadingProjects}
+          >
+            <option value="">
+              {loadingProjects ? "Loading…" : "All projects"}
+            </option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.billing_type === "percentage_share" ? "📊 " : "💰 "}
+                {p.name}
+              </option>
+            ))}
+          </SelectField>
+          {projects.length > 0 && (
+            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+              {hourlyProjectCount > 0 && (
+                <span style={{ fontSize: 10, color: T.t5 }}>
+                  💰 Hourly ({hourlyProjectCount})
+                </span>
+              )}
+              {pctShareProjectCount > 0 && (
+                <span style={{ fontSize: 10, color: T.t5 }}>
+                  📊 % Share ({pctShareProjectCount})
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <SelectField
+          label="Deliverable"
+          value={selectedDeliverable ? String(selectedDeliverable) : ""}
+          onChange={(v) => setSelectedDeliverable(v ? Number(v) : null)}
+          disabled={!selectedProject || loadingDeliverables}
+        >
+          <option value="">
+            {loadingDeliverables ? "Loading…" : "All deliverables"}
+          </option>
+          {deliverables.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </SelectField>
+
+        <SelectField
+          label="User"
+          value={selectedUser ? String(selectedUser) : ""}
+          onChange={(v) => setSelectedUser(v ? Number(v) : null)}
+          disabled={!selectedOrg || loadingUsers}
+        >
+          <option value="">{loadingUsers ? "Loading…" : "All users"}</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </SelectField>
+      </div>
+
+      {activeFilterCount > 0 && (
+        <>
+          <Divider />
+          <div style={{ padding: "12px 14px 20px", display: "flex", gap: 8 }}>
+            {isDateRangeActive && (
+              <button
+                onClick={clearDateRange}
+                style={{
+                  flex: 1,
+                  background: "transparent",
+                  border: `1px solid ${T.orange}40`,
+                  borderRadius: 7,
+                  padding: "10px 0",
+                  fontSize: 11,
+                  color: T.orange,
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans',sans-serif",
+                }}
+              >
+                📅 Clear Dates
+              </button>
+            )}
+            <button
+              onClick={onClearAll}
+              style={{
+                flex: 1,
+                background: "transparent",
+                border: `1px solid ${T.divider}`,
+                borderRadius: 7,
+                padding: "10px 0",
+                fontSize: 11,
+                color: T.t5,
+                cursor: "pointer",
+                fontFamily: "'DM Sans',sans-serif",
+              }}
+            >
+              ✕ Clear All
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+export default function SalaryReportPage() {
   const containerRef = useRef<HTMLDivElement>(null!);
   const [cw, setCw] = useState(9999);
   useEffect(() => {
@@ -332,958 +1124,1163 @@ export default function RevenueExpensePage() {
     setCw(containerRef.current.getBoundingClientRect().width);
     return () => ro.disconnect();
   }, []);
-  const isMobile = cw < 780;
-
-  // Mobile drawer state
+  const isMobile = cw < 740;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [view, setView] = useState<"hourly" | "percentage">("hourly");
 
-  // ── Meta ──────────────────────────────────────────────────────────────────
-  const [orgs,     setOrgs]     = useState<OrganisationOption[]>([]);
+  const [includeAllProjects, setIncludeAllProjects] = useState(false);
+
+  // ── Data state ─────────────────────────────────────────────────────────────
+  const [organisations, setOrganisations] = useState<OrganisationOption[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
-  useEffect(() => { fetchOrganisations().then(setOrgs).catch(console.error); }, []);
+  const [deliverables, setDeliverables] = useState<DeliverableOption[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [report, setReport] = useState<SalaryReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingDeliverables, setLoadingDeliverables] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
-  // ── Filters ───────────────────────────────────────────────────────────────
-  const [selectedOrg,     setSelectedOrg]     = useState<number | null>(null);
+  // ── Filter state ───────────────────────────────────────────────────────────
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  const [selectedOrg, setSelectedOrg] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
-  const [selectedUser,    setSelectedUser]     = useState<number | null>(null);
-  const [usersInOrg, setUsersInOrg] = useState<Array<{ id: number; name: string; role: string }>>([]);
+  const [selectedDeliverable, setSelectedDeliverable] = useState<number | null>(
+    null,
+  );
+  const [selectedUser, setSelectedUser] = useState<number | null>(null);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
+  const clearDateRange = () => {
+    setStartDate("");
+    setEndDate("");
+  };
+
+  // ── Load organisations ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (selectedOrg) { fetchProjectsByOrg(selectedOrg).then(setProjects).catch(console.error); }
-    else { setProjects([]); setSelectedProject(null); }
+    fetchOrganisations()
+      .then(setOrganisations)
+      .catch((e) => console.error("orgs:", e));
+  }, []);
+
+  // ── Load projects when org changes ─────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedOrg) {
+      setProjects([]);
+      setSelectedProject(null);
+      return;
+    }
+    setLoadingProjects(true);
+    fetchProjectsByOrg(selectedOrg)
+      .then((d) => {
+        setProjects(d);
+        setSelectedProject(null);
+        setSelectedDeliverable(null);
+        setDeliverables([]);
+      })
+      .catch(() => setError("Failed to load projects"))
+      .finally(() => setLoadingProjects(false));
   }, [selectedOrg]);
 
-  // ── Calendar / date ───────────────────────────────────────────────────────
-  const [calYear,     setCalYear]     = useState(() => new Date().getFullYear());
-  const [calMonth,    setCalMonth]    = useState(() => new Date().getMonth());
-  const [selDates,    setSelDates]    = useState<Set<string>>(new Set());
-  const [activeDates, setActiveDates] = useState<Set<string>>(new Set());
-  const [selMonth,    setSelMonth]    = useState<number | null>(null);
-  const [selYear,     setSelYear]     = useState<number>(new Date().getFullYear());
-
-  // ── Tabs ──────────────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<"summary" | "details">("summary");
-
-  // ── Data ──────────────────────────────────────────────────────────────────
-  const [data,    setData]    = useState<BalanceSheetResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
-
-  const { dateFrom, dateTo } = useMemo(() => {
-    if (selDates.size > 0) {
-      const sorted = Array.from(selDates).sort();
-      return { dateFrom: sorted[0], dateTo: sorted[sorted.length - 1] };
+  // ── Load deliverables when project changes ─────────────────────────────────
+  useEffect(() => {
+    if (!selectedProject) {
+      setDeliverables([]);
+      setSelectedDeliverable(null);
+      return;
     }
-    if (selMonth !== null) {
-      const m = String(selMonth + 1).padStart(2, "0");
-      const lastDay = getDaysInMonth(selYear, selMonth);
-      return { dateFrom: `${selYear}-${m}-01`, dateTo: `${selYear}-${m}-${lastDay}` };
-    }
-    return { dateFrom: "", dateTo: "" };
-  }, [selDates, selMonth, selYear]);
-
-  const fetchData = useCallback(() => {
-    setLoading(true); setError(null);
-    const params: BalanceSheetParams = {
-      year:            selYear,
-      month:           selMonth !== null ? selMonth : undefined,
-      organisation_id: selectedOrg     || undefined,
-      project_id:      selectedProject || undefined,
-      user_id:         selectedUser    || undefined,
-      view_all:        true,
-    };
-    if (dateFrom) params.from = dateFrom;
-    if (dateTo)   params.to   = dateTo;
-
-    fetchBalanceSheet(params)
-      .then(d => {
-        setData(d);
-        setUsersInOrg(d.meta?.users_in_org || []);
-        const dates = new Set<string>([
-          ...(d.revenues || []).map((r: RevenueRow) => r.date),
-          ...(d.expenses || []).map((e: ExpenseRow) => e.date),
-          ...(d.credits  || []).map((c: CreditRow)  => c.date),
-        ]);
-        setActiveDates(dates);
+    setLoadingDeliverables(true);
+    fetchDeliverablesByProject(selectedProject)
+      .then((d) => {
+        setDeliverables(d);
+        setSelectedDeliverable(null);
       })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [selYear, selMonth, selectedOrg, selectedProject, selectedUser, dateFrom, dateTo]);
+      .catch(() => setError("Failed to load deliverables"))
+      .finally(() => setLoadingDeliverables(false));
+  }, [selectedProject]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // ── Load users when org changes ────────────────────────────────────────────
+  // Fixed: Properly handle the promise and set users state
+  useEffect(() => {
+    setSelectedUser(null);
+    if (!selectedOrg) {
+      setUsers([]);
+      return;
+    }
+    setLoadingUsers(true);
+    fetchUsersByOrg()
+      .then((fetchedUsers) => {
+        setUsers(fetchedUsers);
+      })
+      .catch((err) => {
+        console.error("Failed to load users:", err);
+        setUsers([]);
+      })
+      .finally(() => setLoadingUsers(false));
+  }, [selectedOrg]);
 
-  // ─── Balances ─────────────────────────────────────────────────────────────
-  const revenues = data?.revenues || [];
-  const credits = data?.credits || [];
-  const expenses = data?.expenses || [];
-  
-  const totalCredit = credits.reduce((s, c) => s + c.amount, 0);
-  const outstandingCredit = credits.filter(c => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
-  const repaidCredit = credits.filter(c => c.is_repaid).reduce((s, c) => s + c.amount, 0);
-  const totalRevenue = revenues.reduce((s, r) => s + r.amount, 0);
-  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const nonReimbursedExpenses = expenses.filter(e => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
-  const balanceWithoutCredit = totalRevenue - totalExpenses;
-  const balanceWithCredit = totalRevenue - nonReimbursedExpenses + totalCredit;
+  // ── Core fetch ─────────────────────────────────────────────────────────────
+  const fetchReport = useCallback(async () => {
+    if (!selectedOrg) {
+      setError("Please select an organisation");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchSalaryReport({
+        from: startDate || undefined,
+        to: endDate || undefined,
+        year:
+          !startDate && !endDate && selectedYear !== null
+            ? selectedYear
+            : undefined,
+        month:
+          !startDate &&
+          !endDate &&
+          selectedYear !== null &&
+          selectedMonth !== null
+            ? selectedMonth + 1
+            : undefined,
+        organisation_id: selectedOrg,
+        project_id: selectedProject || undefined,
+        deliverable_id: selectedDeliverable || undefined,
+        user_id: selectedUser || undefined,
+        view_all: true,
+        include_all_projects: includeAllProjects && !selectedProject,
+      });
+      setReport(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report");
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    selectedYear,
+    selectedMonth,
+    selectedOrg,
+    selectedProject,
+    selectedDeliverable,
+    selectedUser,
+    startDate,
+    endDate,
+    includeAllProjects,
+  ]);
 
-  const userBalance = useMemo(() => {
-    if (!selectedUser || !data) return null;
-    const userRevenues = revenues.filter(r => r.user === selectedUser);
-    const userTotalRevenue = userRevenues.reduce((s, r) => s + r.amount, 0);
-    const userExpenses = expenses.filter(e => e.user_id === selectedUser);
-    const userNonReimbursedExpenses = userExpenses.filter(e => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
-    const userReimbursedExpenses = userExpenses.filter(e => e.reimbursed).reduce((s, e) => s + e.amount, 0);
-    const userCredits = credits.filter(c => c.user === selectedUser);
-    const userTotalCredits = userCredits.reduce((s, c) => s + c.amount, 0);
-    const userOutstandingCredits = userCredits.filter(c => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
-    const balance = (userTotalRevenue + userTotalCredits) - userNonReimbursedExpenses;
-    return {
-      balance, isPositive: balance >= 0,
-      userTotalRevenue, userTotalCredits, userOutstandingCredits,
-      userNonReimbursedExpenses, userReimbursedExpenses,
-      owesToCompany: balance > 0, companyOwesUser: balance < 0,
+  // ── Debounced auto-fetch ───────────────────────────────────────────────────
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!selectedOrg) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(fetchReport, 350);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [selectedUser, data, revenues, expenses, credits]);
+  }, [fetchReport]);
 
-  const creditByCat = useMemo(() => {
-    const map: Record<string, number> = {};
-    credits.forEach(c => { map[c.category_display] = (map[c.category_display] ?? 0) + c.amount; });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [credits]);
+  const clearAllFilters = () => {
+    setSelectedOrg(null);
+    setSelectedProject(null);
+    setSelectedDeliverable(null);
+    setSelectedUser(null);
+    setSelectedYear(null);
+    setSelectedMonth(null);
+    setStartDate("");
+    setEndDate("");
+    setIncludeAllProjects(false);
+    setDrawerOpen(false);
+    setReport(null);
+  };
 
-  const revenueByUser = useMemo(() => {
-    const map: Record<number, { name: string; amount: number }> = {};
-    revenues.forEach(r => {
-      if (!map[r.user]) map[r.user] = { name: r.user_name || r.user_email, amount: 0 };
-      map[r.user].amount += r.amount;
-    });
-    return Object.values(map).sort((a, b) => b.amount - a.amount);
-  }, [revenues]);
-
-  const TABS: { key: "summary" | "details"; label: string }[] = [
-    { key: "summary", label: "Summary" },
-    { key: "details", label: "Detailed View" },
-  ];
-
-  function clearAll() {
-    setSelDates(new Set()); setSelMonth(null);
-    setSelectedOrg(null); setSelectedProject(null); setSelectedUser(null);
-  }
-
-  const hasFilter = selDates.size > 0 || selMonth !== null ||
-    !!selectedOrg || !!selectedProject || !!selectedUser;
-
-  function toggleDate(iso: string) {
-    setSelDates(p => { const n = new Set(p); n.has(iso) ? n.delete(iso) : n.add(iso); return n; });
-  }
-  
-  function prevMonth() {
-    if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
-    else setCalMonth(m => m - 1);
-  }
-  
-  function nextMonth() {
-    if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
-    else setCalMonth(m => m + 1);
-  }
-
-  // ─── Sidebar content (shared between desktop panel and mobile drawer) ──────
-  const SidebarContent = () => (
-    <>
-      {/* Calendar */}
-      <div style={{ padding: "16px 14px 14px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <button onClick={prevMonth} style={{
-            width: 30, height: 30, borderRadius: 6, background: T.panel2,
-            border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-          }}>‹</button>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: T.t2 }}>{MONTHS[calMonth]}</div>
-            <div style={{ fontSize: 10, color: T.t5, marginTop: 1 }}>{calYear}</div>
-          </div>
-          <button onClick={nextMonth} style={{
-            width: 30, height: 30, borderRadius: 6, background: T.panel2,
-            border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-          }}>›</button>
-        </div>
-
-        <CalGrid year={calYear} month={calMonth}
-          selDates={selDates} activeDates={activeDates} onToggle={toggleDate} />
-
-        {selDates.size > 0 && (
-          <div style={{
-            marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between",
-            background: T.acLight, borderRadius: 6, padding: "5px 9px",
-          }}>
-            <span style={{ fontSize: 10.5, color: T.acText, fontWeight: 600 }}>
-              {selDates.size} date{selDates.size > 1 ? "s" : ""} selected
-            </span>
-            <button onClick={() => setSelDates(new Set())} style={{
-              background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 14, padding: "2px 4px",
-            }}>✕</button>
-          </div>
-        )}
-      </div>
-
-      <Divider />
-
-      {/* Quick month */}
-      <div style={{ padding: "12px 14px" }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em",
-          textTransform: "uppercase", marginBottom: 8 }}>Quick Month</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 3 }}>
-          {MONTHS.map((m, i) => (
-            <button key={m} onClick={() => setSelMonth(selMonth === i ? null : i)} style={{
-              background: selMonth === i ? T.acLight : "transparent",
-              border: `1px solid ${selMonth === i ? T.acMid : T.divider}`,
-              borderRadius: 5, color: selMonth === i ? T.acText : T.t5,
-              fontSize: 10, padding: "6px 0", cursor: "pointer",
-              textTransform: "uppercase", letterSpacing: "0.04em",
-              fontWeight: selMonth === i ? 700 : 400,
-              minHeight: 32,
-            }}>{m.slice(0, 3)}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Year */}
-      <div style={{ padding: "0 14px 12px" }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em",
-          textTransform: "uppercase", marginBottom: 8 }}>Year</div>
-        <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-          {AVAILABLE_YEARS.map(y => (
-            <button key={y} onClick={() => setSelYear(y)} style={{
-              flex: "1 1 0",
-              background: selYear === y ? T.acLight : "transparent",
-              border: `1px solid ${selYear === y ? T.acMid : T.divider}`,
-              borderRadius: 5, color: selYear === y ? T.acText : T.t5,
-              fontSize: 10, padding: "6px 0", cursor: "pointer",
-              fontWeight: selYear === y ? 700 : 400,
-              minHeight: 32,
-            }}>{y}</button>
-          ))}
-        </div>
-      </div>
-
-      <Divider />
-
-      {/* Filters */}
-      <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em",
-          textTransform: "uppercase" }}>Filters</div>
-
-        <FSel label="Organisation" value={selectedOrg ? String(selectedOrg) : ""}
-          onChange={v => { setSelectedOrg(v ? Number(v) : null); setSelectedProject(null); setSelectedUser(null); }}>
-          <option value="">All organisations</option>
-          {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </FSel>
-
-        <FSel label="Project" value={selectedProject ? String(selectedProject) : ""}
-          onChange={v => setSelectedProject(v ? Number(v) : null)} disabled={!selectedOrg}>
-          <option value="">All projects</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </FSel>
-
-        <FSel label="User" value={selectedUser ? String(selectedUser) : ""}
-          onChange={v => setSelectedUser(v ? Number(v) : null)} disabled={!selectedOrg}>
-          <option value="">All users</option>
-          {usersInOrg.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-        </FSel>
-      </div>
-
-      {/* Overview + breakdowns */}
-      {data && (
-        <>
-          <Divider />
-          <div style={{ padding: "12px 14px" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em",
-              textTransform: "uppercase", marginBottom: 10 }}>Overview</div>
-
-            {[
-              { label: "Revenue",                   val: totalRevenue,           color: T.green,  signed: false },
-              { label: "Expenses",                  val: totalExpenses,          color: T.red,    signed: false },
-              { label: "Credits",                   val: totalCredit,            color: T.purple, signed: false },
-              { label: "Outstanding Credits",       val: outstandingCredit,      color: T.amber,  signed: false },
-              { label: "Non-Reimbursed Expenses",   val: nonReimbursedExpenses,  color: T.red,    signed: false },
-              { label: "Net (with Credit)",         val: balanceWithCredit,      color: balanceWithCredit >= 0 ? T.green : T.red, signed: true },
-            ].map(s => (
-              <div key={s.label} style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                marginBottom: 5, padding: "5px 8px", borderRadius: 6,
-                background: s.color + "0d",
-              }}>
-                <span style={{ fontSize: 11, color: T.t4 }}>{s.label}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>
-                  {s.signed ? (s.val >= 0 ? "+" : "−") : ""}{fmtINR(Math.abs(s.val))}
-                </span>
-              </div>
-            ))}
-
-            {selectedUser && userBalance && (
-              <div style={{
-                marginTop: 12, padding: "10px 12px", borderRadius: 8,
-                background: userBalance.isPositive ? T.greenBg : T.redBg,
-                border: `1px solid ${userBalance.isPositive ? T.green + "30" : T.red + "30"}`,
-              }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.08em",
-                  textTransform: "uppercase", marginBottom: 8 }}>User Balance Analysis</div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontSize: 10.5, color: T.t4 }}>Revenue Collected:</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: T.green }}>{fmtINR(userBalance.userTotalRevenue)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontSize: 10.5, color: T.t4 }}>Credits Taken:</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: T.purple }}>{fmtINR(userBalance.userTotalCredits)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontSize: 10.5, color: T.t4 }}>Non-Reimbursed Expenses:</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: T.red }}>{fmtINR(userBalance.userNonReimbursedExpenses)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, paddingTop: 4, borderTop: `1px solid ${T.divider}` }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: T.t3 }}>Net Balance:</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: userBalance.isPositive ? T.green : T.red }}>
-                    {userBalance.isPositive ? "+" : "−"}{fmtINR(Math.abs(userBalance.balance))}
-                  </span>
-                </div>
-                <div style={{
-                  fontSize: 11, color: userBalance.isPositive ? T.green : T.red, fontWeight: 600,
-                  textAlign: "center", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${T.divider}`,
-                }}>
-                  {userBalance.owesToCompany ? `💰 User owes company ${fmtINR(userBalance.balance)}`
-                    : userBalance.companyOwesUser ? `💸 Company owes user ${fmtINR(Math.abs(userBalance.balance))}`
-                    : "✅ Balanced"}
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em",
-                textTransform: "uppercase", marginBottom: 7 }}>Balance Comparison</div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 10.5, color: T.t4 }}>Without Credit (P&L):</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: balanceWithoutCredit >= 0 ? T.green : T.red }}>
-                  {balanceWithoutCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithoutCredit))}
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 10.5, color: T.t4 }}>With Credit (Asset):</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: balanceWithCredit >= 0 ? T.green : T.red }}>
-                  {balanceWithCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithCredit))}
-                </span>
-              </div>
-              <ProgressBar pct={totalExpenses > 0 ? (nonReimbursedExpenses / totalExpenses) * 100 : 0} color={T.amber} />
-              <div style={{ fontSize: 8, color: T.t6, marginTop: 4, textAlign: "center" }}>
-                {totalExpenses > 0 ? ((nonReimbursedExpenses / totalExpenses) * 100).toFixed(0) : 0}% of expenses not reimbursed
-              </div>
-            </div>
-
-            {(data.summary?.revenue_by_source?.length ?? 0) > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em",
-                  textTransform: "uppercase", marginBottom: 7 }}>Revenue by Source</div>
-                {data.summary.revenue_by_source.map((item: { source: string; total: number }) => (
-                  <div key={item.source} style={{ marginBottom: 7 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 10.5, color: T.t4 }}>{item.source}</span>
-                      <span style={{ fontSize: 10.5, color: T.green, fontWeight: 600 }}>{fmtINR(item.total)}</span>
-                    </div>
-                    <ProgressBar pct={totalRevenue > 0 ? (item.total / totalRevenue) * 100 : 0} color={T.green} />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {revenueByUser.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em",
-                  textTransform: "uppercase", marginBottom: 7 }}>Top Contributors</div>
-                {revenueByUser.slice(0, 3).map(user => (
-                  <div key={user.name} style={{ marginBottom: 7 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 10.5, color: T.t4 }}>{user.name}</span>
-                      <span style={{ fontSize: 10.5, color: T.green, fontWeight: 600 }}>{fmtINR(user.amount)}</span>
-                    </div>
-                    <ProgressBar pct={totalRevenue > 0 ? (user.amount / totalRevenue) * 100 : 0} color={T.green} />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {(data.summary?.expenses_by_category?.length ?? 0) > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em",
-                  textTransform: "uppercase", marginBottom: 7 }}>Expenses by Category</div>
-                {data.summary.expenses_by_category.map((item: { category: string; total: number }) => (
-                  <div key={item.category} style={{ marginBottom: 7 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 10.5, color: T.t4 }}>{item.category}</span>
-                      <span style={{ fontSize: 10.5, color: T.red, fontWeight: 600 }}>{fmtINR(item.total)}</span>
-                    </div>
-                    <ProgressBar pct={totalExpenses > 0 ? (item.total / totalExpenses) * 100 : 0} color={T.red} />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {creditByCat.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em",
-                  textTransform: "uppercase", marginBottom: 7 }}>Credits by Category</div>
-                {creditByCat.map(([cat, val]) => (
-                  <div key={cat} style={{ marginBottom: 7 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 10.5, color: T.t4 }}>{cat}</span>
-                      <span style={{ fontSize: 10.5, color: T.purple, fontWeight: 600 }}>{fmtINR(val)}</span>
-                    </div>
-                    <ProgressBar pct={totalCredit > 0 ? (val / totalCredit) * 100 : 0} color={T.purple} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {hasFilter && (
-        <>
-          <Divider />
-          <div style={{ padding: "10px 14px 20px" }}>
-            <button onClick={() => { clearAll(); setDrawerOpen(false); }} style={{
-              width: "100%", background: "transparent", border: `1px solid ${T.divider}`,
-              borderRadius: 7, padding: "8px 0", fontSize: 11, color: T.t5,
-              cursor: "pointer", fontFamily: "'DM Sans',sans-serif", transition: "all 0.12s",
-              minHeight: 38,
-            }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.red; (e.currentTarget as HTMLElement).style.borderColor = T.red + "40"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t5; (e.currentTarget as HTMLElement).style.borderColor = T.divider; }}
-            >✕ &nbsp;Clear all filters</button>
-          </div>
-        </>
-      )}
-    </>
-  );
-
-  // Active filter count badge
   const activeFilterCount = [
-    selDates.size > 0, selMonth !== null,
-    !!selectedOrg, !!selectedProject, !!selectedUser,
+    !!selectedOrg,
+    !!selectedProject,
+    !!selectedDeliverable,
+    !!selectedUser,
+    !!startDate,
+    !!endDate,
+    selectedYear !== null,
+    selectedMonth !== null,
   ].filter(Boolean).length;
 
+  const selectedOrgName = organisations.find((o) => o.id === selectedOrg)?.name;
+  const selectedProjectName = projects.find(
+    (p) => p.id === selectedProject,
+  )?.name;
+  const selectedProjectType = projects.find(
+    (p) => p.id === selectedProject,
+  )?.billing_type;
+
+  const showAllProjectsToggle =
+    view === "hourly" && !selectedProject && !!selectedOrg;
+
+  // ── Period display ─────────────────────────────────────────────────────────
+  const getPeriodDisplay = () => {
+    if (startDate && endDate) return `${startDate} → ${endDate}`;
+    if (startDate) return `From ${startDate}`;
+    if (endDate) return `Until ${endDate}`;
+    if (selectedYear !== null && selectedMonth !== null)
+      return `${MONTHS[selectedMonth]} ${selectedYear}`;
+    if (selectedYear !== null) return `Full year ${selectedYear}`;
+    return "All time (no date filter)";
+  };
+
+  // ── Totals ─────────────────────────────────────────────────────────────────
+  let totalAmount = 0,
+    totalLabel = "",
+    totalColor = T.t4,
+    subtitle = "";
+  if (view === "hourly") {
+    totalAmount = report?.total_hourly_amount ?? 0;
+    totalLabel =
+      includeAllProjects && !selectedProject
+        ? "Total Hourly Salary (all projects)"
+        : "Total Hourly Salary";
+    totalColor = includeAllProjects && !selectedProject ? T.green : T.blue;
+    subtitle = selectedProject
+      ? `${report?.total_employees || 0} employees — ${selectedProjectName}`
+      : includeAllProjects
+        ? `${report?.total_employees || 0} employees × all projects`
+        : `${report?.total_employees || 0} employees × hourly projects only`;
+  } else {
+    if (selectedProject) {
+      totalAmount = report?.total_percentage_amount ?? 0;
+      totalLabel = `Total % Share — ${selectedProjectName || "Project"}`;
+      totalColor = T.purple;
+      subtitle = "Revenue × share %";
+    } else {
+      totalLabel = "Select a project";
+      totalColor = T.t5;
+      subtitle = "% share requires project selection";
+    }
+  }
+
+  // ── Footer note ────────────────────────────────────────────────────────────
+  const footerNote = (() => {
+    if (view === "hourly") {
+      if (selectedProject) {
+        return selectedProjectType === "percentage_share"
+          ? `💰 Showing hours for ${selectedProjectName} (📊 % share project — no hourly rate applies)`
+          : `💰 Hourly = work logs × hourly rate (${selectedProjectName})`;
+      }
+      if (includeAllProjects) {
+        return "✅ All projects included — hours from % share projects counted in hourly total";
+      }
+      return "💰 Hourly projects only — 📊 percentage-share projects excluded from this total";
+    }
+    if (selectedProject) {
+      return `📊 % Share = revenue from ${selectedProjectName} × share %`;
+    }
+    return "📌 Select a project to enable % share view";
+  })();
+
+  const sidebarProps: SidebarProps = {
+    organisations,
+    selectedOrg,
+    setSelectedOrg,
+    selectedYear,
+    setSelectedYear,
+    selectedMonth,
+    setSelectedMonth,
+    startDate,
+    setStartDate,
+    endDate,
+    setEndDate,
+    clearDateRange,
+    projects,
+    selectedProject,
+    setSelectedProject,
+    loadingProjects,
+    deliverables,
+    selectedDeliverable,
+    setSelectedDeliverable,
+    loadingDeliverables,
+    users,
+    selectedUser,
+    setSelectedUser,
+    loadingUsers,
+    activeFilterCount,
+    onClearAll: clearAllFilters,
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div ref={containerRef} style={{
-      minHeight: "100vh", background: T.bg, color: T.t2,
-      fontFamily: "'DM Sans','Sora',sans-serif",
-      // Safe area padding for notched phones
-      padding: isMobile
-        ? "env(safe-area-inset-top, 18px) env(safe-area-inset-right, 12px) env(safe-area-inset-bottom, 80px) env(safe-area-inset-left, 12px)"
-        : "28px 24px 60px",
-    }}>
+    <div
+      ref={containerRef}
+      style={{
+        minHeight: "100vh",
+        background: T.bg,
+        color: T.t2,
+        fontFamily: "'DM Sans','Sora',sans-serif",
+        padding: isMobile ? "16px 12px 80px" : "28px 24px 60px",
+      }}
+    >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Sora:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,700&family=Sora:wght@600;700&display=swap');
         *{box-sizing:border-box;margin:0;}
         ::-webkit-scrollbar{width:3px;height:3px;}
         ::-webkit-scrollbar-thumb{background:rgba(76,124,243,0.25);border-radius:99px;}
         select option{background:#0d0f1c;color:#d8e0f0;}
-        @keyframes pulse{0%,100%{opacity:.35}50%{opacity:.75}}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
-        .trow{transition:background 0.1s;}
-        .trow:hover{background:rgba(255,255,255,0.025)!important;}
-        /* Prevent iOS double-tap zoom on buttons */
-        button { touch-action: manipulation; }
-        /* Prevent iOS text size adjustment */
-        html { -webkit-text-size-adjust: 100%; }
+        input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.5);cursor:pointer;}
+        @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.7}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .trow:hover{background:rgba(255,255,255,0.022)!important;}
+        button,select,input{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
       `}</style>
 
-      {/* ── Mobile Drawer ── */}
       {isMobile && (
         <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-          <SidebarContent />
+          <Sidebar {...sidebarProps} />
         </MobileDrawer>
       )}
 
-      {/* ── Header ── */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: 16, gap: 10,
-      }}>
-        {/* Left: logo + title */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <div style={{
-            width: 34, height: 34, flexShrink: 0, borderRadius: 9,
-            background: `linear-gradient(135deg, ${T.acLight}, ${T.acGlow})`,
-            border: `1px solid ${T.acMid}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: `0 0 20px ${T.acGlow}`,
-          }}>
-            <svg width={15} height={15} viewBox="0 0 20 20" fill="none">
-              <path d="M3 10h14M3 6h14M3 14h8" stroke={T.acText} strokeWidth={1.7} strokeLinecap="round"/>
-              <circle cx={15} cy={14} r={3} stroke={T.acText} strokeWidth={1.5}/>
-            </svg>
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <h1 style={{
-              fontSize: isMobile ? 16 : 21, fontWeight: 700,
-              fontFamily: "'Sora',sans-serif", letterSpacing: "-0.035em", color: T.t1,
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}>Revenue & Expense</h1>
-            {!isMobile && (
-              <p style={{ color: T.t5, fontSize: 11.5, marginTop: 1 }}>Financial balance sheet · all users</p>
-            )}
-          </div>
-        </div>
-
-        {/* Right: desktop pills OR mobile filter button */}
-        {isMobile ? (
-          <button
-            onClick={() => setDrawerOpen(true)}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 18,
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
             style={{
-              flexShrink: 0, display: "flex", alignItems: "center", gap: 6,
-              background: T.panel, border: `1px solid ${T.panelB}`,
-              borderRadius: 8, padding: "7px 12px",
-              color: T.t3, fontSize: 12, fontWeight: 600,
-              cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
-              position: "relative",
+              width: 42,
+              height: 42,
+              borderRadius: 11,
+              flexShrink: 0,
+              background: `linear-gradient(135deg, ${T.acLight}, ${T.acGlow})`,
+              border: `1px solid ${T.acMid}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            <svg width={14} height={14} viewBox="0 0 20 20" fill="none">
-              <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round"/>
+            <svg width={19} height={19} viewBox="0 0 20 20" fill="none">
+              <path
+                d="M3 10h14M3 6h14M3 14h8"
+                stroke={T.acText}
+                strokeWidth={1.7}
+                strokeLinecap="round"
+              />
+              <circle
+                cx={15}
+                cy={14}
+                r={3}
+                stroke={T.acText}
+                strokeWidth={1.5}
+              />
             </svg>
-            Filters
-            {activeFilterCount > 0 && (
-              <span style={{
-                position: "absolute", top: -5, right: -5,
-                background: T.ac, color: "#fff",
-                width: 16, height: 16, borderRadius: "50%",
-                fontSize: 9, fontWeight: 800,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                border: `2px solid ${T.bg}`,
-              }}>{activeFilterCount}</span>
-            )}
-          </button>
-        ) : (
-          data && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {[
-                { label: "Revenue",  val: fmtINR(totalRevenue),  color: T.green  },
-                { label: "Expenses", val: fmtINR(totalExpenses), color: T.red    },
-                { label: "Credits",  val: fmtINR(totalCredit),   color: T.purple },
-                { label: "Net",
-                  val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)),
-                  color: balanceWithCredit >= 0 ? T.green : T.red },
-              ].map(s => (
-                <div key={s.label} style={{
-                  background: T.panel, border: `1px solid ${T.panelB}`,
-                  borderRadius: 8, padding: "6px 12px", textAlign: "center",
-                }}>
-                  <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em",
-                    textTransform: "uppercase", marginBottom: 2 }}>{s.label}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: s.color, letterSpacing: "-0.02em" }}>{s.val}</div>
-                </div>
-              ))}
-            </div>
-          )
-        )}
+          </div>
+          <div>
+            <h1
+              style={{
+                fontSize: isMobile ? 17 : 22,
+                fontWeight: 700,
+                fontFamily: "'Sora',sans-serif",
+                letterSpacing: "-0.03em",
+                color: T.t1,
+                lineHeight: 1.2,
+              }}
+            >
+              Salary Report
+            </h1>
+            <p style={{ color: T.t5, fontSize: 12, marginTop: 2 }}>
+              {selectedOrgName ? `${selectedOrgName} · ` : ""}
+              {getPeriodDisplay()}
+              {selectedProjectName &&
+                view === "percentage" &&
+                ` · ${selectedProjectName}`}
+            </p>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <ViewToggle view={view} setView={setView} />
+
+          {showAllProjectsToggle && (
+            <AllProjectsToggle
+              enabled={includeAllProjects}
+              onToggle={() => setIncludeAllProjects((v) => !v)}
+            />
+          )}
+
+          {isMobile && (
+            <button
+              onClick={() => setDrawerOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: T.panel,
+                border: `1px solid ${T.panelB}`,
+                borderRadius: 9,
+                padding: "10px 14px",
+                color: T.t3,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                position: "relative",
+                fontFamily: "'DM Sans',sans-serif",
+              }}
+            >
+              <svg width={14} height={14} viewBox="0 0 20 20" fill="none">
+                <path
+                  d="M3 5h14M6 10h8M9 15h2"
+                  stroke="currentColor"
+                  strokeWidth={1.7}
+                  strokeLinecap="round"
+                />
+              </svg>
+              Filters
+              {activeFilterCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -6,
+                    background: T.ac,
+                    color: "#fff",
+                    width: 17,
+                    height: 17,
+                    borderRadius: "50%",
+                    fontSize: 9,
+                    fontWeight: 800,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: `2px solid ${T.bg}`,
+                  }}
+                >
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Mobile summary strip (below header) ── */}
-      {isMobile && data && (
-        <div style={{
-          display: "grid", gridTemplateColumns: "1fr 1fr",
-          gap: 8, marginBottom: 12,
-        }}>
-          {[
-            { label: "Revenue",  val: fmtINR(totalRevenue),  color: T.green  },
-            { label: "Expenses", val: fmtINR(totalExpenses), color: T.red    },
-            { label: "Credits",  val: fmtINR(totalCredit),   color: T.purple },
-            { label: "Net (incl. Credit)", val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)),
-              color: balanceWithCredit >= 0 ? T.green : T.red },
-          ].map(s => (
-            <div key={s.label} style={{
-              background: T.panel, border: `1px solid ${T.panelB}`,
-              borderRadius: 10, padding: "10px 12px",
-            }}>
-              <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.07em",
-                textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: s.color, letterSpacing: "-0.02em" }}>{s.val}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Layout ── */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "260px 1fr",
-        gap: 14, alignItems: "start",
-      }}>
-
-        {/* ─── Desktop sidebar ─── */}
+      {/* ── Layout ─────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "290px 1fr",
+          gap: 18,
+          alignItems: "start",
+        }}
+      >
         {!isMobile && (
-          <div style={{
-            background: T.panel, border: `1px solid ${T.panelB}`,
-            borderRadius: 14, overflow: "hidden",
-            display: "flex", flexDirection: "column",
-            position: "sticky", top: 20,
-            maxHeight: "calc(100vh - 40px)",
-            overflowY: "auto",
-          }}>
-            <SidebarContent />
+          <div
+            style={{
+              background: T.panel,
+              border: `1px solid ${T.panelB}`,
+              borderRadius: 14,
+              overflow: "hidden",
+              position: "sticky",
+              top: 20,
+              maxHeight: "calc(100vh - 48px)",
+              overflowY: "auto",
+            }}
+          >
+            <Sidebar {...sidebarProps} />
           </div>
         )}
 
-        {/* ─── Right panel ─── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+            minWidth: 0,
+          }}
+        >
+          {!selectedOrg && !loading && (
+            <div
+              style={{
+                padding: "52px 20px",
+                textAlign: "center",
+                background: T.panel,
+                borderRadius: 14,
+                border: `1px solid ${T.panelB}`,
+              }}
+            >
+              <svg
+                width={46}
+                height={46}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={T.t5}
+                strokeWidth={1}
+              >
+                <rect x={3} y={3} width={18} height={18} rx={2} />
+                <path d="M3 9h18M9 21v-12" />
+              </svg>
+              <p style={{ marginTop: 14, color: T.t4, fontSize: 13 }}>
+                Select an organisation to view the salary report
+              </p>
+            </div>
+          )}
+
+          {view === "hourly" &&
+            selectedOrg &&
+            !selectedProject &&
+            !includeAllProjects && (
+              <div
+                style={{
+                  padding: "10px 16px",
+                  color: T.t4,
+                  fontSize: 12,
+                  background: T.panel2,
+                  borderRadius: 10,
+                  border: `1px solid ${T.divider}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>💰</span>
+                <span>
+                  Showing{" "}
+                  <strong style={{ color: T.blue }}>
+                    hourly projects only
+                  </strong>
+                  . Toggle <em>All projects</em> above to include % share
+                  projects in the hourly total.
+                </span>
+              </div>
+            )}
+
+          {view === "hourly" &&
+            selectedOrg &&
+            !selectedProject &&
+            includeAllProjects && (
+              <div
+                style={{
+                  padding: "10px 16px",
+                  color: T.green,
+                  fontSize: 12,
+                  background: T.greenBg,
+                  borderRadius: 10,
+                  border: `1px solid ${T.green}30`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>✅</span>
+                <span>
+                  <strong>All projects included</strong> — hours from % share
+                  projects are counted in the hourly salary total.
+                </span>
+              </div>
+            )}
+
+          {view === "percentage" && selectedOrg && !selectedProject && (
+            <div
+              style={{
+                padding: "12px 16px",
+                color: T.orange,
+                fontSize: 13,
+                background: T.orangeBg,
+                borderRadius: 10,
+                border: `1px solid ${T.orange}30`,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <span>⚠️</span>
+              <span>
+                Select a specific project to view percentage share calculations
+              </span>
+            </div>
+          )}
+
+          {view === "percentage" &&
+            selectedProject &&
+            selectedProjectType === "hourly" && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  color: T.blue,
+                  fontSize: 13,
+                  background: T.blueBg,
+                  borderRadius: 10,
+                  border: `1px solid ${T.acMid}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <span>ℹ️</span>
+                <span>
+                  <strong>{selectedProjectName}</strong> is a 💰 hourly project.
+                  Switch to the Hourly view to see earnings, or select a 📊 %
+                  share project.
+                </span>
+              </div>
+            )}
 
           {error && (
-            <div style={{
-              padding: "11px 16px", color: T.red, fontSize: 12.5,
-              background: T.redBg, borderRadius: 10, border: `1px solid ${T.red}30`,
-              wordBreak: "break-word",
-            }}>⚠ {error}</div>
-          )}
-
-          {/* Active filter chips on mobile */}
-          {isMobile && hasFilter && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-              {selMonth !== null && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  background: T.acLight, border: `1px solid ${T.acMid}`,
-                  borderRadius: 20, padding: "3px 10px",
-                  fontSize: 11, color: T.acText, fontWeight: 600,
-                }}>
-                  {MONTHS[selMonth]} {selYear}
-                  <button onClick={() => setSelMonth(null)} style={{
-                    background: "none", border: "none", color: T.acText,
-                    cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1,
-                  }}>✕</button>
-                </span>
-              )}
-              {selDates.size > 0 && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  background: T.acLight, border: `1px solid ${T.acMid}`,
-                  borderRadius: 20, padding: "3px 10px",
-                  fontSize: 11, color: T.acText, fontWeight: 600,
-                }}>
-                  {selDates.size} date{selDates.size > 1 ? "s" : ""}
-                  <button onClick={() => setSelDates(new Set())} style={{
-                    background: "none", border: "none", color: T.acText,
-                    cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1,
-                  }}>✕</button>
-                </span>
-              )}
-              {selectedOrg && orgs.find(o => o.id === selectedOrg) && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  background: T.acLight, border: `1px solid ${T.acMid}`,
-                  borderRadius: 20, padding: "3px 10px",
-                  fontSize: 11, color: T.acText, fontWeight: 600,
-                }}>
-                  {orgs.find(o => o.id === selectedOrg)?.name}
-                  <button onClick={() => { setSelectedOrg(null); setSelectedProject(null); setSelectedUser(null); }} style={{
-                    background: "none", border: "none", color: T.acText,
-                    cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1,
-                  }}>✕</button>
-                </span>
-              )}
-              <button onClick={clearAll} style={{
-                background: "none", border: `1px solid ${T.red}40`,
-                borderRadius: 20, padding: "3px 10px",
-                fontSize: 11, color: T.red, cursor: "pointer",
-                fontFamily: "'DM Sans',sans-serif",
-              }}>Clear all</button>
+            <div
+              style={{
+                padding: "11px 16px",
+                color: T.red,
+                fontSize: 13,
+                background: T.redBg,
+                borderRadius: 10,
+                border: `1px solid ${T.red}30`,
+              }}
+            >
+              ⚠ {error}
             </div>
           )}
 
-          {/* Main tabbed card */}
-          <div style={{
-            background: T.panel, border: `1px solid ${T.panelB}`,
-            borderRadius: 14, overflow: "hidden",
-          }}>
-            {/* Tab bar */}
-            <div style={{
-              display: "flex", borderBottom: `1px solid ${T.divider}`,
-              padding: "10px 14px 0", gap: 4,
-            }}>
-              {TABS.map(t => (
-                <button key={t.key} onClick={() => setTab(t.key)} style={{
-                  flex: isMobile ? 1 : "none",
-                  padding: isMobile ? "9px 8px" : "7px 16px",
-                  borderRadius: "7px 7px 0 0",
-                  border: `1px solid ${tab === t.key ? T.panelB : "transparent"}`,
-                  borderBottom: tab === t.key ? `1px solid ${T.bg}` : "1px solid transparent",
-                  background: tab === t.key ? T.panel2 : "transparent",
-                  color: tab === t.key ? T.t2 : T.t5,
-                  fontSize: isMobile ? 12 : 11.5,
-                  fontWeight: tab === t.key ? 600 : 400,
-                  cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
-                  marginBottom: -1, transition: "all 0.12s",
-                  whiteSpace: "nowrap",
-                }}>{t.label}</button>
-              ))}
-            </div>
-
-            {/* ── SUMMARY TAB ── */}
-            {tab === "summary" && (
-              <div style={{ padding: isMobile ? 12 : 14, display: "flex", flexDirection: "column", gap: 14 }}>
-                {loading ? (
-                  <>
-                    {[72, 80, 200].map(h => (
-                      <div key={h} style={{ height: h, borderRadius: 10,
-                        background: "rgba(255,255,255,0.04)",
-                        animation: "pulse 1.5s ease-in-out infinite" }} />
-                    ))}
-                  </>
-                ) : !data ? (
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", minHeight: 200, gap: 10, color: T.t6 }}>
-                    <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}>
-                      <rect x={2} y={5} width={20} height={14} rx={2}/><path d="M2 10h20"/>
-                    </svg>
-                    <span style={{ fontSize: 13 }}>No data available</span>
+          {selectedOrg && (
+            <div
+              style={{
+                background: T.panel,
+                border: `1px solid ${T.panelB}`,
+                borderRadius: 14,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: isMobile ? "14px" : "18px 22px",
+                  background: `linear-gradient(135deg, ${T.panel2}, transparent)`,
+                  borderBottom: `1px solid ${T.divider}`,
+                }}
+              >
+                {selectedProject && selectedProjectType && (
+                  <div style={{ marginBottom: 10 }}>
+                    <BillingBadge
+                      type={
+                        selectedProjectType as "hourly" | "percentage_share"
+                      }
+                    />
+                    <span style={{ fontSize: 11, color: T.t5, marginLeft: 8 }}>
+                      {selectedProjectName}
+                    </span>
                   </div>
-                ) : (
-                  <>
-                    {/* Net balance hero */}
-                    <div style={{
-                      display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
-                      borderRadius: 10,
-                      background: balanceWithCredit >= 0 ? T.greenBg : T.redBg,
-                      border: `1px solid ${balanceWithCredit >= 0 ? T.green + "30" : T.red + "30"}`,
-                      flexWrap: "wrap",
-                    }}>
-                      <div style={{
-                        width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
-                        background: balanceWithCredit >= 0 ? T.green + "20" : T.red + "20",
-                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-                      }}>{balanceWithCredit >= 0 ? "↑" : "↓"}</div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: T.t4, fontWeight: 700,
-                          letterSpacing: "0.07em", textTransform: "uppercase" }}>Net Balance (with Credit)</div>
-                        <div style={{ fontSize: isMobile ? 20 : 22, fontWeight: 700,
-                          color: balanceWithCredit >= 0 ? T.green : T.red,
-                          fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em" }}>
-                          {balanceWithCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithCredit))}
-                        </div>
-                      </div>
-                      {outstandingCredit > 0 && (
-                        <div style={{
-                          background: T.purpleBg, border: `1px solid ${T.purple}30`,
-                          borderRadius: 8, padding: "6px 12px", textAlign: isMobile ? "left" : "right",
-                          width: isMobile ? "100%" : "auto",
-                        }}>
-                          <div style={{ fontSize: 9, color: T.t5, fontWeight: 700,
-                            letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>
-                            Outstanding Credit
-                          </div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: T.purple }}>
-                            {fmtINR(outstandingCredit)}
-                          </div>
-                        </div>
-                      )}
+                )}
+
+                {!selectedProject &&
+                  includeAllProjects &&
+                  view === "hourly" && (
+                    <div style={{ marginBottom: 10 }}>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: "0.07em",
+                          textTransform: "uppercase",
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          background: T.greenBg,
+                          color: T.green,
+                          border: `1px solid ${T.green}40`,
+                        }}
+                      >
+                        ✅ All projects override
+                      </span>
                     </div>
+                  )}
 
-                    {/* Credit summary 3-up */}
-                    {credits.length > 0 && (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-                        {[
-                          { label: "Total Credit",   val: totalCredit,       color: T.purple },
-                          { label: "Outstanding",    val: outstandingCredit, color: T.amber  },
-                          { label: "Repaid",         val: repaidCredit,      color: T.green  },
-                        ].map(s => (
-                          <div key={s.label} style={{
-                            padding: isMobile ? "8px 10px" : "10px 12px", borderRadius: 8,
-                            background: s.color + "0d", border: `1px solid ${s.color}20`,
-                          }}>
-                            <div style={{ fontSize: isMobile ? 8 : 9, color: T.t5, fontWeight: 700,
-                              letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
-                            <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 700, color: s.color, letterSpacing: "-0.02em" }}>
-                              {fmtINR(s.val)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginBottom: 12,
+                  }}
+                >
+                  <StatCard
+                    loading={loading}
+                    label={totalLabel}
+                    value={totalAmount > 0 ? fmtINR(totalAmount) : "₹0"}
+                    color={totalColor}
+                    subtitle={subtitle}
+                  />
+                  <StatCard
+                    loading={loading}
+                    label="Employees"
+                    value={String(report?.total_employees ?? 0)}
+                    color={T.acText}
+                  />
+                  {view === "percentage" &&
+                    selectedProject &&
+                    report?.total_hourly_amount !== undefined && (
+                      <StatCard
+                        loading={loading}
+                        label="Hourly (reference)"
+                        value={
+                          report.total_hourly_amount > 0
+                            ? fmtINR(report.total_hourly_amount)
+                            : "₹0"
+                        }
+                        color={T.blue}
+                        subtitle="from hourly projects"
+                      />
                     )}
-
-                    {/* Monthly breakdown */}
-                    {(data.summary?.monthly_summary?.length ?? 0) > 0 && (
-                      <div style={{ background: T.panel2, borderRadius: 10,
-                        border: `1px solid ${T.panel2B}`, overflow: "hidden" }}>
-                        <div style={{ padding: "10px 14px 8px", borderBottom: `1px solid ${T.divider}`,
-                          fontSize: 10, fontWeight: 700, color: T.t5,
-                          letterSpacing: "0.09em", textTransform: "uppercase" }}>Monthly Breakdown</div>
-                        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 400 }}>
-                            <thead>
-                              <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
-                                {["Month","Revenue","Expenses","Net"].map((h, i) => (
-                                  <th key={h} style={{
-                                    padding: "8px 12px", textAlign: i === 0 ? "left" : "right",
-                                    fontSize: 10, fontWeight: 700, color: T.t5,
-                                    letterSpacing: "0.07em", textTransform: "uppercase",
-                                    whiteSpace: "nowrap",
-                                  }}>{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {data.summary.monthly_summary.map((item: {
-                                month: string; revenue: number; expenses: number; net: number;
-                              }, idx: number) => (
-                                <tr key={idx} className="trow" style={{ borderBottom: `1px solid ${T.divider}` }}>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, color: T.t2, whiteSpace: "nowrap" }}>{item.month}</td>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right",
-                                    color: T.green, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtINR(item.revenue)}</td>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right",
-                                    color: T.red, whiteSpace: "nowrap" }}>{fmtINR(item.expenses)}</td>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right",
-                                    fontWeight: 700, whiteSpace: "nowrap",
-                                    color: item.net >= 0 ? T.green : T.red }}>
-                                    {item.net >= 0 ? "+" : "−"}{fmtINR(Math.abs(item.net))}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                  </>
+                </div>
+                {report && !loading && (
+                  <div style={{ fontSize: 11, color: T.t5 }}>
+                    Period: {report.report_period.start_date} –{" "}
+                    {report.report_period.end_date}
+                  </div>
                 )}
               </div>
-            )}
 
-            {/* ── DETAILS TAB ── */}
-            {tab === "details" && (
-              <div style={{ padding: isMobile ? 10 : 14, display: "flex", flexDirection: "column", gap: 14 }}>
-
-                <DetailTable
-                  accentColor={T.green} accentBg={T.greenBg} icon="↑"
-                  title="Revenue" count={revenues.length}
-                  headers={[
-                    { label: "Date" }, { label: "User" }, { label: "Source" },
-                    { label: "Amount", right: true }, { label: "Remarks" },
-                  ]}
-                  loading={loading} empty="No revenue entries"
+              {isMobile ? (
+                <div
+                  style={{
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 9,
+                  }}
                 >
-                  {revenues.map((r: RevenueRow, idx: number) => (
-                    <tr key={r.id} className="trow" style={{
-                      borderBottom: `1px solid ${T.divider}`,
-                      animation: `fadeUp 0.18s ease ${idx * 0.015}s both`,
-                    }}>
-                      <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{r.date}</td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Avatar name={r.user_name || r.user_email || "?"} />
-                          <span style={{ fontSize: 11.5, color: T.t2, whiteSpace: "nowrap" }}>
-                            {r.user_name || r.user_email}
-                          </span>
+                  {loading ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          background: T.panel2,
+                          border: `1px solid ${T.panel2B}`,
+                          borderRadius: 12,
+                          padding: 14,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 34,
+                              height: 34,
+                              borderRadius: "50%",
+                              background: "rgba(255,255,255,0.06)",
+                              animation: "pulse 1.4s ease-in-out infinite",
+                            }}
+                          />
+                          <div
+                            style={{
+                              flex: 1,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 5,
+                            }}
+                          >
+                            <Shimmer w={140} />
+                            <Shimmer w={100} h={11} />
+                          </div>
+                          <Shimmer w={60} h={20} />
                         </div>
-                      </td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <CatBadge label={r.source_display} color={T.green} />
-                      </td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{fmtINR(r.amount)}</span>
-                      </td>
-                      <td style={{ padding: "9px 12px", maxWidth: 140 }}>
-                        <span style={{ fontSize: 11, color: T.t4, display: "block",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {r.remarks || <span style={{ color: T.t6 }}>—</span>}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </DetailTable>
-
-                <DetailTable
-                  accentColor={T.red} accentBg={T.redBg} icon="↓"
-                  title="Expenses" count={expenses.length}
-                  headers={[
-                    { label: "Date" }, { label: "User" }, { label: "Category" },
-                    { label: "Amount", right: true }, { label: "Reimb." }, { label: "Remarks" },
-                  ]}
-                  loading={loading} empty="No expense entries"
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr 1fr",
+                            gap: 7,
+                          }}
+                        >
+                          {[1, 2, 3].map((j) => (
+                            <div
+                              key={j}
+                              style={{
+                                background: T.blueBg,
+                                borderRadius: 8,
+                                padding: "8px 10px",
+                              }}
+                            >
+                              <Shimmer w={30} h={9} />
+                              <div style={{ marginTop: 5 }}>
+                                <Shimmer w={50} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  ) : report?.employees.length === 0 ? (
+                    <div
+                      style={{
+                        textAlign: "center",
+                        padding: "40px 0",
+                        color: T.t5,
+                        fontSize: 13,
+                      }}
+                    >
+                      No salary data found for the selected filters
+                    </div>
+                  ) : (
+                    report?.employees.map((emp) => (
+                      <EmployeeCard
+                        key={emp.user.id}
+                        emp={emp}
+                        view={view}
+                        selectedProject={selectedProject}
+                        includeAllProjects={includeAllProjects}
+                      />
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    overflowX: "auto",
+                    WebkitOverflowScrolling: "touch",
+                  }}
                 >
-                  {expenses.map((e: ExpenseRow, idx: number) => (
-                    <tr key={e.id} className="trow" style={{
-                      borderBottom: `1px solid ${T.divider}`,
-                      animation: `fadeUp 0.18s ease ${idx * 0.015}s both`,
-                    }}>
-                      <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{e.date}</td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Avatar name={e.user_name || "?"} />
-                          <span style={{ fontSize: 11.5, color: T.t2, whiteSpace: "nowrap" }}>{e.user_name}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <CatBadge label={e.category_label} color={T.red} />
-                      </td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: T.red }}>{fmtINR(e.amount)}</span>
-                      </td>
-                      <td style={{ padding: "9px 12px" }}>
-                        {e.reimbursed
-                          ? <span style={{ fontSize: 10, color: T.green, fontWeight: 700 }}>✓</span>
-                          : <span style={{ fontSize: 10, color: T.amber, fontWeight: 700 }}>✗</span>}
-                      </td>
-                      <td style={{ padding: "9px 12px", maxWidth: 130 }}>
-                        <span style={{ fontSize: 11, color: T.t4, display: "block",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {e.remarks || <span style={{ color: T.t6 }}>—</span>}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </DetailTable>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      minWidth: 580,
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
+                        <th
+                          style={{
+                            padding: "12px 18px",
+                            textAlign: "left",
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color: T.t4,
+                          }}
+                        >
+                          Employee
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px 18px",
+                            textAlign: "right",
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color: T.t4,
+                          }}
+                        >
+                          Hours
+                        </th>
+                        <th
+                          style={{
+                            padding: "12px 18px",
+                            textAlign: "right",
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color:
+                              view === "hourly"
+                                ? includeAllProjects && !selectedProject
+                                  ? T.green
+                                  : T.blue
+                                : T.purple,
+                          }}
+                        >
+                          {view === "hourly"
+                            ? "Hourly Salary"
+                            : `% Share${selectedProject && selectedProjectName ? ` (${selectedProjectName})` : ""}`}
+                        </th>
+                        {view === "percentage" && (
+                          <th
+                            style={{
+                              padding: "12px 18px",
+                              textAlign: "right",
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              color: T.blue,
+                            }}
+                          >
+                            Hourly ref.
+                          </th>
+                        )}
+                        <th
+                          style={{
+                            padding: "12px 18px",
+                            textAlign: "center",
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            color: T.t4,
+                          }}
+                        >
+                          Logs
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading ? (
+                        <TableSkeleton />
+                      ) : report?.employees.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={view === "percentage" ? 5 : 4}
+                            style={{
+                              padding: "52px 20px",
+                              textAlign: "center",
+                              color: T.t6,
+                              fontSize: 13,
+                            }}
+                          >
+                            No salary data found for the selected filters
+                          </td>
+                        </tr>
+                      ) : (
+                        report?.employees.map((emp, idx) => {
+                          const hourly = emp.hourly_amount ?? 0;
+                          const pct = emp.percentage_amount ?? 0;
+                          const showPct =
+                            view === "percentage" &&
+                            !!selectedProject &&
+                            pct > 0;
+                          const mainVal =
+                            view === "hourly" ? hourly : showPct ? pct : 0;
+                          const mainColor =
+                            view === "hourly"
+                              ? includeAllProjects && !selectedProject
+                                ? T.green
+                                : T.blue
+                              : showPct
+                                ? T.purple
+                                : T.t5;
 
-                <DetailTable
-                  accentColor={T.purple} accentBg={T.purpleBg} icon="⟳"
-                  title="Credits Taken" count={credits.length}
-                  headers={[
-                    { label: "Date" }, { label: "User" }, { label: "Category" },
-                    { label: "Amount", right: true }, { label: "Status" }, { label: "Remarks" },
-                  ]}
-                  loading={loading} empty="No credit entries"
+                          return (
+                            <tr
+                              key={emp.user.id}
+                              className="trow"
+                              style={{
+                                borderBottom: `1px solid ${T.divider}`,
+                                animation: `fadeUp 0.18s ease ${idx * 0.02}s both`,
+                              }}
+                            >
+                              <td style={{ padding: "13px 18px" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                  }}
+                                >
+                                  <Avatar name={emp.user.name} />
+                                  <div>
+                                    <div
+                                      style={{
+                                        fontSize: 13,
+                                        fontWeight: 500,
+                                        color: T.t2,
+                                      }}
+                                    >
+                                      {emp.user.name}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: T.t5 }}>
+                                      {emp.user.email}
+                                    </div>
+                                    {!selectedProject &&
+                                      emp.billing_note &&
+                                      view === "hourly" && (
+                                        <div
+                                          style={{
+                                            fontSize: 9,
+                                            marginTop: 2,
+                                            fontStyle: "italic",
+                                            color: includeAllProjects
+                                              ? T.green
+                                              : T.t6,
+                                          }}
+                                        >
+                                          {includeAllProjects
+                                            ? "✅ all projects included"
+                                            : "% share projects excluded"}
+                                        </div>
+                                      )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td
+                                style={{
+                                  padding: "13px 18px",
+                                  textAlign: "right",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    color: T.t2,
+                                  }}
+                                >
+                                  {emp.total_hours.toFixed(1)} hrs
+                                </span>
+                              </td>
+                              <td
+                                style={{
+                                  padding: "13px 18px",
+                                  textAlign: "right",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: 15,
+                                    fontWeight: 700,
+                                    color: mainColor,
+                                  }}
+                                >
+                                  {mainVal > 0 ? fmtINR(mainVal) : "—"}
+                                </span>
+                                {view === "percentage" &&
+                                  showPct &&
+                                  emp.percentage_details &&
+                                  emp.percentage_details.length > 0 && (
+                                    <div
+                                      style={{
+                                        fontSize: 9,
+                                        color: T.t5,
+                                        marginTop: 2,
+                                      }}
+                                    >
+                                      {emp.percentage_details
+                                        .map(
+                                          (d: PercentageDetail) =>
+                                            `${d.percentage}% of ${fmtINR(d.revenue_base)}`,
+                                        )
+                                        .join(", ")}
+                                    </div>
+                                  )}
+                                {view === "percentage" && !selectedProject && (
+                                  <div
+                                    style={{
+                                      fontSize: 10,
+                                      color: T.t6,
+                                      marginTop: 2,
+                                    }}
+                                  >
+                                    select project
+                                  </div>
+                                )}
+                              </td>
+                              {view === "percentage" && (
+                                <td
+                                  style={{
+                                    padding: "13px 18px",
+                                    textAlign: "right",
+                                  }}
+                                >
+                                  <span style={{ fontSize: 12, color: T.blue }}>
+                                    {hourly > 0 ? fmtINR(hourly) : "—"}
+                                  </span>
+                                </td>
+                              )}
+                              <td
+                                style={{
+                                  padding: "13px 18px",
+                                  textAlign: "center",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    padding: "3px 10px",
+                                    borderRadius: 20,
+                                    background: T.acLight,
+                                    color: T.acText,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {emp.work_logs_count}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div
+                style={{
+                  padding: "11px 18px",
+                  borderTop: `1px solid ${T.divider}`,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 10,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color:
+                      includeAllProjects &&
+                      !selectedProject &&
+                      view === "hourly"
+                        ? T.green
+                        : T.t5,
+                  }}
                 >
-                  {credits.map((c: CreditRow, idx: number) => (
-                    <tr key={c.id} className="trow" style={{
-                      borderBottom: `1px solid ${T.divider}`,
-                      animation: `fadeUp 0.18s ease ${idx * 0.015}s both`,
-                    }}>
-                      <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{c.date}</td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Avatar name={c.user_email || "?"} />
-                          <span style={{ fontSize: 11.5, color: T.t2, whiteSpace: "nowrap" }}>{c.user_email}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: "9px 12px" }}>
-                        <CatBadge label={c.category_display} color={T.purple} />
-                      </td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: T.purple }}>{fmtINR(c.amount)}</span>
-                      </td>
-                      <td style={{ padding: "9px 12px", whiteSpace: "nowrap" }}>
-                        <RepaidBadge repaid={c.is_repaid} date={c.repayment_date ?? undefined} />
-                      </td>
-                      <td style={{ padding: "9px 12px", maxWidth: 130 }}>
-                        <span style={{ fontSize: 11, color: T.t4, display: "block",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {c.remarks || <span style={{ color: T.t6 }}>—</span>}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </DetailTable>
-
+                  {footerNote}
+                </div>
+                <button
+                  onClick={fetchReport}
+                  disabled={loading}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    background: "transparent",
+                    border: `1px solid ${T.divider}`,
+                    borderRadius: 8,
+                    padding: "8px 14px",
+                    fontSize: 12,
+                    color: loading ? T.t6 : T.t4,
+                    cursor: loading ? "not-allowed" : "pointer",
+                    opacity: loading ? 0.5 : 1,
+                    fontFamily: "'DM Sans',sans-serif",
+                  }}
+                >
+                  <svg
+                    width={13}
+                    height={13}
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    style={{
+                      animation: loading ? "spin 0.9s linear infinite" : "none",
+                    }}
+                  >
+                    <path
+                      d="M17 10a7 7 0 1 1-7-7M10 3v4h4"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  {loading ? "Loading…" : "Refresh"}
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

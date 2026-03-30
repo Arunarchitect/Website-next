@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unused-vars */
+
 const BASE = process.env.NEXT_PUBLIC_HOST ;
 
 function getToken(): string {
