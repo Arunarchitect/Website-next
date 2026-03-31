@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
@@ -120,9 +118,9 @@ function CalGrid({
         const sel = selDates.has(iso);
         const has = activeDates.has(iso);
         const isToday = iso === today;
-        const inRange = rangeFrom && rangeTo && iso >= rangeFrom && iso <= rangeTo;
-        const isRangeStart = rangeFrom && iso === rangeFrom;
-        const isRangeEnd = rangeTo && iso === rangeTo;
+        const inRange = !!(rangeFrom && rangeTo && iso >= rangeFrom && iso <= rangeTo);
+        const isRangeStart = !!(rangeFrom && iso === rangeFrom);
+        const isRangeEnd = !!(rangeTo && iso === rangeTo);
 
         return (
           <button
@@ -232,7 +230,6 @@ function FSel({
   );
 }
 
-// ─── FIXED: minWidth:0 + overflow:hidden on wrapper so "To" picker never overflows
 function DateInput({
   label,
   value,
@@ -309,6 +306,44 @@ function CatBadge({ label, color }: { label: string; color: string }) {
     >
       <span style={{ width: 4, height: 4, borderRadius: "50%", background: color, flexShrink: 0 }} />
       {label}
+    </span>
+  );
+}
+
+// ─── NEW: Project Badge ───────────────────────────────────────────────────────
+function ProjectBadge({ name }: { name?: string | null }) {
+  if (!name) {
+    return <span style={{ fontSize: 11, color: T.t6 }}>—</span>;
+  }
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 8px 2px 6px",
+        borderRadius: 5,
+        background: T.teal + "18",
+        border: `1px solid ${T.teal}30`,
+        fontSize: 10.5,
+        fontWeight: 600,
+        color: T.teal,
+        whiteSpace: "nowrap",
+        maxWidth: 140,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
+      <span
+        style={{
+          width: 4,
+          height: 4,
+          borderRadius: "50%",
+          background: T.teal,
+          flexShrink: 0,
+        }}
+      />
+      {name}
     </span>
   );
 }
@@ -451,7 +486,7 @@ function DetailTable({
         )}
       </div>
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
               {headers.map((h) => (
@@ -530,7 +565,7 @@ function MobileDrawer({ open, onClose, children }: { open: boolean; onClose: () 
           }}
         >
           <span style={{ fontSize: 12, fontWeight: 700, color: T.t3, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            Filters & Calendar
+            Filters &amp; Calendar
           </span>
           <button
             onClick={onClose}
@@ -592,13 +627,10 @@ export default function RevenueExpensePage() {
   const [selMonth, setSelMonth] = useState<number | null>(null);
   const [selYear, setSelYear] = useState<number>(new Date().getFullYear());
 
-  // ─── Date Range state ──────────────────────────────────────────────────────
   const [rangeFrom, setRangeFrom] = useState<string>("");
   const [rangeTo, setRangeTo] = useState<string>("");
-  // Track which filter mode is active: "calendar" | "month" | "range" | "none"
   const [filterMode, setFilterMode] = useState<"calendar" | "month" | "range" | "none">("none");
 
-  // When range inputs change, switch mode to "range"
   const handleRangeFrom = useCallback((v: string) => {
     setRangeFrom(v);
     if (v) {
@@ -627,8 +659,6 @@ export default function RevenueExpensePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Compute effective dateFrom / dateTo for display banners and calendar-mode API calls only.
-  // filterMode === "month" uses year+month params directly (not from/to).
   const { dateFrom, dateTo } = useMemo(() => {
     if (filterMode === "range") {
       return { dateFrom: rangeFrom, dateTo: rangeTo };
@@ -644,39 +674,35 @@ export default function RevenueExpensePage() {
     setLoading(true);
     setError(null);
 
-    // Build params based on active filter mode — modes are mutually exclusive
     const params: BalanceSheetParams = {
-      organisation_id: selectedOrg || undefined,
-      project_id: selectedProject || undefined,
-      user_id: selectedUser || undefined,
+      organisation_id: selectedOrg ?? undefined,
+      project_id: selectedProject ?? undefined,
+      user_id: selectedUser ?? undefined,
       view_all: true,
     };
 
     if (filterMode === "range") {
-      // Date range: only send from/to, no year/month
       if (rangeFrom) params.from = rangeFrom;
       if (rangeTo) params.to = rangeTo;
     } else if (filterMode === "month") {
-      // Quick month: send year + month, no from/to
       params.year = selYear;
-      params.month = selMonth !== null ? selMonth + 1 : undefined; // backend expects 1-12
+      params.month = selMonth !== null ? selMonth + 1 : undefined;
     } else if (filterMode === "calendar") {
-      // Specific calendar dates: send from/to derived from selected dates, no year/month
       if (dateFrom) params.from = dateFrom;
       if (dateTo) params.to = dateTo;
     } else {
-      // No date filter: send only year (default view)
       params.year = selYear;
     }
 
     fetchBalanceSheet(params)
       .then((d) => {
         setData(d);
-        setUsersInOrg((d as any).meta?.users_in_org || []);
+        const metaUsers = (d.meta?.users_in_org as Array<{ id: number; name: string; role: string }> | undefined) ?? [];
+        setUsersInOrg(metaUsers);
         const dates = new Set<string>([
-          ...(d.revenues || []).map((r: RevenueRow) => r.date),
-          ...(d.expenses || []).map((e: ExpenseRow) => e.date),
-          ...(d.credits || []).map((c: CreditRow) => c.date),
+          ...(d.revenues ?? []).map((r: RevenueRow) => r.date),
+          ...(d.expenses ?? []).map((e: ExpenseRow) => e.date),
+          ...(d.credits ?? []).map((c: CreditRow) => c.date),
         ]);
         setActiveDates(dates);
       })
@@ -688,9 +714,9 @@ export default function RevenueExpensePage() {
     fetchData();
   }, [fetchData]);
 
-  const revenues = useMemo(() => data?.revenues || [], [data?.revenues]);
-  const credits = useMemo(() => data?.credits || [], [data?.credits]);
-  const expenses = useMemo(() => data?.expenses || [], [data?.expenses]);
+  const revenues = useMemo(() => data?.revenues ?? [], [data]);
+  const credits = useMemo(() => data?.credits ?? [], [data]);
+  const expenses = useMemo(() => data?.expenses ?? [], [data]);
 
   const totalCredit = credits.reduce((s, c) => s + c.amount, 0);
   const outstandingCredit = credits.filter((c) => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
@@ -698,8 +724,9 @@ export default function RevenueExpensePage() {
   const totalRevenue = revenues.reduce((s, r) => s + r.amount, 0);
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
   const nonReimbursedExpenses = expenses.filter((e) => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
+
   const balanceWithoutCredit = totalRevenue - totalExpenses;
-  const balanceWithCredit = totalRevenue - nonReimbursedExpenses + outstandingCredit;
+  const balanceWithCredit = totalRevenue - totalExpenses + outstandingCredit;
 
   const userBalance = useMemo(() => {
     if (!selectedUser || !data) return null;
@@ -734,7 +761,9 @@ export default function RevenueExpensePage() {
   const revenueByUser = useMemo(() => {
     const map: Record<number, { name: string; amount: number }> = {};
     revenues.forEach((r) => {
-      const userName = (r as any).user_name || (r as any).user_email || `User ${r.user}`;
+      const userName = (r as RevenueRow & { user_name?: string; user_email?: string }).user_name
+        ?? (r as RevenueRow & { user_email?: string }).user_email
+        ?? `User ${r.user}`;
       if (!map[r.user]) map[r.user] = { name: userName, amount: 0 };
       map[r.user].amount += r.amount;
     });
@@ -814,7 +843,6 @@ export default function RevenueExpensePage() {
     !!selectedUser,
   ].filter(Boolean).length;
 
-  // ─── Date range label for display ──────────────────────────────────────────
   const rangeLabelShort = useMemo(() => {
     if (filterMode === "range") {
       if (rangeFrom && rangeTo) return `${fmtDateDisplay(rangeFrom)} – ${fmtDateDisplay(rangeTo)}`;
@@ -849,7 +877,6 @@ export default function RevenueExpensePage() {
           )}
         </div>
 
-        {/* ─── FIXED: overflow:hidden prevents "To" picker from escaping ── */}
         <div style={{ display: "flex", gap: 6, marginBottom: 8, overflow: "hidden" }}>
           <DateInput
             label="From"
@@ -1084,10 +1111,11 @@ export default function RevenueExpensePage() {
 
             {[
               { label: "Revenue", val: totalRevenue, color: T.green, signed: false },
-              { label: "Expenses", val: totalExpenses, color: T.red, signed: false },
+              { label: "Total Expenses", val: totalExpenses, color: T.red, signed: false },
+              { label: "Non-Reimbursed Expenses", val: nonReimbursedExpenses, color: T.red, signed: false },
               { label: "Credits", val: totalCredit, color: T.purple, signed: false },
               { label: "Outstanding Credits", val: outstandingCredit, color: T.amber, signed: false },
-              { label: "Non-Reimbursed Expenses", val: nonReimbursedExpenses, color: T.red, signed: false },
+              { label: "Net P&L (no credit)", val: balanceWithoutCredit, color: balanceWithoutCredit >= 0 ? T.green : T.red, signed: true },
               { label: "Net (with Credit)", val: balanceWithCredit, color: balanceWithCredit >= 0 ? T.green : T.red, signed: true },
             ].map((s) => (
               <div
@@ -1146,8 +1174,8 @@ export default function RevenueExpensePage() {
                 Balance Comparison
               </div>
               {[
-                { label: "Without Credit (P&L):", val: balanceWithoutCredit },
-                { label: "With Credit (Asset):", val: balanceWithCredit },
+                { label: "Net P&L (no credit):", val: balanceWithoutCredit },
+                { label: "Net with Credit:", val: balanceWithCredit },
               ].map((row) => (
                 <div key={row.label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                   <span style={{ fontSize: 10.5, color: T.t4 }}>{row.label}</span>
@@ -1306,7 +1334,7 @@ export default function RevenueExpensePage() {
         </MobileDrawer>
       )}
 
-      {/* ─── Header ────────────────────────────────────────────────────────── */}
+      {/* ─── Header ──────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <div
@@ -1336,7 +1364,7 @@ export default function RevenueExpensePage() {
                 textOverflow: "ellipsis",
               }}
             >
-              Revenue & Expense
+              Revenue &amp; Expense
             </h1>
             {!isMobile && <p style={{ color: T.t5, fontSize: 11.5, marginTop: 1 }}>Financial balance sheet · all users</p>}
           </div>
@@ -1379,7 +1407,11 @@ export default function RevenueExpensePage() {
                 { label: "Revenue", val: fmtINR(totalRevenue), color: T.green },
                 { label: "Expenses", val: fmtINR(totalExpenses), color: T.red },
                 { label: "Credits", val: fmtINR(totalCredit), color: T.purple },
-                { label: "Net", val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)), color: balanceWithCredit >= 0 ? T.green : T.red },
+                {
+                  label: "Net",
+                  val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)),
+                  color: balanceWithCredit >= 0 ? T.green : T.red,
+                },
               ].map((s) => (
                 <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 8, padding: "6px 12px", textAlign: "center" }}>
                   <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>{s.label}</div>
@@ -1398,7 +1430,11 @@ export default function RevenueExpensePage() {
             { label: "Revenue", val: fmtINR(totalRevenue), color: T.green },
             { label: "Expenses", val: fmtINR(totalExpenses), color: T.red },
             { label: "Credits", val: fmtINR(totalCredit), color: T.purple },
-            { label: "Net (incl. Credit)", val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)), color: balanceWithCredit >= 0 ? T.green : T.red },
+            {
+              label: "Net (incl. Credit)",
+              val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)),
+              color: balanceWithCredit >= 0 ? T.green : T.red,
+            },
           ].map((s) => (
             <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 10, padding: "10px 12px" }}>
               <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
@@ -1547,7 +1583,7 @@ export default function RevenueExpensePage() {
                 ) : (
                   <>
                     {/* Active filter banner */}
-                    {(filterMode !== "none") && (
+                    {filterMode !== "none" && (
                       <div
                         style={{
                           display: "flex", alignItems: "center", gap: 8,
@@ -1591,6 +1627,7 @@ export default function RevenueExpensePage() {
                       </div>
                     )}
 
+                    {/* ─── Net Balance Hero ─────────────────────────────── */}
                     <div
                       style={{
                         display: "flex", alignItems: "center", gap: 12,
@@ -1611,10 +1648,15 @@ export default function RevenueExpensePage() {
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 10, color: T.t4, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase" }}>
-                          Net Balance (with Credit)
+                          Net Balance (Revenue − Expenses + Outstanding Credit)
                         </div>
                         <div style={{ fontSize: isMobile ? 20 : 22, fontWeight: 700, color: balanceWithCredit >= 0 ? T.green : T.red, fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em" }}>
                           {balanceWithCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithCredit))}
+                        </div>
+                        <div style={{ fontSize: 10, color: T.t5, marginTop: 3 }}>
+                          P&amp;L (no credit): <span style={{ color: balanceWithoutCredit >= 0 ? T.green : T.red, fontWeight: 600 }}>
+                            {balanceWithoutCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithoutCredit))}
+                          </span>
                         </div>
                       </div>
                       {outstandingCredit > 0 && (
@@ -1689,14 +1731,24 @@ export default function RevenueExpensePage() {
             {/* ─── Details tab ─────────────────────────────────────────────── */}
             {tab === "details" && (
               <div style={{ padding: isMobile ? 10 : 14, display: "flex", flexDirection: "column", gap: 14 }}>
+
+                {/* ── Revenue Table ── */}
                 <DetailTable
                   accentColor={T.green} accentBg={T.greenBg} icon="↑" title="Revenue"
                   count={revenues.length}
-                  headers={[{ label: "Date" }, { label: "User" }, { label: "Source" }, { label: "Amount", right: true }, { label: "Remarks" }]}
+                  headers={[
+                    { label: "Date" },
+                    { label: "User" },
+                    { label: "Source" },
+                    { label: "Project" },
+                    { label: "Amount", right: true },
+                    { label: "Remarks" },
+                  ]}
                   loading={loading} empty="No revenue entries"
                 >
                   {revenues.map((r: RevenueRow, idx: number) => {
-                    const userName = (r as any).user_name || (r as any).user_email || `User ${r.user}`;
+                    const rExt = r as RevenueRow & { user_name?: string; user_email?: string };
+                    const userName = rExt.user_name ?? rExt.user_email ?? `User ${r.user}`;
                     return (
                       <tr key={r.id} className="trow" style={{ borderBottom: `1px solid ${T.divider}`, animation: `fadeUp 0.18s ease ${idx * 0.015}s both` }}>
                         <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{r.date}</td>
@@ -1707,6 +1759,7 @@ export default function RevenueExpensePage() {
                           </div>
                         </td>
                         <td style={{ padding: "9px 12px" }}><CatBadge label={r.source_display} color={T.green} /></td>
+                        <td style={{ padding: "9px 12px" }}><ProjectBadge name={r.project_name} /></td>
                         <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{fmtINR(r.amount)}</span>
                         </td>
@@ -1720,10 +1773,19 @@ export default function RevenueExpensePage() {
                   })}
                 </DetailTable>
 
+                {/* ── Expenses Table ── */}
                 <DetailTable
                   accentColor={T.red} accentBg={T.redBg} icon="↓" title="Expenses"
                   count={expenses.length}
-                  headers={[{ label: "Date" }, { label: "User" }, { label: "Category" }, { label: "Amount", right: true }, { label: "Reimb." }, { label: "Remarks" }]}
+                  headers={[
+                    { label: "Date" },
+                    { label: "User" },
+                    { label: "Category" },
+                    { label: "Project" },
+                    { label: "Amount", right: true },
+                    { label: "Reimb." },
+                    { label: "Remarks" },
+                  ]}
                   loading={loading} empty="No expense entries"
                 >
                   {expenses.map((e: ExpenseRow, idx: number) => (
@@ -1731,11 +1793,12 @@ export default function RevenueExpensePage() {
                       <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{e.date}</td>
                       <td style={{ padding: "9px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Avatar name={e.user_name || "?"} />
+                          <Avatar name={e.user_name ?? "?"} />
                           <span style={{ fontSize: 11.5, color: T.t2, whiteSpace: "nowrap" }}>{e.user_name}</span>
                         </div>
                       </td>
                       <td style={{ padding: "9px 12px" }}><CatBadge label={e.category_label} color={T.red} /></td>
+                      <td style={{ padding: "9px 12px" }}><ProjectBadge name={e.project_name} /></td>
                       <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: T.red }}>{fmtINR(e.amount)}</span>
                       </td>
@@ -1754,10 +1817,19 @@ export default function RevenueExpensePage() {
                   ))}
                 </DetailTable>
 
+                {/* ── Credits Table ── */}
                 <DetailTable
                   accentColor={T.purple} accentBg={T.purpleBg} icon="⟳" title="Credits Taken"
                   count={credits.length}
-                  headers={[{ label: "Date" }, { label: "User" }, { label: "Category" }, { label: "Amount", right: true }, { label: "Status" }, { label: "Remarks" }]}
+                  headers={[
+                    { label: "Date" },
+                    { label: "User" },
+                    { label: "Category" },
+                    { label: "Project" },
+                    { label: "Amount", right: true },
+                    { label: "Status" },
+                    { label: "Remarks" },
+                  ]}
                   loading={loading} empty="No credit entries"
                 >
                   {credits.map((c: CreditRow, idx: number) => (
@@ -1765,11 +1837,12 @@ export default function RevenueExpensePage() {
                       <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{c.date}</td>
                       <td style={{ padding: "9px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Avatar name={c.user_email || "?"} />
+                          <Avatar name={c.user_email ?? "?"} />
                           <span style={{ fontSize: 11.5, color: T.t2, whiteSpace: "nowrap" }}>{c.user_email}</span>
                         </div>
                       </td>
                       <td style={{ padding: "9px 12px" }}><CatBadge label={c.category_display} color={T.purple} /></td>
+                      <td style={{ padding: "9px 12px" }}><ProjectBadge name={c.project_name} /></td>
                       <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: T.purple }}>{fmtINR(c.amount)}</span>
                       </td>
@@ -1784,6 +1857,7 @@ export default function RevenueExpensePage() {
                     </tr>
                   ))}
                 </DetailTable>
+
               </div>
             )}
           </div>

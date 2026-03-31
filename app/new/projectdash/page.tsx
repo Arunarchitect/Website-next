@@ -1,2915 +1,1217 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unused-expressions */
-/* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  fetchMeta,
-  fetchMemberWorkLogs,
-  fetchAssignments,
-  fetchDeliverablesByProject,
-  createAssignment,
-  editAssignment,
-  deleteAssignment,
-  currentWeekRange,
-  type MemberWorkLogEntry,
-  type WorkLogPage,
-  type MetaData,
-  type AssignmentEntry,
-  type MemberOption,
-  type DeliverableOption,
-} from "@/app/new/manager_api";
+  fetchProjects,
+  fetchProjectDetail,
+  fetchProjectOrganisations,
+  hoursFromListItem,
+  STAGE_LABEL,
+  DELIVERABLE_STATUS_LABEL,
+  type ProjectListItem,
+  type ProjectDetail,
+  type ProjectListParams,
+  type OrganisationOption,
+  type ProjectStage,
+  type DeliverableStatus,
+} from "@/app/new/project_api";
 
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-function getDaysInMonth(y: number, m: number) {
-  return new Date(y, m + 1, 0).getDate();
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function formatINR(n: number) {
+  if (n >= 1_00_00_000) return `₹${(n / 1_00_00_000).toFixed(1)}Cr`;
+  if (n >= 1_00_000) return `₹${(n / 1_00_000).toFixed(1)}L`;
+  if (n >= 1_000) return `₹${(n / 1_000).toFixed(1)}K`;
+  return `₹${n}`;
 }
-function getFirstDay(y: number, m: number) {
-  return new Date(y, m, 1).getDay();
+
+function formatDate(d: string | null) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
-function pad(n: number) {
-  return String(n).padStart(2, "0");
-}
-function monthRange(year: number, month: number) {
-  return {
-    from: `${year}-${pad(month + 1)}-01`,
-    to: `${year}-${pad(month + 1)}-${pad(new Date(year, month + 1, 0).getDate())}`,
+
+function stageColor(stage: ProjectStage): string {
+  const map: Record<ProjectStage, string> = {
+    "1": "#e8f4ff",
+    "2": "#fff3e0",
+    "3": "#f3e5f5",
+    "4": "#e8f5e9",
+    "5": "#fce4ec",
   };
-}
-function useWindowWidth() {
-  const [w, setW] = useState(
-    typeof window !== "undefined" ? window.innerWidth : 1024,
-  );
-  useEffect(() => {
-    const h = () => setW(window.innerWidth);
-    window.addEventListener("resize", h);
-    return () => window.removeEventListener("resize", h);
-  }, []);
-  return w;
+  return map[stage] ?? "#f5f5f5";
 }
 
-const T = {
-  bg: "#0f1117",
-  panel: "rgba(255,255,255,0.025)",
-  panelB: "rgba(255,255,255,0.07)",
-  panel2: "rgba(255,255,255,0.04)",
-  panel2B: "rgba(255,255,255,0.1)",
-  divider: "rgba(255,255,255,0.06)",
-  t1: "#f8fafc",
-  t2: "#f1f5f9",
-  t3: "#94a3b8",
-  t4: "#64748b",
-  t5: "#475569",
-  t6: "#334155",
-  ac: "#6366f1",
-  acLight: "rgba(99,102,241,0.12)",
-  acMid: "rgba(99,102,241,0.55)",
-  acText: "#818cf8",
-  green: "#10b981",
-  greenBg: "rgba(16,185,129,0.12)",
-  amber: "#f59e0b",
-  amberBg: "rgba(245,158,11,0.12)",
-  red: "#ef4444",
-  redBg: "rgba(239,68,68,0.12)",
+function stageTextColor(stage: ProjectStage): string {
+  const map: Record<ProjectStage, string> = {
+    "1": "#1565c0",
+    "2": "#e65100",
+    "3": "#6a1b9a",
+    "4": "#2e7d32",
+    "5": "#880e4f",
+  };
+  return map[stage] ?? "#555";
+}
+
+const DELIVERABLE_STATUS_STYLE: Record<
+  DeliverableStatus,
+  { bg: string; text: string }
+> = {
+  not_started: { bg: "#f0f0f0", text: "#888" },
+  ongoing: { bg: "#e3f2fd", text: "#1565c0" },
+  ready: { bg: "#fff8e1", text: "#f57f17" },
+  passed: { bg: "#e8f5e9", text: "#2e7d32" },
+  failed: { bg: "#fce4ec", text: "#c62828" },
+  discrepancy: { bg: "#fff3e0", text: "#bf360c" },
 };
-const Divider = () => <div style={{ height: 1, background: T.divider }} />;
 
-// ─── Progress bar ─────────────────────────────────────────────────────────────
-function ProgressBar({ loading }: { loading: boolean }) {
-  const [pct, setPct] = useState(0);
-  const [visible, setVisible] = useState(false);
-  const ref = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (loading) {
-      setVisible(true);
-      setPct(0);
-      let c = 0;
-      ref.current = setInterval(() => {
-        c += Math.random() * 18;
-        if (c >= 90) {
-          c = 90;
-          clearInterval(ref.current!);
-        }
-        setPct(c);
-      }, 120);
-    } else {
-      clearInterval(ref.current!);
-      setPct(100);
-      const t = setTimeout(() => {
-        setVisible(false);
-        setPct(0);
-      }, 350);
-      return () => clearTimeout(t);
-    }
-    return () => clearInterval(ref.current!);
-  }, [loading]);
-  if (!visible) return null;
+// ─── Skeleton ────────────────────────────────────────────────────────────────
+
+function Skeleton({ w, h, r = 6 }: { w?: string; h?: string; r?: number }) {
   return (
     <div
       style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 9999,
-        height: 3,
+        width: w ?? "100%",
+        height: h ?? "14px",
+        borderRadius: r,
+        background: "linear-gradient(90deg,#ececec 25%,#f8f8f8 50%,#ececec 75%)",
+        backgroundSize: "200% 100%",
+        animation: "shimmer 1.4s infinite",
+        flexShrink: 0,
       }}
-    >
-      <div
-        style={{
-          height: "100%",
-          width: `${pct}%`,
-          background: `linear-gradient(90deg,${T.ac},#a78bfa)`,
-          transition: pct === 100 ? "width 0.2s,opacity 0.3s" : "width 0.12s",
-          opacity: pct === 100 ? 0 : 1,
-          borderRadius: "0 2px 2px 0",
-          boxShadow: `0 0 8px ${T.ac}`,
-        }}
-      />
-    </div>
+    />
   );
 }
 
-// ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalGrid({
-  year,
-  month,
-  activeDates,
-  selDates,
-  onToggle,
-}: {
-  year: number;
-  month: number;
-  activeDates: Set<string>;
-  selDates: Set<string>;
-  onToggle: (d: string) => void;
-}) {
-  const total = getDaysInMonth(year, month);
-  const first = getFirstDay(year, month);
-  const cells: (number | null)[] = [
-    ...Array(first).fill(null),
-    ...Array.from({ length: total }, (_, i) => i + 1),
-  ];
-  return (
-    <div
-      style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}
-    >
-      {DAYS.map((d) => (
-        <div
-          key={d}
-          style={{
-            textAlign: "center",
-            fontSize: 9,
-            color: T.t5,
-            fontWeight: 600,
-            letterSpacing: "0.06em",
-            padding: "4px 0",
-            textTransform: "uppercase",
-          }}
-        >
-          {d}
-        </div>
-      ))}
-      {cells.map((day, i) => {
-        if (!day) return <div key={`_${i}`} />;
-        const iso = `${year}-${pad(month + 1)}-${pad(day)}`;
-        const has = activeDates.has(iso),
-          sel = selDates.has(iso);
-        return (
-          <button
-            key={iso}
-            onClick={() => onToggle(iso)}
-            style={{
-              background: sel ? T.ac : "transparent",
-              border: `1px solid ${sel ? T.ac : "transparent"}`,
-              borderRadius: 6,
-              cursor: "pointer",
-              color: sel ? "#fff" : has ? T.t2 : T.t4,
-              fontSize: 11,
-              padding: "6px 0",
-              width: "100%",
-              fontFamily: "'DM Sans',sans-serif",
-              fontWeight: sel ? 600 : 400,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 1,
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              if (!sel)
-                (e.currentTarget as HTMLElement).style.background = T.panel2;
-            }}
-            onMouseLeave={(e) => {
-              if (!sel)
-                (e.currentTarget as HTMLElement).style.background =
-                  "transparent";
-            }}
-          >
-            {day}
-            {has && (
-              <span
-                style={{
-                  display: "block",
-                  width: 3,
-                  height: 3,
-                  borderRadius: "50%",
-                  background: sel ? "#fff" : T.acText,
-                }}
-              />
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+// ─── Stat chip ───────────────────────────────────────────────────────────────
 
-// ─── Delete modal ─────────────────────────────────────────────────────────────
-function DeleteModal({
-  onConfirm,
-  onCancel,
-  message = "Delete this entry?",
-}: {
-  onConfirm: () => void;
-  onCancel: () => void;
-  message?: string;
-}) {
-  return (
-    <>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.6)",
-          zIndex: 199,
-        }}
-        onClick={onCancel}
-      />
-      <div
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%,-50%)",
-          zIndex: 200,
-          background: "#1a1d2e",
-          border: `1px solid ${T.panel2B}`,
-          borderRadius: 14,
-          padding: "24px",
-          boxShadow: "0 12px 40px rgba(0,0,0,0.7)",
-          minWidth: 260,
-          maxWidth: "90vw",
-        }}
-      >
-        <p
-          style={{
-            margin: "0 0 6px",
-            fontSize: 14,
-            fontWeight: 600,
-            color: T.t2,
-          }}
-        >
-          {message}
-        </p>
-        <p style={{ margin: "0 0 18px", fontSize: 12, color: T.t4 }}>
-          This action cannot be undone.
-        </p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={onCancel}
-            style={{
-              flex: 1,
-              padding: "9px 0",
-              fontSize: 13,
-              borderRadius: 8,
-              background: T.panel2,
-              border: `1px solid ${T.panel2B}`,
-              color: T.t3,
-              cursor: "pointer",
-              fontFamily: "'DM Sans',sans-serif",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            style={{
-              flex: 1,
-              padding: "9px 0",
-              fontSize: 13,
-              borderRadius: 8,
-              background: T.red,
-              border: "none",
-              color: "#fff",
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "'DM Sans',sans-serif",
-            }}
-          >
-            Yes, delete
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── Cascading filter bar ─────────────────────────────────────────────────────
-interface CascadeFilters {
-  org_id: number;
-  member_id: number;
-  project_id: number;
-  deliverable_id: number;
-  date_from: string;
-  date_to: string;
-}
-
-function CascadeFilterBar({
-  meta,
-  filters,
-  onChange,
-  deliverableOptions,
-  delivLoading,
-  onApplyDateRange,
-}: {
-  meta: MetaData;
-  filters: CascadeFilters;
-  onChange: (f: Partial<CascadeFilters>) => void;
-  deliverableOptions: DeliverableOption[];
-  delivLoading: boolean;
-  onApplyDateRange: () => void;
-}) {
-  const sel: React.CSSProperties = {
-    background: T.panel2,
-    border: `1px solid ${T.panel2B}`,
-    borderRadius: 7,
-    padding: "7px 10px",
-    fontSize: 12,
-    color: T.t2,
-    outline: "none",
-    cursor: "pointer",
-    fontFamily: "'DM Sans',sans-serif",
-    appearance: "none" as const,
-    width: "100%",
-    transition: "border-color 0.15s",
-  };
-  const inp: React.CSSProperties = {
-    ...sel,
-    cursor: "text",
-    colorScheme: "dark" as any,
-  };
-
-  const visibleProjects = filters.org_id
-    ? meta.projects.filter((p) => p.organisation_id === filters.org_id)
-    : meta.projects;
-  const visibleDelivs = deliverableOptions;
-  const hasDateFilter = !!(filters.date_from || filters.date_to);
-
+function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div
       style={{
-        background: T.panel,
-        border: `1px solid ${T.panelB}`,
-        borderRadius: 12,
-        padding: "14px 16px",
         display: "flex",
         flexDirection: "column",
-        gap: 10,
+        gap: 3,
+        padding: "12px 16px",
+        background: "#fafafa",
+        border: "1px solid #efefef",
+        borderRadius: 12,
+        minWidth: 100,
       }}
     >
-      <div
+      <span
         style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: T.t5,
-          letterSpacing: "0.07em",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: "0.08em",
           textTransform: "uppercase",
+          color: "#bbb",
+          fontFamily: "var(--font-mono)",
         }}
       >
-        Filters
-      </div>
-
-      {/* ── Date range ── */}
-      <div>
-        <div
-          style={{
-            fontSize: 10,
-            color: T.t5,
-            marginBottom: 6,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            fontWeight: 600,
-          }}
-        >
-          Date Range
-        </div>
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-        >
-          <div>
-            <div
-              style={{
-                fontSize: 10,
-                color: T.t5,
-                marginBottom: 4,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              From
-            </div>
-            <input
-              type="date"
-              value={filters.date_from}
-              onChange={(e) => onChange({ date_from: e.target.value })}
-              style={inp}
-            />
-          </div>
-          <div>
-            <div
-              style={{
-                fontSize: 10,
-                color: T.t5,
-                marginBottom: 4,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              To
-            </div>
-            <input
-              type="date"
-              value={filters.date_to}
-              onChange={(e) => onChange({ date_to: e.target.value })}
-              style={inp}
-            />
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <button
-            onClick={onApplyDateRange}
-            disabled={!filters.date_from && !filters.date_to}
-            style={{
-              flex: 1,
-              padding: "7px 0",
-              borderRadius: 7,
-              border: "none",
-              background:
-                filters.date_from || filters.date_to ? T.ac : T.panel2B,
-              color: filters.date_from || filters.date_to ? "#fff" : T.t5,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor:
-                filters.date_from || filters.date_to ? "pointer" : "default",
-              fontFamily: "'DM Sans',sans-serif",
-              transition: "all 0.15s",
-            }}
-          >
-            Apply Date Range
-          </button>
-          {hasDateFilter && (
-            <button
-              onClick={() => {
-                onChange({ date_from: "", date_to: "" });
-                onApplyDateRange();
-              }}
-              style={{
-                padding: "7px 12px",
-                borderRadius: 7,
-                border: `1px solid ${T.panel2B}`,
-                background: "transparent",
-                color: T.red,
-                fontSize: 12,
-                cursor: "pointer",
-                fontFamily: "'DM Sans',sans-serif",
-              }}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-        {/* Quick presets */}
-        <div
-          style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}
-        >
-          {[
-            {
-              label: "This week",
-              fn: () => {
-                const { from, to } = currentWeekRange();
-                onChange({ date_from: from, date_to: to });
-              },
-            },
-            {
-              label: "This month",
-              fn: () => {
-                const now = new Date();
-                const y = now.getFullYear(),
-                  m = now.getMonth();
-                onChange({
-                  date_from: `${y}-${pad(m + 1)}-01`,
-                  date_to: `${y}-${pad(m + 1)}-${pad(new Date(y, m + 1, 0).getDate())}`,
-                });
-              },
-            },
-            {
-              label: "Last month",
-              fn: () => {
-                const now = new Date();
-                const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                const y = d.getFullYear(),
-                  m = d.getMonth();
-                onChange({
-                  date_from: `${y}-${pad(m + 1)}-01`,
-                  date_to: `${y}-${pad(m + 1)}-${pad(new Date(y, m + 1, 0).getDate())}`,
-                });
-              },
-            },
-          ].map(({ label, fn }) => (
-            <button
-              key={label}
-              onClick={() => {
-                fn();
-                setTimeout(onApplyDateRange, 0);
-              }}
-              style={{
-                padding: "4px 9px",
-                borderRadius: 5,
-                border: `1px solid ${T.panel2B}`,
-                background: T.panel2,
-                color: T.t4,
-                fontSize: 10,
-                cursor: "pointer",
-                fontFamily: "'DM Sans',sans-serif",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.color = T.acText;
-                (e.currentTarget as HTMLElement).style.borderColor = T.acMid;
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.color = T.t4;
-                (e.currentTarget as HTMLElement).style.borderColor = T.panel2B;
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <Divider />
-
-      {/* ── Cascade selects ── */}
-      <div
+        {label}
+      </span>
+      <span
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, 1fr)",
-          gap: 8,
+          fontSize: 19,
+          fontWeight: 800,
+          color: "#111",
+          letterSpacing: "-0.03em",
+          fontFamily: "var(--font-display)",
         }}
       >
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: T.t5,
-              marginBottom: 4,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Organisation
-          </div>
-          <select
-            value={filters.org_id}
-            onChange={(e) =>
-              onChange({
-                org_id: Number(e.target.value),
-                member_id: 0,
-                project_id: 0,
-                deliverable_id: 0,
-              })
-            }
-            style={sel}
-          >
-            <option value={0}>All</option>
-            {meta.organisations.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: T.t5,
-              marginBottom: 4,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Member
-          </div>
-          <select
-            value={filters.member_id}
-            onChange={(e) => onChange({ member_id: Number(e.target.value) })}
-            style={sel}
-          >
-            <option value={0}>All</option>
-            {meta.members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: T.t5,
-              marginBottom: 4,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Project
-          </div>
-          <select
-            value={filters.project_id}
-            onChange={(e) =>
-              onChange({
-                project_id: Number(e.target.value),
-                deliverable_id: 0,
-              })
-            }
-            style={sel}
-          >
-            <option value={0}>All</option>
-            {visibleProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: T.t5,
-              marginBottom: 4,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Deliverable
-          </div>
-          {delivLoading ? (
-            <div style={{ fontSize: 11, color: T.t5, padding: "8px 0" }}>
-              Loading…
-            </div>
-          ) : (
-            <select
-              value={filters.deliverable_id}
-              onChange={(e) =>
-                onChange({ deliverable_id: Number(e.target.value) })
-              }
-              style={sel}
-            >
-              <option value={0}>All</option>
-              {visibleDelivs.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      </div>
-
-      {/* Active filter chips */}
-      {filters.org_id ||
-      filters.member_id ||
-      filters.project_id ||
-      filters.deliverable_id ||
-      filters.date_from ||
-      filters.date_to ? (
-        <div
-          style={{
-            display: "flex",
-            gap: 6,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          {filters.date_from && (
-            <Chip
-              label={`From: ${filters.date_from}`}
-              onRemove={() => {
-                onChange({ date_from: "" });
-                onApplyDateRange();
-              }}
-            />
-          )}
-          {filters.date_to && (
-            <Chip
-              label={`To: ${filters.date_to}`}
-              onRemove={() => {
-                onChange({ date_to: "" });
-                onApplyDateRange();
-              }}
-            />
-          )}
-          {filters.org_id > 0 && (
-            <Chip
-              label={
-                meta.organisations.find((o) => o.id === filters.org_id)?.name ??
-                ""
-              }
-              onRemove={() =>
-                onChange({
-                  org_id: 0,
-                  member_id: 0,
-                  project_id: 0,
-                  deliverable_id: 0,
-                })
-              }
-            />
-          )}
-          {filters.member_id > 0 && (
-            <Chip
-              label={
-                meta.members.find((m) => m.id === filters.member_id)?.name ?? ""
-              }
-              onRemove={() => onChange({ member_id: 0 })}
-            />
-          )}
-          {filters.project_id > 0 && (
-            <Chip
-              label={
-                meta.projects.find((p) => p.id === filters.project_id)?.name ??
-                ""
-              }
-              onRemove={() => onChange({ project_id: 0, deliverable_id: 0 })}
-            />
-          )}
-          {filters.deliverable_id > 0 && (
-            <Chip
-              label={
-                visibleDelivs.find((d) => d.id === filters.deliverable_id)
-                  ?.name ?? ""
-              }
-              onRemove={() => onChange({ deliverable_id: 0 })}
-            />
-          )}
-          <button
-            onClick={() => {
-              onChange({
-                org_id: 0,
-                member_id: 0,
-                project_id: 0,
-                deliverable_id: 0,
-                date_from: "",
-                date_to: "",
-              });
-              onApplyDateRange();
-            }}
-            style={{
-              fontSize: 11,
-              color: T.red,
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "2px 6px",
-            }}
-          >
-            Clear all
-          </button>
-        </div>
-      ) : null}
+        {value}
+      </span>
     </div>
   );
 }
 
-function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "3px 8px",
-        borderRadius: 20,
-        background: T.acLight,
-        border: `1px solid ${T.acMid}`,
-        fontSize: 11,
-        color: T.acText,
-      }}
-    >
-      {label}
-      <button
-        onClick={onRemove}
-        style={{
-          background: "none",
-          border: "none",
-          color: T.acText,
-          cursor: "pointer",
-          padding: 0,
-          lineHeight: 1,
-          fontSize: 12,
-        }}
-      >
-        ✕
-      </button>
-    </span>
-  );
-}
+// ─── Deliverable row ─────────────────────────────────────────────────────────
 
-// ─── Worklog view card (read-only) ────────────────────────────────────────────
-function WorklogViewCard({ row }: { row: MemberWorkLogEntry }) {
+function DeliverableRow({ d }: { d: ProjectDetail["deliverables"][0] }) {
+  const s = DELIVERABLE_STATUS_STYLE[d.status];
   return (
     <div
       style={{
-        background: T.panel2,
-        border: `1px solid ${T.panel2B}`,
-        borderRadius: 12,
-        padding: "12px 14px",
+        display: "grid",
+        gridTemplateColumns: "1fr auto auto auto",
+        gap: 10,
+        alignItems: "center",
+        padding: "10px 14px",
+        borderRadius: 10,
+        background: "#fafafa",
+        border: "1px solid #efefef",
+        transition: "background 0.15s",
       }}
+      onMouseEnter={(e) =>
+        ((e.currentTarget as HTMLDivElement).style.background = "#f4f4f4")
+      }
+      onMouseLeave={(e) =>
+        ((e.currentTarget as HTMLDivElement).style.background = "#fafafa")
+      }
     >
-      <div style={{ marginBottom: 8 }}>
-        <div
+      <div>
+        <p
           style={{
+            margin: 0,
             fontSize: 13,
             fontWeight: 600,
-            color: T.t2,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
+            color: "#111",
+            fontFamily: "var(--font-body)",
           }}
         >
-          {row.deliverable_name}
-        </div>
-        <div style={{ fontSize: 11, color: T.t5, marginTop: 2 }}>
-          {row.organisation_name} · {row.project_name}
-        </div>
+          {d.name}
+        </p>
+        <p style={{ margin: "2px 0 0", fontSize: 10, color: "#bbb" }}>
+          Due {formatDate(d.end_date)}
+        </p>
       </div>
-      <div
+      <span
         style={{
-          display: "flex",
-          gap: 12,
-          flexWrap: "wrap",
+          fontSize: 11,
+          color: "#666",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          display: "none",
+        }}
+        className="assigned-to"
+      >
+        {d.assigned_to_display}
+      </span>
+      <span
+        style={{
+          display: "inline-flex",
           alignItems: "center",
+          background: s.bg,
+          color: s.text,
+          borderRadius: 6,
+          padding: "3px 9px",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          whiteSpace: "nowrap",
+          width: "fit-content",
+          fontFamily: "var(--font-mono)",
         }}
       >
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: T.t5,
-              marginBottom: 2,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Start
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: T.t2,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {row.start_date_fmt} {row.start_time_fmt}
-          </div>
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: T.t5,
-              marginBottom: 2,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            End
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: T.t2,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {row.end_date_fmt ? `${row.end_date_fmt} ${row.end_time_fmt}` : "—"}
-          </div>
-        </div>
-        {row.remarks && (
-          <div style={{ flex: 1, minWidth: 80 }}>
-            <div
-              style={{
-                fontSize: 10,
-                color: T.t5,
-                marginBottom: 2,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Remarks
-            </div>
-            <div style={{ fontSize: 12, color: T.t3 }}>{row.remarks}</div>
-          </div>
-        )}
-        <div
-          style={{
-            marginLeft: "auto",
-            fontSize: 11,
-            color: T.t5,
-            flexShrink: 0,
-          }}
-        >
-          {row.employee_name}
-        </div>
-      </div>
+        {DELIVERABLE_STATUS_LABEL[d.status]}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: "#444",
+          textAlign: "right",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        {d.hours_logged > 0 ? `${d.hours_logged}h` : "—"}
+      </span>
     </div>
   );
 }
 
-// ─── Assignment card (editable) ───────────────────────────────────────────────
-function AssignmentCard({
-  assignment,
-  meta,
-  onSave,
-  onDelete,
-}: {
-  assignment: AssignmentEntry;
-  meta: MetaData;
-  onSave: (id: number, data: AssignmentEntry) => void;
-  onDelete: (id: number) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ ...assignment });
-  const [saving, setSaving] = useState(false);
-  const [flash, setFlash] = useState(false);
-  const [showDel, setShowDel] = useState(false);
-  const [deliverables, setDeliverables] = useState<DeliverableOption[]>([]);
-  const [loadingDelivs, setLoadingDelivs] = useState(false);
-  const [error, setError] = useState("");
+// ─── Detail panel ─────────────────────────────────────────────────────────────
 
-  function patch(p: Partial<typeof draft>) {
-    setDraft((d) => ({ ...d, ...p }));
-  }
-  function cancelEdit() {
-    setDraft({ ...assignment });
-    setEditing(false);
-    setError("");
-  }
-
-  async function handleProjectChange(projId: number) {
-    patch({ project_id: projId, deliverable_id: 0 });
-    setLoadingDelivs(true);
-    try {
-      setDeliverables(await fetchDeliverablesByProject(projId));
-    } finally {
-      setLoadingDelivs(false);
-    }
-  }
-
-  async function startEdit() {
-    setEditing(true);
-    setLoadingDelivs(true);
-    try {
-      setDeliverables(await fetchDeliverablesByProject(assignment.project_id));
-    } finally {
-      setLoadingDelivs(false);
-    }
-  }
-
-  async function save() {
-    if (!draft.name.trim()) {
-      setError("Task name is required.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const updated = await editAssignment(assignment.id, {
-        name: draft.name,
-        deliverable: draft.deliverable_id,
-        assigned_to: draft.assigned_to_id,
-        start_date: draft.start_date || null,
-        due_date: draft.due_date || null,
-      });
-      onSave(assignment.id, updated);
-      setEditing(false);
-      setFlash(true);
-      setTimeout(() => setFlash(false), 900);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const inp: React.CSSProperties = {
-    background: T.panel2,
-    border: `1px solid ${T.panel2B}`,
-    borderRadius: 6,
-    padding: "7px 10px",
-    fontSize: 12,
-    color: T.t2,
-    width: "100%",
-    outline: "none",
-    fontFamily: "'DM Sans',sans-serif",
-    boxSizing: "border-box",
-  };
-  const sel: React.CSSProperties = {
-    ...inp,
-    cursor: "pointer",
-    appearance: "none" as const,
-  };
-  const bg = flash
-    ? "rgba(16,185,129,0.08)"
-    : editing
-      ? "rgba(99,102,241,0.06)"
-      : T.panel2;
-  const border = flash
-    ? `1px solid ${T.green}`
-    : editing
-      ? `1px solid ${T.acMid}`
-      : `1px solid ${T.panel2B}`;
+function DetailPanel({ project }: { project: ProjectDetail }) {
+  const profit = project.total_revenue - project.total_expenses;
+  const pct =
+    project.deliverable_count === 0
+      ? 0
+      : Math.round((project.delivered_count / project.deliverable_count) * 100);
 
   return (
-    <>
-      {showDel && (
-        <DeleteModal
-          message="Delete this assignment?"
-          onConfirm={() => {
-            setShowDel(false);
-            deleteAssignment(assignment.id)
-              .then(() => onDelete(assignment.id))
-              .catch((e) => setError(e.message));
-          }}
-          onCancel={() => setShowDel(false)}
-        />
-      )}
-      <div
-        style={{
-          background: bg,
-          border,
-          borderRadius: 12,
-          padding: "12px 14px",
-          transition: "all 0.15s",
-        }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {/* Header */}
+      <div>
         <div
           style={{
             display: "flex",
             alignItems: "flex-start",
-            gap: 8,
-            marginBottom: editing ? 10 : 0,
-          }}
-        >
-          <div
-            style={{ display: "flex", gap: 4, flexShrink: 0, paddingTop: 2 }}
-          >
-            {editing ? (
-              <>
-                <button
-                  onClick={save}
-                  disabled={saving}
-                  title="Save"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    border: "none",
-                    background: T.greenBg,
-                    color: T.green,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
-                    <path
-                      d="M2 7l4 4 6-6"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                <button
-                  onClick={cancelEdit}
-                  title="Cancel"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    border: "none",
-                    background: T.panel2B,
-                    color: T.t4,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <svg width={11} height={11} viewBox="0 0 12 12" fill="none">
-                    <path
-                      d="M2 2l8 8M10 2l-8 8"
-                      stroke="currentColor"
-                      strokeWidth={1.8}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={startEdit}
-                  title="Edit"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    border: "none",
-                    background: "transparent",
-                    color: T.t5,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      T.acLight;
-                    (e.currentTarget as HTMLElement).style.color = T.acText;
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      "transparent";
-                    (e.currentTarget as HTMLElement).style.color = T.t5;
-                  }}
-                >
-                  <svg width={12} height={12} viewBox="0 0 14 14" fill="none">
-                    <path
-                      d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setShowDel(true)}
-                  title="Delete"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    border: "none",
-                    background: "transparent",
-                    color: T.t5,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = T.redBg;
-                    (e.currentTarget as HTMLElement).style.color = T.red;
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background =
-                      "transparent";
-                    (e.currentTarget as HTMLElement).style.color = T.t5;
-                  }}
-                >
-                  <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
-                    <path
-                      d="M2 4h10M5 4V2.5h4V4M5.5 4v7M8.5 4v7M3 4l.5 7.5a1 1 0 001 .5h5a1 1 0 001-.5L11 4"
-                      stroke="currentColor"
-                      strokeWidth={1.4}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </>
-            )}
-          </div>
-
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {editing ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: T.t5,
-                      marginBottom: 3,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    Task Name
-                  </div>
-                  <input
-                    value={draft.name}
-                    onChange={(e) => patch({ name: e.target.value })}
-                    style={inp}
-                    placeholder="Task name…"
-                  />
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 6,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: T.t5,
-                        marginBottom: 3,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Organisation
-                    </div>
-                    <select
-                      value={draft.organisation_id}
-                      onChange={(e) =>
-                        patch({ organisation_id: Number(e.target.value) })
-                      }
-                      style={sel}
-                    >
-                      {meta.organisations.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: T.t5,
-                        marginBottom: 3,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Project
-                    </div>
-                    <select
-                      value={draft.project_id}
-                      onChange={(e) =>
-                        handleProjectChange(Number(e.target.value))
-                      }
-                      style={sel}
-                    >
-                      {meta.projects
-                        .filter(
-                          (p) => p.organisation_id === draft.organisation_id,
-                        )
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: T.t5,
-                      marginBottom: 3,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    Deliverable
-                  </div>
-                  {loadingDelivs ? (
-                    <div style={{ fontSize: 11, color: T.t5 }}>Loading…</div>
-                  ) : (
-                    <select
-                      value={
-                        deliverables.some((d) => d.id === draft.deliverable_id)
-                          ? draft.deliverable_id
-                          : ""
-                      }
-                      onChange={(e) =>
-                        patch({ deliverable_id: Number(e.target.value) })
-                      }
-                      style={sel}
-                    >
-                      {!deliverables.some(
-                        (d) => d.id === draft.deliverable_id,
-                      ) && <option value="">— select —</option>}
-                      {deliverables.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: T.t5,
-                      marginBottom: 3,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    Assigned To
-                  </div>
-                  <select
-                    value={draft.assigned_to_id}
-                    onChange={(e) =>
-                      patch({ assigned_to_id: Number(e.target.value) })
-                    }
-                    style={sel}
-                  >
-                    {meta.members.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 6,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: T.t5,
-                        marginBottom: 3,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Start Date
-                    </div>
-                    <input
-                      type="date"
-                      value={draft.start_date ?? ""}
-                      onChange={(e) => patch({ start_date: e.target.value })}
-                      style={{ ...inp, colorScheme: "dark" }}
-                    />
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: T.t5,
-                        marginBottom: 3,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Due Date
-                    </div>
-                    <input
-                      type="date"
-                      value={draft.due_date ?? ""}
-                      onChange={(e) => patch({ due_date: e.target.value })}
-                      style={{ ...inp, colorScheme: "dark" }}
-                    />
-                  </div>
-                </div>
-                {error && (
-                  <div style={{ fontSize: 11, color: T.red }}>⚠ {error}</div>
-                )}
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
-                  {assignment.name}
-                </div>
-                <div style={{ fontSize: 11, color: T.t5 }}>
-                  {assignment.organisation_name} · {assignment.project_name} ·{" "}
-                  {assignment.deliverable_name}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    marginTop: 4,
-                  }}
-                >
-                  <div>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: T.t5,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      Assigned to:{" "}
-                    </span>
-                    <span
-                      style={{ fontSize: 12, color: T.acText, fontWeight: 500 }}
-                    >
-                      {assignment.assigned_to_name}
-                    </span>
-                  </div>
-                  {assignment.start_date && (
-                    <div>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: T.t5,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                        }}
-                      >
-                        Start:{" "}
-                      </span>
-                      <span style={{ fontSize: 12, color: T.t3 }}>
-                        {assignment.start_date}
-                      </span>
-                    </div>
-                  )}
-                  {assignment.due_date && (
-                    <div>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: T.t5,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                        }}
-                      >
-                        Due:{" "}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: T.amber,
-                          fontWeight: 500,
-                        }}
-                      >
-                        {assignment.due_date}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── Add assignment form ──────────────────────────────────────────────────────
-function AddAssignmentForm({
-  meta,
-  selectedMemberId,
-  onAdd,
-}: {
-  meta: MetaData;
-  selectedMemberId: number;
-  onAdd: (a: AssignmentEntry) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({
-    name: "",
-    organisation_id: meta.organisations[0]?.id ?? 0,
-    project_id: 0,
-    deliverable_id: 0,
-    assigned_to: selectedMemberId,
-    start_date: "",
-    due_date: "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [deliverables, setDeliverables] = useState<DeliverableOption[]>([]);
-  const [loadingDelivs, setLoadingDelivs] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setDraft((d) => ({ ...d, assigned_to: selectedMemberId }));
-  }, [selectedMemberId]);
-
-  function patch(p: Partial<typeof draft>) {
-    setDraft((d) => ({ ...d, ...p }));
-  }
-
-  async function handleProjectChange(projId: number) {
-    patch({ project_id: projId, deliverable_id: 0 });
-    setLoadingDelivs(true);
-    try {
-      setDeliverables(await fetchDeliverablesByProject(projId));
-    } finally {
-      setLoadingDelivs(false);
-    }
-  }
-
-  async function handleAdd() {
-    if (!draft.name.trim() || !draft.deliverable_id || !draft.assigned_to) {
-      setError("Name, deliverable and assigned member are required.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const created = await createAssignment({
-        name: draft.name,
-        deliverable: draft.deliverable_id,
-        assigned_to: draft.assigned_to,
-        start_date: draft.start_date || undefined,
-        due_date: draft.due_date || undefined,
-      });
-      onAdd(created);
-      setDraft({
-        name: "",
-        organisation_id: meta.organisations[0]?.id ?? 0,
-        project_id: 0,
-        deliverable_id: 0,
-        assigned_to: selectedMemberId,
-        start_date: "",
-        due_date: "",
-      });
-      setDeliverables([]);
-      setOpen(false);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const filteredProjects = meta.projects.filter(
-    (p) => p.organisation_id === draft.organisation_id,
-  );
-  const inp: React.CSSProperties = {
-    background: T.panel2,
-    border: `1px solid ${T.panel2B}`,
-    borderRadius: 7,
-    padding: "8px 10px",
-    fontSize: 12,
-    color: T.t2,
-    width: "100%",
-    outline: "none",
-    fontFamily: "'DM Sans',sans-serif",
-    boxSizing: "border-box",
-  };
-  const sel: React.CSSProperties = {
-    ...inp,
-    cursor: "pointer",
-    appearance: "none" as const,
-  };
-
-  return (
-    <div
-      style={{
-        background: T.panel,
-        border: `1px solid ${T.panelB}`,
-        borderRadius: 14,
-        overflow: "hidden",
-      }}
-    >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: "100%",
-          padding: "13px 16px",
-          background: "transparent",
-          border: "none",
-          color: T.acText,
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: "pointer",
-          textAlign: "left",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontFamily: "'DM Sans',sans-serif",
-        }}
-      >
-        <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-          <path
-            d="M7 2v10M2 7h10"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-        </svg>
-        Assign Task
-        <svg
-          width={10}
-          height={10}
-          viewBox="0 0 10 10"
-          fill="none"
-          style={{
-            marginLeft: "auto",
-            transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 0.2s",
-          }}
-        >
-          <path
-            d="M2 3.5l3 3 3-3"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-      {open && (
-        <div
-          style={{
-            padding: "0 16px 16px",
-            display: "flex",
-            flexDirection: "column",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
             gap: 10,
           }}
         >
           <div>
-            <div
+            <h2
               style={{
-                fontSize: 10,
-                color: T.t5,
-                marginBottom: 4,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
+                margin: 0,
+                fontSize: "clamp(18px, 5vw, 22px)",
+                fontWeight: 900,
+                color: "#0a0a0a",
+                letterSpacing: "-0.04em",
+                fontFamily: "var(--font-display)",
+                lineHeight: 1.1,
               }}
             >
-              Task Name
-            </div>
-            <input
-              value={draft.name}
-              onChange={(e) => patch({ name: e.target.value })}
-              placeholder="Task name…"
-              style={inp}
-            />
-          </div>
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: T.t5,
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Organisation
-              </div>
-              <select
-                value={draft.organisation_id}
-                onChange={(e) =>
-                  patch({
-                    organisation_id: Number(e.target.value),
-                    project_id: 0,
-                    deliverable_id: 0,
-                  })
-                }
-                style={sel}
-              >
-                <option value={0}>— select —</option>
-                {meta.organisations.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: T.t5,
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Project
-              </div>
-              <select
-                value={draft.project_id}
-                onChange={(e) => handleProjectChange(Number(e.target.value))}
-                style={sel}
-              >
-                <option value={0}>— select —</option>
-                {filteredProjects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <div
+              {project.name}
+            </h2>
+            <p
               style={{
-                fontSize: 10,
-                color: T.t5,
-                marginBottom: 4,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
+                margin: "4px 0 0",
+                fontSize: "clamp(11px, 3vw, 12px)",
+                color: "#999",
+                fontFamily: "var(--font-body)",
               }}
             >
-              Deliverable
-            </div>
-            {loadingDelivs ? (
-              <div style={{ fontSize: 12, color: T.t5 }}>Loading…</div>
-            ) : (
-              <select
-                value={draft.deliverable_id}
-                onChange={(e) =>
-                  patch({ deliverable_id: Number(e.target.value) })
-                }
-                style={sel}
+              {project.organisation_name} · {project.location}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span
+              style={{
+                background: stageColor(project.current_stage),
+                color: stageTextColor(project.current_stage),
+                borderRadius: 8,
+                padding: "4px 12px",
+                fontSize: 11,
+                fontWeight: 700,
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.04em",
+              }}
+            >
+              {STAGE_LABEL[project.current_stage]}
+            </span>
+            {project.is_completed && (
+              <span
+                style={{
+                  background: "#e8f5e9",
+                  color: "#2e7d32",
+                  borderRadius: 8,
+                  padding: "4px 12px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: "var(--font-mono)",
+                }}
               >
-                <option value={0}>— select —</option>
-                {deliverables.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
+                ✓ Completed
+              </span>
             )}
           </div>
-          <div>
-            <div
-              style={{
-                fontSize: 10,
-                color: T.t5,
-                marginBottom: 4,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Assign To
-            </div>
-            <select
-              value={draft.assigned_to}
-              onChange={(e) => patch({ assigned_to: Number(e.target.value) })}
-              style={sel}
-            >
-              <option value={0}>— select member —</option>
-              {meta.members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: T.t5,
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Start Date
-              </div>
-              <input
-                type="date"
-                value={draft.start_date}
-                onChange={(e) => patch({ start_date: e.target.value })}
-                style={{ ...inp, colorScheme: "dark" }}
-              />
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: T.t5,
-                  marginBottom: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Due Date
-              </div>
-              <input
-                type="date"
-                value={draft.due_date}
-                onChange={(e) => patch({ due_date: e.target.value })}
-                style={{ ...inp, colorScheme: "dark" }}
-              />
-            </div>
-          </div>
-          {error && (
-            <div
-              style={{
-                fontSize: 12,
-                color: T.red,
-                padding: "6px 10px",
-                background: T.redBg,
-                borderRadius: 7,
-              }}
-            >
-              ⚠ {error}
-            </div>
-          )}
-          <button
-            onClick={handleAdd}
-            disabled={saving}
+        </div>
+        {project.description && (
+          <p
             style={{
-              padding: "10px 0",
-              borderRadius: 9,
-              border: "none",
-              background: T.ac,
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "'DM Sans',sans-serif",
-              opacity: saving ? 0.6 : 1,
+              margin: "12px 0 0",
+              fontSize: "clamp(12px, 3.5vw, 13px)",
+              color: "#555",
+              lineHeight: 1.65,
+              fontFamily: "var(--font-body)",
             }}
           >
-            {saving ? "Saving…" : "Create Assignment"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+            {project.description}
+          </p>
+        )}
+      </div>
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-export default function ManagerPage() {
-  const w = useWindowWidth();
-  const isMobile = w < 700;
-  const today = new Date();
-
-  // ── Calendar ──────────────────────────────────────────────────────────────
-  const [calYear, setCalYear] = useState(today.getFullYear());
-  const [calMonth, setCalMonth] = useState(today.getMonth());
-  const [selDates, setSelDates] = useState<Set<string>>(new Set());
-  const [selMonth, setSelMonth] = useState<number | null>(null);
-  const [selYear, setSelYear] = useState<number | null>(null);
-
-  // ── Shared cascade filters (including date range) ─────────────────────────
-  const [filters, setFilters] = useState<CascadeFilters>({
-    org_id: 0,
-    member_id: 0,
-    project_id: 0,
-    deliverable_id: 0,
-    date_from: "",
-    date_to: "",
-  });
-  const [filterDelivs, setFilterDelivs] = useState<DeliverableOption[]>([]);
-  const [filterDelivLoad, setFilterDelivLoad] = useState(false);
-
-  function updateFilters(partial: Partial<CascadeFilters>) {
-    setFilters((prev) => ({ ...prev, ...partial }));
-  }
-
-  // Load deliverables when project filter changes
-  useEffect(() => {
-    if (!filters.project_id) {
-      setFilterDelivs([]);
-      return;
-    }
-    setFilterDelivLoad(true);
-    fetchDeliverablesByProject(filters.project_id)
-      .then(setFilterDelivs)
-      .finally(() => setFilterDelivLoad(false));
-  }, [filters.project_id]);
-
-  // ── Data ──────────────────────────────────────────────────────────────────
-  const [meta, setMeta] = useState<MetaData>({
-    organisations: [],
-    projects: [],
-    members: [],
-  });
-  const [rows, setRows] = useState<MemberWorkLogEntry[]>([]);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalMinutes, setTotalMinutes] = useState(0); // ← from API, all pages
-  const [currentPage, setCurrentPage] = useState(1);
-  const [assignments, setAssignments] = useState<AssignmentEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [rowsLoading, setRowsLoading] = useState(false);
-  const [assignLoading, setAssignLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const dateRangeRef = useRef<{ from?: string; to?: string }>({});
-
-  async function loadRows(params: {
-    from?: string;
-    to?: string;
-    page?: number;
-    member_id?: number;
-    org_id?: number;
-    project_id?: number;
-    deliverable_id?: number;
-  }) {
-    dateRangeRef.current = { from: params.from, to: params.to };
-    setRowsLoading(true);
-    try {
-      const data = await fetchMemberWorkLogs(params);
-      setRows(data.results);
-      setTotalPages(data.pages);
-      setTotalCount(data.count);
-      setCurrentPage(data.page);
-      setTotalMinutes(data.total_minutes); // ← always reflects full result set
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setRowsLoading(false);
-    }
-  }
-
-  async function loadAssignments(memberId?: number) {
-    setAssignLoading(true);
-    try {
-      setAssignments(await fetchAssignments(memberId));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setAssignLoading(false);
-    }
-  }
-
-  // Initial load — default to current week
-  useEffect(() => {
-    const { from, to } = currentWeekRange();
-    setFilters((f) => ({ ...f, date_from: from, date_to: to }));
-    Promise.all([
-      fetchMeta(),
-      fetchMemberWorkLogs({ from, to, page: 1 }),
-      fetchAssignments(),
-    ])
-      .then(([m, worklogs, assigns]) => {
-        setMeta(m);
-        setRows(worklogs.results);
-        setTotalPages(worklogs.pages);
-        setTotalCount(worklogs.count);
-        setTotalMinutes(worklogs.total_minutes); // ← set on initial load
-        setCurrentPage(1);
-        setAssignments(assigns);
-        dateRangeRef.current = { from, to };
-        setLoading(false);
-      })
-      .catch((e) => {
-        setError(e.message);
-        setLoading(false);
-      });
-  }, []);
-
-  // ── Date range resolution ─────────────────────────────────────────────────
-  // Priority: explicit date filter > calendar day selection > calendar month/year > current week
-  function resolveRange(
-    overrideFrom?: string,
-    overrideTo?: string,
-  ): { from: string; to: string } {
-    const f = overrideFrom ?? filters.date_from;
-    const t = overrideTo ?? filters.date_to;
-    if (f || t) return { from: f || "", to: t || "" };
-    if (selDates.size > 0) {
-      const s = Array.from(selDates).sort();
-      return { from: s[0], to: s[s.length - 1] };
-    }
-    if (selMonth !== null || selYear !== null) {
-      const year = selYear ?? today.getFullYear();
-      const month = selMonth ?? today.getMonth();
-      return monthRange(year, month);
-    }
-    return currentWeekRange();
-  }
-
-  // Called when user clicks "Apply Date Range"
-  function applyDateRange() {
-    setSelDates(new Set());
-    setSelMonth(null);
-    setSelYear(null);
-    const { from, to } = resolveRange(filters.date_from, filters.date_to);
-    loadRows({
-      from,
-      to,
-      page: 1,
-      member_id: filters.member_id || undefined,
-      org_id: filters.org_id || undefined,
-      project_id: filters.project_id || undefined,
-      deliverable_id: filters.deliverable_id || undefined,
-    });
-  }
-
-  const isFirstRender = useRef(true);
-
-  // React to calendar changes (only when no explicit date range filter active)
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    if (filters.date_from || filters.date_to) return;
-    const { from, to } = resolveRange();
-    loadRows({ from, to, page: 1, member_id: filters.member_id || undefined });
-  }, [selDates, selMonth, selYear]);
-
-  // React to member filter changes
-  useEffect(() => {
-    if (isFirstRender.current) return;
-    const { from, to } = resolveRange();
-    loadRows({
-      from,
-      to,
-      page: 1,
-      member_id: filters.member_id || undefined,
-      org_id: filters.org_id || undefined,
-      project_id: filters.project_id || undefined,
-      deliverable_id: filters.deliverable_id || undefined,
-    });
-  }, [filters.org_id, filters.project_id, filters.deliverable_id]);
-
-  function goToPage(p: number) {
-    const { from, to } = resolveRange();
-    loadRows({ from, to, page: p, member_id: filters.member_id || undefined });
-  }
-
-  const activeDates = useMemo(
-    () =>
-      new Set(
-        rows
-          .map((r) => r.end_date_fmt ?? r.start_date_fmt)
-          .filter(Boolean) as string[],
-      ),
-    [rows],
-  );
-  const availableYears = useMemo(
-    () =>
-      Array.from(
-        new Set(rows.map((r) => new Date(r.start_time).getFullYear())),
-      ).sort(),
-    [rows],
-  );
-  const hasCalFilter =
-    selDates.size > 0 || selMonth !== null || selYear !== null;
-  const hasDateFilter = !!(filters.date_from || filters.date_to);
-
-  // ── Client-side filtering on top of server results ────────────────────────
-  const filteredRows = useMemo(
-    () =>
-      rows.filter((r) => {
-        if (filters.org_id && r.organisation_id !== filters.org_id)
-          return false;
-        if (filters.project_id && r.project_id !== filters.project_id)
-          return false;
-        if (filters.deliverable_id && r.deliverable !== filters.deliverable_id)
-          return false;
-        return true;
-      }),
-    [rows, filters],
-  );
-
-  const filteredAssignments = useMemo(
-    () =>
-      assignments.filter((a) => {
-        if (filters.org_id && a.organisation_id !== filters.org_id)
-          return false;
-        if (filters.member_id && a.assigned_to_id !== filters.member_id)
-          return false;
-        if (filters.project_id && a.project_id !== filters.project_id)
-          return false;
-        if (
-          filters.deliverable_id &&
-          a.deliverable_id !== filters.deliverable_id
-        )
-          return false;
-        return true;
-      }),
-    [assignments, filters],
-  );
-
-  function saveAssignment(id: number, data: AssignmentEntry) {
-    setAssignments((p) => p.map((a) => (a.id === id ? data : a)));
-  }
-  function deleteAssignmentLocal(id: number) {
-    setAssignments((p) => p.filter((a) => a.id !== id));
-  }
-  function addAssignment(a: AssignmentEntry) {
-    setAssignments((p) => [a, ...p]);
-  }
-
-  function toggleDate(iso: string) {
-    if (filters.date_from || filters.date_to)
-      updateFilters({ date_from: "", date_to: "" });
-    setSelDates((p) => {
-      const n = new Set(p);
-      n.has(iso) ? n.delete(iso) : n.add(iso);
-      return n;
-    });
-  }
-  function prevMonth() {
-    const m = calMonth === 0 ? 11 : calMonth - 1,
-      y = calMonth === 0 ? calYear - 1 : calYear;
-    setCalMonth(m);
-    setCalYear(y);
-    setSelMonth(m);
-    setSelYear(y);
-    setSelDates(new Set());
-    updateFilters({ date_from: "", date_to: "" });
-  }
-  function nextMonth() {
-    const m = calMonth === 11 ? 0 : calMonth + 1,
-      y = calMonth === 11 ? calYear + 1 : calYear;
-    setCalMonth(m);
-    setCalYear(y);
-    setSelMonth(m);
-    setSelYear(y);
-    setSelDates(new Set());
-    updateFilters({ date_from: "", date_to: "" });
-  }
-  function clearCal() {
-    setSelDates(new Set());
-    setSelMonth(null);
-    setSelYear(null);
-  }
-
-  if (loading)
-    return (
+      {/* Stats row - responsive grid */}
       <div
         style={{
-          minHeight: "100vh",
-          background: T.bg,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 16,
-          fontFamily: "'DM Sans',sans-serif",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gap: 8,
         }}
       >
+        <Stat label="Revenue" value={formatINR(project.total_revenue)} />
+        <Stat label="Expenses" value={formatINR(project.total_expenses)} />
+        <Stat label="Profit" value={formatINR(profit)} />
+        <Stat label="Hours" value={`${project.total_hours}h`} />
+        <Stat
+          label="Done"
+          value={`${project.delivered_count}/${project.deliverable_count}`}
+        />
+      </div>
+
+      {/* Progress bar */}
+      <div>
         <div
           style={{
-            width: 220,
-            height: 3,
-            background: T.panel2B,
-            borderRadius: 2,
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: 6,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#bbb",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Deliverable Progress
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#333",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {pct}%
+          </span>
+        </div>
+        <div
+          style={{
+            height: 5,
+            background: "#ededed",
+            borderRadius: 99,
             overflow: "hidden",
           }}
         >
           <div
             style={{
               height: "100%",
-              background: `linear-gradient(90deg,${T.ac},#a78bfa)`,
-              animation: "initload 1.2s ease-in-out infinite alternate",
+              width: `${pct}%`,
+              background:
+                pct === 100
+                  ? "linear-gradient(90deg,#43a047,#66bb6a)"
+                  : "linear-gradient(90deg,#1565c0,#42a5f5)",
+              borderRadius: 99,
+              transition: "width 0.5s ease",
             }}
           />
         </div>
-        <span style={{ fontSize: 12, color: T.t5 }}>Loading manager view…</span>
-        <style>{`@keyframes initload{from{width:15%;margin-left:0}to{width:60%;margin-left:35%}}`}</style>
       </div>
-    );
-  if (error)
-    return (
+
+      {/* Client + Timeline - responsive */}
       <div
         style={{
-          minHeight: "100vh",
-          background: T.bg,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: T.red,
-          fontFamily: "'DM Sans',sans-serif",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 20,
+          paddingTop: 4,
+          borderTop: "1px solid #f0f0f0",
         }}
       >
-        {error}
+        {[
+          {
+            heading: "Client",
+            rows: [
+              { label: "Name", value: project.client_name },
+              { label: "Location", value: project.location },
+              { label: "Type", value: project.project_type },
+            ],
+          },
+          {
+            heading: "Timeline",
+            rows: [
+              { label: "Start", value: formatDate(project.start_date) },
+              { label: "End", value: formatDate(project.end_date) },
+              {
+                label: "Billing",
+                value:
+                  project.billing_type === "hourly"
+                    ? "Hourly"
+                    : "Percentage Share",
+              },
+            ],
+          },
+        ].map((col) => (
+          <div key={col.heading}>
+            <p
+              style={{
+                margin: "0 0 12px",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "#ccc",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {col.heading}
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {col.rows.map((r) => (
+                <div key={r.label}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 10,
+                      color: "#bbb",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {r.label}
+                  </p>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      fontSize: "clamp(12px, 3.5vw, 13px)",
+                      fontWeight: 600,
+                      color: "#222",
+                      fontFamily: "var(--font-body)",
+                    }}
+                  >
+                    {r.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
-    );
 
-  // ── Calendar panel ────────────────────────────────────────────────────────
-  const CalendarPanel = (
-    <div
+      {/* Deliverables - responsive table */}
+      <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 4 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "#ccc",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            Deliverables
+          </p>
+          {/* column headers - hide on mobile */}
+          <div
+            style={{
+              display: "none",
+              gridTemplateColumns: "1fr 130px 160px 60px",
+              gap: 10,
+              width: "100%",
+              marginLeft: 14,
+            }}
+            className="deliverable-headers"
+          >
+            {["Task", "Assigned To", "Status", "Hours"].map((h) => (
+              <span
+                key={h}
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: "#ccc",
+                  letterSpacing: "0.07em",
+                  textTransform: "uppercase",
+                  fontFamily: "var(--font-mono)",
+                  textAlign: h === "Hours" ? "right" : "left",
+                }}
+              >
+                {h}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {project.deliverables.length === 0 ? (
+            <p style={{ fontSize: 13, color: "#bbb", textAlign: "center", padding: "24px 0" }}>
+              No deliverables yet
+            </p>
+          ) : (
+            project.deliverables.map((d) => (
+              <DeliverableRow key={d.id} d={d} />
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Project list card ───────────────────────────────────────────────────────
+
+function ProjectCard({
+  project,
+  selected,
+  onClick,
+}: {
+  project: ProjectListItem;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const hours = hoursFromListItem(project);
+  return (
+    <button
+      onClick={onClick}
       style={{
-        background: T.panel,
-        border: `1px solid ${T.panelB}`,
-        borderRadius: 16,
-        padding: "16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
+        all: "unset",
+        display: "block",
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "13px 15px",
+        borderRadius: 12,
+        cursor: "pointer",
+        border: `1.5px solid ${selected ? "#1565c0" : "#ebebeb"}`,
+        background: selected ? "#f0f4ff" : "#fff",
+        transition: "all 0.15s",
+        textAlign: "left",
+      }}
+      onMouseEnter={(e) => {
+        if (!selected)
+          (e.currentTarget as HTMLButtonElement).style.borderColor = "#c5d5f5";
+      }}
+      onMouseLeave={(e) => {
+        if (!selected)
+          (e.currentTarget as HTMLButtonElement).style.borderColor = "#ebebeb";
       }}
     >
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 4,
         }}
       >
-        <button
-          onClick={prevMonth}
+        <span
           style={{
-            width: 28,
-            height: 28,
-            borderRadius: 7,
-            background: T.panel2,
-            border: `1px solid ${T.panel2B}`,
-            color: T.t4,
-            cursor: "pointer",
-            fontSize: 14,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            fontSize: "clamp(12px, 4vw, 13px)",
+            fontWeight: 700,
+            color: "#0a0a0a",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontFamily: "var(--font-display)",
+            letterSpacing: "-0.01em",
           }}
         >
-          ‹
-        </button>
-        <span style={{ fontSize: 12, fontWeight: 600, color: T.t2 }}>
-          {MONTHS[calMonth]} {calYear}
+          {project.name}
         </span>
-        <button
-          onClick={nextMonth}
+        <span
           style={{
-            width: 28,
-            height: 28,
-            borderRadius: 7,
-            background: T.panel2,
-            border: `1px solid ${T.panel2B}`,
-            color: T.t4,
-            cursor: "pointer",
-            fontSize: 14,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            background: stageColor(project.current_stage),
+            color: stageTextColor(project.current_stage),
+            borderRadius: 6,
+            padding: "2px 8px",
+            fontSize: 9,
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+            fontFamily: "var(--font-mono)",
+            flexShrink: 0,
           }}
         >
-          ›
-        </button>
+          {project.is_completed
+            ? "✓ Done"
+            : STAGE_LABEL[project.current_stage]}
+        </span>
       </div>
-
-      {/* Dim calendar when date range filter is active */}
+      <p
+        style={{
+          margin: "0 0 8px",
+          fontSize: "clamp(10px, 3vw, 11px)",
+          color: "#999",
+          fontFamily: "var(--font-body)",
+        }}
+      >
+        {project.client_name} · {project.location}
+      </p>
       <div
         style={{
-          opacity: hasDateFilter ? 0.4 : 1,
-          pointerEvents: hasDateFilter ? "none" : "auto",
-          transition: "opacity 0.2s",
+          display: "flex",
+          gap: 14,
+          fontSize: "clamp(10px, 3vw, 11px)",
+          color: "#bbb",
+          fontFamily: "var(--font-mono)",
+          flexWrap: "wrap",
         }}
       >
-        <CalGrid
-          year={calYear}
-          month={calMonth}
-          activeDates={activeDates}
-          selDates={selDates}
-          onToggle={toggleDate}
-        />
+        <span>{project.agg_deliverable_count} deliverables</span>
+        <span>{hours}h</span>
+        <span>{formatINR(project.agg_revenue)}</span>
       </div>
-
-      {hasDateFilter && (
-        <div
-          style={{
-            textAlign: "center",
-            fontSize: 11,
-            color: T.acText,
-            padding: "4px 8px",
-            background: T.acLight,
-            borderRadius: 6,
-          }}
-        >
-          Date range filter active
-        </div>
-      )}
-      {selDates.size > 0 && !hasDateFilter && (
-        <div style={{ textAlign: "center", fontSize: 11, color: T.acText }}>
-          {selDates.size} date{selDates.size > 1 ? "s" : ""} selected &nbsp;
-          <button
-            onClick={() => setSelDates(new Set())}
-            style={{
-              background: "none",
-              border: "none",
-              color: T.red,
-              cursor: "pointer",
-              fontSize: 11,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      <Divider />
-
-      <div>
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            color: T.t5,
-            letterSpacing: "0.07em",
-            textTransform: "uppercase",
-            marginBottom: 6,
-          }}
-        >
-          Month
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4,1fr)",
-            gap: 3,
-            opacity: hasDateFilter ? 0.4 : 1,
-            pointerEvents: hasDateFilter ? "none" : "auto",
-          }}
-        >
-          {MONTHS.map((m, i) => (
-            <button
-              key={m}
-              onClick={() => {
-                const n = selMonth === i ? null : i;
-                setSelMonth(n);
-                if (n !== null) {
-                  setCalMonth(n);
-                  setSelDates(new Set());
-                  updateFilters({ date_from: "", date_to: "" });
-                }
-              }}
-              style={{
-                background: selMonth === i ? T.acLight : T.panel2,
-                border: `1px solid ${selMonth === i ? T.acMid : T.panel2B}`,
-                borderRadius: 5,
-                color: selMonth === i ? T.acText : T.t4,
-                fontSize: 9,
-                padding: "4px 0",
-                cursor: "pointer",
-                textTransform: "uppercase",
-                fontWeight: selMonth === i ? 600 : 400,
-                transition: "all 0.15s",
-              }}
-            >
-              {m.slice(0, 3)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {availableYears.length > 0 && (
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: T.t5,
-              letterSpacing: "0.07em",
-              textTransform: "uppercase",
-              marginBottom: 6,
-            }}
-          >
-            Year
-          </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 4,
-              flexWrap: "wrap",
-              opacity: hasDateFilter ? 0.4 : 1,
-              pointerEvents: hasDateFilter ? "none" : "auto",
-            }}
-          >
-            {availableYears.map((y) => (
-              <button
-                key={y}
-                onClick={() => {
-                  const n = selYear === y ? null : y;
-                  setSelYear(n);
-                  if (n !== null) {
-                    setCalYear(n);
-                    setSelDates(new Set());
-                    updateFilters({ date_from: "", date_to: "" });
-                  }
-                }}
-                style={{
-                  background: selYear === y ? T.acLight : T.panel2,
-                  border: `1px solid ${selYear === y ? T.acMid : T.panel2B}`,
-                  borderRadius: 5,
-                  color: selYear === y ? T.acText : T.t4,
-                  fontSize: 9,
-                  padding: "4px 8px",
-                  cursor: "pointer",
-                  fontWeight: selYear === y ? 600 : 400,
-                  transition: "all 0.15s",
-                }}
-              >
-                {y}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <Divider />
-
-      {[
-        { label: "Worklogs", val: `${filteredRows.length}/${totalCount}` },
-        {
-          label: "Total Hours",
-          val: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
-        },
-        { label: "Assignments", val: String(filteredAssignments.length) },
-      ].map(({ label, val }) => (
-        <div
-          key={label}
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span style={{ fontSize: 11, color: T.t4 }}>{label}</span>
-          <span style={{ fontSize: 12, color: T.acText, fontWeight: 600 }}>
-            {val}
-          </span>
-        </div>
-      ))}
-
-      {(hasCalFilter || hasDateFilter) && (
-        <>
-          <Divider />
-          <button
-            onClick={() => {
-              clearCal();
-              updateFilters({ date_from: "", date_to: "" });
-              // after state updates flush, reload with default week
-              setTimeout(() => {
-                const { from, to } = currentWeekRange();
-                loadRows({
-                  from,
-                  to,
-                  page: 1,
-                  member_id: filters.member_id || undefined,
-                });
-              }, 0);
-            }}
-            style={{
-              background: "transparent",
-              border: `1px solid ${T.panel2B}`,
-              borderRadius: 7,
-              padding: "6px 0",
-              fontSize: 11,
-              color: T.t4,
-              cursor: "pointer",
-              width: "100%",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.color = T.t2;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.color = T.t4;
-            }}
-          >
-            ✕ &nbsp;Clear all date filters
-          </button>
-        </>
-      )}
-    </div>
+    </button>
   );
+}
 
-  // ── Pagination ────────────────────────────────────────────────────────────
-  const PaginationControls =
-    totalPages > 1 ? (
+// ─── Filter bar ───────────────────────────────────────────────────────────────
+
+function FilterBar({
+  orgs,
+  params,
+  onChange,
+}: {
+  orgs: OrganisationOption[];
+  params: ProjectListParams;
+  onChange: (p: ProjectListParams) => void;
+}) {
+  const inputStyle: React.CSSProperties = {
+    border: "1.5px solid #e4e4e4",
+    borderRadius: 9,
+    padding: "8px 12px",
+    fontSize: 13,
+    color: "#222",
+    background: "#fff",
+    outline: "none",
+    fontFamily: "var(--font-body)",
+    cursor: "pointer",
+    appearance: "none" as React.CSSProperties["appearance"],
+    WebkitAppearance: "none",
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {/* Search */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          gap: 6,
-          paddingTop: 4,
-          flexWrap: "wrap",
+          gap: 8,
+          flex: "1 1 200px",
+          border: "1.5px solid #e4e4e4",
+          borderRadius: 9,
+          padding: "8px 12px",
+          background: "#fff",
         }}
       >
-        <button
-          onClick={() => goToPage(currentPage - 1)}
-          disabled={currentPage === 1}
-          style={{
-            padding: "6px 12px",
-            borderRadius: 7,
-            border: `1px solid ${T.panel2B}`,
-            background: T.panel2,
-            color: currentPage === 1 ? T.t6 : T.t3,
-            cursor: currentPage === 1 ? "default" : "pointer",
-            fontSize: 12,
-            fontFamily: "'DM Sans',sans-serif",
-          }}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          style={{ color: "#bbb", flexShrink: 0 }}
         >
-          ‹ Prev
-        </button>
-        {Array.from({ length: totalPages }, (_, i) => i + 1)
-          .filter(
-            (p) =>
-              p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1,
-          )
-          .reduce<(number | "…")[]>((acc, p, i, arr) => {
-            if (i > 0 && (p as number) - (arr[i - 1] as number) > 1)
-              acc.push("…");
-            acc.push(p);
-            return acc;
-          }, [])
-          .map((p, i) =>
-            p === "…" ? (
-              <span key={`e${i}`} style={{ color: T.t5, fontSize: 12 }}>
-                …
-              </span>
-            ) : (
-              <button
-                key={p}
-                onClick={() => goToPage(p as number)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 7,
-                  border: `1px solid ${currentPage === p ? T.acMid : T.panel2B}`,
-                  background: currentPage === p ? T.acLight : T.panel2,
-                  color: currentPage === p ? T.acText : T.t3,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: "'DM Sans',sans-serif",
-                  fontWeight: currentPage === p ? 600 : 400,
-                }}
-              >
-                {p}
-              </button>
-            ),
-          )}
-        <button
-          onClick={() => goToPage(currentPage + 1)}
-          disabled={currentPage === totalPages}
+          <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.5" />
+          <line
+            x1="10.5"
+            y1="10.5"
+            x2="14"
+            y2="14"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+        <input
+          value={params.q ?? ""}
+          onChange={(e) => onChange({ ...params, q: e.target.value })}
+          placeholder="Search projects…"
           style={{
-            padding: "6px 12px",
-            borderRadius: 7,
-            border: `1px solid ${T.panel2B}`,
-            background: T.panel2,
-            color: currentPage === totalPages ? T.t6 : T.t3,
-            cursor: currentPage === totalPages ? "default" : "pointer",
-            fontSize: 12,
-            fontFamily: "'DM Sans',sans-serif",
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            fontSize: 13,
+            color: "#222",
+            fontFamily: "var(--font-body)",
+            width: "100%",
           }}
-        >
-          Next ›
-        </button>
-      </div>
-    ) : null;
-
-  // Active range label for worklog header
-  const activeRangeLabel = (() => {
-    if (filters.date_from && filters.date_to)
-      return `${filters.date_from} → ${filters.date_to}`;
-    if (filters.date_from) return `From ${filters.date_from}`;
-    if (filters.date_to) return `Until ${filters.date_to}`;
-    if (selDates.size > 0) {
-      const s = Array.from(selDates).sort();
-      return selDates.size === 1 ? s[0] : `${s[0]} → ${s[s.length - 1]}`;
-    }
-    if (selMonth !== null)
-      return `${MONTHS[selMonth]}${selYear ? " " + selYear : ""}`;
-    return "This week";
-  })();
-
-  // ── Right panel ───────────────────────────────────────────────────────────
-  const RightPanel = (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <CascadeFilterBar
-        meta={meta}
-        filters={filters}
-        onChange={updateFilters}
-        deliverableOptions={filterDelivs}
-        delivLoading={filterDelivLoad}
-        onApplyDateRange={applyDateRange}
-      />
-
-      {/* ── Worklogs ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 6,
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
-            Worklogs
-            {filters.member_id > 0 && (
-              <span
-                style={{
-                  fontSize: 11,
-                  color: T.t5,
-                  marginLeft: 8,
-                  fontWeight: 400,
-                }}
-              >
-                — {meta.members.find((m) => m.id === filters.member_id)?.name}
-              </span>
-            )}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span
-              style={{
-                fontSize: 10,
-                color: T.t5,
-                background: T.panel2,
-                border: `1px solid ${T.panel2B}`,
-                borderRadius: 5,
-                padding: "3px 8px",
-              }}
-            >
-              {activeRangeLabel}
-            </span>
-            <span style={{ fontSize: 11, color: T.t5 }}>
-              {filteredRows.length}
-              {totalCount > rows.length ? `/${totalCount}` : ""} entries
-            </span>
-          </div>
-        </div>
-
-        {rowsLoading ? (
-          <div
-            style={{
-              background: T.panel,
-              border: `1px solid ${T.panelB}`,
-              borderRadius: 12,
-              padding: "32px 16px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div
-              style={{
-                height: 3,
-                width: 120,
-                background: T.panel2B,
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  height: "100%",
-                  background: `linear-gradient(90deg,${T.ac},#a78bfa)`,
-                  animation: "pulse 1s ease-in-out infinite alternate",
-                }}
-              />
-            </div>
-            <style>{`@keyframes pulse{from{width:20%;margin-left:0}to{width:60%;margin-left:30%}}`}</style>
-          </div>
-        ) : filteredRows.length === 0 ? (
-          <div
-            style={{
-              background: T.panel,
-              border: `1px solid ${T.panelB}`,
-              borderRadius: 12,
-              padding: "40px 16px",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 10,
-              color: T.t6,
-            }}
-          >
-            <svg
-              width={28}
-              height={28}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={T.t6}
-              strokeWidth={1.2}
-            >
-              <circle cx={12} cy={12} r={10} />
-              <path d="M12 6v6l4 2" />
-            </svg>
-            <span style={{ fontSize: 13 }}>No worklogs for this selection</span>
-          </div>
-        ) : (
-          filteredRows.map((row) => <WorklogViewCard key={row.id} row={row} />)
-        )}
-
-        {PaginationControls}
-      </div>
-
-      {/* ── Assignments ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
-            Assignments
-            {filters.member_id > 0 && (
-              <span
-                style={{
-                  fontSize: 11,
-                  color: T.t5,
-                  marginLeft: 8,
-                  fontWeight: 400,
-                }}
-              >
-                — {meta.members.find((m) => m.id === filters.member_id)?.name}
-              </span>
-            )}
-          </div>
-          <span style={{ fontSize: 11, color: T.t5 }}>
-            {filteredAssignments.length} entries
-          </span>
-        </div>
-
-        <AddAssignmentForm
-          meta={meta}
-          selectedMemberId={filters.member_id}
-          onAdd={addAssignment}
         />
-
-        {assignLoading ? (
-          <div
+        {params.q && (
+          <button
+            onClick={() => onChange({ ...params, q: "" })}
             style={{
-              background: T.panel,
-              border: `1px solid ${T.panelB}`,
-              borderRadius: 12,
-              padding: "24px 16px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              color: "#bbb",
+              fontSize: 17,
+              lineHeight: 1,
+              padding: 0,
             }}
           >
-            <div
-              style={{
-                height: 3,
-                width: 120,
-                background: T.panel2B,
-                borderRadius: 2,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  height: "100%",
-                  background: `linear-gradient(90deg,${T.ac},#a78bfa)`,
-                  animation: "pulse 1s ease-in-out infinite alternate",
-                }}
-              />
-            </div>
-          </div>
-        ) : filteredAssignments.length === 0 ? (
-          <div
-            style={{
-              background: T.panel,
-              border: `1px solid ${T.panelB}`,
-              borderRadius: 12,
-              padding: "32px 16px",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 10,
-              color: T.t6,
-            }}
-          >
-            <svg
-              width={24}
-              height={24}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={T.t6}
-              strokeWidth={1.2}
-            >
-              <rect x={3} y={3} width={18} height={18} rx={3} />
-              <path d="M9 9h6M9 13h4" />
-            </svg>
-            <span style={{ fontSize: 13 }}>
-              No assignments for this selection
-            </span>
-          </div>
-        ) : (
-          filteredAssignments.map((a) => (
-            <AssignmentCard
-              key={a.id}
-              assignment={a}
-              meta={meta}
-              onSave={saveAssignment}
-              onDelete={deleteAssignmentLocal}
-            />
-          ))
+            ×
+          </button>
         )}
       </div>
+
+      {/* Org filter */}
+      <select
+        value={params.org_id ?? ""}
+        onChange={(e) =>
+          onChange({
+            ...params,
+            org_id: e.target.value ? Number(e.target.value) : undefined,
+          })
+        }
+        style={{ ...inputStyle, flex: "1 1 140px", minWidth: "120px" }}
+      >
+        <option value="">All Orgs</option>
+        {orgs.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+
+      {/* Stage filter */}
+      <select
+        value={params.stage ?? ""}
+        onChange={(e) =>
+          onChange({
+            ...params,
+            stage: (e.target.value || undefined) as ProjectStage | undefined,
+          })
+        }
+        style={{ ...inputStyle, flex: "1 1 100px", minWidth: "100px" }}
+      >
+        <option value="">All Stages</option>
+        {(["1", "2", "3", "4", "5"] as ProjectStage[]).map((s) => (
+          <option key={s} value={s}>
+            {STAGE_LABEL[s]}
+          </option>
+        ))}
+      </select>
+
+      {/* Completion filter */}
+      <select
+        value={
+          params.is_completed === undefined
+            ? ""
+            : params.is_completed
+            ? "true"
+            : "false"
+        }
+        onChange={(e) =>
+          onChange({
+            ...params,
+            is_completed:
+              e.target.value === "" ? undefined : e.target.value === "true",
+          })
+        }
+        style={{ ...inputStyle, flex: "1 1 110px", minWidth: "110px" }}
+      >
+        <option value="">All Status</option>
+        <option value="false">In Progress</option>
+        <option value="true">Completed</option>
+      </select>
     </div>
   );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function ProjectsPage() {
+  const [orgs, setOrgs] = useState<OrganisationOption[]>([]);
+  const [projects, setProjects] = useState<ProjectListItem[]>([]);
+  const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [params, setParams] = useState<ProjectListParams>({});
+  const [listLoading, setListLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [showMobileList, setShowMobileList] = useState(true);
+  const [showMobileDetail, setShowMobileDetail] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  // Debounce search
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [debouncedParams, setDebouncedParams] = useState<ProjectListParams>({});
+
+  useEffect(() => {
+    fetchProjectOrganisations().then(setOrgs).catch(() => {});
+  }, []);
+
+  const handleParamChange = (p: ProjectListParams) => {
+    setParams(p);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedParams(p), 320);
+  };
+
+  useEffect(() => {
+    setListLoading(true);
+    setListError(null);
+    fetchProjects(debouncedParams)
+      .then((data) => {
+        setProjects(data);
+        setListLoading(false);
+        // Auto-select first if nothing selected and on desktop
+        if (data.length > 0 && !selectedId && window.innerWidth > 768) {
+          selectProject(data[0].id);
+        }
+      })
+      .catch((e: Error) => {
+        setListError(e.message);
+        setListLoading(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedParams]);
+
+  const selectProject = useCallback((id: number) => {
+    setSelectedId(id);
+    setDetailLoading(true);
+    setDetail(null);
+    fetchProjectDetail(id)
+      .then((d) => {
+        setDetail(d);
+        setDetailLoading(false);
+      })
+      .catch(() => setDetailLoading(false));
+  }, []);
+
+  const handleCardClick = (id: number) => {
+    selectProject(id);
+    // On mobile, switch to detail view
+    if (window.innerWidth <= 768) {
+      setShowMobileList(false);
+      setShowMobileDetail(true);
+    }
+    setTimeout(() => detailRef.current?.scrollTo({ top: 0, behavior: "smooth" }), 50);
+  };
+
+  const handleBackToList = () => {
+    setShowMobileList(true);
+    setShowMobileDetail(false);
+  };
+
+  // Add resize handler for responsive behavior
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 768) {
+        setShowMobileList(true);
+        setShowMobileDetail(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   return (
     <>
-      <ProgressBar loading={rowsLoading || assignLoading} />
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800;900&family=Lato:wght@400;500;600&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
+        :root {
+          --font-display: 'Bricolage Grotesque', sans-serif;
+          --font-body: 'Lato', sans-serif;
+          --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        @keyframes shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideIn {
+          from { transform: translateX(100%); }
+          to   { transform: translateX(0); }
+        }
+        .project-card-enter {
+          animation: fadeIn 0.2s ease forwards;
+        }
+        .detail-enter {
+          animation: fadeIn 0.25s ease forwards;
+        }
+        .mobile-detail-enter {
+          animation: slideIn 0.3s ease forwards;
+        }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 99px; }
+
+        /* Responsive styles */
+        @media (max-width: 768px) {
+          .deliverable-headers {
+            display: none !important;
+          }
+          .assigned-to {
+            display: none !important;
+          }
+        }
+
+        @media (min-width: 769px) {
+          .mobile-back-button {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       <div
         style={{
           minHeight: "100vh",
-          background: T.bg,
-          color: T.t2,
-          fontFamily: "'DM Sans','Sora',sans-serif",
-          padding: isMobile ? "14px 12px 48px" : "28px 28px 56px",
+          background: "#f5f6f8",
+          fontFamily: "var(--font-body)",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Sora:wght@400;600;700&display=swap');
-          *{box-sizing:border-box;}
-          ::-webkit-scrollbar{width:4px;height:4px}
-          ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:99px}
-          input[type=date]::-webkit-calendar-picker-indicator,
-          input[type=time]::-webkit-calendar-picker-indicator{filter:invert(0.6);cursor:pointer}
-          select option{background:#1a1d2e;color:#f1f5f9}
-          select{max-width:100%;}
-          input,select{font-size:12px !important;}
-          @media(max-width:700px){input,select{font-size:16px !important;}}
-        `}</style>
+        {/* ── Top bar ── */}
+        <header
+          style={{
+            padding: "clamp(12px, 4vw, 18px) clamp(16px, 5vw, 28px) clamp(10px, 3vw, 14px)",
+            background: "#fff",
+            borderBottom: "1px solid #efefef",
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ flex: "0 0 auto" }}>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "clamp(18px, 6vw, 20px)",
+                fontWeight: 900,
+                color: "#0a0a0a",
+                letterSpacing: "-0.04em",
+                fontFamily: "var(--font-display)",
+              }}
+            >
+              Projects
+            </h1>
+            <p
+              style={{
+                margin: "2px 0 0",
+                fontSize: "clamp(10px, 3vw, 11px)",
+                color: "#bbb",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {projects.length} results
+            </p>
+          </div>
 
-        <div style={{ marginBottom: isMobile ? 14 : 22 }}>
-          <h1
+          <div style={{ flex: 1, minWidth: "clamp(200px, 80%, 280px)" }}>
+            <FilterBar orgs={orgs} params={params} onChange={handleParamChange} />
+          </div>
+        </header>
+
+        {/* ── Body ── */}
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            gridTemplateColumns: "clamp(280px, 28%, 340px) 1fr",
+            overflow: "hidden",
+            height: "calc(100vh - 75px)",
+            position: "relative",
+          }}
+          className="main-grid"
+        >
+          {/* List column - hidden on mobile when detail is shown */}
+          <aside
             style={{
-              fontSize: isMobile ? 20 : 24,
-              fontWeight: 700,
-              fontFamily: "'Sora',sans-serif",
-              letterSpacing: "-0.03em",
-              color: T.t1,
-              margin: 0,
+              borderRight: "1px solid #efefef",
+              background: "#fff",
+              overflowY: "auto",
+              padding: "14px 12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              ...(window.innerWidth <= 768 && !showMobileList
+                ? { display: "none" }
+                : {}),
             }}
           >
-            Manager View
-          </h1>
-          <p style={{ color: T.t5, fontSize: 12, margin: "3px 0 0" }}>
-            View member worklogs · manage assignments
-          </p>
+            {listError && (
+              <div
+                style={{
+                  padding: "12px 14px",
+                  background: "#fce4ec",
+                  borderRadius: 10,
+                  color: "#c62828",
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {listError}
+              </div>
+            )}
+
+            {listLoading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  style={{
+                    padding: "13px 15px",
+                    border: "1.5px solid #efefef",
+                    borderRadius: 12,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <Skeleton h="14px" w="75%" />
+                  <Skeleton h="10px" w="50%" />
+                  <Skeleton h="10px" w="60%" />
+                </div>
+              ))
+            ) : projects.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "60px 20px",
+                  color: "#ccc",
+                }}
+              >
+                <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
+                <p style={{ margin: 0, fontSize: 13, fontFamily: "var(--font-body)" }}>
+                  No projects found
+                </p>
+              </div>
+            ) : (
+              projects.map((p, i) => (
+                <div
+                  key={p.id}
+                  className="project-card-enter"
+                  style={{ animationDelay: `${i * 30}ms` }}
+                >
+                  <ProjectCard
+                    project={p}
+                    selected={selectedId === p.id}
+                    onClick={() => handleCardClick(p.id)}
+                  />
+                </div>
+              ))
+            )}
+          </aside>
+
+          {/* Detail column - full width on mobile when shown */}
+          <main
+            ref={detailRef}
+            style={{
+              overflowY: "auto",
+              padding: "clamp(16px, 4vw, 24px) clamp(16px, 5vw, 28px)",
+              background: "#f5f6f8",
+              ...(window.innerWidth <= 768 && showMobileDetail
+                ? { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, background: "#f5f6f8" }
+                : {}),
+            }}
+          >
+            {/* Mobile back button */}
+            {window.innerWidth <= 768 && showMobileDetail && (
+              <button
+                onClick={handleBackToList}
+                className="mobile-back-button"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "white",
+                  border: "1px solid #efefef",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  marginBottom: 16,
+                  cursor: "pointer",
+                  fontFamily: "var(--font-body)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: "#1565c0",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+                Back to projects
+              </button>
+            )}
+
+            {detailLoading ? (
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: 16,
+                  padding: "clamp(20px, 5vw, 28px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                  border: "1px solid #efefef",
+                }}
+              >
+                <Skeleton h="22px" w="55%" />
+                <Skeleton h="12px" w="35%" />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        flex: "1 1 120px",
+                        padding: "14px",
+                        border: "1px solid #efefef",
+                        borderRadius: 12,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <Skeleton h="10px" w="50%" />
+                      <Skeleton h="20px" w="70%" />
+                    </div>
+                  ))}
+                </div>
+                <Skeleton h="5px" />
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} h="44px" r={10} />
+                ))}
+              </div>
+            ) : detail ? (
+              <div
+                className={window.innerWidth <= 768 ? "mobile-detail-enter" : "detail-enter"}
+                style={{
+                  background: "#fff",
+                  borderRadius: 16,
+                  padding: "clamp(20px, 5vw, 28px)",
+                  border: "1px solid #efefef",
+                  boxShadow: "0 2px 20px rgba(0,0,0,0.04)",
+                }}
+              >
+                <DetailPanel project={detail} />
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "100%",
+                  color: "#ccc",
+                  gap: 10,
+                }}
+              >
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 48 48"
+                  fill="none"
+                  style={{ opacity: 0.4 }}
+                >
+                  <rect
+                    x="6"
+                    y="6"
+                    width="36"
+                    height="36"
+                    rx="8"
+                    stroke="#bbb"
+                    strokeWidth="2"
+                  />
+                  <line x1="14" y1="18" x2="34" y2="18" stroke="#bbb" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="14" y1="24" x2="28" y2="24" stroke="#bbb" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="14" y1="30" x2="24" y2="30" stroke="#bbb" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    fontFamily: "var(--font-body)",
+                    color: "#bbb",
+                  }}
+                >
+                  Select a project to view details
+                </p>
+              </div>
+            )}
+          </main>
         </div>
-
-        {isMobile ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {CalendarPanel}
-            {RightPanel}
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "240px 1fr",
-              gap: 20,
-              alignItems: "start",
-            }}
-          >
-            {CalendarPanel}
-            {RightPanel}
-          </div>
-        )}
       </div>
     </>
   );
