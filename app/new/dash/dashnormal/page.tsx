@@ -1,3 +1,4 @@
+// app/new/dashnormal/page.tsx
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -983,6 +984,11 @@ export default function DashboardPage() {
               icon={<WorklogIcon />}
               label="Detailed Worklog"
               href="/new/hour/hournormal"
+            />
+            <NavButton
+              icon={<WorklogIcon />}
+              label="Add your Expense"
+              href="/new/exp/expnormal"
             />
           </div>
         </div>

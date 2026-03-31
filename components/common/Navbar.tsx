@@ -91,9 +91,9 @@ export default function Navbar() {
       {donateLink(isMobile)}
       {aboutLink(isMobile)}
       <NavLink
-        isSelected={isSelected("/new/dash/dashnormal")}
+        isSelected={isSelected("/new/dash/dashadmin")}
         isMobile={isMobile}
-        href="/new/dash/dashnormal"
+        href="/new/dash/dashadmin"
       >
         Dashboard
       </NavLink>

@@ -1,20 +1,40 @@
+// /hooks/use-login.ts
 import { useState, ChangeEvent, FormEvent } from "react";
 import { useLoginMutation } from "@/redux/features/authApiSlice";
 import { toast } from "react-toastify";
 import { useRouter } from "next/navigation";
 import { setAuth } from "@/redux/features/authSlice";
 import { useAppDispatch } from "@/redux/hooks";
+import { OrganisationMembership } from "@/redux/features/membershipApiSlice";
+import { apiSlice } from "@/redux/services/apiSlice"; // adjust path if needed
+
+// Pull the base URL from the same apiSlice config so it's always in sync
+const API_BASE = apiSlice.reducerPath
+  ? (apiSlice as any).endpoints // fallback: read from env
+  : "";
+
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+
+async function fetchIsAdmin(accessToken: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE_URL}/my-memberships/`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return false;
+    const data: OrganisationMembership[] = await res.json();
+    return data.some((m) => m.role === "admin");
+  } catch {
+    return false;
+  }
+}
 
 export default function useLogin() {
   const router = useRouter();
   const [login, { isLoading }] = useLoginMutation();
   const dispatch = useAppDispatch();
 
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  });
-
+  const [formData, setFormData] = useState({ email: "", password: "" });
   const { email, password } = formData;
 
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -27,12 +47,9 @@ export default function useLogin() {
 
     login({ email, password })
       .unwrap()
-      .then((data) => {
-        // Save access and refresh tokens to localStorage
-        localStorage.setItem('access', data.access);
-        localStorage.setItem('refresh', data.refresh); // Save refresh token
-
-        // Dispatch action to update the auth state (if needed)
+      .then(async (data) => {
+        localStorage.setItem("access", data.access);
+        localStorage.setItem("refresh", data.refresh);
         dispatch(setAuth());
 
         toast.success("Logged in successfully", {
@@ -40,52 +57,28 @@ export default function useLogin() {
           pauseOnHover: true,
         });
 
-        // Add delay before routing (3 seconds to match toast duration)
+        const isAdmin = await fetchIsAdmin(data.access);
+        const destination = isAdmin ? "/new/dash/dashadmin" : "/new/dash/dashnormal";
+
         setTimeout(() => {
-          router.push("/new/dash/dashnormal");
+          router.push(destination);
         }, 3000);
       })
       .catch((error) => {
-        const toastOptions = {
-          autoClose: 5000,
-          pauseOnHover: true,
-        };
-
-        // Handle errors based on the error status
+        const toastOptions = { autoClose: 5000, pauseOnHover: true };
         if (error.status === 400) {
-          toast.error(
-            error.data?.detail || "Invalid request format", 
-            toastOptions
-          );
+          toast.error(error.data?.detail || "Invalid request format", toastOptions);
         } else if (error.status === 401) {
-          toast.error(
-            error.data?.detail || "Invalid credentials", 
-            toastOptions
-          );
+          toast.error(error.data?.detail || "Invalid credentials", toastOptions);
         } else if (error.status === 500) {
-          toast.error(
-            "Server error - please try again later", 
-            toastOptions
-          );
-        } else if (error.status === 'FETCH_ERROR' || !error.status) {
-          toast.error(
-            "Network error - please check your connection", 
-            toastOptions
-          );
+          toast.error("Server error - please try again later", toastOptions);
+        } else if (error.status === "FETCH_ERROR" || !error.status) {
+          toast.error("Network error - please check your connection", toastOptions);
         } else {
-          toast.error(
-            "Login failed - please try again", 
-            toastOptions
-          );
+          toast.error("Login failed - please try again", toastOptions);
         }
       });
   };
 
-  return {
-    email,
-    password,
-    isLoading,
-    onChange,
-    onSubmit,
-  };
+  return { email, password, isLoading, onChange, onSubmit };
 }
