@@ -6,19 +6,12 @@ import { useRouter } from "next/navigation";
 import { setAuth } from "@/redux/features/authSlice";
 import { useAppDispatch } from "@/redux/hooks";
 import { OrganisationMembership } from "@/redux/features/membershipApiSlice";
-import { apiSlice } from "@/redux/services/apiSlice"; // adjust path if needed
 
-// Pull the base URL from the same apiSlice config so it's always in sync
-const API_BASE = apiSlice.reducerPath
-  ? (apiSlice as any).endpoints // fallback: read from env
-  : "";
-
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const BASE_URL = process.env.NEXT_PUBLIC_HOST; // ← match your actual env var name
 
 async function fetchIsAdmin(accessToken: string): Promise<boolean> {
   try {
-    const res = await fetch(`${BASE_URL}/my-memberships/`, {
+    const res = await fetch(`${BASE_URL}/api/my-memberships/`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return false;

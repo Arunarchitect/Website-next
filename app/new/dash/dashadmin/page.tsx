@@ -22,13 +22,13 @@ import { OrganisationMembership } from "@/redux/features/membershipApiSlice";
 // Admin guard
 // ---------------------------------------------------------------------------
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const BASE_URL = process.env.NEXT_PUBLIC_HOST;
 
 async function checkIsAdmin(): Promise<boolean> {
   const token = localStorage.getItem("access");
   if (!token) return false;
   try {
-    const res = await fetch(`${BASE_URL}/my-memberships/`, {
+    const res = await fetch(`${BASE_URL}/api/my-memberships/`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return false;
