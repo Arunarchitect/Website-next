@@ -232,6 +232,7 @@ function FSel({
   );
 }
 
+// ─── FIXED: minWidth:0 + overflow:hidden on wrapper so "To" picker never overflows
 function DateInput({
   label,
   value,
@@ -246,7 +247,7 @@ function DateInput({
   max?: string;
 }) {
   return (
-    <div style={{ flex: 1 }}>
+    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
       <div
         style={{
           fontSize: 9,
@@ -267,11 +268,12 @@ function DateInput({
         max={max}
         style={{
           width: "100%",
+          minWidth: 0,
           background: T.panel2,
           border: `1px solid ${value ? T.acMid : T.panel2B}`,
           borderRadius: 7,
-          padding: "7px 10px",
-          fontSize: 11.5,
+          padding: "7px 6px",
+          fontSize: 11,
           color: value ? T.t2 : T.t5,
           outline: "none",
           fontFamily: "'DM Sans',sans-serif",
@@ -847,7 +849,8 @@ export default function RevenueExpensePage() {
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        {/* ─── FIXED: overflow:hidden prevents "To" picker from escaping ── */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 8, overflow: "hidden" }}>
           <DateInput
             label="From"
             value={filterMode === "range" ? rangeFrom : ""}
@@ -879,8 +882,6 @@ export default function RevenueExpensePage() {
             </span>
           </div>
         )}
-
-
       </div>
 
       <Divider />
@@ -1003,7 +1004,6 @@ export default function RevenueExpensePage() {
         </div>
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
           {AVAILABLE_YEARS.map((y) => {
-            // Year highlight only relevant when not overridden by range/calendar modes
             const yearActive = selYear === y && (filterMode === "month" || filterMode === "none");
             return (
               <button
@@ -1546,7 +1546,7 @@ export default function RevenueExpensePage() {
                   </div>
                 ) : (
                   <>
-                    {/* Active filter banner — shows what date scope is active */}
+                    {/* Active filter banner */}
                     {(filterMode !== "none") && (
                       <div
                         style={{
