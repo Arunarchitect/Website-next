@@ -1,10 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unused-expressions */
 /* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   fetchMeta, fetchMemberWorkLogs, fetchAssignments,
   fetchDeliverablesByProject, createAssignment, editAssignment, deleteAssignment,
@@ -23,6 +22,9 @@ function monthRange(year: number, month: number) {
     from: `${year}-${pad(month+1)}-01`,
     to:   `${year}-${pad(month+1)}-${pad(new Date(year, month+1, 0).getDate())}`,
   };
+}
+function yearRange(year: number) {
+  return { from: `${year}-01-01`, to: `${year}-12-31` };
 }
 function useWindowWidth() {
   const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
@@ -50,7 +52,7 @@ const Divider = () => <div style={{ height:1, background:T.divider }} />;
 function ProgressBar({ loading }: { loading: boolean }) {
   const [pct, setPct]         = useState(0);
   const [visible, setVisible] = useState(false);
-  const ref = useRef<NodeJS.Timeout | null>(null);
+  const ref = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (loading) {
       setVisible(true); setPct(0); let c = 0;
@@ -60,11 +62,12 @@ function ProgressBar({ loading }: { loading: boolean }) {
         setPct(c);
       }, 120);
     } else {
-      clearInterval(ref.current!); setPct(100);
+      if (ref.current) clearInterval(ref.current);
+      setPct(100);
       const t = setTimeout(() => { setVisible(false); setPct(0); }, 350);
       return () => clearTimeout(t);
     }
-    return () => clearInterval(ref.current!);
+    return () => { if (ref.current) clearInterval(ref.current); };
   }, [loading]);
   if (!visible) return null;
   return (
@@ -121,7 +124,7 @@ function DeleteModal({ onConfirm, onCancel, message = "Delete this entry?" }: {
   );
 }
 
-// ─── Cascading filter bar ─────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface CascadeFilters {
   org_id:         number;
   member_id:      number;
@@ -131,6 +134,7 @@ interface CascadeFilters {
   date_to:        string;
 }
 
+// ─── Cascade filter bar ───────────────────────────────────────────────────────
 function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLoading, onApplyDateRange }: {
   meta: MetaData;
   filters: CascadeFilters;
@@ -145,15 +149,11 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
     fontFamily:"'DM Sans',sans-serif", appearance:"none" as const, width:"100%",
     transition:"border-color 0.15s",
   };
-  const inp: React.CSSProperties = {
-    ...sel, cursor:"text", colorScheme:"dark" as any,
-  };
+  const inp: React.CSSProperties = { ...sel, cursor:"text", colorScheme:"dark" as any };
 
-  const visibleMembers = meta.members;
   const visibleProjects = filters.org_id
     ? meta.projects.filter(p => p.organisation_id === filters.org_id)
     : meta.projects;
-  const visibleDelivs = deliverableOptions;
 
   const hasDateFilter = !!(filters.date_from || filters.date_to);
 
@@ -161,83 +161,44 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
     <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:10 }}>
       <div style={{ fontSize:11, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase" }}>Filters</div>
 
-      {/* ── Date range row ── */}
+      {/* Date range */}
       <div>
         <div style={{ fontSize:10, color:T.t5, marginBottom:6, textTransform:"uppercase", letterSpacing:"0.05em", fontWeight:600 }}>Date Range</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
           <div>
-            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>From</div>
-            <input
-              type="date"
-              value={filters.date_from}
-              onChange={e => onChange({ date_from: e.target.value })}
-              style={inp}
-            />
+            <div style={{ fontSize:10, color:T.t5, marginBottom:4 }}>From</div>
+            <input type="date" value={filters.date_from} onChange={e => onChange({ date_from: e.target.value })} style={inp} />
           </div>
           <div>
-            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>To</div>
-            <input
-              type="date"
-              value={filters.date_to}
-              onChange={e => onChange({ date_to: e.target.value })}
-              style={inp}
-            />
+            <div style={{ fontSize:10, color:T.t5, marginBottom:4 }}>To</div>
+            <input type="date" value={filters.date_to} onChange={e => onChange({ date_to: e.target.value })} style={inp} />
           </div>
         </div>
         <div style={{ display:"flex", gap:6, marginTop:8 }}>
-          <button
-            onClick={onApplyDateRange}
-            disabled={!filters.date_from && !filters.date_to}
-            style={{
-              flex:1, padding:"7px 0", borderRadius:7, border:"none",
-              background: (filters.date_from || filters.date_to) ? T.ac : T.panel2B,
-              color: (filters.date_from || filters.date_to) ? "#fff" : T.t5,
-              fontSize:12, fontWeight:600, cursor: (filters.date_from || filters.date_to) ? "pointer" : "default",
-              fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s",
-            }}
-          >
+          <button onClick={onApplyDateRange} disabled={!filters.date_from && !filters.date_to}
+            style={{ flex:1, padding:"7px 0", borderRadius:7, border:"none", background:(filters.date_from||filters.date_to)?T.ac:T.panel2B, color:(filters.date_from||filters.date_to)?"#fff":T.t5, fontSize:12, fontWeight:600, cursor:(filters.date_from||filters.date_to)?"pointer":"default", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s" }}>
             Apply Date Range
           </button>
           {hasDateFilter && (
-            <button
-              onClick={() => { onChange({ date_from:"", date_to:"" }); onApplyDateRange(); }}
-              style={{
-                padding:"7px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`,
-                background:"transparent", color:T.red, fontSize:12,
-                cursor:"pointer", fontFamily:"'DM Sans',sans-serif",
-              }}
-            >
-              ✕
-            </button>
+            <button onClick={() => { onChange({ date_from:"", date_to:"" }); onApplyDateRange(); }}
+              style={{ padding:"7px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:"transparent", color:T.red, fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>✕</button>
           )}
         </div>
-
         {/* Quick presets */}
         <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:6 }}>
           {[
-            { label:"This week", fn: () => {
-              const { from, to } = currentWeekRange();
-              onChange({ date_from: from, date_to: to });
-            }},
-            { label:"This month", fn: () => {
-              const now = new Date();
-              const { from, to } = (() => {
-                const y = now.getFullYear(), m = now.getMonth();
-                return { from: `${y}-${pad(m+1)}-01`, to: `${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}` };
-              })();
-              onChange({ date_from: from, date_to: to });
-            }},
-            { label:"Last month", fn: () => {
-              const now = new Date();
-              const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-              const y = d.getFullYear(), m = d.getMonth();
-              onChange({ date_from: `${y}-${pad(m+1)}-01`, date_to: `${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}` });
-            }},
+            { label:"This week",  fn: () => { const {from,to}=currentWeekRange(); onChange({date_from:from,date_to:to}); }},
+            { label:"This month", fn: () => { const n=new Date(),y=n.getFullYear(),m=n.getMonth(); onChange({date_from:`${y}-${pad(m+1)}-01`,date_to:`${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}`}); }},
+            { label:"Last month", fn: () => { const n=new Date(),d=new Date(n.getFullYear(),n.getMonth()-1,1),y=d.getFullYear(),m=d.getMonth(); onChange({date_from:`${y}-${pad(m+1)}-01`,date_to:`${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}`}); }},
+            { label:"This year",  fn: () => { const y=new Date().getFullYear(); onChange({date_from:`${y}-01-01`,date_to:`${y}-12-31`}); }},
+            { label:"Last year",  fn: () => { const y=new Date().getFullYear()-1; onChange({date_from:`${y}-01-01`,date_to:`${y}-12-31`}); }},
+            // FIX: "All time" now clears dates then immediately triggers the load via onApplyDateRange
+            { label:"All time",   fn: () => { onChange({date_from:"",date_to:""}); }},
           ].map(({ label, fn }) => (
             <button key={label} onClick={() => { fn(); setTimeout(onApplyDateRange, 0); }}
               style={{ padding:"4px 9px", borderRadius:5, border:`1px solid ${T.panel2B}`, background:T.panel2, color:T.t4, fontSize:10, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.acText; (e.currentTarget as HTMLElement).style.borderColor = T.acMid; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; (e.currentTarget as HTMLElement).style.borderColor = T.panel2B; }}>
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color=T.acText; (e.currentTarget as HTMLElement).style.borderColor=T.acMid; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color=T.t4; (e.currentTarget as HTMLElement).style.borderColor=T.panel2B; }}>
               {label}
             </button>
           ))}
@@ -246,25 +207,22 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
 
       <Divider />
 
-      {/* ── Cascade selects ── */}
+      {/* Cascade selects */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:8 }}>
-        {/* Org */}
         <div>
           <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
-          <select value={filters.org_id} onChange={e => onChange({ org_id:Number(e.target.value), member_id:0, project_id:0, deliverable_id:0 })} style={sel}>
+          <select value={filters.org_id} onChange={e => onChange({ org_id:Number(e.target.value), project_id:0, deliverable_id:0 })} style={sel}>
             <option value={0}>All</option>
             {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </div>
-        {/* Member */}
         <div>
           <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Member</div>
           <select value={filters.member_id} onChange={e => onChange({ member_id:Number(e.target.value) })} style={sel}>
             <option value={0}>All</option>
-            {visibleMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {meta.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </div>
-        {/* Project */}
         <div>
           <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
           <select value={filters.project_id} onChange={e => onChange({ project_id:Number(e.target.value), deliverable_id:0 })} style={sel}>
@@ -272,7 +230,6 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
             {visibleProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
-        {/* Deliverable */}
         <div>
           <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
           {delivLoading ? (
@@ -280,37 +237,23 @@ function CascadeFilterBar({ meta, filters, onChange, deliverableOptions, delivLo
           ) : (
             <select value={filters.deliverable_id} onChange={e => onChange({ deliverable_id:Number(e.target.value) })} style={sel}>
               <option value={0}>All</option>
-              {visibleDelivs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              {deliverableOptions.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           )}
         </div>
       </div>
 
-      {/* Active filter chips */}
-      {(filters.org_id || filters.member_id || filters.project_id || filters.deliverable_id || filters.date_from || filters.date_to) ? (
+      {/* Active chips */}
+      {(filters.org_id||filters.member_id||filters.project_id||filters.deliverable_id||filters.date_from||filters.date_to) ? (
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-          {filters.date_from && (
-            <Chip label={`From: ${filters.date_from}`} onRemove={() => { onChange({ date_from:"" }); onApplyDateRange(); }} />
-          )}
-          {filters.date_to && (
-            <Chip label={`To: ${filters.date_to}`} onRemove={() => { onChange({ date_to:"" }); onApplyDateRange(); }} />
-          )}
-          {filters.org_id > 0 && (
-            <Chip label={meta.organisations.find(o => o.id===filters.org_id)?.name ?? ""} onRemove={() => onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0})} />
-          )}
-          {filters.member_id > 0 && (
-            <Chip label={meta.members.find(m => m.id===filters.member_id)?.name ?? ""} onRemove={() => onChange({member_id:0})} />
-          )}
-          {filters.project_id > 0 && (
-            <Chip label={meta.projects.find(p => p.id===filters.project_id)?.name ?? ""} onRemove={() => onChange({project_id:0,deliverable_id:0})} />
-          )}
-          {filters.deliverable_id > 0 && (
-            <Chip label={visibleDelivs.find(d => d.id===filters.deliverable_id)?.name ?? ""} onRemove={() => onChange({deliverable_id:0})} />
-          )}
+          {filters.date_from && <Chip label={`From: ${filters.date_from}`} onRemove={() => { onChange({date_from:""}); onApplyDateRange(); }} />}
+          {filters.date_to   && <Chip label={`To: ${filters.date_to}`}     onRemove={() => { onChange({date_to:""});   onApplyDateRange(); }} />}
+          {filters.org_id > 0         && <Chip label={meta.organisations.find(o=>o.id===filters.org_id)?.name??""} onRemove={()=>onChange({org_id:0,project_id:0,deliverable_id:0})} />}
+          {filters.member_id > 0      && <Chip label={meta.members.find(m=>m.id===filters.member_id)?.name??""} onRemove={()=>onChange({member_id:0})} />}
+          {filters.project_id > 0     && <Chip label={meta.projects.find(p=>p.id===filters.project_id)?.name??""} onRemove={()=>onChange({project_id:0,deliverable_id:0})} />}
+          {filters.deliverable_id > 0 && <Chip label={deliverableOptions.find(d=>d.id===filters.deliverable_id)?.name??""} onRemove={()=>onChange({deliverable_id:0})} />}
           <button onClick={() => { onChange({org_id:0,member_id:0,project_id:0,deliverable_id:0,date_from:"",date_to:""}); onApplyDateRange(); }}
-            style={{ fontSize:11, color:T.red, background:"none", border:"none", cursor:"pointer", padding:"2px 6px" }}>
-            Clear all
-          </button>
+            style={{ fontSize:11, color:T.red, background:"none", border:"none", cursor:"pointer", padding:"2px 6px" }}>Clear all</button>
         </div>
       ) : null}
     </div>
@@ -326,7 +269,7 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   );
 }
 
-// ─── Worklog view card (read-only) ────────────────────────────────────────────
+// ─── Worklog card ─────────────────────────────────────────────────────────────
 function WorklogViewCard({ row }: { row: MemberWorkLogEntry }) {
   return (
     <div style={{ background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:12, padding:"12px 14px" }}>
@@ -357,7 +300,7 @@ function WorklogViewCard({ row }: { row: MemberWorkLogEntry }) {
   );
 }
 
-// ─── Assignment card (editable) ───────────────────────────────────────────────
+// ─── Assignment card ──────────────────────────────────────────────────────────
 function AssignmentCard({ assignment, meta, onSave, onDelete }: {
   assignment: AssignmentEntry; meta: MetaData;
   onSave: (id: number, data: AssignmentEntry) => void;
@@ -383,8 +326,7 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
   }
 
   async function startEdit() {
-    setEditing(true);
-    setLoadingDelivs(true);
+    setEditing(true); setLoadingDelivs(true);
     try { setDeliverables(await fetchDeliverablesByProject(assignment.project_id)); }
     finally { setLoadingDelivs(false); }
   }
@@ -394,14 +336,10 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
     setSaving(true); setError("");
     try {
       const updated = await editAssignment(assignment.id, {
-        name:        draft.name,
-        deliverable: draft.deliverable_id,
-        assigned_to: draft.assigned_to_id,
-        start_date:  draft.start_date || null,
-        due_date:    draft.due_date || null,
+        name: draft.name, deliverable: draft.deliverable_id,
+        assigned_to: draft.assigned_to_id, start_date: draft.start_date || null, due_date: draft.due_date || null,
       });
-      onSave(assignment.id, updated);
-      setEditing(false); setFlash(true);
+      onSave(assignment.id, updated); setEditing(false); setFlash(true);
       setTimeout(() => setFlash(false), 900);
     } catch(e:any) { setError(e.message); }
     finally { setSaving(false); }
@@ -409,12 +347,12 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
 
   const inp: React.CSSProperties = { background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:6, padding:"7px 10px", fontSize:12, color:T.t2, width:"100%", outline:"none", fontFamily:"'DM Sans',sans-serif", boxSizing:"border-box" };
   const sel: React.CSSProperties = { ...inp, cursor:"pointer", appearance:"none" as const };
-  const bg     = flash ? "rgba(16,185,129,0.08)" : editing ? "rgba(99,102,241,0.06)" : T.panel2;
-  const border = flash ? `1px solid ${T.green}` : editing ? `1px solid ${T.acMid}` : `1px solid ${T.panel2B}`;
+  const bg     = flash?"rgba(16,185,129,0.08)":editing?"rgba(99,102,241,0.06)":T.panel2;
+  const border = flash?`1px solid ${T.green}`:editing?`1px solid ${T.acMid}`:`1px solid ${T.panel2B}`;
 
   return (
     <>
-      {showDel && <DeleteModal message="Delete this assignment?" onConfirm={() => { setShowDel(false); deleteAssignment(assignment.id).then(() => onDelete(assignment.id)).catch(e => setError(e.message)); }} onCancel={() => setShowDel(false)} />}
+      {showDel && <DeleteModal message="Delete this assignment?" onConfirm={() => { setShowDel(false); deleteAssignment(assignment.id).then(()=>onDelete(assignment.id)).catch(e=>setError(e.message)); }} onCancel={()=>setShowDel(false)} />}
       <div style={{ background:bg, border, borderRadius:12, padding:"12px 14px", transition:"all 0.15s" }}>
         <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:editing?10:0 }}>
           <div style={{ display:"flex", gap:4, flexShrink:0, paddingTop:2 }}>
@@ -433,14 +371,14 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
               <>
                 <button onClick={startEdit} title="Edit"
                   style={{ width:30, height:30, borderRadius:8, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = T.acLight; (e.currentTarget as HTMLElement).style.color = T.acText; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = T.t5; }}>
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background=T.acLight; (e.currentTarget as HTMLElement).style.color=T.acText; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background="transparent"; (e.currentTarget as HTMLElement).style.color=T.t5; }}>
                   <svg width={12} height={12} viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round"/></svg>
                 </button>
-                <button onClick={() => setShowDel(true)} title="Delete"
+                <button onClick={()=>setShowDel(true)} title="Delete"
                   style={{ width:30, height:30, borderRadius:8, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = T.redBg; (e.currentTarget as HTMLElement).style.color = T.red; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = T.t5; }}>
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background=T.redBg; (e.currentTarget as HTMLElement).style.color=T.red; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background="transparent"; (e.currentTarget as HTMLElement).style.color=T.t5; }}>
                   <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
                     <path d="M2 4h10M5 4V2.5h4V4M5.5 4v7M8.5 4v7M3 4l.5 7.5a1 1 0 001 .5h5a1 1 0 001-.5L11 4" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
@@ -448,52 +386,49 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
               </>
             )}
           </div>
-
           <div style={{ flex:1, minWidth:0 }}>
             {editing ? (
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 <div>
                   <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Task Name</div>
-                  <input value={draft.name} onChange={e => patch({name:e.target.value})} style={inp} placeholder="Task name…" />
+                  <input value={draft.name} onChange={e=>patch({name:e.target.value})} style={inp} placeholder="Task name…" />
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                   <div>
                     <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
-                    <select value={draft.organisation_id} onChange={e => patch({organisation_id:Number(e.target.value)})} style={sel}>
-                      {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    <select value={draft.organisation_id} onChange={e=>patch({organisation_id:Number(e.target.value)})} style={sel}>
+                      {meta.organisations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
-                    <select value={draft.project_id} onChange={e => handleProjectChange(Number(e.target.value))} style={sel}>
-                      {meta.projects.filter(p => p.organisation_id === draft.organisation_id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    <select value={draft.project_id} onChange={e=>handleProjectChange(Number(e.target.value))} style={sel}>
+                      {meta.projects.filter(p=>p.organisation_id===draft.organisation_id).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
-                  {loadingDelivs
-                    ? <div style={{ fontSize:11, color:T.t5 }}>Loading…</div>
-                    : <select value={deliverables.some(d => d.id === draft.deliverable_id) ? draft.deliverable_id : ""} onChange={e => patch({deliverable_id:Number(e.target.value)})} style={sel}>
-                        {!deliverables.some(d => d.id === draft.deliverable_id) && <option value="">— select —</option>}
-                        {deliverables.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                      </select>
-                  }
+                  {loadingDelivs ? <div style={{ fontSize:11, color:T.t5 }}>Loading…</div>
+                    : <select value={deliverables.some(d=>d.id===draft.deliverable_id)?draft.deliverable_id:""} onChange={e=>patch({deliverable_id:Number(e.target.value)})} style={sel}>
+                        {!deliverables.some(d=>d.id===draft.deliverable_id)&&<option value="">— select —</option>}
+                        {deliverables.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>}
                 </div>
                 <div>
                   <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assigned To</div>
-                  <select value={draft.assigned_to_id} onChange={e => patch({assigned_to_id:Number(e.target.value)})} style={sel}>
-                    {meta.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  <select value={draft.assigned_to_id} onChange={e=>patch({assigned_to_id:Number(e.target.value)})} style={sel}>
+                    {meta.members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                   <div>
                     <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Date</div>
-                    <input type="date" value={draft.start_date??""} onChange={e => patch({start_date:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+                    <input type="date" value={draft.start_date??""} onChange={e=>patch({start_date:e.target.value})} style={{...inp,colorScheme:"dark"}} />
                   </div>
                   <div>
                     <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due Date</div>
-                    <input type="date" value={draft.due_date??""} onChange={e => patch({due_date:e.target.value})} style={{...inp, colorScheme:"dark"}} />
+                    <input type="date" value={draft.due_date??""} onChange={e=>patch({due_date:e.target.value})} style={{...inp,colorScheme:"dark"}} />
                   </div>
                 </div>
                 {error && <div style={{ fontSize:11, color:T.red }}>⚠ {error}</div>}
@@ -503,22 +438,9 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
                 <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>{assignment.name}</div>
                 <div style={{ fontSize:11, color:T.t5 }}>{assignment.organisation_name} · {assignment.project_name} · {assignment.deliverable_name}</div>
                 <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginTop:4 }}>
-                  <div>
-                    <span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assigned to: </span>
-                    <span style={{ fontSize:12, color:T.acText, fontWeight:500 }}>{assignment.assigned_to_name}</span>
-                  </div>
-                  {assignment.start_date && (
-                    <div>
-                      <span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start: </span>
-                      <span style={{ fontSize:12, color:T.t3 }}>{assignment.start_date}</span>
-                    </div>
-                  )}
-                  {assignment.due_date && (
-                    <div>
-                      <span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due: </span>
-                      <span style={{ fontSize:12, color:T.amber, fontWeight:500 }}>{assignment.due_date}</span>
-                    </div>
-                  )}
+                  <div><span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assigned to: </span><span style={{ fontSize:12, color:T.acText, fontWeight:500 }}>{assignment.assigned_to_name}</span></div>
+                  {assignment.start_date && <div><span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start: </span><span style={{ fontSize:12, color:T.t3 }}>{assignment.start_date}</span></div>}
+                  {assignment.due_date   && <div><span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due: </span><span style={{ fontSize:12, color:T.amber, fontWeight:500 }}>{assignment.due_date}</span></div>}
                 </div>
               </div>
             )}
@@ -540,9 +462,8 @@ function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
   const [loadingDelivs, setLoadingDelivs] = useState(false);
   const [error,         setError]         = useState("");
 
-  useEffect(() => { setDraft(d => ({...d, assigned_to:selectedMemberId})); }, [selectedMemberId]);
-
-  function patch(p: Partial<typeof draft>) { setDraft(d => ({...d, ...p})); }
+  useEffect(() => { setDraft(d=>({...d,assigned_to:selectedMemberId})); }, [selectedMemberId]);
+  function patch(p: Partial<typeof draft>) { setDraft(d=>({...d,...p})); }
 
   async function handleProjectChange(projId: number) {
     patch({ project_id:projId, deliverable_id:0 });
@@ -552,18 +473,10 @@ function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
   }
 
   async function handleAdd() {
-    if (!draft.name.trim() || !draft.deliverable_id || !draft.assigned_to) {
-      setError("Name, deliverable and assigned member are required."); return;
-    }
+    if (!draft.name.trim()||!draft.deliverable_id||!draft.assigned_to) { setError("Name, deliverable and assigned member are required."); return; }
     setSaving(true); setError("");
     try {
-      const created = await createAssignment({
-        name:        draft.name,
-        deliverable: draft.deliverable_id,
-        assigned_to: draft.assigned_to,
-        start_date:  draft.start_date || undefined,
-        due_date:    draft.due_date || undefined,
-      });
+      const created = await createAssignment({ name:draft.name, deliverable:draft.deliverable_id, assigned_to:draft.assigned_to, start_date:draft.start_date||undefined, due_date:draft.due_date||undefined });
       onAdd(created);
       setDraft({ name:"", organisation_id:meta.organisations[0]?.id??0, project_id:0, deliverable_id:0, assigned_to:selectedMemberId, start_date:"", due_date:"" });
       setDeliverables([]); setOpen(false);
@@ -571,13 +484,13 @@ function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
     finally { setSaving(false); }
   }
 
-  const filteredProjects = meta.projects.filter(p => p.organisation_id === draft.organisation_id);
+  const filteredProjects = meta.projects.filter(p=>p.organisation_id===draft.organisation_id);
   const inp: React.CSSProperties = { background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:7, padding:"8px 10px", fontSize:12, color:T.t2, width:"100%", outline:"none", fontFamily:"'DM Sans',sans-serif", boxSizing:"border-box" };
   const sel: React.CSSProperties = { ...inp, cursor:"pointer", appearance:"none" as const };
 
   return (
     <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:14, overflow:"hidden" }}>
-      <button onClick={() => setOpen(o => !o)}
+      <button onClick={()=>setOpen(o=>!o)}
         style={{ width:"100%", padding:"13px 16px", background:"transparent", border:"none", color:T.acText, fontSize:13, fontWeight:600, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:8, fontFamily:"'DM Sans',sans-serif" }}>
         <svg width={14} height={14} viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth={2} strokeLinecap="round"/></svg>
         Assign Task
@@ -587,57 +500,42 @@ function AddAssignmentForm({ meta, selectedMemberId, onAdd }: {
       </button>
       {open && (
         <div style={{ padding:"0 16px 16px", display:"flex", flexDirection:"column", gap:10 }}>
-          <div>
-            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Task Name</div>
-            <input value={draft.name} onChange={e => patch({name:e.target.value})} placeholder="Task name…" style={inp} />
-          </div>
+          <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Task Name</div><input value={draft.name} onChange={e=>patch({name:e.target.value})} placeholder="Task name…" style={inp} /></div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            <div>
-              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
-              <select value={draft.organisation_id} onChange={e => patch({organisation_id:Number(e.target.value),project_id:0,deliverable_id:0})} style={sel}>
+            <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
+              <select value={draft.organisation_id} onChange={e=>patch({organisation_id:Number(e.target.value),project_id:0,deliverable_id:0})} style={sel}>
                 <option value={0}>— select —</option>
-                {meta.organisations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                {meta.organisations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
             </div>
-            <div>
-              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
-              <select value={draft.project_id} onChange={e => handleProjectChange(Number(e.target.value))} style={sel}>
+            <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
+              <select value={draft.project_id} onChange={e=>handleProjectChange(Number(e.target.value))} style={sel}>
                 <option value={0}>— select —</option>
-                {filteredProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {filteredProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
           </div>
-          <div>
-            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
-            {loadingDelivs
-              ? <div style={{ fontSize:12, color:T.t5 }}>Loading…</div>
-              : <select value={draft.deliverable_id} onChange={e => patch({deliverable_id:Number(e.target.value)})} style={sel}>
+          <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
+            {loadingDelivs ? <div style={{ fontSize:12, color:T.t5 }}>Loading…</div>
+              : <select value={draft.deliverable_id} onChange={e=>patch({deliverable_id:Number(e.target.value)})} style={sel}>
                   <option value={0}>— select —</option>
-                  {deliverables.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-            }
+                  {deliverables.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>}
           </div>
-          <div>
-            <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assign To</div>
-            <select value={draft.assigned_to} onChange={e => patch({assigned_to:Number(e.target.value)})} style={sel}>
+          <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assign To</div>
+            <select value={draft.assigned_to} onChange={e=>patch({assigned_to:Number(e.target.value)})} style={sel}>
               <option value={0}>— select member —</option>
-              {meta.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {meta.members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            <div>
-              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Date</div>
-              <input type="date" value={draft.start_date} onChange={e => patch({start_date:e.target.value})} style={{...inp, colorScheme:"dark"}} />
-            </div>
-            <div>
-              <div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due Date</div>
-              <input type="date" value={draft.due_date} onChange={e => patch({due_date:e.target.value})} style={{...inp, colorScheme:"dark"}} />
-            </div>
+            <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Date</div><input type="date" value={draft.start_date} onChange={e=>patch({start_date:e.target.value})} style={{...inp,colorScheme:"dark"}} /></div>
+            <div><div style={{ fontSize:10, color:T.t5, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due Date</div><input type="date" value={draft.due_date} onChange={e=>patch({due_date:e.target.value})} style={{...inp,colorScheme:"dark"}} /></div>
           </div>
           {error && <div style={{ fontSize:12, color:T.red, padding:"6px 10px", background:T.redBg, borderRadius:7 }}>⚠ {error}</div>}
           <button onClick={handleAdd} disabled={saving}
             style={{ padding:"10px 0", borderRadius:9, border:"none", background:T.ac, color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", opacity:saving?0.6:1 }}>
-            {saving ? "Saving…" : "Create Assignment"}
+            {saving?"Saving…":"Create Assignment"}
           </button>
         </div>
       )}
@@ -651,20 +549,24 @@ export default function ManagerPage() {
   const isMobile = w < 700;
   const today    = new Date();
 
-  // ── Calendar ──────────────────────────────────────────────────────────────
+  // Calendar state (display only — doesn't trigger API calls directly)
   const [calYear,  setCalYear]  = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
   const [selDates, setSelDates] = useState<Set<string>>(new Set());
   const [selMonth, setSelMonth] = useState<number|null>(null);
   const [selYear,  setSelYear]  = useState<number|null>(null);
 
-  // ── Shared cascade filters (including date range) ─────────────────────────
+  // ── Shared filters (single source of truth for all API calls) ────────────
   const [filters, setFilters] = useState<CascadeFilters>({
     org_id:0, member_id:0, project_id:0, deliverable_id:0,
     date_from:"", date_to:"",
   });
   const [filterDelivs,    setFilterDelivs]    = useState<DeliverableOption[]>([]);
   const [filterDelivLoad, setFilterDelivLoad] = useState(false);
+
+  // Keep a ref so loadRows always has latest filters without stale closure
+  const filtersRef = useRef(filters);
+  useEffect(() => { filtersRef.current = filters; }, [filters]);
 
   function updateFilters(partial: Partial<CascadeFilters>) {
     setFilters(prev => ({ ...prev, ...partial }));
@@ -679,27 +581,39 @@ export default function ManagerPage() {
       .finally(() => setFilterDelivLoad(false));
   }, [filters.project_id]);
 
-  // ── Data ──────────────────────────────────────────────────────────────────
+  // ── Data state ────────────────────────────────────────────────────────────
   const [meta,          setMeta]          = useState<MetaData>({organisations:[],projects:[],members:[]});
   const [rows,          setRows]          = useState<MemberWorkLogEntry[]>([]);
   const [totalPages,    setTotalPages]    = useState(1);
   const [totalCount,    setTotalCount]    = useState(0);
   const [currentPage,   setCurrentPage]  = useState(1);
+  const [totalMinutes,  setTotalMinutes] = useState(0);
   const [assignments,   setAssignments]  = useState<AssignmentEntry[]>([]);
   const [loading,       setLoading]      = useState(true);
   const [rowsLoading,   setRowsLoading]  = useState(false);
   const [assignLoading, setAssignLoading]= useState(false);
   const [error,         setError]        = useState<string|null>(null);
 
-  const dateRangeRef = useRef<{from?:string;to?:string}>({});
-
-  async function loadRows(params:{from?:string;to?:string;page?:number;member_id?:number}) {
-    dateRangeRef.current = {from:params.from, to:params.to};
+  // ── Core load function — always uses filtersRef for latest values ─────────
+  async function loadRows(overrides?: Partial<CascadeFilters & { page: number }>) {
+    const f = { ...filtersRef.current, ...overrides };
+    const page = overrides?.page ?? 1;
     setRowsLoading(true);
     try {
-      const data = await fetchMemberWorkLogs(params);
-      setRows(data.results); setTotalPages(data.pages);
-      setTotalCount(data.count); setCurrentPage(data.page);
+      const data = await fetchMemberWorkLogs({
+        from:           f.date_from || undefined,
+        to:             f.date_to   || undefined,
+        member_id:      f.member_id  || undefined,
+        org_id:         f.org_id     || undefined,
+        project_id:     f.project_id     || undefined,
+        deliverable_id: f.deliverable_id || undefined,
+        page,
+      });
+      setRows(data.results);
+      setTotalPages(data.pages);
+      setTotalCount(data.count);
+      setCurrentPage(data.page);
+      setTotalMinutes(data.total_minutes ?? 0);
     } catch(e:any) { setError(e.message); }
     finally { setRowsLoading(false); }
   }
@@ -714,123 +628,127 @@ export default function ManagerPage() {
   // Initial load — default to current week
   useEffect(() => {
     const {from, to} = currentWeekRange();
-    // Pre-fill filter date inputs to match initial load
-    setFilters(f => ({ ...f, date_from: from, date_to: to }));
+    const initialFilters = { ...filters, date_from: from, date_to: to };
+    setFilters(initialFilters);
+    filtersRef.current = initialFilters;
     Promise.all([fetchMeta(), fetchMemberWorkLogs({from, to, page:1}), fetchAssignments()])
       .then(([m, worklogs, assigns]) => {
         setMeta(m);
         setRows(worklogs.results); setTotalPages(worklogs.pages);
         setTotalCount(worklogs.count); setCurrentPage(1);
+        setTotalMinutes(worklogs.total_minutes ?? 0);
         setAssignments(assigns);
-        dateRangeRef.current = {from, to};
         setLoading(false);
       }).catch(e => { setError(e.message); setLoading(false); });
   }, []);
 
-  // ── Date range resolution (priority: date filter > calendar > default week) ─
-  // Returns the effective from/to for a load call
-  function resolveRange(overrideFrom?: string, overrideTo?: string): {from:string;to:string} {
-    const f = overrideFrom ?? filters.date_from;
-    const t = overrideTo   ?? filters.date_to;
-
-    // 1. Explicit date range filter wins
-    if (f || t) return { from: f || "", to: t || "" };
-
-    // 2. Calendar date selections
-    if (selDates.size > 0) {
-      const s = Array.from(selDates).sort();
-      return { from: s[0], to: s[s.length-1] };
-    }
-
-    // 3. Calendar month/year selection
-    if (selMonth !== null || selYear !== null) {
-      const year  = selYear  ?? today.getFullYear();
-      const month = selMonth ?? today.getMonth();
-      return monthRange(year, month);
-    }
-
-    // 4. Default: current week
-    return currentWeekRange();
-  }
-
-  // Called when user clicks "Apply Date Range" button
-  function applyDateRange() {
-    // Clear calendar selections so date range takes over
-    setSelDates(new Set()); setSelMonth(null); setSelYear(null);
-    const { from, to } = resolveRange(filters.date_from, filters.date_to);
-    loadRows({ from, to, page:1, member_id: filters.member_id || undefined });
-  }
-
-  // Refetch worklogs when calendar selections change (calendar still works independently)
+  // ── Re-fetch whenever cascade (non-date) filters change ──────────────────
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
-    // Only react to calendar changes when no explicit date range filter is active
-    if (filters.date_from || filters.date_to) return;
-    const { from, to } = resolveRange();
-    loadRows({ from, to, page:1, member_id: filters.member_id || undefined });
-  }, [selDates, selMonth, selYear]);
+    const t = setTimeout(() => {
+      loadRows();
+      loadAssignments(filters.member_id || undefined);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [
+    filters.org_id, filters.member_id, filters.project_id, filters.deliverable_id,
+  ]);
 
-  // Refetch when member filter changes
-  useEffect(() => {
-    if (isFirstRender.current) return;
-    const { from, to } = resolveRange();
-    loadRows({ from, to, page:1, member_id: filters.member_id || undefined });
-    loadAssignments(filters.member_id || undefined);
-  }, [filters.member_id]);
+  // Called explicitly when user presses "Apply Date Range", a preset, or calendar nav.
+  // FIX: reads directly from filtersRef so it always sees the latest dates even
+  // when called via setTimeout(onApplyDateRange, 0) from inside CascadeFilterBar.
+  const applyDateRange = useCallback(() => {
+    setSelDates(new Set()); setSelMonth(null); setSelYear(null);
+    loadRows();
+  }, []);
 
-  function goToPage(p:number) {
-    const { from, to } = resolveRange();
-    loadRows({ from, to, page:p, member_id: filters.member_id || undefined });
-  }
+  function goToPage(p: number) { loadRows({ page: p }); }
 
-  const activeDates  = useMemo(() => new Set(rows.map(r => r.end_date_fmt ?? r.start_date_fmt).filter(Boolean) as string[]), [rows]);
-  const totalMinutes = useMemo(() => rows.reduce((s,r) => {
-    if (!r.start_time || !r.end_time) return s;
-    return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
-  }, 0), [rows]);
-  const availableYears = useMemo(() => Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort(), [rows]);
-  const hasCalFilter   = selDates.size > 0 || selMonth !== null || selYear !== null;
-  const hasDateFilter  = !!(filters.date_from || filters.date_to);
+  const activeDates = useMemo(() =>
+    new Set(rows.map(r => r.end_date_fmt ?? r.start_date_fmt).filter(Boolean) as string[]),
+  [rows]);
 
-  // ── Client-side filtering ─────────────────────────────────────────────────
-  const filteredRows = useMemo(() => rows.filter(r => {
-    if (filters.org_id         && r.organisation_id !== filters.org_id)         return false;
-    if (filters.project_id     && r.project_id      !== filters.project_id)     return false;
-    if (filters.deliverable_id && r.deliverable      !== filters.deliverable_id) return false;
-    return true;
-  }), [rows, filters]);
+  const hasCalFilter  = selDates.size > 0 || selMonth !== null || selYear !== null;
+  const hasDateFilter = !!(filters.date_from || filters.date_to);
 
-  const filteredAssignments = useMemo(() => assignments.filter(a => {
-    if (filters.org_id         && a.organisation_id  !== filters.org_id)         return false;
-    if (filters.member_id      && a.assigned_to_id   !== filters.member_id)      return false;
-    if (filters.project_id     && a.project_id       !== filters.project_id)     return false;
-    if (filters.deliverable_id && a.deliverable_id   !== filters.deliverable_id) return false;
-    return true;
-  }), [assignments, filters]);
-
-  function saveAssignment(id:number, data:AssignmentEntry) { setAssignments(p => p.map(a => a.id===id ? data : a)); }
-  function deleteAssignmentLocal(id:number) { setAssignments(p => p.filter(a => a.id!==id)); }
-  function addAssignment(a:AssignmentEntry) { setAssignments(p => [a, ...p]); }
-
-  function toggleDate(iso:string) {
-    // Clear date range filter when using calendar
-    if (filters.date_from || filters.date_to) {
-      updateFilters({ date_from:"", date_to:"" });
+  // ── Calendar helpers ──────────────────────────────────────────────────────
+  function toggleDate(iso: string) {
+    // Clear text-input date range when user clicks calendar days
+    if (filters.date_from || filters.date_to) updateFilters({ date_from:"", date_to:"" });
+    const n = new Set(selDates);
+    if (n.has(iso)) { n.delete(iso); } else { n.add(iso); }
+    setSelDates(n);
+    if (n.size > 0) {
+      const sorted = Array.from(n).sort();
+      // FIX: update ref first, then state, then load — no duplicate key
+      filtersRef.current = { ...filtersRef.current, date_from: sorted[0], date_to: sorted[sorted.length-1] };
+      setFilters(f => ({ ...f, date_from: sorted[0], date_to: sorted[sorted.length-1] }));
+      setTimeout(() => loadRows(), 0);
     }
-    setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; });
   }
+
   function prevMonth() {
-    const m=calMonth===0?11:calMonth-1, y=calMonth===0?calYear-1:calYear;
+    const m = calMonth===0?11:calMonth-1, y = calMonth===0?calYear-1:calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
-    updateFilters({ date_from:"", date_to:"" });
+    const {from,to} = monthRange(y,m);
+    filtersRef.current = {...filtersRef.current, date_from:from, date_to:to};
+    updateFilters({date_from:from, date_to:to});
+    setTimeout(()=>loadRows(), 0);
   }
   function nextMonth() {
-    const m=calMonth===11?0:calMonth+1, y=calMonth===11?calYear+1:calYear;
+    const m = calMonth===11?0:calMonth+1, y = calMonth===11?calYear+1:calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
-    updateFilters({ date_from:"", date_to:"" });
+    const {from,to} = monthRange(y,m);
+    filtersRef.current = {...filtersRef.current, date_from:from, date_to:to};
+    updateFilters({date_from:from, date_to:to});
+    setTimeout(()=>loadRows(), 0);
   }
-  function clearCal() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
+
+  function selectMonth(i: number) {
+    const n = selMonth===i ? null : i;
+    setSelMonth(n);
+    if (n !== null) {
+      setCalMonth(n); setSelDates(new Set());
+      const yr = selYear ?? calYear;
+      const {from,to} = monthRange(yr, n);
+      filtersRef.current = {...filtersRef.current, date_from:from, date_to:to};
+      updateFilters({date_from:from, date_to:to});
+      setTimeout(()=>loadRows(), 0);
+    }
+  }
+
+  function selectYear(y: number) {
+    const n = selYear===y ? null : y;
+    setSelYear(n);
+    if (n !== null) {
+      setCalYear(n); setSelDates(new Set());
+      const {from,to} = selMonth !== null ? monthRange(n, selMonth) : yearRange(n);
+      filtersRef.current = {...filtersRef.current, date_from:from, date_to:to};
+      updateFilters({date_from:from, date_to:to});
+      setTimeout(()=>loadRows(), 0);
+    }
+  }
+
+  // FIX: clearAllDateFilters — update ref synchronously before calling loadRows
+  function clearAllDateFilters() {
+    setSelDates(new Set()); setSelMonth(null); setSelYear(null);
+    filtersRef.current = {...filtersRef.current, date_from:"", date_to:""};
+    updateFilters({date_from:"", date_to:""});
+    setTimeout(()=>loadRows(), 0);
+  }
+
+  function saveAssignment(id:number, data:AssignmentEntry)  { setAssignments(p=>p.map(a=>a.id===id?data:a)); }
+  function deleteAssignmentLocal(id:number)                  { setAssignments(p=>p.filter(a=>a.id!==id)); }
+  function addAssignment(a:AssignmentEntry)                  { setAssignments(p=>[a,...p]); }
+
+  const thisYear  = today.getFullYear();
+  const lastYear  = thisYear - 1;
+  const rowYears  = useMemo(() => Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort(), [rows]);
+  const availableYears = useMemo(() => {
+    const base = [thisYear-2, thisYear-1, thisYear, thisYear+1];
+    return Array.from(new Set([...base, ...rowYears])).sort();
+  }, [rowYears, thisYear]);
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, fontFamily:"'DM Sans',sans-serif" }}>
@@ -845,75 +763,103 @@ export default function ManagerPage() {
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", color:T.red, fontFamily:"'DM Sans',sans-serif" }}>{error}</div>
   );
 
+  const activeRangeLabel = (() => {
+    if (filters.date_from && filters.date_to) return `${filters.date_from} → ${filters.date_to}`;
+    if (filters.date_from) return `From ${filters.date_from}`;
+    if (filters.date_to)   return `Until ${filters.date_to}`;
+    return "All time";
+  })();
+
   // ── Calendar panel ────────────────────────────────────────────────────────
   const CalendarPanel = (
     <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:16, padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
+      {/* Month nav */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
         <button onClick={prevMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
         <span style={{ fontSize:12, fontWeight:600, color:T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
         <button onClick={nextMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
       </div>
 
-      {/* Dim calendar when date range filter is active */}
-      <div style={{ opacity: hasDateFilter ? 0.4 : 1, pointerEvents: hasDateFilter ? "none" : "auto", transition:"opacity 0.2s" }}>
-        <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
-      </div>
+      <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
 
-      {hasDateFilter && (
-        <div style={{ textAlign:"center", fontSize:11, color:T.acText, padding:"4px 8px", background:T.acLight, borderRadius:6 }}>
-          Date range filter active
-        </div>
-      )}
-
-      {selDates.size > 0 && !hasDateFilter && (
+      {selDates.size > 0 && (
         <div style={{ textAlign:"center", fontSize:11, color:T.acText }}>
           {selDates.size} date{selDates.size>1?"s":""} selected &nbsp;
-          <button onClick={() => setSelDates(new Set())} style={{ background:"none", border:"none", color:T.red, cursor:"pointer", fontSize:11 }}>✕</button>
+          <button onClick={()=>setSelDates(new Set())} style={{ background:"none", border:"none", color:T.red, cursor:"pointer", fontSize:11 }}>✕</button>
         </div>
       )}
+
       <Divider />
+
+      {/* Month buttons */}
       <div>
         <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Month</div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3, opacity: hasDateFilter ? 0.4 : 1, pointerEvents: hasDateFilter ? "none" : "auto" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3 }}>
           {MONTHS.map((m,i) => (
-            <button key={m} onClick={() => { const n=selMonth===i?null:i; setSelMonth(n); if(n!==null){setCalMonth(n);setSelDates(new Set());updateFilters({date_from:"",date_to:""}); } }}
+            <button key={m} onClick={()=>selectMonth(i)}
               style={{ background:selMonth===i?T.acLight:T.panel2, border:`1px solid ${selMonth===i?T.acMid:T.panel2B}`, borderRadius:5, color:selMonth===i?T.acText:T.t4, fontSize:9, padding:"4px 0", cursor:"pointer", textTransform:"uppercase", fontWeight:selMonth===i?600:400, transition:"all 0.15s" }}>
               {m.slice(0,3)}
             </button>
           ))}
         </div>
       </div>
-      {availableYears.length > 0 && (
-        <div>
-          <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Year</div>
-          <div style={{ display:"flex", gap:4, flexWrap:"wrap", opacity: hasDateFilter ? 0.4 : 1, pointerEvents: hasDateFilter ? "none" : "auto" }}>
-            {availableYears.map(y => (
-              <button key={y} onClick={() => { const n=selYear===y?null:y; setSelYear(n); if(n!==null){setCalYear(n);setSelDates(new Set());updateFilters({date_from:"",date_to:""});} }}
-                style={{ background:selYear===y?T.acLight:T.panel2, border:`1px solid ${selYear===y?T.acMid:T.panel2B}`, borderRadius:5, color:selYear===y?T.acText:T.t4, fontSize:9, padding:"4px 8px", cursor:"pointer", fontWeight:selYear===y?600:400, transition:"all 0.15s" }}>
-                {y}
+
+      {/* Year quick-select */}
+      <div>
+        <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Year</div>
+
+        {/* Quick presets row */}
+        <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap" }}>
+          {[
+            { label:"All",       action: () => clearAllDateFilters() },
+            { label:"This year", action: () => selectYear(thisYear) },
+            { label:"Last year", action: () => selectYear(lastYear) },
+          ].map(({label, action}) => {
+            const isActive =
+              label==="All"       ? !selYear && !filters.date_from && !filters.date_to :
+              label==="This year" ? selYear===thisYear :
+              selYear===lastYear;
+            return (
+              <button key={label} onClick={action}
+                style={{ flex:1, padding:"5px 4px", borderRadius:6, border:`1px solid ${isActive?T.acMid:T.panel2B}`, background:isActive?T.acLight:T.panel2, color:isActive?T.acText:T.t4, fontSize:10, cursor:"pointer", fontWeight:isActive?600:400, fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s", whiteSpace:"nowrap" }}>
+                {label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
-      )}
+
+        {/* Specific year chips */}
+        <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+          {availableYears.map(y => (
+            <button key={y} onClick={()=>selectYear(y)}
+              style={{ background:selYear===y?T.acLight:T.panel2, border:`1px solid ${selYear===y?T.acMid:T.panel2B}`, borderRadius:5, color:selYear===y?T.acText:T.t4, fontSize:9, padding:"4px 8px", cursor:"pointer", fontWeight:selYear===y?600:400, transition:"all 0.15s" }}>
+              {y}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <Divider />
+
+      {/* Stats */}
       {[
-        {label:"Worklogs",    val:`${filteredRows.length}/${totalCount}`},
+        {label:"Worklogs",    val:`${totalCount}`},
         {label:"Hours",       val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
-        {label:"Assignments", val:String(filteredAssignments.length)},
+        {label:"Assignments", val:String(assignments.length)},
       ].map(({label,val}) => (
         <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <span style={{ fontSize:11, color:T.t4 }}>{label}</span>
           <span style={{ fontSize:12, color:T.acText, fontWeight:600 }}>{val}</span>
         </div>
       ))}
+
       {(hasCalFilter || hasDateFilter) && (
         <>
           <Divider />
-          <button onClick={() => { clearCal(); updateFilters({date_from:"",date_to:""}); applyDateRange(); }}
+          <button onClick={clearAllDateFilters}
             style={{ background:"transparent", border:`1px solid ${T.panel2B}`, borderRadius:7, padding:"6px 0", fontSize:11, color:T.t4, cursor:"pointer", width:"100%" }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = T.t2; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = T.t4; }}>
+            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color=T.t2;}}
+            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color=T.t4;}}>
             ✕ &nbsp;Clear all date filters
           </button>
         </>
@@ -924,70 +870,52 @@ export default function ManagerPage() {
   // ── Pagination ────────────────────────────────────────────────────────────
   const PaginationControls = totalPages > 1 ? (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, paddingTop:4, flexWrap:"wrap" }}>
-      <button onClick={() => goToPage(currentPage-1)} disabled={currentPage===1}
+      <button onClick={()=>goToPage(currentPage-1)} disabled={currentPage===1}
         style={{ padding:"6px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:currentPage===1?T.t6:T.t3, cursor:currentPage===1?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>‹ Prev</button>
       {Array.from({length:totalPages},(_,i)=>i+1)
-        .filter(p => p===1||p===totalPages||Math.abs(p-currentPage)<=1)
-        .reduce<(number|"…")[]>((acc,p,i,arr) => {
-          if (i>0&&(p as number)-(arr[i-1] as number)>1) acc.push("…");
-          acc.push(p); return acc;
+        .filter(p=>p===1||p===totalPages||Math.abs(p-currentPage)<=1)
+        .reduce<(number|"…")[]>((acc,p,i,arr)=>{
+          if(i>0&&(p as number)-(arr[i-1] as number)>1)acc.push("…");
+          acc.push(p);return acc;
         },[])
-        .map((p,i) => p==="…"
-          ? <span key={`e${i}`} style={{ color:T.t5, fontSize:12 }}>…</span>
-          : <button key={p} onClick={() => goToPage(p as number)}
-              style={{ width:32, height:32, borderRadius:7, border:`1px solid ${currentPage===p?T.acMid:T.panel2B}`, background:currentPage===p?T.acLight:T.panel2, color:currentPage===p?T.acText:T.t3, cursor:"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif", fontWeight:currentPage===p?600:400 }}>
+        .map((p,i)=>p==="…"
+          ?<span key={`e${i}`} style={{color:T.t5,fontSize:12}}>…</span>
+          :<button key={p} onClick={()=>goToPage(p as number)}
+              style={{width:32,height:32,borderRadius:7,border:`1px solid ${currentPage===p?T.acMid:T.panel2B}`,background:currentPage===p?T.acLight:T.panel2,color:currentPage===p?T.acText:T.t3,cursor:"pointer",fontSize:12,fontFamily:"'DM Sans',sans-serif",fontWeight:currentPage===p?600:400}}>
               {p}
-            </button>
-        )}
-      <button onClick={() => goToPage(currentPage+1)} disabled={currentPage===totalPages}
+            </button>)}
+      <button onClick={()=>goToPage(currentPage+1)} disabled={currentPage===totalPages}
         style={{ padding:"6px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:currentPage===totalPages?T.t6:T.t3, cursor:currentPage===totalPages?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>Next ›</button>
     </div>
   ) : null;
 
   // ── Right panel ───────────────────────────────────────────────────────────
-  // Active range label for display
-  const activeRangeLabel = (() => {
-    if (filters.date_from && filters.date_to) return `${filters.date_from} → ${filters.date_to}`;
-    if (filters.date_from) return `From ${filters.date_from}`;
-    if (filters.date_to)   return `Until ${filters.date_to}`;
-    if (selDates.size > 0) {
-      const s = Array.from(selDates).sort();
-      return selDates.size === 1 ? s[0] : `${s[0]} → ${s[s.length-1]}`;
-    }
-    if (selMonth !== null) return `${MONTHS[selMonth]}${selYear ? " "+selYear:""}`;
-    return "This week";
-  })();
-
   const RightPanel = (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-
       <CascadeFilterBar
-        meta={meta}
-        filters={filters}
-        onChange={updateFilters}
-        deliverableOptions={filterDelivs}
-        delivLoading={filterDelivLoad}
+        meta={meta} filters={filters} onChange={partial => {
+          // FIX: always sync ref before state so loadRows picks up the latest values
+          if ("org_id" in partial) {
+            filtersRef.current = {...filtersRef.current, ...partial, project_id:0, deliverable_id:0};
+          } else {
+            filtersRef.current = {...filtersRef.current, ...partial};
+          }
+          updateFilters(partial);
+        }}
+        deliverableOptions={filterDelivs} delivLoading={filterDelivLoad}
         onApplyDateRange={applyDateRange}
       />
 
-      {/* ── Worklogs ── */}
+      {/* Worklogs */}
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:6 }}>
           <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>
             Worklogs
-            {filters.member_id > 0 && (
-              <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>
-                — {meta.members.find(m => m.id===filters.member_id)?.name}
-              </span>
-            )}
+            {filters.member_id > 0 && <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>— {meta.members.find(m=>m.id===filters.member_id)?.name}</span>}
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:10, color:T.t5, background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:5, padding:"3px 8px" }}>
-              📅 {activeRangeLabel}
-            </span>
-            <span style={{ fontSize:11, color:T.t5 }}>
-              {filteredRows.length}{totalCount > rows.length ? `/${totalCount}` : ""} entries
-            </span>
+            <span style={{ fontSize:10, color:T.t5, background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:5, padding:"3px 8px" }}>📅 {activeRangeLabel}</span>
+            <span style={{ fontSize:11, color:T.t5 }}>{totalCount} entries</span>
           </div>
         </div>
 
@@ -998,28 +926,24 @@ export default function ManagerPage() {
             </div>
             <style>{`@keyframes pulse{from{width:20%;margin-left:0}to{width:60%;margin-left:30%}}`}</style>
           </div>
-        ) : filteredRows.length === 0 ? (
+        ) : rows.length === 0 ? (
           <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"40px 16px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, color:T.t6 }}>
             <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><circle cx={12} cy={12} r={10}/><path d="M12 6v6l4 2"/></svg>
             <span style={{ fontSize:13 }}>No worklogs for this selection</span>
           </div>
-        ) : filteredRows.map(row => <WorklogViewCard key={row.id} row={row} />)}
+        ) : rows.map(row => <WorklogViewCard key={row.id} row={row} />)}
 
         {PaginationControls}
       </div>
 
-      {/* ── Assignments ── */}
+      {/* Assignments */}
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>
             Assignments
-            {filters.member_id > 0 && (
-              <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>
-                — {meta.members.find(m => m.id===filters.member_id)?.name}
-              </span>
-            )}
+            {filters.member_id > 0 && <span style={{ fontSize:11, color:T.t5, marginLeft:8, fontWeight:400 }}>— {meta.members.find(m=>m.id===filters.member_id)?.name}</span>}
           </div>
-          <span style={{ fontSize:11, color:T.t5 }}>{filteredAssignments.length} entries</span>
+          <span style={{ fontSize:11, color:T.t5 }}>{assignments.length} entries</span>
         </div>
 
         <AddAssignmentForm meta={meta} selectedMemberId={filters.member_id} onAdd={addAssignment} />
@@ -1030,12 +954,12 @@ export default function ManagerPage() {
               <div style={{ height:"100%", background:`linear-gradient(90deg,${T.ac},#a78bfa)`, animation:"pulse 1s ease-in-out infinite alternate" }} />
             </div>
           </div>
-        ) : filteredAssignments.length === 0 ? (
+        ) : assignments.length === 0 ? (
           <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"32px 16px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, color:T.t6 }}>
             <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><rect x={3} y={3} width={18} height={18} rx={3}/><path d="M9 9h6M9 13h4"/></svg>
             <span style={{ fontSize:13 }}>No assignments for this selection</span>
           </div>
-        ) : filteredAssignments.map(a => (
+        ) : assignments.map(a => (
           <AssignmentCard key={a.id} assignment={a} meta={meta} onSave={saveAssignment} onDelete={deleteAssignmentLocal} />
         ))}
       </div>
