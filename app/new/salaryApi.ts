@@ -95,8 +95,10 @@ export interface FetchSalaryReportParams {
   /** 1-indexed month, e.g. 3 for March */
   month?: number;
   organisation_id?: number;
-  project_id?: number;
-  /** Use this project's revenue for percentage calculations */
+  /**
+   * Used ONLY for percentage-share calculations.
+   * Hourly is always computed across all hourly projects.
+   */
   revenue_project_id?: number;
   deliverable_id?: number;
   user_id?: number;
@@ -108,7 +110,6 @@ export interface FetchSalaryReportParams {
   include_all_projects?: boolean;
 }
 
-// Add type for revenue items
 export interface RevenueItem {
   id: number;
   amount: number;
@@ -160,22 +161,15 @@ export async function fetchDeliverablesByProject(
 }
 
 export async function fetchUsersByOrg(orgId: number): Promise<UserOption[]> {
-  const response = await fetch(
-    `/api/salary/users-by-org/?organisation_id=${orgId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-        "Content-Type": "application/json",
-      },
-    },
+  const res = await fetch(
+    `${BASE}/api/v2/salary/users-by-org/?organisation_id=${orgId}`,
+    { headers: authHeaders() },
   );
-
-  if (!response.ok) {
-    const error = await response.json();
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: "Failed to fetch users" }));
     throw new Error(error.error || "Failed to fetch users");
   }
-
-  return response.json();
+  return res.json();
 }
 
 export async function fetchSalaryReport(
@@ -196,9 +190,13 @@ export async function fetchSalaryReport(
 
   if (params.organisation_id)
     qs.set("organisation_id", String(params.organisation_id));
-  if (params.project_id) qs.set("project_id", String(params.project_id));
+
+  // NOTE: project_id is intentionally NOT sent.
+  // Hourly is always across all hourly projects.
+  // revenue_project_id scopes only the % share calculation.
   if (params.revenue_project_id)
     qs.set("revenue_project_id", String(params.revenue_project_id));
+
   if (params.deliverable_id)
     qs.set("deliverable_id", String(params.deliverable_id));
   if (params.user_id) qs.set("user_id", String(params.user_id));
@@ -218,7 +216,6 @@ export async function fetchSalaryReport(
   return res.json();
 }
 
-// Optional: Fetch project revenue separately if needed
 export async function fetchProjectRevenue(
   projectId: number,
   from?: string,
@@ -226,7 +223,6 @@ export async function fetchProjectRevenue(
 ): Promise<ProjectRevenueResponse> {
   const qs = new URLSearchParams();
   qs.set("project_id", String(projectId));
-
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
 
@@ -234,9 +230,7 @@ export async function fetchProjectRevenue(
     headers: authHeaders(),
   });
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch revenue: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Failed to fetch revenue: ${res.status}`);
 
   const data = await res.json();
   return {
