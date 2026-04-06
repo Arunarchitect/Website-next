@@ -27,6 +27,12 @@ export interface DashboardAssignment {
   org_name: string;
   due_date: string | null;
   start_date: string | null;
+  status: 'pending' | 'submitted' | 'approved' | 'rejected';
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by_name: string | null;
+  rejection_reason: string | null;
+  rejection_count: number;
 }
 
 export interface DashboardQuickAccess {
@@ -60,6 +66,14 @@ export interface StartWorkLogResult {
   start_time: string;
   end_time: string;
   finalised: boolean;
+}
+
+export interface AssignmentReviewEntry {
+  id: number;
+  action: 'approved' | 'rejected';
+  reason: string | null;
+  reviewed_at: string;
+  reviewed_by: string | null;
 }
 
 export async function fetchDashboard(): Promise<DashboardData> {
@@ -136,4 +150,60 @@ export async function updateWorkLogRemarks(
     body: JSON.stringify({ remarks }),
   });
   if (!res.ok) throw new Error(`Update remarks failed: ${res.status}`);
+}
+
+export async function submitAssignment(
+  id: number
+): Promise<DashboardAssignment> {
+  const res = await fetch(`${BASE}/api/v2/manager/assignments/${id}/submit/`, {
+    method: "PATCH",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Submit failed: ${res.status}`);
+  }
+  return res.json() as Promise<DashboardAssignment>;
+}
+
+export async function reviewAssignment(
+  id: number,
+  action: "approve" | "reject",
+  reason?: string
+): Promise<DashboardAssignment> {
+  const res = await fetch(`${BASE}/api/v2/manager/assignments/${id}/review/`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ action, reason: reason ?? "" }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Review failed: ${res.status}`);
+  }
+  return res.json() as Promise<DashboardAssignment>;
+}
+
+export async function completeAssignment(
+  id: number
+): Promise<DashboardAssignment> {
+  const res = await fetch(`${BASE}/api/v2/manager/assignments/${id}/complete/`, {
+    method: "PATCH",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Complete failed: ${res.status}`);
+  }
+  return res.json() as Promise<DashboardAssignment>;
+}
+
+export async function fetchAssignmentHistory(
+  id: number
+): Promise<AssignmentReviewEntry[]> {
+  const res = await fetch(
+    `${BASE}/api/v2/manager/assignments/${id}/history/`,
+    { headers: authHeaders() }
+  );
+  if (!res.ok) throw new Error(`History fetch failed: ${res.status}`);
+  return res.json() as Promise<AssignmentReviewEntry[]>;
 }

@@ -1,4 +1,3 @@
-// app/new/dashnormal/page.tsx
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -10,14 +9,12 @@ import {
   discardWorkLog,
   updateWorkLogEndTime,
   updateWorkLogRemarks,
+  submitAssignment,
+  completeAssignment,
   type DashboardAssignment,
   type DashboardQuickAccess,
   type DashboardData,
 } from "@/app/new/api";
-
-// ---------------------------------------------------------------------------
-// Format helpers
-// ---------------------------------------------------------------------------
 
 function fmtDate(date: Date): string {
   const dd = String(date.getDate()).padStart(2, "0");
@@ -64,14 +61,41 @@ function useWindowWidth(): number {
   return w;
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+const STATUS_COLORS: Record<string, { bg: string; color: string; label: string }> = {
+  pending:   { bg: "#f3f3f3", color: "#888",    label: "Pending"   },
+  submitted: { bg: "#fff8e1", color: "#f59f00", label: "Submitted" },
+  approved:  { bg: "#e8f5e9", color: "#43a047", label: "Approved"  },
+  rejected:  { bg: "#fff0f0", color: "#e53935", label: "Rejected"  },
+  completed: { bg: "#e8eaf6", color: "#3949ab", label: "Completed" },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_COLORS[status] ?? STATUS_COLORS.pending;
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: "2px 8px",
+      borderRadius: "20px",
+      fontSize: "10px",
+      fontWeight: 700,
+      letterSpacing: "0.05em",
+      textTransform: "uppercase",
+      background: s.bg,
+      color: s.color,
+      flexShrink: 0,
+    }}>
+      {s.label}
+    </span>
+  );
+}
 
 interface TimerEntry {
   id: string;
   deliverableId: number;
-  /** Only present for assigned rows */
+  assignmentId?: number;
+  assignmentStatus?: string;
+  rejectionReason?: string | null;
+  rejectionCount?: number;
   taskName?: string;
   orgName: string;
   projectName: string;
@@ -90,6 +114,10 @@ function makeEntryFromAssignment(a: DashboardAssignment): TimerEntry {
   return {
     id: `a-${a.id}`,
     deliverableId: a.deliverable_id,
+    assignmentId: a.id,
+    assignmentStatus: a.status,
+    rejectionReason: a.rejection_reason,
+    rejectionCount: a.rejection_count,
     taskName: a.name,
     orgName: a.org_name,
     projectName: a.project_name,
@@ -122,26 +150,19 @@ function makeEntryFromQuickAccess(q: DashboardQuickAccess): TimerEntry {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Shared button style
-// ---------------------------------------------------------------------------
-function btnStyle(bg: string, color: string): React.CSSProperties {
+function btnStyle(bg: string, color: string, disabled?: boolean): React.CSSProperties {
   return {
     padding: "7px 16px",
     borderRadius: "7px",
     border: "none",
-    background: bg,
-    color,
+    background: disabled ? "#f3f3f3" : bg,
+    color: disabled ? "#bbb" : color,
     fontSize: "13px",
     fontWeight: 600,
-    cursor: "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
     fontFamily: "inherit",
   };
 }
-
-// ---------------------------------------------------------------------------
-// Confirm dialog
-// ---------------------------------------------------------------------------
 
 interface ConfirmDialogProps {
   message: string;
@@ -170,10 +191,6 @@ function ConfirmDialog({ message, onConfirm, onDiscard, onCancel }: ConfirmDialo
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Text popup — click truncated text to see full
-// ---------------------------------------------------------------------------
 
 function TextPopup({ text, style }: { text: string; style?: React.CSSProperties }) {
   const [open, setOpen] = useState(false);
@@ -206,9 +223,6 @@ function TextPopup({ text, style }: { text: string; style?: React.CSSProperties 
   );
 }
 
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
 const PlayIcon = () => (
   <svg width="9" height="11" viewBox="0 0 10 12" fill="none">
     <polygon points="0,0 10,6 0,12" fill="currentColor" />
@@ -252,9 +266,6 @@ function ModelflickMark() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// NavButton — uses <a> so right-click "Open in new tab" works natively
-// ---------------------------------------------------------------------------
 function NavButton({ icon, label, href }: { icon: React.ReactNode; label: string; href: string }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -263,22 +274,13 @@ function NavButton({ icon, label, href }: { icon: React.ReactNode; label: string
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        flex: "1 1 0",
-        minWidth: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "8px",
-        padding: "16px 10px",
+        flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: "8px", padding: "16px 10px",
         background: hovered ? "#f2f2f2" : "#fafafa",
         border: `1px solid ${hovered ? "#d0d0d0" : "#e4e4e4"}`,
-        borderRadius: "10px",
-        cursor: "pointer",
+        borderRadius: "10px", cursor: "pointer",
         transition: "background 0.15s, border-color 0.15s",
-        textDecoration: "none",
-        color: "#222",
-        WebkitTapHighlightColor: "transparent",
+        textDecoration: "none", color: "#222", WebkitTapHighlightColor: "transparent",
       }}
     >
       <span style={{ color: "#555" }}>{icon}</span>
@@ -289,9 +291,6 @@ function NavButton({ icon, label, href }: { icon: React.ReactNode; label: string
   );
 }
 
-// ---------------------------------------------------------------------------
-// Section label
-// ---------------------------------------------------------------------------
 function SectionLabel({ label, sub }: { label: string; sub?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -304,7 +303,7 @@ function SectionLabel({ label, sub }: { label: string; sub?: React.ReactNode }) 
 }
 
 // ---------------------------------------------------------------------------
-// ── DESKTOP TABLE ──
+// Desktop row
 // ---------------------------------------------------------------------------
 
 interface DesktopRowProps {
@@ -318,6 +317,8 @@ interface DesktopRowProps {
   onEndChange: (id: string, v: string) => void;
   onRemarksChange: (id: string, v: string) => void;
   onRemarksSave: (id: string) => void;
+  onSubmit?: (assignmentId: number) => void;
+  onComplete?: (assignmentId: number) => void;
 }
 
 function DesktopTableHeader({ showDue, showTask }: { showDue?: boolean; showTask?: boolean }) {
@@ -335,19 +336,23 @@ function DesktopTableHeader({ showDue, showTask }: { showDue?: boolean; showTask
       {showTask && th("Task", 110)}
       {th("Deliverable", 120)}
       {showDue && th("Due", 72, "center")}
+      {th("Status", 88, "center")}
       {th("Start", 82, "center")}
       {th("End", 148, "center")}
-      {th("Remarks", 150)}
-      <div style={{ width: 28, flexShrink: 0 }} />
+      {th("Remarks", 130)}
+      <div style={{ width: 90, flexShrink: 0 }} />
     </div>
   );
 }
 
 function DesktopRow({
   entry, isRunning, liveSeconds, showDue, showTask,
-  onPlay, onStop, onEndChange, onRemarksChange, onRemarksSave,
+  onPlay, onStop, onEndChange, onRemarksChange, onRemarksSave, onSubmit, onComplete,
 }: DesktopRowProps) {
   const nearEnd = isRunning && entry.sessionEnd && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
+  const canSubmit = entry.assignmentId &&
+    (entry.assignmentStatus === "pending" || entry.assignmentStatus === "rejected");
+  const canComplete = entry.assignmentId && entry.assignmentStatus === "approved";
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
@@ -361,7 +366,6 @@ function DesktopRow({
           transition: "background 0.2s, border-color 0.2s",
         }}
       >
-        {/* Play/Stop */}
         <button
           onClick={() => isRunning ? onStop(entry.id) : onPlay(entry.id)}
           style={{ width: 30, height: 30, borderRadius: "50%", border: `2px solid ${isRunning ? "#e53935" : "#444"}`, background: isRunning ? "#e53935" : "transparent", color: isRunning ? "#fff" : "#444", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0, transition: "all 0.15s", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
@@ -369,41 +373,37 @@ function DesktopRow({
           {isRunning ? <StopIcon /> : <PlayIcon />}
         </button>
 
-        {/* Elapsed */}
         <div style={{ width: 68, flexShrink: 0, fontSize: "12px", fontVariantNumeric: "tabular-nums", color: isRunning ? "#e53935" : "#444", fontWeight: isRunning ? 600 : 400, textAlign: "center" }}>
           {formatElapsed(liveSeconds)}
         </div>
 
-        {/* Org */}
         <div style={{ width: 88, flexShrink: 0, overflow: "hidden" }}>
           <TextPopup text={entry.orgName} style={{ fontSize: "12px", color: "#888" }} />
         </div>
-
-        {/* Project */}
         <div style={{ width: 100, flexShrink: 0, overflow: "hidden" }}>
           <TextPopup text={entry.projectName} style={{ fontSize: "12px", color: "#222", fontWeight: 500 }} />
         </div>
-
-        {/* Task (assigned only) */}
         {showTask && (
           <div style={{ width: 110, flexShrink: 0, overflow: "hidden" }}>
             <TextPopup text={entry.taskName ?? "—"} style={{ fontSize: "12px", color: "#555", fontStyle: "italic" }} />
           </div>
         )}
-
-        {/* Deliverable */}
         <div style={{ width: 120, flexShrink: 0, overflow: "hidden" }}>
           <TextPopup text={entry.deliverableName} style={{ fontSize: "12px", color: "#555" }} />
         </div>
-
-        {/* Due */}
         {showDue && (
           <div style={{ width: 72, flexShrink: 0, fontSize: "12px", color: "#888", textAlign: "center", whiteSpace: "nowrap" }}>
             {entry.dueDate ?? "—"}
           </div>
         )}
 
-        {/* Start — two lines */}
+        <div style={{ width: 88, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+          {entry.assignmentStatus
+            ? <StatusBadge status={entry.assignmentStatus} />
+            : <span style={{ fontSize: "12px", color: "#bbb" }}>—</span>
+          }
+        </div>
+
         <div style={{ width: 82, flexShrink: 0, textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
           {entry.sessionStart ? (
             <>
@@ -415,7 +415,6 @@ function DesktopRow({
           )}
         </div>
 
-        {/* End — datetime-local */}
         <div style={{ width: 148, flexShrink: 0, display: "flex", justifyContent: "center" }}>
           {isRunning ? (
             <input
@@ -429,25 +428,41 @@ function DesktopRow({
           )}
         </div>
 
-        {/* Remarks */}
         <input
           type="text"
           value={entry.remarks}
           onChange={(e) => onRemarksChange(entry.id, e.target.value)}
           placeholder={isRunning ? "Add note…" : ""}
           disabled={!isRunning}
-          style={{ width: 150, flexShrink: 0, fontSize: "12px", border: `1px solid ${isRunning ? "#e0e0e0" : "transparent"}`, borderRadius: "5px", padding: "4px 6px", background: isRunning ? "#fff" : "transparent", color: "#555", outline: "none", cursor: isRunning ? "text" : "default", boxSizing: "border-box" }}
+          style={{ width: 130, flexShrink: 0, fontSize: "12px", border: `1px solid ${isRunning ? "#e0e0e0" : "transparent"}`, borderRadius: "5px", padding: "4px 6px", background: isRunning ? "#fff" : "transparent", color: "#555", outline: "none", cursor: isRunning ? "text" : "default", boxSizing: "border-box" }}
         />
 
-        {/* Tick */}
-        <div style={{ width: 28, flexShrink: 0 }}>
+        <div style={{ width: 90, flexShrink: 0, display: "flex", gap: 4, alignItems: "center" }}>
           {isRunning && (
             <button
               onClick={() => onRemarksSave(entry.id)}
               title="Save remarks"
-              style={{ width: 26, height: 26, borderRadius: "5px", border: `1px solid ${entry.remarksSaved ? "#43a047" : "#e0e0e0"}`, background: entry.remarksSaved ? "#e8f5e9" : "#fff", color: entry.remarksSaved ? "#43a047" : "#aaa", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", padding: 0 }}
+              style={{ width: 26, height: 26, borderRadius: "5px", border: `1px solid ${entry.remarksSaved ? "#43a047" : "#e0e0e0"}`, background: entry.remarksSaved ? "#e8f5e9" : "#fff", color: entry.remarksSaved ? "#43a047" : "#aaa", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", padding: 0, flexShrink: 0 }}
             >
               <TickIcon />
+            </button>
+          )}
+          {canSubmit && (
+            <button
+              onClick={() => onSubmit?.(entry.assignmentId!)}
+              title="Submit for review"
+              style={{ height: 26, padding: "0 8px", borderRadius: "5px", border: "1px solid #43a047", background: "#e8f5e9", color: "#43a047", fontSize: "10px", fontWeight: 700, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}
+            >
+              Submit
+            </button>
+          )}
+          {canComplete && (
+            <button
+              onClick={() => onComplete?.(entry.assignmentId!)}
+              title="Mark as completed"
+              style={{ height: 26, padding: "0 8px", borderRadius: "5px", border: "1px solid #3949ab", background: "#e8eaf6", color: "#3949ab", fontSize: "10px", fontWeight: 700, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}
+            >
+              Done ✓
             </button>
           )}
         </div>
@@ -458,12 +473,22 @@ function DesktopRow({
           ⚠ {entry.endError}
         </div>
       )}
+
+      {entry.assignmentStatus === "rejected" && entry.rejectionReason && (
+        <div style={{ background: "#fff0f0", border: "1px solid #ffbbbb", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "5px 10px", fontSize: "11px", color: "#e53935", display: "flex", gap: 6 }}>
+          <span style={{ fontWeight: 700 }}>Rejected:</span>
+          <span>{entry.rejectionReason}</span>
+          {(entry.rejectionCount ?? 0) > 1 && (
+            <span style={{ opacity: 0.7 }}>×{entry.rejectionCount}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// ── MOBILE CARD ──
+// Mobile card
 // ---------------------------------------------------------------------------
 
 interface MobileCardProps {
@@ -476,13 +501,18 @@ interface MobileCardProps {
   onEndChange: (id: string, v: string) => void;
   onRemarksChange: (id: string, v: string) => void;
   onRemarksSave: (id: string) => void;
+  onSubmit?: (assignmentId: number) => void;
+  onComplete?: (assignmentId: number) => void;
 }
 
 function MobileCard({
   entry, isRunning, liveSeconds, showTask,
-  onPlay, onStop, onEndChange, onRemarksChange, onRemarksSave,
+  onPlay, onStop, onEndChange, onRemarksChange, onRemarksSave, onSubmit, onComplete,
 }: MobileCardProps) {
   const nearEnd = isRunning && entry.sessionEnd && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
+  const canSubmit = entry.assignmentId &&
+    (entry.assignmentStatus === "pending" || entry.assignmentStatus === "rejected");
+  const canComplete = entry.assignmentId && entry.assignmentStatus === "approved";
 
   const labelStyle: React.CSSProperties = { fontSize: "10px", fontWeight: 700, color: "#aaa", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 2 };
   const valueStyle: React.CSSProperties = { fontSize: "13px", color: "#333", fontWeight: 400 };
@@ -493,14 +523,12 @@ function MobileCard({
         style={{
           background: isRunning ? "#fff8f8" : "#f7f7f7",
           border: `1px solid ${nearEnd ? "#ff8a65" : isRunning ? "#ffbbbb" : "#eaeaea"}`,
-          borderRadius: entry.endError ? "10px 10px 0 0" : "10px",
+          borderRadius: (entry.endError || (entry.assignmentStatus === "rejected" && entry.rejectionReason)) ? "10px 10px 0 0" : "10px",
           padding: "12px 12px 10px",
           transition: "background 0.2s, border-color 0.2s",
         }}
       >
-        {/* Top row: play + elapsed + meta */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-          {/* Play/Stop */}
           <button
             onClick={() => isRunning ? onStop(entry.id) : onPlay(entry.id)}
             style={{ width: 34, height: 34, borderRadius: "50%", border: `2px solid ${isRunning ? "#e53935" : "#444"}`, background: isRunning ? "#e53935" : "transparent", color: isRunning ? "#fff" : "#444", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0, marginTop: 2, touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
@@ -508,34 +536,30 @@ function MobileCard({
             {isRunning ? <StopIcon /> : <PlayIcon />}
           </button>
 
-          {/* Meta block */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Org · Project */}
             <div style={{ fontSize: "11px", color: "#999", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {entry.orgName} · {entry.projectName}
             </div>
-            {/* Task (assigned) */}
             {showTask && entry.taskName && (
               <div style={{ fontSize: "12px", color: "#555", fontStyle: "italic", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {entry.taskName}
               </div>
             )}
-            {/* Deliverable */}
             <div style={{ fontSize: "13px", color: "#111", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {entry.deliverableName}
             </div>
           </div>
 
-          {/* Elapsed */}
-          <div style={{ fontSize: "14px", fontVariantNumeric: "tabular-nums", color: isRunning ? "#e53935" : "#999", fontWeight: isRunning ? 700 : 400, flexShrink: 0, paddingTop: 6 }}>
-            {formatElapsed(liveSeconds)}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+            <div style={{ fontSize: "14px", fontVariantNumeric: "tabular-nums", color: isRunning ? "#e53935" : "#999", fontWeight: isRunning ? 700 : 400 }}>
+              {formatElapsed(liveSeconds)}
+            </div>
+            {entry.assignmentStatus && <StatusBadge status={entry.assignmentStatus} />}
           </div>
         </div>
 
-        {/* Running details */}
         {isRunning && (
           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Start + End row */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <div>
                 <div style={labelStyle}>Start</div>
@@ -558,8 +582,6 @@ function MobileCard({
                 />
               </div>
             </div>
-
-            {/* Remarks row */}
             <div>
               <div style={labelStyle}>Remarks</div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -572,21 +594,40 @@ function MobileCard({
                 />
                 <button
                   onClick={() => onRemarksSave(entry.id)}
-                  title="Save remarks"
                   style={{ width: 32, height: 32, borderRadius: "6px", border: `1px solid ${entry.remarksSaved ? "#43a047" : "#e0e0e0"}`, background: entry.remarksSaved ? "#e8f5e9" : "#fff", color: entry.remarksSaved ? "#43a047" : "#aaa", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}
                 >
                   <TickIcon />
                 </button>
               </div>
             </div>
-
-            {/* Due (if present) */}
             {entry.dueDate && (
               <div>
                 <div style={labelStyle}>Due</div>
                 <div style={valueStyle}>{entry.dueDate}</div>
               </div>
             )}
+          </div>
+        )}
+
+        {canSubmit && (
+          <div style={{ marginTop: 10 }}>
+            <button
+              onClick={() => onSubmit?.(entry.assignmentId!)}
+              style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #43a047", background: "#e8f5e9", color: "#43a047", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+            >
+              Submit for Review
+            </button>
+          </div>
+        )}
+
+        {canComplete && (
+          <div style={{ marginTop: 10 }}>
+            <button
+              onClick={() => onComplete?.(entry.assignmentId!)}
+              style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #3949ab", background: "#e8eaf6", color: "#3949ab", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+            >
+              Mark as Completed ✓
+            </button>
           </div>
         )}
       </div>
@@ -596,24 +637,23 @@ function MobileCard({
           ⚠ {entry.endError}
         </div>
       )}
+      {entry.assignmentStatus === "rejected" && entry.rejectionReason && (
+        <div style={{ background: "#fff0f0", border: "1px solid #ffbbbb", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "8px 12px", fontSize: "12px", color: "#e53935", display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontWeight: 700 }}>Rejected{(entry.rejectionCount ?? 0) > 1 ? ` (×${entry.rejectionCount})` : ""}:</span>
+          <span>{entry.rejectionReason}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Pending action type
-// ---------------------------------------------------------------------------
 interface PendingAction {
   action: "stop" | "switch";
   nextId?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
 export default function DashboardPage() {
   const isMobile = useWindowWidth() < 700;
-
 
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -635,7 +675,6 @@ export default function DashboardPage() {
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Build entries
   useEffect(() => {
     if (!dashboard) return;
     const list: TimerEntry[] = [
@@ -645,7 +684,6 @@ export default function DashboardPage() {
     setEntries(Object.fromEntries(list.map((e) => [e.id, e])));
   }, [dashboard]);
 
-  // Restore active session
   useEffect(() => {
     if (!dashboard) return;
     fetchActiveWorkLog()
@@ -655,12 +693,10 @@ export default function DashboardPage() {
         const sessionEnd = new Date(active.end_time);
         const now = Date.now();
         if (sessionEnd.getTime() <= now) return;
-
         const matchA = dashboard.assignments.find((a) => a.deliverable_id === active.deliverable_id);
         const matchQ = dashboard.quick_access.find((q) => q.deliverable_id === active.deliverable_id);
         const entryId = matchA ? `a-${matchA.id}` : matchQ ? `q-${matchQ.id}` : null;
         if (!entryId) return;
-
         worklogIdRef.current = active.id;
         startRef.current = sessionStart.getTime();
         setTick(Math.floor((now - sessionStart.getTime()) / 1000));
@@ -673,14 +709,12 @@ export default function DashboardPage() {
       .catch(() => {});
   }, [dashboard]);
 
-  // Tick
   useEffect(() => {
     if (!runningId) return;
     const iv = setInterval(() => setTick(Math.floor((Date.now() - (startRef.current ?? Date.now())) / 1000)), 1000);
     return () => clearInterval(iv);
   }, [runningId]);
 
-  // Auto-clear at sessionEnd
   useEffect(() => {
     if (!runningId) return;
     const end = entries[runningId]?.sessionEnd;
@@ -696,7 +730,6 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningId, entries[runningId ?? ""]?.sessionEnd?.getTime()]);
 
-  // Timer actions
   const commitStart = useCallback(async (id: string) => {
     const entry = entries[id];
     if (!entry) return;
@@ -779,6 +812,44 @@ export default function DashboardPage() {
     }
   }, [entries]);
 
+  const handleSubmitAssignment = useCallback(async (assignmentId: number) => {
+    try {
+      const updated = await submitAssignment(assignmentId);
+      const entryId = `a-${assignmentId}`;
+      setEntries((prev) => ({
+        ...prev,
+        [entryId]: {
+          ...prev[entryId],
+          assignmentStatus: updated.status,
+          rejectionReason: updated.rejection_reason,
+          rejectionCount: updated.rejection_count,
+        },
+      }));
+      setSaveError(null);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Submit failed");
+    }
+  }, []);
+
+  const handleCompleteAssignment = useCallback(async (assignmentId: number) => {
+    try {
+      const updated = await completeAssignment(assignmentId);
+      const entryId = `a-${assignmentId}`;
+      setEntries((prev) => ({
+        ...prev,
+        [entryId]: {
+          ...prev[entryId],
+          assignmentStatus: updated.status,
+          rejectionReason: updated.rejection_reason,
+          rejectionCount: updated.rejection_count,
+        },
+      }));
+      setSaveError(null);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Complete failed");
+    }
+  }, []);
+
   const handleConfirm = async () => {
     if (!pending || !runningId) return;
     await commitStop(runningId);
@@ -796,7 +867,6 @@ export default function DashboardPage() {
 
   const handleCancel = () => setPending(null);
 
-  // Derived
   const assignedEntries = (dashboard?.assignments ?? [])
     .map((a) => entries[`a-${a.id}`])
     .filter((e): e is TimerEntry => Boolean(e));
@@ -806,83 +876,62 @@ export default function DashboardPage() {
     .filter((e): e is TimerEntry => Boolean(e));
 
   const liveSeconds = (id: string) => (entries[id]?.elapsed ?? 0) + (runningId === id ? tick : 0);
-
   const userName = dashboard?.user.name ?? "";
   const [first, ...rest] = userName.split(" ");
+  const dialogMessage = pending?.action === "stop" ? "Record this work session?" : "You have a session running. Record it before switching?";
 
-  const dialogMessage = pending?.action === "stop"
-    ? "Record this work session?"
-    : "You have a session running. Record it before switching?";
+  if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", color: "#888" }}>Loading…</div>;
+  if (error) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", color: "#e53935" }}>{error}</div>;
 
-  if (loading)
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", color: "#888" }}>
-        Loading…
-      </div>
-    );
-
-  if (error)
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", color: "#e53935" }}>
-        {error}
-      </div>
-    );
-
-  // ── Desktop table section
   const renderDesktopSection = (list: TimerEntry[], showDue?: boolean, showTask?: boolean) => {
-    // min width: 34+6+68+6+88+6+100+6 + (110+6 if task) + 120+6 + (72+6 if due) + 82+6 + 148+6 + 150+6 + 28 = ~870 base, +116 task, +78 due
-    const minW = 870 + (showTask ? 116 : 0) + (showDue ? 78 : 0);
+    const minW = 920 + (showTask ? 116 : 0) + (showDue ? 78 : 0);
     return (
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <div style={{ minWidth: minW }}>
           <DesktopTableHeader showDue={showDue} showTask={showTask} />
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {list.length === 0 ? (
-              <div style={{ fontSize: "12px", color: "#bbb", padding: "12px 4px" }}>None</div>
-            ) : (
-              list.map((e) => (
+            {list.length === 0
+              ? <div style={{ fontSize: "12px", color: "#bbb", padding: "12px 4px" }}>None</div>
+              : list.map((e) => (
                 <DesktopRow
-                  key={e.id}
-                  entry={e}
+                  key={e.id} entry={e}
                   isRunning={runningId === e.id}
                   liveSeconds={liveSeconds(e.id)}
-                  showDue={showDue}
-                  showTask={showTask}
-                  onPlay={handlePlay}
-                  onStop={handleStop}
+                  showDue={showDue} showTask={showTask}
+                  onPlay={handlePlay} onStop={handleStop}
                   onEndChange={handleEndChange}
                   onRemarksChange={handleRemarksChange}
                   onRemarksSave={handleRemarksSave}
+                  onSubmit={handleSubmitAssignment}
+                  onComplete={handleCompleteAssignment}
                 />
               ))
-            )}
+            }
           </div>
         </div>
       </div>
     );
   };
 
-  // ── Mobile card section
   const renderMobileSection = (list: TimerEntry[], showTask?: boolean) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {list.length === 0 ? (
-        <div style={{ fontSize: "12px", color: "#bbb", padding: "8px 0" }}>None</div>
-      ) : (
-        list.map((e) => (
+      {list.length === 0
+        ? <div style={{ fontSize: "12px", color: "#bbb", padding: "8px 0" }}>None</div>
+        : list.map((e) => (
           <MobileCard
-            key={e.id}
-            entry={e}
+            key={e.id} entry={e}
             isRunning={runningId === e.id}
             liveSeconds={liveSeconds(e.id)}
             showTask={showTask}
-            onPlay={handlePlay}
-            onStop={handleStop}
+            onPlay={handlePlay} onStop={handleStop}
             onEndChange={handleEndChange}
             onRemarksChange={handleRemarksChange}
             onRemarksSave={handleRemarksSave}
+            onSubmit={handleSubmitAssignment}
+            onComplete={handleCompleteAssignment}
           />
         ))
-      )}
+      }
     </div>
   );
 
@@ -896,49 +945,15 @@ export default function DashboardPage() {
           onCancel={handleCancel}
         />
       )}
-
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "#fafafa",
-          fontFamily: "'DM Sans', 'Helvetica Neue', Arial, sans-serif",
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "center",
-          padding: isMobile ? "12px 8px" : "32px 16px",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e4e4e4",
-            borderRadius: isMobile ? "12px" : "16px",
-            padding: isMobile ? "18px 12px" : "32px 32px",
-            width: "100%",
-            maxWidth: "1200px",
-            boxShadow: "0 2px 20px 0 rgba(0,0,0,0.06)",
-            boxSizing: "border-box",
-          }}
-        >
-          {/* Greeting */}
+      <div style={{ minHeight: "100vh", background: "#fafafa", fontFamily: "'DM Sans', 'Helvetica Neue', Arial, sans-serif", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: isMobile ? "12px 8px" : "32px 16px", boxSizing: "border-box" }}>
+        <div style={{ background: "#fff", border: "1px solid #e4e4e4", borderRadius: isMobile ? "12px" : "16px", padding: isMobile ? "18px 12px" : "32px 32px", width: "100%", maxWidth: "1200px", boxShadow: "0 2px 20px 0 rgba(0,0,0,0.06)", boxSizing: "border-box" }}>
           <div style={{ fontSize: isMobile ? "17px" : "21px", fontWeight: 400, color: "#111", marginBottom: 4, lineHeight: 1.4 }}>
             Welcome, <span style={{ fontWeight: 700 }}>{first} {rest.join(" ")}</span>!
           </div>
-
-          {/* Banner */}
-          <div
-            style={{
-              display: "flex", alignItems: "flex-start", gap: 10,
-              background: "#fdf5f5", border: "1px solid #fde0e0", borderRadius: "10px",
-              padding: isMobile ? "12px" : "14px 16px", marginTop: 14, marginBottom: 24,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "#fdf5f5", border: "1px solid #fde0e0", borderRadius: "10px", padding: isMobile ? "12px" : "14px 16px", marginTop: 14, marginBottom: 24 }}>
             <div style={{ paddingTop: 2 }}><ModelflickMark /></div>
             <div>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#e53935", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4 }}>
-                Modelflick
-              </div>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#e53935", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4 }}>Modelflick</div>
               <div style={{ fontSize: isMobile ? "12px" : "13px", color: "#555", lineHeight: 1.65 }}>
                 Unified platform for{" "}
                 <span style={{ textDecoration: "underline", textDecorationColor: "#e53935", textUnderlineOffset: "3px", textDecorationThickness: "1.5px", color: "#222" }}>
@@ -948,51 +963,31 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Save error toast */}
           {saveError && (
             <div style={{ background: "#fff3f0", border: "1px solid #ffccbc", borderRadius: "8px", padding: "10px 14px", marginBottom: 16, fontSize: "12px", color: "#e53935" }}>
               ⚠ {saveError}
             </div>
           )}
 
-          {/* Assigned Deliverables */}
           <SectionLabel label="Assigned Deliverables" />
-          {isMobile
-            ? renderMobileSection(assignedEntries, true)
-            : renderDesktopSection(assignedEntries, true, true)}
+          {isMobile ? renderMobileSection(assignedEntries, true) : renderDesktopSection(assignedEntries, true, true)}
 
           <div style={{ borderTop: "1px solid #ebebeb", margin: "20px 0" }} />
 
-          {/* Quick Access */}
-          <SectionLabel
-            label="Quick Access"
-            sub={
-              <span style={{ fontSize: "10px", color: "#e53935", opacity: 0.8, display: "flex", alignItems: "center", gap: 3 }}>
-                <PinIcon /> pinned
-              </span>
-            }
-          />
-          {isMobile
-            ? renderMobileSection(quickEntries, false)
-            : renderDesktopSection(quickEntries, false, false)}
+          <SectionLabel label="Quick Access" sub={<span style={{ fontSize: "10px", color: "#e53935", opacity: 0.8, display: "flex", alignItems: "center", gap: 3 }}><PinIcon /> pinned</span>} />
+          {isMobile ? renderMobileSection(quickEntries, false) : renderDesktopSection(quickEntries, false, false)}
 
           <div style={{ borderTop: "1px solid #ebebeb", margin: "20px 0" }} />
 
-          {/* Nav */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
-            <NavButton
-              icon={<WorklogIcon />}
-              label="Detailed Worklog"
-              href="/new/hour/hournormal"
-            />
-            <NavButton
-              icon={<WorklogIcon />}
-              label="Add your Expense"
-              href="/new/exp/expnormal"
-            />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
+            <NavButton icon={<WorklogIcon />} label="Detailed Worklog" href="/new/hour/hournormal" />
+            <NavButton icon={<WorklogIcon />} label="Add your Expense" href="/new/exp/expnormal" />
           </div>
         </div>
       </div>
     </>
   );
 }
+
+
+

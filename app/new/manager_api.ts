@@ -96,6 +96,47 @@ export interface DeliverableOption {
   stage_display: string;
 }
 
+export interface AssignmentEntry {
+  id: number;
+  name: string;
+  deliverable_id: number;
+  deliverable_name: string;
+  project_id: number;
+  project_name: string;
+  organisation_id: number;
+  organisation_name: string;
+  assigned_to_id: number;
+  assigned_to_name: string;
+  assigned_by_id: number;
+  assigned_by_name: string;
+  start_date: string | null;
+  due_date: string | null;
+  initial_due_date: string | null;   // ← add
+  status: string;                    // ← add
+  submitted_at: string | null;       // ← add
+  reviewed_at: string | null;        // ← add
+  reviewed_by_name: string | null;   // ← add
+  rejection_reason: string | null;   // ← add
+  rejection_count: number;           // ← add
+}
+
+export async function reviewAssignment(
+  id: number,
+  action: 'approve' | 'reject',
+  reason?: string,
+): Promise<AssignmentEntry> {
+  const res = await fetch(`${BASE}/api/v2/manager/assignments/${id}/review/`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ action, reason: reason ?? '' }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error ?? `Review failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 function mapWorklog(w: any): MemberWorkLogEntry {
   const st = w.start_time ? new Date(w.start_time) : null;
   const et = w.end_time ? new Date(w.end_time) : null;

@@ -7,6 +7,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   fetchMeta, fetchMemberWorkLogs, fetchAssignments,
   fetchDeliverablesByProject, createAssignment, editAssignment, deleteAssignment,
+  reviewAssignment,
   currentWeekRange,
   type MemberWorkLogEntry, type WorkLogPage, type MetaData,
   type AssignmentEntry, type MemberOption, type DeliverableOption,
@@ -314,15 +315,76 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
   const [deliverables,  setDeliverables]  = useState<DeliverableOption[]>([]);
   const [loadingDelivs, setLoadingDelivs] = useState(false);
   const [error,         setError]         = useState("");
+  // Review state
+  const [rejReason,     setRejReason]     = useState("");
+  const [reviewing,     setReviewing]     = useState(false);
+  const [reviewError,   setReviewError]   = useState("");
+  // Due date inline edit
+  const [editingDue,    setEditingDue]    = useState(false);
+  const [draftDue,      setDraftDue]      = useState(assignment.due_date ?? "");
+  const [savingDue,     setSavingDue]     = useState(false);
 
   function patch(p: Partial<typeof draft>) { setDraft(d => ({...d, ...p})); }
   function cancelEdit() { setDraft({...assignment}); setEditing(false); setError(""); }
 
-  async function handleProjectChange(projId: number) {
-    patch({ project_id:projId, deliverable_id:0 });
-    setLoadingDelivs(true);
-    try { setDeliverables(await fetchDeliverablesByProject(projId)); }
-    finally { setLoadingDelivs(false); }
+  // ── Status badge ───────────────────────────────────────────────────────────
+  const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+    pending:   { bg:"rgba(100,116,139,0.12)", color:"#94a3b8", label:"Pending" },
+    submitted: { bg:"rgba(56,189,248,0.15)",  color:"#38bdf8", label:"Submitted" },
+    approved:  { bg:"rgba(16,185,129,0.12)",  color:"#10b981", label:"Approved" },
+    rejected:  { bg:"rgba(239,68,68,0.12)",   color:"#ef4444", label:"Rejected" },
+  };
+  const statusStyle = STATUS_STYLE[assignment.status] ?? STATUS_STYLE.pending;
+
+  // ── Due date drift ─────────────────────────────────────────────────────────
+  const driftDays = useMemo(() => {
+    if (!assignment.initial_due_date || !assignment.due_date) return null;
+    const a = new Date(assignment.initial_due_date).getTime();
+    const b = new Date(assignment.due_date).getTime();
+    return Math.round((b - a) / 86400000);
+  }, [assignment.initial_due_date, assignment.due_date]);
+
+  // ── Review handler ─────────────────────────────────────────────────────────
+  async function handleReview(action: 'approve' | 'reject') {
+    if (action === 'reject' && !rejReason.trim()) {
+      setReviewError("Rejection reason is required."); return;
+    }
+    setReviewing(true); setReviewError("");
+    try {
+      const updated = await reviewAssignment(assignment.id, action, rejReason);
+      onSave(assignment.id, updated);
+      setRejReason("");
+    } catch(e:any) { setReviewError(e.message); }
+    finally { setReviewing(false); }
+  }
+
+  // ── Due date save ──────────────────────────────────────────────────────────
+  async function saveDueDate() {
+    setSavingDue(true);
+    try {
+      const updated = await editAssignment(assignment.id, { due_date: draftDue || null });
+      onSave(assignment.id, updated);
+      setEditingDue(false);
+      setFlash(true); setTimeout(() => setFlash(false), 900);
+    } catch(e:any) { setError(e.message); }
+    finally { setSavingDue(false); }
+  }
+
+  // ── Full edit save ─────────────────────────────────────────────────────────
+  async function save() {
+    if (!draft.name.trim()) { setError("Task name is required."); return; }
+    setSaving(true); setError("");
+    try {
+      const updated = await editAssignment(assignment.id, {
+        name: draft.name, deliverable: draft.deliverable_id,
+        assigned_to: draft.assigned_to_id,
+        start_date: draft.start_date || null,
+        due_date: draft.due_date || null,
+      });
+      onSave(assignment.id, updated); setEditing(false);
+      setFlash(true); setTimeout(() => setFlash(false), 900);
+    } catch(e:any) { setError(e.message); }
+    finally { setSaving(false); }
   }
 
   async function startEdit() {
@@ -331,117 +393,208 @@ function AssignmentCard({ assignment, meta, onSave, onDelete }: {
     finally { setLoadingDelivs(false); }
   }
 
-  async function save() {
-    if (!draft.name.trim()) { setError("Task name is required."); return; }
-    setSaving(true); setError("");
-    try {
-      const updated = await editAssignment(assignment.id, {
-        name: draft.name, deliverable: draft.deliverable_id,
-        assigned_to: draft.assigned_to_id, start_date: draft.start_date || null, due_date: draft.due_date || null,
-      });
-      onSave(assignment.id, updated); setEditing(false); setFlash(true);
-      setTimeout(() => setFlash(false), 900);
-    } catch(e:any) { setError(e.message); }
-    finally { setSaving(false); }
+  async function handleProjectChange(projId: number) {
+    patch({ project_id:projId, deliverable_id:0 });
+    setLoadingDelivs(true);
+    try { setDeliverables(await fetchDeliverablesByProject(projId)); }
+    finally { setLoadingDelivs(false); }
   }
 
   const inp: React.CSSProperties = { background:T.panel2, border:`1px solid ${T.panel2B}`, borderRadius:6, padding:"7px 10px", fontSize:12, color:T.t2, width:"100%", outline:"none", fontFamily:"'DM Sans',sans-serif", boxSizing:"border-box" };
   const sel: React.CSSProperties = { ...inp, cursor:"pointer", appearance:"none" as const };
-  const bg     = flash?"rgba(16,185,129,0.08)":editing?"rgba(99,102,241,0.06)":T.panel2;
-  const border = flash?`1px solid ${T.green}`:editing?`1px solid ${T.acMid}`:`1px solid ${T.panel2B}`;
+
+  const borderColor = flash ? T.green
+    : assignment.status === 'submitted' ? T.ac
+    : assignment.status === 'approved'  ? T.green
+    : assignment.status === 'rejected'  ? T.red
+    : T.panel2B;
 
   return (
     <>
       {showDel && <DeleteModal message="Delete this assignment?" onConfirm={() => { setShowDel(false); deleteAssignment(assignment.id).then(()=>onDelete(assignment.id)).catch(e=>setError(e.message)); }} onCancel={()=>setShowDel(false)} />}
-      <div style={{ background:bg, border, borderRadius:12, padding:"12px 14px", transition:"all 0.15s" }}>
-        <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:editing?10:0 }}>
-          <div style={{ display:"flex", gap:4, flexShrink:0, paddingTop:2 }}>
-            {editing ? (
-              <>
-                <button onClick={save} disabled={saving} title="Save"
-                  style={{ width:30, height:30, borderRadius:8, border:"none", background:T.greenBg, color:T.green, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <svg width={13} height={13} viewBox="0 0 14 14" fill="none"><path d="M2 7l4 4 6-6" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/></svg>
-                </button>
-                <button onClick={cancelEdit} title="Cancel"
-                  style={{ width:30, height:30, borderRadius:8, border:"none", background:T.panel2B, color:T.t4, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <svg width={11} height={11} viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"/></svg>
-                </button>
-              </>
-            ) : (
-              <>
-                <button onClick={startEdit} title="Edit"
-                  style={{ width:30, height:30, borderRadius:8, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background=T.acLight; (e.currentTarget as HTMLElement).style.color=T.acText; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background="transparent"; (e.currentTarget as HTMLElement).style.color=T.t5; }}>
-                  <svg width={12} height={12} viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round"/></svg>
-                </button>
-                <button onClick={()=>setShowDel(true)} title="Delete"
-                  style={{ width:30, height:30, borderRadius:8, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background=T.redBg; (e.currentTarget as HTMLElement).style.color=T.red; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background="transparent"; (e.currentTarget as HTMLElement).style.color=T.t5; }}>
-                  <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
-                    <path d="M2 4h10M5 4V2.5h4V4M5.5 4v7M8.5 4v7M3 4l.5 7.5a1 1 0 001 .5h5a1 1 0 001-.5L11 4" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-              </>
-            )}
-          </div>
+      <div style={{ background:T.panel2, border:`1px solid ${borderColor}`, borderRadius:12, padding:"12px 14px", transition:"border-color 0.2s", display:"flex", flexDirection:"column", gap:10 }}>
+
+        {/* ── Header row ── */}
+        <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
+          {/* Action buttons */}
+          {!editing && (
+            <div style={{ display:"flex", gap:4, paddingTop:2, flexShrink:0 }}>
+              <button onClick={startEdit} title="Edit"
+                style={{ width:28, height:28, borderRadius:7, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=T.acLight;(e.currentTarget as HTMLElement).style.color=T.acText;}}
+                onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";(e.currentTarget as HTMLElement).style.color=T.t5;}}>
+                <svg width={12} height={12} viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round"/></svg>
+              </button>
+              <button onClick={()=>setShowDel(true)} title="Delete"
+                style={{ width:28, height:28, borderRadius:7, border:"none", background:"transparent", color:T.t5, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=T.redBg;(e.currentTarget as HTMLElement).style.color=T.red;}}
+                onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";(e.currentTarget as HTMLElement).style.color=T.t5;}}>
+                <svg width={13} height={13} viewBox="0 0 14 14" fill="none">
+                  <path d="M2 4h10M5 4V2.5h4V4M5.5 4v7M8.5 4v7M3 4l.5 7.5a1 1 0 001 .5h5a1 1 0 001-.5L11 4" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          )}
+
           <div style={{ flex:1, minWidth:0 }}>
             {editing ? (
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                <div>
-                  <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Task Name</div>
-                  <input value={draft.name} onChange={e=>patch({name:e.target.value})} style={inp} placeholder="Task name…" />
-                </div>
+                <div><input value={draft.name} onChange={e=>patch({name:e.target.value})} style={inp} placeholder="Task name…" /></div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                   <div>
-                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Organisation</div>
+                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase" }}>Organisation</div>
                     <select value={draft.organisation_id} onChange={e=>patch({organisation_id:Number(e.target.value)})} style={sel}>
                       {meta.organisations.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Project</div>
+                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase" }}>Project</div>
                     <select value={draft.project_id} onChange={e=>handleProjectChange(Number(e.target.value))} style={sel}>
                       {meta.projects.filter(p=>p.organisation_id===draft.organisation_id).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Deliverable</div>
+                  <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase" }}>Deliverable</div>
                   {loadingDelivs ? <div style={{ fontSize:11, color:T.t5 }}>Loading…</div>
-                    : <select value={deliverables.some(d=>d.id===draft.deliverable_id)?draft.deliverable_id:""} onChange={e=>patch({deliverable_id:Number(e.target.value)})} style={sel}>
-                        {!deliverables.some(d=>d.id===draft.deliverable_id)&&<option value="">— select —</option>}
+                    : <select value={draft.deliverable_id} onChange={e=>patch({deliverable_id:Number(e.target.value)})} style={sel}>
                         {deliverables.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
                       </select>}
                 </div>
                 <div>
-                  <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assigned To</div>
+                  <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase" }}>Assigned To</div>
                   <select value={draft.assigned_to_id} onChange={e=>patch({assigned_to_id:Number(e.target.value)})} style={sel}>
                     {meta.members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                   <div>
-                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start Date</div>
+                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase" }}>Start</div>
                     <input type="date" value={draft.start_date??""} onChange={e=>patch({start_date:e.target.value})} style={{...inp,colorScheme:"dark"}} />
                   </div>
                   <div>
-                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due Date</div>
+                    <div style={{ fontSize:10, color:T.t5, marginBottom:3, textTransform:"uppercase" }}>Due</div>
                     <input type="date" value={draft.due_date??""} onChange={e=>patch({due_date:e.target.value})} style={{...inp,colorScheme:"dark"}} />
                   </div>
                 </div>
                 {error && <div style={{ fontSize:11, color:T.red }}>⚠ {error}</div>}
+                <div style={{ display:"flex", gap:6 }}>
+                  <button onClick={save} disabled={saving}
+                    style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", background:T.greenBg, color:T.green, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button onClick={cancelEdit}
+                    style={{ flex:1, padding:"8px 0", borderRadius:8, border:`1px solid ${T.panel2B}`, background:"transparent", color:T.t4, fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
-              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-                <div style={{ fontSize:13, fontWeight:600, color:T.t2 }}>{assignment.name}</div>
-                <div style={{ fontSize:11, color:T.t5 }}>{assignment.organisation_name} · {assignment.project_name} · {assignment.deliverable_name}</div>
-                <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginTop:4 }}>
-                  <div><span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assigned to: </span><span style={{ fontSize:12, color:T.acText, fontWeight:500 }}>{assignment.assigned_to_name}</span></div>
-                  {assignment.start_date && <div><span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start: </span><span style={{ fontSize:12, color:T.t3 }}>{assignment.start_date}</span></div>}
-                  {assignment.due_date   && <div><span style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Due: </span><span style={{ fontSize:12, color:T.amber, fontWeight:500 }}>{assignment.due_date}</span></div>}
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {/* Name + status badge */}
+                <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:T.t2 }}>{assignment.name}</span>
+                  <span style={{ padding:"2px 8px", borderRadius:99, fontSize:10, fontWeight:600, background:statusStyle.bg, color:statusStyle.color }}>
+                    {statusStyle.label}{assignment.rejection_count > 0 ? ` ×${assignment.rejection_count}` : ""}
+                  </span>
                 </div>
+                <div style={{ fontSize:11, color:T.t5 }}>{assignment.organisation_name} · {assignment.project_name} · {assignment.deliverable_name}</div>
+
+                {/* Meta row */}
+                <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginTop:2 }}>
+                  <div>
+                    <div style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Assigned to</div>
+                    <div style={{ fontSize:12, color:T.acText, fontWeight:500 }}>{assignment.assigned_to_name}</div>
+                  </div>
+                  {assignment.start_date && (
+                    <div>
+                      <div style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Start</div>
+                      <div style={{ fontSize:12, color:T.t3 }}>{assignment.start_date}</div>
+                    </div>
+                  )}
+                  {/* Due date — always editable inline */}
+                  <div>
+                    <div style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:3 }}>Due date</div>
+                    {editingDue ? (
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <input type="date" value={draftDue} onChange={e=>setDraftDue(e.target.value)}
+                          style={{ ...inp, width:"auto", colorScheme:"dark", padding:"4px 8px" }} />
+                        <button onClick={saveDueDate} disabled={savingDue}
+                          style={{ padding:"4px 10px", borderRadius:6, border:"none", background:T.greenBg, color:T.green, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                          {savingDue ? "…" : "Save"}
+                        </button>
+                        <button onClick={()=>{ setEditingDue(false); setDraftDue(assignment.due_date??""); }}
+                          style={{ padding:"4px 8px", borderRadius:6, border:`1px solid ${T.panel2B}`, background:"transparent", color:T.t4, fontSize:11, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{ fontSize:12, color:T.amber, fontWeight:500 }}>{assignment.due_date ?? "—"}</span>
+                        <button onClick={()=>{ setEditingDue(true); setDraftDue(assignment.due_date??""); }}
+                          style={{ padding:"2px 7px", borderRadius:5, border:`1px solid ${T.panel2B}`, background:"transparent", color:T.t5, fontSize:10, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                          Change
+                        </button>
+                      </div>
+                    )}
+                    {/* Drift indicator */}
+                    {driftDays !== null && (
+                      <div style={{ fontSize:10, marginTop:3, color: driftDays === 0 ? T.green : driftDays > 0 ? T.red : T.green }}>
+                        {driftDays === 0 ? "On schedule"
+                          : driftDays > 0 ? `+${driftDays}d from plan`
+                          : `${driftDays}d early`}
+                        <span style={{ color:T.t5, marginLeft:4 }}>(was {assignment.initial_due_date})</span>
+                      </div>
+                    )}
+                  </div>
+                  {/* Submitted at */}
+                  {assignment.submitted_at && (
+                    <div>
+                      <div style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Submitted</div>
+                      <div style={{ fontSize:12, color:T.t3 }}>{assignment.submitted_at.slice(0,16).replace('T',' ')}</div>
+                    </div>
+                  )}
+                  {/* Reviewed by */}
+                  {assignment.reviewed_by_name && (
+                    <div>
+                      <div style={{ fontSize:10, color:T.t5, textTransform:"uppercase", letterSpacing:"0.05em" }}>Reviewed by</div>
+                      <div style={{ fontSize:12, color:T.t3 }}>{assignment.reviewed_by_name}</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Rejection reason pill */}
+                {assignment.status === 'rejected' && assignment.rejection_reason && (
+                  <div style={{ background:T.redBg, border:`1px solid rgba(239,68,68,0.25)`, borderRadius:8, padding:"8px 10px", fontSize:12, color:"#fca5a5", borderLeft:`3px solid ${T.red}`, borderTopLeftRadius:0, borderBottomLeftRadius:0 }}>
+                    <span style={{ fontSize:10, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", display:"block", marginBottom:3, color:T.red }}>Rejection reason</span>
+                    {assignment.rejection_reason}
+                  </div>
+                )}
+
+                {/* ── Review panel (submitted only) ── */}
+                {assignment.status === 'submitted' && (
+                  <div style={{ background:"rgba(99,102,241,0.06)", border:`1px solid ${T.acMid}`, borderRadius:10, padding:"12px", display:"flex", flexDirection:"column", gap:8 }}>
+                    <div style={{ fontSize:10, fontWeight:600, color:T.acText, textTransform:"uppercase", letterSpacing:"0.06em" }}>Review submission</div>
+                    <textarea
+                      value={rejReason}
+                      onChange={e=>setRejReason(e.target.value)}
+                      placeholder="Rejection reason (required if rejecting)…"
+                      rows={2}
+                      style={{ ...inp, resize:"vertical" as const, minHeight:52 }}
+                    />
+                    {reviewError && <div style={{ fontSize:11, color:T.red }}>⚠ {reviewError}</div>}
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button onClick={()=>handleReview('approve')} disabled={reviewing}
+                        style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", background:T.greenBg, color:T.green, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", opacity:reviewing?0.6:1 }}>
+                        ✓ Approve
+                      </button>
+                      <button onClick={()=>handleReview('reject')} disabled={reviewing}
+                        style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", background:T.redBg, color:T.red, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", opacity:reviewing?0.6:1 }}>
+                        ✗ Reject
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
