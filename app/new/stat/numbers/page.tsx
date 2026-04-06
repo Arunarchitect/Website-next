@@ -5,6 +5,8 @@ import {
   fetchOrganisations,
   fetchProjectsByOrg,
   fetchBalanceSheet,
+  fetchTaxRules,
+  computeTaxForRevenues,
   type BalanceSheetResponse,
   type BalanceSheetParams,
   type OrganisationOption,
@@ -12,6 +14,7 @@ import {
   type CreditRow,
   type RevenueRow,
   type ExpenseRow,
+  type TaxRule,
 } from "@/app/new/revenueExpenseApi";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -21,12 +24,8 @@ const MONTHS = [
 ];
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
-function getDaysInMonth(y: number, m: number) {
-  return new Date(y, m + 1, 0).getDate();
-}
-function getFirstDay(y: number, m: number) {
-  return new Date(y, m, 1).getDay();
-}
+function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
+function getFirstDay(y: number, m: number)    { return new Date(y, m, 1).getDay(); }
 function fmtINR(n: number) {
   return "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
@@ -38,131 +37,54 @@ function fmtDateDisplay(iso: string) {
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const T = {
-  bg: "#07080f",
-  panel: "rgba(255,255,255,0.028)",
-  panelB: "rgba(255,255,255,0.065)",
-  panel2: "rgba(255,255,255,0.038)",
+  bg:      "#07080f",
+  panel:   "rgba(255,255,255,0.028)",
+  panelB:  "rgba(255,255,255,0.065)",
+  panel2:  "rgba(255,255,255,0.038)",
   panel2B: "rgba(255,255,255,0.08)",
   divider: "rgba(255,255,255,0.05)",
-  t1: "#f0f4ff",
-  t2: "#d8e0f0",
-  t3: "#8a9ab8",
-  t4: "#55657e",
-  t5: "#39475a",
-  t6: "#1f2733",
-  ac: "#4c7cf3",
-  acGlow: "rgba(76,124,243,0.15)",
+  t1: "#f0f4ff", t2: "#d8e0f0", t3: "#8a9ab8",
+  t4: "#55657e", t5: "#39475a", t6: "#1f2733",
+  ac:      "#4c7cf3",
+  acGlow:  "rgba(76,124,243,0.15)",
   acLight: "rgba(76,124,243,0.1)",
-  acMid: "rgba(76,124,243,0.45)",
-  acText: "#7ba4ff",
-  green: "#1ec99a",
-  greenBg: "rgba(30,201,154,0.09)",
-  red: "#f0686a",
-  redBg: "rgba(240,104,106,0.09)",
-  amber: "#f5a623",
-  amberBg: "rgba(245,166,35,0.09)",
-  purple: "#9b79f5",
-  purpleBg: "rgba(155,121,245,0.09)",
-  teal: "#2ec4b6",
+  acMid:   "rgba(76,124,243,0.45)",
+  acText:  "#7ba4ff",
+  green:   "#1ec99a", greenBg:  "rgba(30,201,154,0.09)",
+  red:     "#f0686a", redBg:    "rgba(240,104,106,0.09)",
+  amber:   "#f5a623", amberBg:  "rgba(245,166,35,0.09)",
+  purple:  "#9b79f5", purpleBg: "rgba(155,121,245,0.09)",
+  tax:     "#e879f9", taxBg:    "rgba(232,121,249,0.09)",
+  teal:    "#2ec4b6",
 };
 
 const AVAILABLE_YEARS = [2022, 2023, 2024, 2025, 2026];
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalGrid({
-  year,
-  month,
-  selDates,
-  activeDates,
-  rangeFrom,
-  rangeTo,
-  onToggle,
-}: {
-  year: number;
-  month: number;
-  selDates: Set<string>;
-  activeDates: Set<string>;
-  rangeFrom: string;
-  rangeTo: string;
-  onToggle: (d: string) => void;
+function CalGrid({ year, month, selDates, activeDates, rangeFrom, rangeTo, onToggle }: {
+  year: number; month: number; selDates: Set<string>; activeDates: Set<string>;
+  rangeFrom: string; rangeTo: string; onToggle: (d: string) => void;
 }) {
   const total = getDaysInMonth(year, month);
   const first = getFirstDay(year, month);
-  const cells: (number | null)[] = [
-    ...Array(first).fill(null),
-    ...Array.from({ length: total }, (_, i) => i + 1),
-  ];
+  const cells: (number | null)[] = [...Array(first).fill(null), ...Array.from({ length: total }, (_, i) => i + 1)];
   const today = new Date().toISOString().slice(0, 10);
-
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1 }}>
       {DAYS.map((d) => (
-        <div
-          key={d}
-          style={{
-            textAlign: "center",
-            fontSize: 9,
-            color: T.t5,
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            paddingBottom: 5,
-            textTransform: "uppercase",
-          }}
-        >
-          {d}
-        </div>
+        <div key={d} style={{ textAlign: "center", fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", paddingBottom: 5, textTransform: "uppercase" }}>{d}</div>
       ))}
       {cells.map((day, i) => {
         if (!day) return <div key={`_${i}`} />;
         const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        const sel = selDates.has(iso);
-        const has = activeDates.has(iso);
-        const isToday = iso === today;
+        const sel = selDates.has(iso), has = activeDates.has(iso), isToday = iso === today;
         const inRange = !!(rangeFrom && rangeTo && iso >= rangeFrom && iso <= rangeTo);
-        const isRangeStart = !!(rangeFrom && iso === rangeFrom);
-        const isRangeEnd = !!(rangeTo && iso === rangeTo);
-
+        const isEdge  = (rangeFrom && iso === rangeFrom) || (rangeTo && iso === rangeTo);
         return (
-          <button
-            key={iso}
-            onClick={() => onToggle(iso)}
-            style={{
-              background: sel
-                ? T.ac
-                : isRangeStart || isRangeEnd
-                ? T.ac
-                : inRange
-                ? T.acLight
-                : "transparent",
-              border: `1.5px solid ${sel || isRangeStart || isRangeEnd ? T.ac : isToday ? T.acMid : "transparent"}`,
-              borderRadius: 6,
-              cursor: "pointer",
-              color: sel || isRangeStart || isRangeEnd ? "#fff" : inRange ? T.acText : has ? T.t2 : T.t5,
-              fontSize: 11,
-              padding: "5px 0",
-              width: "100%",
-              fontFamily: "'DM Sans',sans-serif",
-              fontWeight: sel || isRangeStart || isRangeEnd ? 700 : 400,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 2,
-              transition: "all 0.12s",
-              boxShadow: sel ? `0 2px 8px ${T.acGlow}` : "none",
-            }}
-          >
+          <button key={iso} onClick={() => onToggle(iso)}
+            style={{ background: sel || isEdge ? T.ac : inRange ? T.acLight : "transparent", border: `1.5px solid ${sel || isEdge ? T.ac : isToday ? T.acMid : "transparent"}`, borderRadius: 6, cursor: "pointer", color: sel || isEdge ? "#fff" : inRange ? T.acText : has ? T.t2 : T.t5, fontSize: 11, padding: "5px 0", width: "100%", fontFamily: "'DM Sans',sans-serif", fontWeight: sel || isEdge ? 700 : 400, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, transition: "all 0.12s", boxShadow: sel ? `0 2px 8px ${T.acGlow}` : "none" }}>
             {day}
-            {has && (
-              <span
-                style={{
-                  width: 3,
-                  height: 3,
-                  borderRadius: "50%",
-                  background: sel ? "#fff" : T.acText,
-                  opacity: 0.8,
-                }}
-              />
-            )}
+            {has && <span style={{ width: 3, height: 3, borderRadius: "50%", background: sel ? "#fff" : T.acText, opacity: 0.8 }} />}
           </button>
         );
       })}
@@ -173,176 +95,46 @@ function CalGrid({
 // ─── Small helpers ────────────────────────────────────────────────────────────
 const Divider = () => <div style={{ height: 1, background: T.divider }} />;
 
-function FSel({
-  label,
-  value,
-  onChange,
-  disabled,
-  children,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-  children: React.ReactNode;
+function FSel({ label, value, onChange, disabled, children }: {
+  label: string; value: string; onChange: (v: string) => void; disabled?: boolean; children: React.ReactNode;
 }) {
   return (
     <div>
-      <div
-        style={{
-          fontSize: 9.5,
-          fontWeight: 700,
-          color: T.t5,
-          letterSpacing: "0.09em",
-          textTransform: "uppercase",
-          marginBottom: 5,
-        }}
-      >
-        {label}
-      </div>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        style={{
-          width: "100%",
-          background: disabled ? "rgba(255,255,255,0.02)" : T.panel2,
-          border: `1px solid ${T.panel2B}`,
-          borderRadius: 7,
-          padding: "8px 32px 8px 10px",
-          fontSize: 12,
-          color: disabled ? T.t5 : T.t2,
-          outline: "none",
-          fontFamily: "'DM Sans',sans-serif",
-          cursor: disabled ? "not-allowed" : "pointer",
-          appearance: "none",
-          WebkitAppearance: "none",
-          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2339475a'/%3E%3C/svg%3E")`,
-          backgroundRepeat: "no-repeat",
-          backgroundPosition: "calc(100% - 10px) center",
-          transition: "all 0.12s",
-          minHeight: 40,
-        }}
-      >
+      <div style={{ fontSize: 9.5, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 5 }}>{label}</div>
+      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
+        style={{ width: "100%", background: disabled ? "rgba(255,255,255,0.02)" : T.panel2, border: `1px solid ${T.panel2B}`, borderRadius: 7, padding: "8px 32px 8px 10px", fontSize: 12, color: disabled ? T.t5 : T.t2, outline: "none", fontFamily: "'DM Sans',sans-serif", cursor: disabled ? "not-allowed" : "pointer", appearance: "none", WebkitAppearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2339475a'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "calc(100% - 10px) center", transition: "all 0.12s", minHeight: 40 }}>
         {children}
       </select>
     </div>
   );
 }
 
-function DateInput({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  min?: string;
-  max?: string;
+function DateInput({ label, value, onChange, min, max }: {
+  label: string; value: string; onChange: (v: string) => void; min?: string; max?: string;
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-      <div
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          color: T.t5,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          marginBottom: 4,
-        }}
-      >
-        {label}
-      </div>
-      <input
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        min={min}
-        max={max}
-        style={{
-          width: "100%",
-          minWidth: 0,
-          background: T.panel2,
-          border: `1px solid ${value ? T.acMid : T.panel2B}`,
-          borderRadius: 7,
-          padding: "7px 6px",
-          fontSize: 11,
-          color: value ? T.t2 : T.t5,
-          outline: "none",
-          fontFamily: "'DM Sans',sans-serif",
-          cursor: "pointer",
-          colorScheme: "dark",
-          minHeight: 36,
-          transition: "border-color 0.15s",
-          boxSizing: "border-box",
-        }}
-      />
+      <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+      <input type="date" value={value} onChange={(e) => onChange(e.target.value)} min={min} max={max}
+        style={{ width: "100%", minWidth: 0, background: T.panel2, border: `1px solid ${value ? T.acMid : T.panel2B}`, borderRadius: 7, padding: "7px 6px", fontSize: 11, color: value ? T.t2 : T.t5, outline: "none", fontFamily: "'DM Sans',sans-serif", cursor: "pointer", colorScheme: "dark", minHeight: 36, transition: "border-color 0.15s", boxSizing: "border-box" }} />
     </div>
   );
 }
 
 function CatBadge({ label, color }: { label: string; color: string }) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px 2px 6px",
-        borderRadius: 5,
-        background: color + "18",
-        border: `1px solid ${color}30`,
-        fontSize: 10.5,
-        fontWeight: 600,
-        color,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        whiteSpace: "nowrap",
-      }}
-    >
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px 2px 6px", borderRadius: 5, background: color + "18", border: `1px solid ${color}30`, fontSize: 10.5, fontWeight: 600, color, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>
       <span style={{ width: 4, height: 4, borderRadius: "50%", background: color, flexShrink: 0 }} />
       {label}
     </span>
   );
 }
 
-// ─── NEW: Project Badge ───────────────────────────────────────────────────────
 function ProjectBadge({ name }: { name?: string | null }) {
-  if (!name) {
-    return <span style={{ fontSize: 11, color: T.t6 }}>—</span>;
-  }
+  if (!name) return <span style={{ fontSize: 11, color: T.t6 }}>—</span>;
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px 2px 6px",
-        borderRadius: 5,
-        background: T.teal + "18",
-        border: `1px solid ${T.teal}30`,
-        fontSize: 10.5,
-        fontWeight: 600,
-        color: T.teal,
-        whiteSpace: "nowrap",
-        maxWidth: 140,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
-    >
-      <span
-        style={{
-          width: 4,
-          height: 4,
-          borderRadius: "50%",
-          background: T.teal,
-          flexShrink: 0,
-        }}
-      />
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px 2px 6px", borderRadius: 5, background: T.teal + "18", border: `1px solid ${T.teal}30`, fontSize: 10.5, fontWeight: 600, color: T.teal, whiteSpace: "nowrap", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
+      <span style={{ width: 4, height: 4, borderRadius: "50%", background: T.teal, flexShrink: 0 }} />
       {name}
     </span>
   );
@@ -350,52 +142,16 @@ function ProjectBadge({ name }: { name?: string | null }) {
 
 function RepaidBadge({ repaid, date }: { repaid: boolean; date?: string | null }) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: 5,
-        background: repaid ? T.greenBg : T.amberBg,
-        border: `1px solid ${repaid ? T.green + "30" : T.amber + "30"}`,
-        color: repaid ? T.green : T.amber,
-        fontSize: 10,
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.06em",
-        whiteSpace: "nowrap",
-      }}
-    >
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 5, background: repaid ? T.greenBg : T.amberBg, border: `1px solid ${repaid ? T.green + "30" : T.amber + "30"}`, color: repaid ? T.green : T.amber, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>
       {repaid ? `✓ Repaid${date ? ` · ${date}` : ""}` : "Outstanding"}
     </span>
   );
 }
 
 function Avatar({ name }: { name: string }) {
-  const initials = (name || "?")
-    .split(" ")
-    .map((w: string) => w[0] || "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const initials = (name || "?").split(" ").map((w: string) => w[0] || "").join("").slice(0, 2).toUpperCase();
   return (
-    <div
-      style={{
-        width: 22,
-        height: 22,
-        borderRadius: "50%",
-        background: T.acLight,
-        border: `1px solid ${T.acMid}`,
-        color: T.acText,
-        fontSize: 8,
-        fontWeight: 700,
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <div style={{ width: 22, height: 22, borderRadius: "50%", background: T.acLight, border: `1px solid ${T.acMid}`, color: T.acText, fontSize: 8, fontWeight: 700, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
       {initials}
     </div>
   );
@@ -404,16 +160,7 @@ function Avatar({ name }: { name: string }) {
 function ProgressBar({ pct, color }: { pct: number; color: string }) {
   return (
     <div style={{ height: 3, borderRadius: 99, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-      <div
-        style={{
-          height: "100%",
-          borderRadius: 99,
-          background: color,
-          width: `${Math.min(100, pct)}%`,
-          transition: "width 0.5s",
-          boxShadow: `0 0 6px ${color}60`,
-        }}
-      />
+      <div style={{ height: "100%", borderRadius: 99, background: color, width: `${Math.min(100, pct)}%`, transition: "width 0.5s", boxShadow: `0 0 6px ${color}60` }} />
     </div>
   );
 }
@@ -425,15 +172,7 @@ function TableSkeleton({ cols = 5 }: { cols?: number }) {
         <tr key={i} style={{ borderBottom: `1px solid ${T.divider}` }}>
           {Array.from({ length: cols }).map((__, j) => (
             <td key={j} style={{ padding: "10px 12px" }}>
-              <div
-                style={{
-                  height: 11,
-                  width: [90, 120, 100, 80, 110][j % 5],
-                  borderRadius: 4,
-                  background: "rgba(255,255,255,0.05)",
-                  animation: "pulse 1.5s ease-in-out infinite",
-                }}
-              />
+              <div style={{ height: 11, width: [90, 120, 100, 80, 110][j % 5], borderRadius: 4, background: "rgba(255,255,255,0.05)", animation: "pulse 1.5s ease-in-out infinite" }} />
             </td>
           ))}
         </tr>
@@ -442,80 +181,30 @@ function TableSkeleton({ cols = 5 }: { cols?: number }) {
   );
 }
 
-function DetailTable({
-  accentColor,
-  accentBg,
-  icon,
-  title,
-  count,
-  headers,
-  loading,
-  empty,
-  children,
-}: {
-  accentColor: string;
-  accentBg: string;
-  icon: string;
-  title: string;
-  count?: number;
-  headers: { label: string; right?: boolean }[];
-  loading: boolean;
-  empty: string;
-  children: React.ReactNode;
+function DetailTable({ accentColor, accentBg, icon, title, count, headers, loading, empty, children }: {
+  accentColor: string; accentBg: string; icon: string; title: string; count?: number;
+  headers: { label: string; right?: boolean }[]; loading: boolean; empty: string; children: React.ReactNode;
 }) {
   return (
     <div style={{ borderRadius: 10, border: `1px solid ${T.panel2B}`, overflow: "hidden" }}>
-      <div
-        style={{
-          padding: "10px 14px",
-          borderBottom: `1px solid ${T.divider}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          background: accentBg,
-        }}
-      >
+      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${T.divider}`, display: "flex", alignItems: "center", gap: 8, background: accentBg }}>
         <span style={{ fontSize: 14 }}>{icon}</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: accentColor, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-          {title}
-        </span>
-        {count !== undefined && (
-          <span style={{ marginLeft: "auto", fontSize: 10, color: T.t4 }}>
-            {count} {count === 1 ? "entry" : "entries"}
-          </span>
-        )}
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: accentColor, letterSpacing: "0.05em", textTransform: "uppercase" }}>{title}</span>
+        {count !== undefined && <span style={{ marginLeft: "auto", fontSize: 10, color: T.t4 }}>{count} {count === 1 ? "entry" : "entries"}</span>}
       </div>
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
               {headers.map((h) => (
-                <th
-                  key={h.label}
-                  style={{
-                    padding: "8px 12px",
-                    textAlign: h.right ? "right" : "left",
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: T.t5,
-                    letterSpacing: "0.07em",
-                    textTransform: "uppercase",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {h.label}
-                </th>
+                <th key={h.label} style={{ padding: "8px 12px", textAlign: h.right ? "right" : "left", fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.07em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{h.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? <TableSkeleton cols={headers.length} /> : children}
             {!loading && count === 0 && (
-              <tr>
-                <td colSpan={headers.length} style={{ padding: "32px 16px", textAlign: "center", color: T.t6, fontSize: 12 }}>
-                  {empty}
-                </td>
-              </tr>
+              <tr><td colSpan={headers.length} style={{ padding: "32px 16px", textAlign: "center", color: T.t6, fontSize: 12 }}>{empty}</td></tr>
             )}
           </tbody>
         </table>
@@ -526,58 +215,14 @@ function DetailTable({
 
 // ─── Mobile Drawer ────────────────────────────────────────────────────────────
 function MobileDrawer({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [open]);
-
+  useEffect(() => { document.body.style.overflow = open ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [open]);
   return (
     <>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed", inset: 0, zIndex: 40,
-          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
-          opacity: open ? 1 : 0,
-          pointerEvents: open ? "auto" : "none",
-          transition: "opacity 0.25s",
-        }}
-      />
-      <div
-        style={{
-          position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 50,
-          width: "min(85vw, 300px)",
-          background: "#0d0f1c",
-          borderRight: `1px solid ${T.panelB}`,
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
-          transform: open ? "translateX(0)" : "translateX(-100%)",
-          transition: "transform 0.28s cubic-bezier(0.32,0,0.25,1)",
-          boxShadow: open ? "8px 0 40px rgba(0,0,0,0.6)" : "none",
-        }}
-      >
-        <div
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "16px 14px 12px",
-            borderBottom: `1px solid ${T.divider}`,
-            position: "sticky", top: 0, background: "#0d0f1c", zIndex: 1,
-          }}
-        >
-          <span style={{ fontSize: 12, fontWeight: 700, color: T.t3, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            Filters &amp; Calendar
-          </span>
-          <button
-            onClick={onClose}
-            style={{
-              width: 28, height: 28, borderRadius: 6,
-              background: T.panel2, border: `1px solid ${T.panel2B}`,
-              color: T.t4, cursor: "pointer", fontSize: 16,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            ✕
-          </button>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none", transition: "opacity 0.25s" }} />
+      <div style={{ position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 50, width: "min(85vw, 300px)", background: "#0d0f1c", borderRight: `1px solid ${T.panelB}`, overflowY: "auto", WebkitOverflowScrolling: "touch", transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.28s cubic-bezier(0.32,0,0.25,1)", boxShadow: open ? "8px 0 40px rgba(0,0,0,0.6)" : "none" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 14px 12px", borderBottom: `1px solid ${T.divider}`, position: "sticky", top: 0, background: "#0d0f1c", zIndex: 1 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: T.t3, letterSpacing: "0.08em", textTransform: "uppercase" }}>Filters &amp; Calendar</span>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, background: T.panel2, border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         </div>
         {children}
       </div>
@@ -600,109 +245,84 @@ export default function RevenueExpensePage() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const [orgs, setOrgs] = useState<OrganisationOption[]>([]);
+  const [orgs, setOrgs]         = useState<OrganisationOption[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
-  useEffect(() => {
-    fetchOrganisations().then(setOrgs).catch(console.error);
-  }, []);
+  useEffect(() => { fetchOrganisations().then(setOrgs).catch(console.error); }, []);
 
-  const [selectedOrg, setSelectedOrg] = useState<number | null>(null);
+  const [selectedOrg, setSelectedOrg]         = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
-  const [selectedUser, setSelectedUser] = useState<number | null>(null);
-  const [usersInOrg, setUsersInOrg] = useState<Array<{ id: number; name: string; role: string }>>([]);
+  const [selectedUser, setSelectedUser]       = useState<number | null>(null);
+  const [usersInOrg, setUsersInOrg]           = useState<Array<{ id: number; name: string; role: string }>>([]);
 
   useEffect(() => {
-    if (selectedOrg) {
-      fetchProjectsByOrg(selectedOrg).then(setProjects).catch(console.error);
-    } else {
-      setProjects([]);
-      setSelectedProject(null);
-    }
+    if (selectedOrg) fetchProjectsByOrg(selectedOrg).then(setProjects).catch(console.error);
+    else { setProjects([]); setSelectedProject(null); }
   }, [selectedOrg]);
 
-  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
-  const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
-  const [selDates, setSelDates] = useState<Set<string>>(new Set());
+  const [calYear, setCalYear]         = useState(() => new Date().getFullYear());
+  const [calMonth, setCalMonth]       = useState(() => new Date().getMonth());
+  const [selDates, setSelDates]       = useState<Set<string>>(new Set());
   const [activeDates, setActiveDates] = useState<Set<string>>(new Set());
-  const [selMonth, setSelMonth] = useState<number | null>(null);
-  const [selYear, setSelYear] = useState<number>(new Date().getFullYear());
-
-  const [rangeFrom, setRangeFrom] = useState<string>("");
-  const [rangeTo, setRangeTo] = useState<string>("");
-  const [filterMode, setFilterMode] = useState<"calendar" | "month" | "range" | "none">("none");
+  const [selMonth, setSelMonth]       = useState<number | null>(null);
+  const [selYear, setSelYear]         = useState<number>(new Date().getFullYear());
+  const [rangeFrom, setRangeFrom]     = useState<string>("");
+  const [rangeTo, setRangeTo]         = useState<string>("");
+  const [filterMode, setFilterMode]   = useState<"calendar"|"month"|"range"|"none">("none");
 
   const handleRangeFrom = useCallback((v: string) => {
     setRangeFrom(v);
-    if (v) {
-      setFilterMode("range");
-      setSelDates(new Set());
-      setSelMonth(null);
-    } else if (!rangeTo) {
-      setFilterMode("none");
-    }
+    if (v) { setFilterMode("range"); setSelDates(new Set()); setSelMonth(null); }
+    else if (!rangeTo) setFilterMode("none");
   }, [rangeTo]);
-
   const handleRangeTo = useCallback((v: string) => {
     setRangeTo(v);
-    if (v) {
-      setFilterMode("range");
-      setSelDates(new Set());
-      setSelMonth(null);
-    } else if (!rangeFrom) {
-      setFilterMode("none");
-    }
+    if (v) { setFilterMode("range"); setSelDates(new Set()); setSelMonth(null); }
+    else if (!rangeFrom) setFilterMode("none");
   }, [rangeFrom]);
 
-  const [tab, setTab] = useState<"summary" | "details">("summary");
+  const [tab, setTab] = useState<"summary"|"details">("summary");
 
-  const [data, setData] = useState<BalanceSheetResponse | null>(null);
+  const [data, setData]       = useState<BalanceSheetResponse | null>(null);
+  const [taxes, setTaxes]     = useState<TaxRule[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]     = useState<string | null>(null);
 
   const { dateFrom, dateTo } = useMemo(() => {
-    if (filterMode === "range") {
-      return { dateFrom: rangeFrom, dateTo: rangeTo };
-    }
+    if (filterMode === "range") return { dateFrom: rangeFrom, dateTo: rangeTo };
     if (filterMode === "calendar" && selDates.size > 0) {
-      const sorted = Array.from(selDates).sort();
-      return { dateFrom: sorted[0], dateTo: sorted[sorted.length - 1] };
+      const s = Array.from(selDates).sort();
+      return { dateFrom: s[0], dateTo: s[s.length - 1] };
     }
     return { dateFrom: "", dateTo: "" };
   }, [filterMode, rangeFrom, rangeTo, selDates]);
 
   const fetchData = useCallback(() => {
-    setLoading(true);
-    setError(null);
-
+    setLoading(true); setError(null);
     const params: BalanceSheetParams = {
       organisation_id: selectedOrg ?? undefined,
-      project_id: selectedProject ?? undefined,
-      user_id: selectedUser ?? undefined,
-      view_all: true,
+      project_id:      selectedProject ?? undefined,
+      user_id:         selectedUser ?? undefined,
+      view_all:        true,
     };
+    if (filterMode === "range")         { if (rangeFrom) params.from = rangeFrom; if (rangeTo) params.to = rangeTo; }
+    else if (filterMode === "month")    { params.year = selYear; params.month = selMonth !== null ? selMonth + 1 : undefined; }
+    else if (filterMode === "calendar") { if (dateFrom) params.from = dateFrom; if (dateTo) params.to = dateTo; }
+    else                                { params.year = selYear; }
 
-    if (filterMode === "range") {
-      if (rangeFrom) params.from = rangeFrom;
-      if (rangeTo) params.to = rangeTo;
-    } else if (filterMode === "month") {
-      params.year = selYear;
-      params.month = selMonth !== null ? selMonth + 1 : undefined;
-    } else if (filterMode === "calendar") {
-      if (dateFrom) params.from = dateFrom;
-      if (dateTo) params.to = dateTo;
-    } else {
-      params.year = selYear;
-    }
-
-    fetchBalanceSheet(params)
-      .then((d) => {
+    // Fetch balance sheet + taxes in parallel (same pattern as pie page)
+    Promise.all([
+      fetchBalanceSheet(params),
+      fetchTaxRules({ organisation_id: selectedOrg ?? undefined, is_active: true }),
+    ])
+      .then(([d, t]) => {
         setData(d);
+        setTaxes(t);
         const metaUsers = (d.meta?.users_in_org as Array<{ id: number; name: string; role: string }> | undefined) ?? [];
         setUsersInOrg(metaUsers);
         const dates = new Set<string>([
           ...(d.revenues ?? []).map((r: RevenueRow) => r.date),
           ...(d.expenses ?? []).map((e: ExpenseRow) => e.date),
-          ...(d.credits ?? []).map((c: CreditRow) => c.date),
+          ...(d.credits  ?? []).map((c: CreditRow)  => c.date),
         ]);
         setActiveDates(dates);
       })
@@ -710,47 +330,58 @@ export default function RevenueExpensePage() {
       .finally(() => setLoading(false));
   }, [filterMode, selYear, selMonth, rangeFrom, rangeTo, selectedOrg, selectedProject, selectedUser, dateFrom, dateTo]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const revenues = useMemo(() => data?.revenues ?? [], [data]);
-  const credits = useMemo(() => data?.credits ?? [], [data]);
+  const credits  = useMemo(() => data?.credits  ?? [], [data]);
   const expenses = useMemo(() => data?.expenses ?? [], [data]);
 
-  const totalCredit = credits.reduce((s, c) => s + c.amount, 0);
-  const outstandingCredit = credits.filter((c) => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
-  const repaidCredit = credits.filter((c) => c.is_repaid).reduce((s, c) => s + c.amount, 0);
-  const totalRevenue = revenues.reduce((s, r) => s + r.amount, 0);
-  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const nonReimbursedExpenses = expenses.filter((e) => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
+  // ── Tax computation (identical to pie page) ───────────────────────────────
+  const { totalTax, byName: taxByName } = useMemo(
+    () => computeTaxForRevenues(revenues, taxes),
+    [revenues, taxes],
+  );
 
-  const balanceWithoutCredit = totalRevenue - totalExpenses;
-  const balanceWithCredit = totalRevenue - totalExpenses + outstandingCredit;
+  const totalCredit            = credits.reduce((s, c) => s + c.amount, 0);
+  const outstandingCredit      = credits.filter((c) => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
+  const repaidCredit           = credits.filter((c) =>  c.is_repaid).reduce((s, c) => s + c.amount, 0);
+  const totalRevenue           = revenues.reduce((s, r) => s + r.amount, 0);
+  const totalExpenses          = expenses.reduce((s, e) => s + e.amount, 0);
+  const nonReimbursedExpenses  = expenses.filter((e) => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
+
+  // Net = revenue − expenses − tax + outstanding credit
+  const balanceWithoutCredit = totalRevenue - totalExpenses - totalTax;
+  const balanceWithCredit    = balanceWithoutCredit + outstandingCredit;
+
+  // Per-revenue tax for detail table
+  const revenueTaxMap = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const rev of revenues) {
+      const { totalTax: t } = computeTaxForRevenues([rev], taxes);
+      map[rev.id] = t;
+    }
+    return map;
+  }, [revenues, taxes]);
 
   const userBalance = useMemo(() => {
     if (!selectedUser || !data) return null;
     const userRevenues = revenues.filter((r) => r.user === selectedUser);
     const userTotalRevenue = userRevenues.reduce((s, r) => s + r.amount, 0);
+    const userTax = computeTaxForRevenues(userRevenues, taxes).totalTax;
     const userExpenses = expenses.filter((e) => e.user_id === selectedUser);
-    const userNonReimbursedExpenses = userExpenses.filter((e) => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
-    const userReimbursedExpenses = userExpenses.filter((e) => e.reimbursed).reduce((s, e) => s + e.amount, 0);
-    const userCredits = credits.filter((c) => c.user === selectedUser);
-    const userTotalCredits = userCredits.reduce((s, c) => s + c.amount, 0);
-    const userOutstandingCredits = userCredits.filter((c) => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
-    const balance = userTotalRevenue + userTotalCredits - userNonReimbursedExpenses;
+    const userNonReimbursed = userExpenses.filter((e) => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
+    const userReimbursed    = userExpenses.filter((e) =>  e.reimbursed).reduce((s, e) => s + e.amount, 0);
+    const userCredits       = credits.filter((c) => c.user === selectedUser);
+    const userTotalCredits  = userCredits.reduce((s, c) => s + c.amount, 0);
+    const userOutstanding   = userCredits.filter((c) => !c.is_repaid).reduce((s, c) => s + c.amount, 0);
+    const balance = userTotalRevenue - userTax + userTotalCredits - userNonReimbursed;
     return {
-      balance,
-      isPositive: balance >= 0,
-      userTotalRevenue,
-      userTotalCredits,
-      userOutstandingCredits,
-      userNonReimbursedExpenses,
-      userReimbursedExpenses,
-      owesToCompany: balance > 0,
-      companyOwesUser: balance < 0,
+      balance, isPositive: balance >= 0,
+      userTotalRevenue, userTax, userTotalCredits, userOutstanding,
+      userNonReimbursed, userReimbursed,
+      owesToCompany: balance > 0, companyOwesUser: balance < 0,
     };
-  }, [selectedUser, data, revenues, expenses, credits]);
+  }, [selectedUser, data, revenues, expenses, credits, taxes]);
 
   const creditByCat = useMemo(() => {
     const map: Record<string, number> = {};
@@ -761,392 +392,146 @@ export default function RevenueExpensePage() {
   const revenueByUser = useMemo(() => {
     const map: Record<number, { name: string; amount: number }> = {};
     revenues.forEach((r) => {
-      const userName = (r as RevenueRow & { user_name?: string; user_email?: string }).user_name
-        ?? (r as RevenueRow & { user_email?: string }).user_email
-        ?? `User ${r.user}`;
-      if (!map[r.user]) map[r.user] = { name: userName, amount: 0 };
+      const name = (r as RevenueRow & { user_name?: string }).user_name ?? r.user_email ?? `User ${r.user}`;
+      if (!map[r.user]) map[r.user] = { name, amount: 0 };
       map[r.user].amount += r.amount;
     });
     return Object.values(map).sort((a, b) => b.amount - a.amount);
   }, [revenues]);
 
-  const TABS: { key: "summary" | "details"; label: string }[] = [
+  const TABS: { key: "summary"|"details"; label: string }[] = [
     { key: "summary", label: "Summary" },
     { key: "details", label: "Detailed View" },
   ];
 
-  function clearAll() {
-    setSelDates(new Set());
-    setSelMonth(null);
-    setRangeFrom("");
-    setRangeTo("");
-    setFilterMode("none");
-    setSelectedOrg(null);
-    setSelectedProject(null);
-    setSelectedUser(null);
-  }
+  const clearAll         = () => { setSelDates(new Set()); setSelMonth(null); setRangeFrom(""); setRangeTo(""); setFilterMode("none"); setSelectedOrg(null); setSelectedProject(null); setSelectedUser(null); };
+  const clearDateFilters = () => { setSelDates(new Set()); setSelMonth(null); setRangeFrom(""); setRangeTo(""); setFilterMode("none"); };
+  const toggleDate = (iso: string) => {
+    setFilterMode("calendar"); setRangeFrom(""); setRangeTo(""); setSelMonth(null);
+    setSelDates((p) => { const n = new Set(p); if (n.has(iso)) n.delete(iso); else n.add(iso); if (n.size === 0) setFilterMode("none"); return n; });
+  };
+  const selectMonth = (idx: number) => {
+    if (selMonth === idx && filterMode === "month") { setSelMonth(null); setFilterMode("none"); }
+    else { setSelMonth(idx); setFilterMode("month"); setSelDates(new Set()); setRangeFrom(""); setRangeTo(""); }
+  };
+  const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); };
+  const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); };
 
-  function clearDateFilters() {
-    setSelDates(new Set());
-    setSelMonth(null);
-    setRangeFrom("");
-    setRangeTo("");
-    setFilterMode("none");
-  }
-
-  const hasFilter =
-    filterMode !== "none" ||
-    !!selectedOrg ||
-    !!selectedProject ||
-    !!selectedUser;
-
-  function toggleDate(iso: string) {
-    setFilterMode("calendar");
-    setRangeFrom("");
-    setRangeTo("");
-    setSelMonth(null);
-    setSelDates((p) => {
-      const n = new Set(p);
-      if (n.has(iso)) { n.delete(iso); } else { n.add(iso); }
-      if (n.size === 0) setFilterMode("none");
-      return n;
-    });
-  }
-
-  function selectMonth(idx: number) {
-    if (selMonth === idx && filterMode === "month") {
-      setSelMonth(null);
-      setFilterMode("none");
-    } else {
-      setSelMonth(idx);
-      setFilterMode("month");
-      setSelDates(new Set());
-      setRangeFrom("");
-      setRangeTo("");
-    }
-  }
-
-  function prevMonth() {
-    if (calMonth === 0) { setCalMonth(11); setCalYear((y) => y - 1); }
-    else setCalMonth((m) => m - 1);
-  }
-
-  function nextMonth() {
-    if (calMonth === 11) { setCalMonth(0); setCalYear((y) => y + 1); }
-    else setCalMonth((m) => m + 1);
-  }
-
-  const activeFilterCount = [
-    filterMode !== "none",
-    !!selectedOrg,
-    !!selectedProject,
-    !!selectedUser,
-  ].filter(Boolean).length;
-
-  const rangeLabelShort = useMemo(() => {
-    if (filterMode === "range") {
-      if (rangeFrom && rangeTo) return `${fmtDateDisplay(rangeFrom)} – ${fmtDateDisplay(rangeTo)}`;
-      if (rangeFrom) return `From ${fmtDateDisplay(rangeFrom)}`;
-      if (rangeTo) return `Until ${fmtDateDisplay(rangeTo)}`;
-    }
-    return "";
+  const hasFilter         = filterMode !== "none" || !!selectedOrg || !!selectedProject || !!selectedUser;
+  const activeFilterCount = [filterMode !== "none", !!selectedOrg, !!selectedProject, !!selectedUser].filter(Boolean).length;
+  const rangeLabelShort   = useMemo(() => {
+    if (filterMode !== "range") return "";
+    if (rangeFrom && rangeTo) return `${fmtDateDisplay(rangeFrom)} – ${fmtDateDisplay(rangeTo)}`;
+    if (rangeFrom) return `From ${fmtDateDisplay(rangeFrom)}`;
+    return `Until ${fmtDateDisplay(rangeTo)}`;
   }, [filterMode, rangeFrom, rangeTo]);
 
+  // ─── Sidebar ──────────────────────────────────────────────────────────────
   const SidebarContent = () => (
     <>
-      {/* ─── Date Range Picker ─────────────────────────────────── */}
       <div style={{ padding: "14px 14px 12px" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 10,
-          }}
-        >
-          <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>
-            Date Range
-          </div>
-          {filterMode === "range" && (rangeFrom || rangeTo) && (
-            <button
-              onClick={clearDateFilters}
-              style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11, padding: "1px 4px" }}
-            >
-              ✕ Clear
-            </button>
-          )}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>Date Range</div>
+          {filterMode === "range" && (rangeFrom || rangeTo) && <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11, padding: "1px 4px" }}>✕ Clear</button>}
         </div>
-
         <div style={{ display: "flex", gap: 6, marginBottom: 8, overflow: "hidden" }}>
-          <DateInput
-            label="From"
-            value={filterMode === "range" ? rangeFrom : ""}
-            onChange={handleRangeFrom}
-            max={filterMode === "range" && rangeTo ? rangeTo : undefined}
-          />
-          <DateInput
-            label="To"
-            value={filterMode === "range" ? rangeTo : ""}
-            onChange={handleRangeTo}
-            min={filterMode === "range" && rangeFrom ? rangeFrom : undefined}
-          />
+          <DateInput label="From" value={filterMode === "range" ? rangeFrom : ""} onChange={handleRangeFrom} max={filterMode === "range" && rangeTo ? rangeTo : undefined} />
+          <DateInput label="To"   value={filterMode === "range" ? rangeTo   : ""} onChange={handleRangeTo}   min={filterMode === "range" && rangeFrom ? rangeFrom : undefined} />
         </div>
-
         {filterMode === "range" && (rangeFrom || rangeTo) && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              background: T.acLight,
-              borderRadius: 6,
-              padding: "5px 9px",
-              border: `1px solid ${T.acMid}`,
-            }}
-          >
-            <span style={{ fontSize: 10, color: T.acText, fontWeight: 600, flex: 1 }}>
-              📅 {rangeLabelShort}
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: T.acLight, borderRadius: 6, padding: "5px 9px", border: `1px solid ${T.acMid}` }}>
+            <span style={{ fontSize: 10, color: T.acText, fontWeight: 600, flex: 1 }}>📅 {rangeLabelShort}</span>
           </div>
         )}
       </div>
-
       <Divider />
 
-      {/* ─── Calendar ─────────────────────────────────────────── */}
       <div style={{ padding: "14px 14px 0" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 12,
-          }}
-        >
-          <button
-            onClick={prevMonth}
-            style={{
-              width: 30, height: 30, borderRadius: 6,
-              background: T.panel2, border: `1px solid ${T.panel2B}`,
-              color: T.t4, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-            }}
-          >
-            ‹
-          </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <button onClick={prevMonth} style={{ width: 30, height: 30, borderRadius: 6, background: T.panel2, border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>‹</button>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: T.t2 }}>{MONTHS[calMonth]}</div>
             <div style={{ fontSize: 10, color: T.t5, marginTop: 1 }}>{calYear}</div>
           </div>
-          <button
-            onClick={nextMonth}
-            style={{
-              width: 30, height: 30, borderRadius: 6,
-              background: T.panel2, border: `1px solid ${T.panel2B}`,
-              color: T.t4, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-            }}
-          >
-            ›
-          </button>
+          <button onClick={nextMonth} style={{ width: 30, height: 30, borderRadius: 6, background: T.panel2, border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>›</button>
         </div>
-
-        <CalGrid
-          year={calYear}
-          month={calMonth}
-          selDates={filterMode === "calendar" ? selDates : new Set<string>()}
-          activeDates={activeDates}
-          rangeFrom={filterMode === "range" ? rangeFrom : ""}
-          rangeTo={filterMode === "range" ? rangeTo : ""}
-          onToggle={toggleDate}
-        />
-
+        <CalGrid year={calYear} month={calMonth} selDates={filterMode === "calendar" ? selDates : new Set<string>()} activeDates={activeDates} rangeFrom={filterMode === "range" ? rangeFrom : ""} rangeTo={filterMode === "range" ? rangeTo : ""} onToggle={toggleDate} />
         {filterMode === "calendar" && selDates.size > 0 && (
-          <div
-            style={{
-              marginTop: 8,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: T.acLight,
-              borderRadius: 6,
-              padding: "5px 9px",
-            }}
-          >
-            <span style={{ fontSize: 10.5, color: T.acText, fontWeight: 600 }}>
-              {selDates.size} date{selDates.size > 1 ? "s" : ""} selected
-            </span>
-            <button
-              onClick={clearDateFilters}
-              style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 14, padding: "2px 4px" }}
-            >
-              ✕
-            </button>
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", background: T.acLight, borderRadius: 6, padding: "5px 9px" }}>
+            <span style={{ fontSize: 10.5, color: T.acText, fontWeight: 600 }}>{selDates.size} date{selDates.size > 1 ? "s" : ""} selected</span>
+            <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 14, padding: "2px 4px" }}>✕</button>
           </div>
         )}
       </div>
-
       <Divider />
 
-      {/* ─── Quick Month ───────────────────────────────────────── */}
       <div style={{ padding: "12px 14px" }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 8 }}>
-          Quick Month
-        </div>
+        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 8 }}>Quick Month</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 3 }}>
           {MONTHS.map((m, i) => {
-            const monthActive = filterMode === "month" && selMonth === i;
+            const active = filterMode === "month" && selMonth === i;
             const dimmed = filterMode === "range" || filterMode === "calendar";
-            return (
-              <button
-                key={m}
-                onClick={() => selectMonth(i)}
-                style={{
-                  background: monthActive ? T.acLight : "transparent",
-                  border: `1px solid ${monthActive ? T.acMid : T.divider}`,
-                  borderRadius: 5,
-                  color: monthActive ? T.acText : T.t5,
-                  fontSize: 10,
-                  padding: "6px 0",
-                  cursor: "pointer",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.04em",
-                  fontWeight: monthActive ? 700 : 400,
-                  minHeight: 32,
-                  opacity: dimmed ? 0.4 : 1,
-                  transition: "opacity 0.15s",
-                }}
-              >
-                {m.slice(0, 3)}
-              </button>
-            );
+            return <button key={m} onClick={() => selectMonth(i)} style={{ background: active ? T.acLight : "transparent", border: `1px solid ${active ? T.acMid : T.divider}`, borderRadius: 5, color: active ? T.acText : T.t5, fontSize: 10, padding: "6px 0", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: active ? 700 : 400, minHeight: 32, opacity: dimmed ? 0.4 : 1 }}>{m.slice(0, 3)}</button>;
           })}
         </div>
       </div>
 
-      {/* ─── Year ─────────────────────────────────────────────── */}
       <div style={{ padding: "0 14px 12px" }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 8 }}>
-          Year
-        </div>
+        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 8 }}>Year</div>
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
           {AVAILABLE_YEARS.map((y) => {
-            const yearActive = selYear === y && (filterMode === "month" || filterMode === "none");
-            return (
-              <button
-                key={y}
-                onClick={() => setSelYear(y)}
-                style={{
-                  flex: "1 1 0",
-                  background: yearActive ? T.acLight : "transparent",
-                  border: `1px solid ${yearActive ? T.acMid : T.divider}`,
-                  borderRadius: 5,
-                  color: yearActive ? T.acText : T.t5,
-                  fontSize: 10,
-                  padding: "6px 0",
-                  cursor: "pointer",
-                  fontWeight: yearActive ? 700 : 400,
-                  minHeight: 32,
-                  opacity: filterMode === "range" || filterMode === "calendar" ? 0.4 : 1,
-                  transition: "opacity 0.15s",
-                }}
-              >
-                {y}
-              </button>
-            );
+            const active = selYear === y && (filterMode === "month" || filterMode === "none");
+            return <button key={y} onClick={() => setSelYear(y)} style={{ flex: "1 1 0", background: active ? T.acLight : "transparent", border: `1px solid ${active ? T.acMid : T.divider}`, borderRadius: 5, color: active ? T.acText : T.t5, fontSize: 10, padding: "6px 0", cursor: "pointer", fontWeight: active ? 700 : 400, minHeight: 32, opacity: filterMode === "range" || filterMode === "calendar" ? 0.4 : 1 }}>{y}</button>;
           })}
         </div>
       </div>
-
       <Divider />
 
-      {/* ─── Filters ──────────────────────────────────────────── */}
       <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>
-          Filters
-        </div>
-
-        <FSel
-          label="Organisation"
-          value={selectedOrg ? String(selectedOrg) : ""}
-          onChange={(v) => {
-            setSelectedOrg(v ? Number(v) : null);
-            setSelectedProject(null);
-            setSelectedUser(null);
-          }}
-        >
+        <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>Filters</div>
+        <FSel label="Organisation" value={selectedOrg ? String(selectedOrg) : ""} onChange={(v) => { setSelectedOrg(v ? Number(v) : null); setSelectedProject(null); setSelectedUser(null); }}>
           <option value="">All organisations</option>
           {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </FSel>
-
-        <FSel
-          label="Project"
-          value={selectedProject ? String(selectedProject) : ""}
-          onChange={(v) => setSelectedProject(v ? Number(v) : null)}
-          disabled={!selectedOrg}
-        >
+        <FSel label="Project" value={selectedProject ? String(selectedProject) : ""} onChange={(v) => setSelectedProject(v ? Number(v) : null)} disabled={!selectedOrg}>
           <option value="">All projects</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </FSel>
-
-        <FSel
-          label="User"
-          value={selectedUser ? String(selectedUser) : ""}
-          onChange={(v) => setSelectedUser(v ? Number(v) : null)}
-          disabled={!selectedOrg}
-        >
+        <FSel label="User" value={selectedUser ? String(selectedUser) : ""} onChange={(v) => setSelectedUser(v ? Number(v) : null)} disabled={!selectedOrg}>
           <option value="">All users</option>
           {usersInOrg.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
         </FSel>
       </div>
 
-      {/* ─── Overview ─────────────────────────────────────────── */}
       {data && (
         <>
           <Divider />
           <div style={{ padding: "12px 14px" }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 10 }}>
-              Overview
-            </div>
-
+            <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 10 }}>Overview</div>
             {[
-              { label: "Revenue", val: totalRevenue, color: T.green, signed: false },
-              { label: "Total Expenses", val: totalExpenses, color: T.red, signed: false },
-              { label: "Non-Reimbursed Expenses", val: nonReimbursedExpenses, color: T.red, signed: false },
-              { label: "Credits", val: totalCredit, color: T.purple, signed: false },
-              { label: "Outstanding Credits", val: outstandingCredit, color: T.amber, signed: false },
-              { label: "Net P&L (no credit)", val: balanceWithoutCredit, color: balanceWithoutCredit >= 0 ? T.green : T.red, signed: true },
-              { label: "Net (with Credit)", val: balanceWithCredit, color: balanceWithCredit >= 0 ? T.green : T.red, signed: true },
+              { label: "Revenue",                 val: totalRevenue,           color: T.green,  signed: false },
+              { label: "Total Expenses",           val: totalExpenses,          color: T.red,    signed: false },
+              { label: "Non-Reimbursed Expenses",  val: nonReimbursedExpenses,  color: T.red,    signed: false },
+              { label: "Tax Liability",            val: totalTax,               color: T.tax,    signed: false },
+              { label: "Credits",                  val: totalCredit,            color: T.purple, signed: false },
+              { label: "Outstanding Credits",      val: outstandingCredit,      color: T.amber,  signed: false },
+              { label: "Net P&L (no credit)",      val: balanceWithoutCredit,   color: balanceWithoutCredit >= 0 ? T.green : T.red, signed: true },
+              { label: "Net (with Credit)",        val: balanceWithCredit,      color: balanceWithCredit    >= 0 ? T.green : T.red, signed: true },
             ].map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  marginBottom: 5, padding: "5px 8px", borderRadius: 6, background: s.color + "0d",
-                }}
-              >
+              <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5, padding: "5px 8px", borderRadius: 6, background: s.color + "0d" }}>
                 <span style={{ fontSize: 11, color: T.t4 }}>{s.label}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>
-                  {s.signed ? (s.val >= 0 ? "+" : "−") : ""}{fmtINR(Math.abs(s.val))}
-                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>{s.signed ? (s.val >= 0 ? "+" : "−") : ""}{fmtINR(Math.abs(s.val))}</span>
               </div>
             ))}
 
             {selectedUser && userBalance && (
-              <div
-                style={{
-                  marginTop: 12, padding: "10px 12px", borderRadius: 8,
-                  background: userBalance.isPositive ? T.greenBg : T.redBg,
-                  border: `1px solid ${userBalance.isPositive ? T.green + "30" : T.red + "30"}`,
-                }}
-              >
-                <div style={{ fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
-                  User Balance Analysis
-                </div>
+              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: userBalance.isPositive ? T.greenBg : T.redBg, border: `1px solid ${userBalance.isPositive ? T.green + "30" : T.red + "30"}` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>User Balance Analysis</div>
                 {[
-                  { label: "Revenue Collected:", val: userBalance.userTotalRevenue, color: T.green },
-                  { label: "Credits Taken:", val: userBalance.userTotalCredits, color: T.purple },
-                  { label: "Non-Reimbursed Expenses:", val: userBalance.userNonReimbursedExpenses, color: T.red },
+                  { label: "Revenue Collected:", val: userBalance.userTotalRevenue, color: T.green  },
+                  { label: "Tax on Revenue:",    val: userBalance.userTax,          color: T.tax    },
+                  { label: "Credits Taken:",     val: userBalance.userTotalCredits, color: T.purple },
+                  { label: "Non-Reimb. Expenses:", val: userBalance.userNonReimbursed, color: T.red },
                 ].map((row) => (
                   <div key={row.label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                     <span style={{ fontSize: 10.5, color: T.t4 }}>{row.label}</span>
@@ -1155,48 +540,47 @@ export default function RevenueExpensePage() {
                 ))}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, paddingTop: 4, borderTop: `1px solid ${T.divider}` }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: T.t3 }}>Net Balance:</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: userBalance.isPositive ? T.green : T.red }}>
-                    {userBalance.isPositive ? "+" : "−"}{fmtINR(Math.abs(userBalance.balance))}
-                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: userBalance.isPositive ? T.green : T.red }}>{userBalance.isPositive ? "+" : "−"}{fmtINR(Math.abs(userBalance.balance))}</span>
                 </div>
                 <div style={{ fontSize: 11, color: userBalance.isPositive ? T.green : T.red, fontWeight: 600, textAlign: "center", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${T.divider}` }}>
-                  {userBalance.owesToCompany
-                    ? `💰 User owes company ${fmtINR(userBalance.balance)}`
-                    : userBalance.companyOwesUser
-                    ? `💸 Company owes user ${fmtINR(Math.abs(userBalance.balance))}`
-                    : "✅ Balanced"}
+                  {userBalance.owesToCompany ? `💰 User owes company ${fmtINR(userBalance.balance)}` : userBalance.companyOwesUser ? `💸 Company owes user ${fmtINR(Math.abs(userBalance.balance))}` : "✅ Balanced"}
                 </div>
               </div>
             )}
 
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>
-                Balance Comparison
+            {/* Tax breakdown in sidebar */}
+            {totalTax > 0 && Object.keys(taxByName).length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>Tax Breakdown</div>
+                {Object.entries(taxByName).map(([name, amt]) => (
+                  <div key={name} style={{ marginBottom: 7 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                      <span style={{ fontSize: 10.5, color: T.t4 }}>{name}</span>
+                      <span style={{ fontSize: 10.5, color: T.tax, fontWeight: 600 }}>{fmtINR(amt)}</span>
+                    </div>
+                    <ProgressBar pct={totalRevenue > 0 ? (amt / totalRevenue) * 100 : 0} color={T.tax} />
+                  </div>
+                ))}
               </div>
-              {[
-                { label: "Net P&L (no credit):", val: balanceWithoutCredit },
-                { label: "Net with Credit:", val: balanceWithCredit },
-              ].map((row) => (
+            )}
+
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>Balance Comparison</div>
+              {[{ label: "Net P&L (no credit):", val: balanceWithoutCredit }, { label: "Net with Credit:", val: balanceWithCredit }].map((row) => (
                 <div key={row.label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                   <span style={{ fontSize: 10.5, color: T.t4 }}>{row.label}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: row.val >= 0 ? T.green : T.red }}>
-                    {row.val >= 0 ? "+" : "−"}{fmtINR(Math.abs(row.val))}
-                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: row.val >= 0 ? T.green : T.red }}>{row.val >= 0 ? "+" : "−"}{fmtINR(Math.abs(row.val))}</span>
                 </div>
               ))}
               <div style={{ marginTop: 8 }}>
                 <ProgressBar pct={totalExpenses > 0 ? (nonReimbursedExpenses / totalExpenses) * 100 : 0} color={T.amber} />
-                <div style={{ fontSize: 8, color: T.t6, marginTop: 4, textAlign: "center" }}>
-                  {totalExpenses > 0 ? ((nonReimbursedExpenses / totalExpenses) * 100).toFixed(0) : 0}% of expenses not reimbursed
-                </div>
+                <div style={{ fontSize: 8, color: T.t6, marginTop: 4, textAlign: "center" }}>{totalExpenses > 0 ? ((nonReimbursedExpenses / totalExpenses) * 100).toFixed(0) : 0}% of expenses not reimbursed</div>
               </div>
             </div>
 
             {(data.summary?.revenue_by_source?.length ?? 0) > 0 && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>
-                  Revenue by Source
-                </div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>Revenue by Source</div>
                 {data.summary.revenue_by_source.map((item: { source: string; total: number }) => (
                   <div key={item.source} style={{ marginBottom: 7 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
@@ -1211,9 +595,7 @@ export default function RevenueExpensePage() {
 
             {revenueByUser.length > 0 && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>
-                  Top Contributors
-                </div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>Top Contributors</div>
                 {revenueByUser.slice(0, 3).map((user) => (
                   <div key={user.name} style={{ marginBottom: 7 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
@@ -1228,9 +610,7 @@ export default function RevenueExpensePage() {
 
             {(data.summary?.expenses_by_category?.length ?? 0) > 0 && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>
-                  Expenses by Category
-                </div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>Expenses by Category</div>
                 {data.summary.expenses_by_category.map((item: { category: string; total: number }) => (
                   <div key={item.category} style={{ marginBottom: 7 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
@@ -1245,9 +625,7 @@ export default function RevenueExpensePage() {
 
             {creditByCat.length > 0 && (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>
-                  Credits by Category
-                </div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 7 }}>Credits by Category</div>
                 {creditByCat.map(([cat, val]) => (
                   <div key={cat} style={{ marginBottom: 7 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
@@ -1267,30 +645,10 @@ export default function RevenueExpensePage() {
         <>
           <Divider />
           <div style={{ padding: "10px 14px 20px" }}>
-            <button
-              onClick={() => { clearAll(); setDrawerOpen(false); }}
-              style={{
-                width: "100%",
-                background: "transparent",
-                border: `1px solid ${T.divider}`,
-                borderRadius: 7,
-                padding: "8px 0",
-                fontSize: 11,
-                color: T.t5,
-                cursor: "pointer",
-                fontFamily: "'DM Sans',sans-serif",
-                transition: "all 0.12s",
-                minHeight: 38,
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.color = T.red;
-                (e.currentTarget as HTMLElement).style.borderColor = T.red + "40";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.color = T.t5;
-                (e.currentTarget as HTMLElement).style.borderColor = T.divider;
-              }}
-            >
+            <button onClick={() => { clearAll(); setDrawerOpen(false); }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = T.red; (e.currentTarget as HTMLElement).style.borderColor = T.red + "40"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = T.t5; (e.currentTarget as HTMLElement).style.borderColor = T.divider; }}
+              style={{ width: "100%", background: "transparent", border: `1px solid ${T.divider}`, borderRadius: 7, padding: "8px 0", fontSize: 11, color: T.t5, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", transition: "all 0.12s", minHeight: 38 }}>
               ✕ &nbsp;Clear all filters
             </button>
           </div>
@@ -1299,19 +657,9 @@ export default function RevenueExpensePage() {
     </>
   );
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div
-      ref={containerRef}
-      style={{
-        minHeight: "100vh",
-        background: T.bg,
-        color: T.t2,
-        fontFamily: "'DM Sans','Sora',sans-serif",
-        padding: isMobile
-          ? "env(safe-area-inset-top, 18px) env(safe-area-inset-right, 12px) env(safe-area-inset-bottom, 80px) env(safe-area-inset-left, 12px)"
-          : "28px 24px 60px",
-      }}
-    >
+    <div ref={containerRef} style={{ minHeight: "100vh", background: T.bg, color: T.t2, fontFamily: "'DM Sans','Sora',sans-serif", padding: isMobile ? "env(safe-area-inset-top, 18px) env(safe-area-inset-right, 12px) env(safe-area-inset-bottom, 80px) env(safe-area-inset-left, 12px)" : "28px 24px 60px" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Sora:wght@400;600;700&display=swap');
         *{box-sizing:border-box;margin:0;}
@@ -1324,117 +672,60 @@ export default function RevenueExpensePage() {
         @keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
         .trow{transition:background 0.1s;}
         .trow:hover{background:rgba(255,255,255,0.025)!important;}
-        button { touch-action: manipulation; }
-        html { -webkit-text-size-adjust: 100%; }
+        button{touch-action:manipulation;}
+        html{-webkit-text-size-adjust:100%;}
       `}</style>
 
-      {isMobile && (
-        <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-          <SidebarContent />
-        </MobileDrawer>
-      )}
+      {isMobile && <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}><SidebarContent /></MobileDrawer>}
 
-      {/* ─── Header ──────────────────────────────────────────────────────── */}
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <div
-            style={{
-              width: 34, height: 34, flexShrink: 0, borderRadius: 9,
-              background: `linear-gradient(135deg, ${T.acLight}, ${T.acGlow})`,
-              border: `1px solid ${T.acMid}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: `0 0 20px ${T.acGlow}`,
-            }}
-          >
+          <div style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 9, background: `linear-gradient(135deg, ${T.acLight}, ${T.acGlow})`, border: `1px solid ${T.acMid}`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 20px ${T.acGlow}` }}>
             <svg width={15} height={15} viewBox="0 0 20 20" fill="none">
               <path d="M3 10h14M3 6h14M3 14h8" stroke={T.acText} strokeWidth={1.7} strokeLinecap="round" />
               <circle cx={15} cy={14} r={3} stroke={T.acText} strokeWidth={1.5} />
             </svg>
           </div>
           <div style={{ minWidth: 0 }}>
-            <h1
-              style={{
-                fontSize: isMobile ? 16 : 21,
-                fontWeight: 700,
-                fontFamily: "'Sora',sans-serif",
-                letterSpacing: "-0.035em",
-                color: T.t1,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              Revenue &amp; Expense
-            </h1>
-            {!isMobile && <p style={{ color: T.t5, fontSize: 11.5, marginTop: 1 }}>Financial balance sheet · all users</p>}
+            <h1 style={{ fontSize: isMobile ? 16 : 21, fontWeight: 700, fontFamily: "'Sora',sans-serif", letterSpacing: "-0.035em", color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Revenue &amp; Expense</h1>
+            {!isMobile && <p style={{ color: T.t5, fontSize: 11.5, marginTop: 1 }}>Financial balance sheet · includes tax liability · all users</p>}
           </div>
         </div>
 
         {isMobile ? (
-          <button
-            onClick={() => setDrawerOpen(true)}
-            style={{
-              flexShrink: 0, display: "flex", alignItems: "center", gap: 6,
-              background: T.panel, border: `1px solid ${T.panelB}`,
-              borderRadius: 8, padding: "7px 12px",
-              color: T.t3, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              fontFamily: "'DM Sans',sans-serif", position: "relative",
-            }}
-          >
-            <svg width={14} height={14} viewBox="0 0 20 20" fill="none">
-              <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" />
-            </svg>
+          <button onClick={() => setDrawerOpen(true)} style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 8, padding: "7px 12px", color: T.t3, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", position: "relative" }}>
+            <svg width={14} height={14} viewBox="0 0 20 20" fill="none"><path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" /></svg>
             Filters
-            {activeFilterCount > 0 && (
-              <span
-                style={{
-                  position: "absolute", top: -5, right: -5,
-                  background: T.ac, color: "#fff",
-                  width: 16, height: 16, borderRadius: "50%",
-                  fontSize: 9, fontWeight: 800,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  border: `2px solid ${T.bg}`,
-                }}
-              >
-                {activeFilterCount}
-              </span>
-            )}
+            {activeFilterCount > 0 && <span style={{ position: "absolute", top: -5, right: -5, background: T.ac, color: "#fff", width: 16, height: 16, borderRadius: "50%", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${T.bg}` }}>{activeFilterCount}</span>}
           </button>
-        ) : (
-          data && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {[
-                { label: "Revenue", val: fmtINR(totalRevenue), color: T.green },
-                { label: "Expenses", val: fmtINR(totalExpenses), color: T.red },
-                { label: "Credits", val: fmtINR(totalCredit), color: T.purple },
-                {
-                  label: "Net",
-                  val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)),
-                  color: balanceWithCredit >= 0 ? T.green : T.red,
-                },
-              ].map((s) => (
-                <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 8, padding: "6px 12px", textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>{s.label}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: s.color, letterSpacing: "-0.02em" }}>{s.val}</div>
-                </div>
-              ))}
-            </div>
-          )
+        ) : data && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {[
+              { label: "Revenue",      val: fmtINR(totalRevenue),  color: T.green  },
+              { label: "Expenses",     val: fmtINR(totalExpenses), color: T.red    },
+              { label: "Tax Liability",val: fmtINR(totalTax),      color: T.tax    },
+              { label: "Credits",      val: fmtINR(totalCredit),   color: T.purple },
+              { label: "Net", val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)), color: balanceWithCredit >= 0 ? T.green : T.red },
+            ].map((s) => (
+              <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 8, padding: "6px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>{s.label}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: s.color, letterSpacing: "-0.02em" }}>{s.val}</div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* ─── Mobile summary cards ──────────────────────────────────────────── */}
+      {/* Mobile summary */}
       {isMobile && data && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
           {[
-            { label: "Revenue", val: fmtINR(totalRevenue), color: T.green },
-            { label: "Expenses", val: fmtINR(totalExpenses), color: T.red },
-            { label: "Credits", val: fmtINR(totalCredit), color: T.purple },
-            {
-              label: "Net (incl. Credit)",
-              val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)),
-              color: balanceWithCredit >= 0 ? T.green : T.red,
-            },
+            { label: "Revenue",  val: fmtINR(totalRevenue),  color: T.green  },
+            { label: "Expenses", val: fmtINR(totalExpenses), color: T.red    },
+            { label: "Tax",      val: fmtINR(totalTax),      color: T.tax    },
+            { label: "Credits",  val: fmtINR(totalCredit),   color: T.purple },
+            { label: "Net (incl. Credit)", val: (balanceWithCredit >= 0 ? "+" : "−") + fmtINR(Math.abs(balanceWithCredit)), color: balanceWithCredit >= 0 ? T.green : T.red },
           ].map((s) => (
             <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 10, padding: "10px 12px" }}>
               <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
@@ -1445,232 +736,107 @@ export default function RevenueExpensePage() {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "260px 1fr", gap: 14, alignItems: "start" }}>
-        {/* ─── Desktop Sidebar ─────────────────────────────────────────────── */}
         {!isMobile && (
-          <div
-            style={{
-              background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 14,
-              overflow: "hidden", display: "flex", flexDirection: "column",
-              position: "sticky", top: 20,
-              maxHeight: "calc(100vh - 40px)", overflowY: "auto",
-            }}
-          >
+          <div style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 14, overflow: "hidden", display: "flex", flexDirection: "column", position: "sticky", top: 20, maxHeight: "calc(100vh - 40px)", overflowY: "auto" }}>
             <SidebarContent />
           </div>
         )}
 
-        {/* ─── Main content ─────────────────────────────────────────────────── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-          {error && (
-            <div style={{ padding: "11px 16px", color: T.red, fontSize: 12.5, background: T.redBg, borderRadius: 10, border: `1px solid ${T.red}30`, wordBreak: "break-word" }}>
-              ⚠ {error}
-            </div>
-          )}
+          {error && <div style={{ padding: "11px 16px", color: T.red, fontSize: 12.5, background: T.redBg, borderRadius: 10, border: `1px solid ${T.red}30`, wordBreak: "break-word" }}>⚠ {error}</div>}
 
-          {/* ─── Active filter chips (mobile) ─────────────────────────────── */}
+          {/* Mobile filter chips */}
           {isMobile && hasFilter && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
               {filterMode === "range" && (rangeFrom || rangeTo) && (
-                <span
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    background: T.acLight, border: `1px solid ${T.acMid}`,
-                    borderRadius: 20, padding: "3px 10px",
-                    fontSize: 11, color: T.acText, fontWeight: 600,
-                  }}
-                >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: T.acLight, border: `1px solid ${T.acMid}`, borderRadius: 20, padding: "3px 10px", fontSize: 11, color: T.acText, fontWeight: 600 }}>
                   📅 {rangeLabelShort}
                   <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>✕</button>
                 </span>
               )}
               {filterMode === "month" && selMonth !== null && (
-                <span
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    background: T.acLight, border: `1px solid ${T.acMid}`,
-                    borderRadius: 20, padding: "3px 10px",
-                    fontSize: 11, color: T.acText, fontWeight: 600,
-                  }}
-                >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: T.acLight, border: `1px solid ${T.acMid}`, borderRadius: 20, padding: "3px 10px", fontSize: 11, color: T.acText, fontWeight: 600 }}>
                   {MONTHS[selMonth]} {selYear}
                   <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>✕</button>
                 </span>
               )}
-              {filterMode === "calendar" && selDates.size > 0 && (
-                <span
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    background: T.acLight, border: `1px solid ${T.acMid}`,
-                    borderRadius: 20, padding: "3px 10px",
-                    fontSize: 11, color: T.acText, fontWeight: 600,
-                  }}
-                >
-                  {selDates.size} date{selDates.size > 1 ? "s" : ""}
-                  <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>✕</button>
-                </span>
-              )}
               {selectedOrg && orgs.find((o) => o.id === selectedOrg) && (
-                <span
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    background: T.acLight, border: `1px solid ${T.acMid}`,
-                    borderRadius: 20, padding: "3px 10px",
-                    fontSize: 11, color: T.acText, fontWeight: 600,
-                  }}
-                >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: T.acLight, border: `1px solid ${T.acMid}`, borderRadius: 20, padding: "3px 10px", fontSize: 11, color: T.acText, fontWeight: 600 }}>
                   {orgs.find((o) => o.id === selectedOrg)?.name}
-                  <button
-                    onClick={() => { setSelectedOrg(null); setSelectedProject(null); setSelectedUser(null); }}
-                    style={{ background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}
-                  >✕</button>
+                  <button onClick={() => { setSelectedOrg(null); setSelectedProject(null); setSelectedUser(null); }} style={{ background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>✕</button>
                 </span>
               )}
-              <button
-                onClick={clearAll}
-                style={{ background: "none", border: `1px solid ${T.red}40`, borderRadius: 20, padding: "3px 10px", fontSize: 11, color: T.red, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}
-              >
-                Clear all
-              </button>
+              <button onClick={clearAll} style={{ background: "none", border: `1px solid ${T.red}40`, borderRadius: 20, padding: "3px 10px", fontSize: 11, color: T.red, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>Clear all</button>
             </div>
           )}
 
-          {/* ─── Tab panel ──────────────────────────────────────────────────── */}
+          {/* Tab panel */}
           <div style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 14, overflow: "hidden" }}>
             <div style={{ display: "flex", borderBottom: `1px solid ${T.divider}`, padding: "10px 14px 0", gap: 4 }}>
               {TABS.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setTab(t.key)}
-                  style={{
-                    flex: isMobile ? 1 : "none",
-                    padding: isMobile ? "9px 8px" : "7px 16px",
-                    borderRadius: "7px 7px 0 0",
-                    border: `1px solid ${tab === t.key ? T.panelB : "transparent"}`,
-                    borderBottom: tab === t.key ? `1px solid ${T.bg}` : "1px solid transparent",
-                    background: tab === t.key ? T.panel2 : "transparent",
-                    color: tab === t.key ? T.t2 : T.t5,
-                    fontSize: isMobile ? 12 : 11.5,
-                    fontWeight: tab === t.key ? 600 : 400,
-                    cursor: "pointer",
-                    fontFamily: "'DM Sans',sans-serif",
-                    marginBottom: -1,
-                    transition: "all 0.12s",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+                <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: isMobile ? 1 : "none", padding: isMobile ? "9px 8px" : "7px 16px", borderRadius: "7px 7px 0 0", border: `1px solid ${tab === t.key ? T.panelB : "transparent"}`, borderBottom: tab === t.key ? `1px solid ${T.bg}` : "1px solid transparent", background: tab === t.key ? T.panel2 : "transparent", color: tab === t.key ? T.t2 : T.t5, fontSize: isMobile ? 12 : 11.5, fontWeight: tab === t.key ? 600 : 400, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", marginBottom: -1, transition: "all 0.12s", whiteSpace: "nowrap" }}>
                   {t.label}
                 </button>
               ))}
             </div>
 
-            {/* ─── Summary tab ─────────────────────────────────────────────── */}
+            {/* ── Summary Tab ── */}
             {tab === "summary" && (
               <div style={{ padding: isMobile ? 12 : 14, display: "flex", flexDirection: "column", gap: 14 }}>
                 {loading ? (
-                  <>
-                    {[72, 80, 200].map((h) => (
-                      <div key={h} style={{ height: h, borderRadius: 10, background: "rgba(255,255,255,0.04)", animation: "pulse 1.5s ease-in-out infinite" }} />
-                    ))}
-                  </>
+                  <>{[72, 80, 60, 200].map((h) => <div key={h} style={{ height: h, borderRadius: 10, background: "rgba(255,255,255,0.04)", animation: "pulse 1.5s ease-in-out infinite" }} />)}</>
                 ) : !data ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 200, gap: 10, color: T.t6 }}>
-                    <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}>
-                      <rect x={2} y={5} width={20} height={14} rx={2} />
-                      <path d="M2 10h20" />
-                    </svg>
+                    <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><rect x={2} y={5} width={20} height={14} rx={2} /><path d="M2 10h20" /></svg>
                     <span style={{ fontSize: 13 }}>No data available</span>
                   </div>
                 ) : (
                   <>
-                    {/* Active filter banner */}
                     {filterMode !== "none" && (
-                      <div
-                        style={{
-                          display: "flex", alignItems: "center", gap: 8,
-                          padding: "8px 14px", borderRadius: 8,
-                          background: T.acLight, border: `1px solid ${T.acMid}`,
-                          fontSize: 11.5, color: T.acText, fontWeight: 500,
-                        }}
-                      >
-                        <svg width={13} height={13} viewBox="0 0 20 20" fill="none">
-                          <rect x={2} y={3} width={16} height={16} rx={3} stroke={T.acText} strokeWidth={1.5} />
-                          <path d="M2 8h16M6 1v4M14 1v4" stroke={T.acText} strokeWidth={1.5} strokeLinecap="round" />
-                        </svg>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 8, background: T.acLight, border: `1px solid ${T.acMid}`, fontSize: 11.5, color: T.acText, fontWeight: 500 }}>
+                        <svg width={13} height={13} viewBox="0 0 20 20" fill="none"><rect x={2} y={3} width={16} height={16} rx={3} stroke={T.acText} strokeWidth={1.5} /><path d="M2 8h16M6 1v4M14 1v4" stroke={T.acText} strokeWidth={1.5} strokeLinecap="round" /></svg>
                         <span>
-                          {filterMode === "range" && (
-                            <>
-                              Showing data
-                              {dateFrom && dateTo
-                                ? ` from ${fmtDateDisplay(dateFrom)} to ${fmtDateDisplay(dateTo)}`
-                                : dateFrom
-                                ? ` from ${fmtDateDisplay(dateFrom)}`
-                                : ` until ${fmtDateDisplay(dateTo)}`}
-                            </>
-                          )}
-                          {filterMode === "month" && selMonth !== null && (
-                            <>Showing {MONTHS[selMonth]} {selYear}</>
-                          )}
-                          {filterMode === "calendar" && selDates.size > 0 && (
-                            <>
-                              {selDates.size === 1
-                                ? `Showing ${fmtDateDisplay(Array.from(selDates)[0])}`
-                                : `Showing ${selDates.size} selected dates (${fmtDateDisplay(dateFrom)} – ${fmtDateDisplay(dateTo)})`}
-                            </>
-                          )}
+                          {filterMode === "range" && <>Showing data{dateFrom && dateTo ? ` from ${fmtDateDisplay(dateFrom)} to ${fmtDateDisplay(dateTo)}` : dateFrom ? ` from ${fmtDateDisplay(dateFrom)}` : ` until ${fmtDateDisplay(dateTo)}`}</>}
+                          {filterMode === "month" && selMonth !== null && <>Showing {MONTHS[selMonth]} {selYear}</>}
+                          {filterMode === "calendar" && selDates.size > 0 && <>{selDates.size === 1 ? `Showing ${fmtDateDisplay(Array.from(selDates)[0])}` : `Showing ${selDates.size} selected dates`}</>}
                         </span>
-                        <button
-                          onClick={clearDateFilters}
-                          style={{ marginLeft: "auto", background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 13, opacity: 0.7, padding: "2px 4px" }}
-                        >
-                          ✕
-                        </button>
+                        <button onClick={clearDateFilters} style={{ marginLeft: "auto", background: "none", border: "none", color: T.acText, cursor: "pointer", fontSize: 13, opacity: 0.7, padding: "2px 4px" }}>✕</button>
                       </div>
                     )}
 
-                    {/* ─── Net Balance Hero ─────────────────────────────── */}
-                    <div
-                      style={{
-                        display: "flex", alignItems: "center", gap: 12,
-                        padding: "14px 16px", borderRadius: 10,
-                        background: balanceWithCredit >= 0 ? T.greenBg : T.redBg,
-                        border: `1px solid ${balanceWithCredit >= 0 ? T.green + "30" : T.red + "30"}`,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
-                          background: balanceWithCredit >= 0 ? T.green + "20" : T.red + "20",
-                          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-                        }}
-                      >
+                    {/* Tax liability banner */}
+                    {totalTax > 0 && (
+                      <div style={{ padding: "10px 14px", borderRadius: 10, background: T.taxBg, border: `1px solid ${T.tax}25`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: T.tax, letterSpacing: "0.1em", textTransform: "uppercase", marginRight: 4 }}>⊕ Tax Liability</span>
+                          {Object.entries(taxByName).map(([name, amt]) => (
+                            <span key={name} style={{ fontSize: 9.5, color: T.tax, background: T.tax + "18", border: `1px solid ${T.tax}30`, borderRadius: 20, padding: "2px 8px" }}>
+                              {name}: {fmtINR(amt)}
+                            </span>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: T.tax, fontFamily: "'Sora',sans-serif" }}>{fmtINR(totalTax)}</div>
+                      </div>
+                    )}
+
+                    {/* Net Balance Hero */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 10, background: balanceWithCredit >= 0 ? T.greenBg : T.redBg, border: `1px solid ${balanceWithCredit >= 0 ? T.green + "30" : T.red + "30"}`, flexWrap: "wrap" }}>
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: balanceWithCredit >= 0 ? T.green + "20" : T.red + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
                         {balanceWithCredit >= 0 ? "↑" : "↓"}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: T.t4, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase" }}>
-                          Net Balance (Revenue − Expenses + Outstanding Credit)
-                        </div>
+                        <div style={{ fontSize: 10, color: T.t4, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase" }}>Net Balance (Revenue − Expenses − Tax + Outstanding Credit)</div>
                         <div style={{ fontSize: isMobile ? 20 : 22, fontWeight: 700, color: balanceWithCredit >= 0 ? T.green : T.red, fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em" }}>
                           {balanceWithCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithCredit))}
                         </div>
                         <div style={{ fontSize: 10, color: T.t5, marginTop: 3 }}>
-                          P&amp;L (no credit): <span style={{ color: balanceWithoutCredit >= 0 ? T.green : T.red, fontWeight: 600 }}>
-                            {balanceWithoutCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithoutCredit))}
-                          </span>
+                          P&amp;L (no credit): <span style={{ color: balanceWithoutCredit >= 0 ? T.green : T.red, fontWeight: 600 }}>{balanceWithoutCredit >= 0 ? "+" : "−"}{fmtINR(Math.abs(balanceWithoutCredit))}</span>
+                          {totalTax > 0 && <> · Tax: <span style={{ color: T.tax, fontWeight: 600 }}>{fmtINR(totalTax)}</span></>}
                         </div>
                       </div>
                       {outstandingCredit > 0 && (
-                        <div
-                          style={{
-                            background: T.purpleBg, border: `1px solid ${T.purple}30`,
-                            borderRadius: 8, padding: "6px 12px",
-                            textAlign: isMobile ? "left" : "right",
-                            width: isMobile ? "100%" : "auto",
-                          }}
-                        >
-                          <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>
-                            Outstanding Credit
-                          </div>
+                        <div style={{ background: T.purpleBg, border: `1px solid ${T.purple}30`, borderRadius: 8, padding: "6px 12px", textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : "auto" }}>
+                          <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>Outstanding Credit</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: T.purple }}>{fmtINR(outstandingCredit)}</div>
                         </div>
                       )}
@@ -1679,9 +845,9 @@ export default function RevenueExpensePage() {
                     {credits.length > 0 && (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
                         {[
-                          { label: "Total Credit", val: totalCredit, color: T.purple },
-                          { label: "Outstanding", val: outstandingCredit, color: T.amber },
-                          { label: "Repaid", val: repaidCredit, color: T.green },
+                          { label: "Total Credit", val: totalCredit,       color: T.purple },
+                          { label: "Outstanding",  val: outstandingCredit, color: T.amber  },
+                          { label: "Repaid",        val: repaidCredit,      color: T.green  },
                         ].map((s) => (
                           <div key={s.label} style={{ padding: isMobile ? "8px 10px" : "10px 12px", borderRadius: 8, background: s.color + "0d", border: `1px solid ${s.color}20` }}>
                             <div style={{ fontSize: isMobile ? 8 : 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
@@ -1691,33 +857,41 @@ export default function RevenueExpensePage() {
                       </div>
                     )}
 
+                    {/* Monthly breakdown — now includes Tax column */}
                     {(data.summary?.monthly_summary?.length ?? 0) > 0 && (
                       <div style={{ background: T.panel2, borderRadius: 10, border: `1px solid ${T.panel2B}`, overflow: "hidden" }}>
-                        <div style={{ padding: "10px 14px 8px", borderBottom: `1px solid ${T.divider}`, fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>
-                          Monthly Breakdown
-                        </div>
+                        <div style={{ padding: "10px 14px 8px", borderBottom: `1px solid ${T.divider}`, fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>Monthly Breakdown</div>
                         <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 400 }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 460 }}>
                             <thead>
                               <tr style={{ borderBottom: `1px solid ${T.divider}` }}>
-                                {["Month", "Revenue", "Expenses", "Net"].map((h, i) => (
-                                  <th key={h} style={{ padding: "8px 12px", textAlign: i === 0 ? "left" : "right", fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.07em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
-                                    {h}
-                                  </th>
+                                {["Month", "Revenue", "Expenses", totalTax > 0 ? "Tax" : null, "Net"].filter(Boolean).map((h, i) => (
+                                  <th key={h!} style={{ padding: "8px 12px", textAlign: i === 0 ? "left" : "right", fontSize: 10, fontWeight: 700, color: h === "Tax" ? T.tax : T.t5, letterSpacing: "0.07em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
-                              {data.summary.monthly_summary.map((item: { month: string; revenue: number; expenses: number; net: number }, idx: number) => (
-                                <tr key={idx} className="trow" style={{ borderBottom: `1px solid ${T.divider}` }}>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, color: T.t2, whiteSpace: "nowrap" }}>{item.month}</td>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", color: T.green, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtINR(item.revenue)}</td>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", color: T.red, whiteSpace: "nowrap" }}>{fmtINR(item.expenses)}</td>
-                                  <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", color: item.net >= 0 ? T.green : T.red }}>
-                                    {item.net >= 0 ? "+" : "−"}{fmtINR(Math.abs(item.net))}
-                                  </td>
-                                </tr>
-                              ))}
+                              {data.summary.monthly_summary.map((item: { month: string; revenue: number; expenses: number; net: number }, idx: number) => {
+                                // Approximate per-month tax by filtering revenues by month label
+                                const monthRevs = revenues.filter((r) => {
+                                  const d = new Date(r.date);
+                                  return d.toLocaleString("default", { month: "long", year: "numeric" }) === item.month ||
+                                         `${MONTHS[d.getMonth()]} ${d.getFullYear()}` === item.month;
+                                });
+                                const monthTax = computeTaxForRevenues(monthRevs, taxes).totalTax;
+                                const netWithTax = item.revenue - item.expenses - monthTax;
+                                return (
+                                  <tr key={idx} className="trow" style={{ borderBottom: `1px solid ${T.divider}` }}>
+                                    <td style={{ padding: "9px 12px", fontSize: 12, color: T.t2, whiteSpace: "nowrap" }}>{item.month}</td>
+                                    <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", color: T.green, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtINR(item.revenue)}</td>
+                                    <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", color: T.red, whiteSpace: "nowrap" }}>{fmtINR(item.expenses)}</td>
+                                    {totalTax > 0 && <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", color: T.tax, whiteSpace: "nowrap" }}>{fmtINR(monthTax)}</td>}
+                                    <td style={{ padding: "9px 12px", fontSize: 12, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", color: netWithTax >= 0 ? T.green : T.red }}>
+                                      {netWithTax >= 0 ? "+" : "−"}{fmtINR(Math.abs(netWithTax))}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -1728,27 +902,27 @@ export default function RevenueExpensePage() {
               </div>
             )}
 
-            {/* ─── Details tab ─────────────────────────────────────────────── */}
+            {/* ── Details Tab ── */}
             {tab === "details" && (
               <div style={{ padding: isMobile ? 10 : 14, display: "flex", flexDirection: "column", gap: 14 }}>
 
-                {/* ── Revenue Table ── */}
+                {/* Revenue table — now has Tax column */}
                 <DetailTable
                   accentColor={T.green} accentBg={T.greenBg} icon="↑" title="Revenue"
                   count={revenues.length}
                   headers={[
-                    { label: "Date" },
-                    { label: "User" },
-                    { label: "Source" },
-                    { label: "Project" },
-                    { label: "Amount", right: true },
+                    { label: "Date" }, { label: "User" }, { label: "Source" },
+                    { label: "Project" }, { label: "Amount", right: true },
+                    ...(totalTax > 0 ? [{ label: "Tax", right: true }] : []),
+                    ...(totalTax > 0 ? [{ label: "Net Revenue", right: true }] : []),
                     { label: "Remarks" },
                   ]}
                   loading={loading} empty="No revenue entries"
                 >
                   {revenues.map((r: RevenueRow, idx: number) => {
-                    const rExt = r as RevenueRow & { user_name?: string; user_email?: string };
-                    const userName = rExt.user_name ?? rExt.user_email ?? `User ${r.user}`;
+                    const rExt = r as RevenueRow & { user_name?: string };
+                    const userName = rExt.user_name ?? r.user_email ?? `User ${r.user}`;
+                    const tax = revenueTaxMap[r.id] ?? 0;
                     return (
                       <tr key={r.id} className="trow" style={{ borderBottom: `1px solid ${T.divider}`, animation: `fadeUp 0.18s ease ${idx * 0.015}s both` }}>
                         <td style={{ padding: "9px 12px", fontSize: 11.5, color: T.t4, whiteSpace: "nowrap" }}>{r.date}</td>
@@ -1763,6 +937,18 @@ export default function RevenueExpensePage() {
                         <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{fmtINR(r.amount)}</span>
                         </td>
+                        {totalTax > 0 && (
+                          <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                            {tax > 0
+                              ? <span style={{ fontSize: 11.5, fontWeight: 600, color: T.tax }}>−{fmtINR(tax)}</span>
+                              : <span style={{ fontSize: 11, color: T.t6 }}>—</span>}
+                          </td>
+                        )}
+                        {totalTax > 0 && (
+                          <td style={{ padding: "9px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: T.green }}>{fmtINR(r.amount - tax)}</span>
+                          </td>
+                        )}
                         <td style={{ padding: "9px 12px", maxWidth: 140 }}>
                           <span style={{ fontSize: 11, color: T.t4, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {r.remarks || <span style={{ color: T.t6 }}>—</span>}
@@ -1773,19 +959,11 @@ export default function RevenueExpensePage() {
                   })}
                 </DetailTable>
 
-                {/* ── Expenses Table ── */}
+                {/* Expenses table */}
                 <DetailTable
                   accentColor={T.red} accentBg={T.redBg} icon="↓" title="Expenses"
                   count={expenses.length}
-                  headers={[
-                    { label: "Date" },
-                    { label: "User" },
-                    { label: "Category" },
-                    { label: "Project" },
-                    { label: "Amount", right: true },
-                    { label: "Reimb." },
-                    { label: "Remarks" },
-                  ]}
+                  headers={[{ label: "Date" }, { label: "User" }, { label: "Category" }, { label: "Project" }, { label: "Amount", right: true }, { label: "Reimb." }, { label: "Remarks" }]}
                   loading={loading} empty="No expense entries"
                 >
                   {expenses.map((e: ExpenseRow, idx: number) => (
@@ -1803,10 +981,7 @@ export default function RevenueExpensePage() {
                         <span style={{ fontSize: 13, fontWeight: 700, color: T.red }}>{fmtINR(e.amount)}</span>
                       </td>
                       <td style={{ padding: "9px 12px" }}>
-                        {e.reimbursed
-                          ? <span style={{ fontSize: 10, color: T.green, fontWeight: 700 }}>✓</span>
-                          : <span style={{ fontSize: 10, color: T.amber, fontWeight: 700 }}>✗</span>
-                        }
+                        {e.reimbursed ? <span style={{ fontSize: 10, color: T.green, fontWeight: 700 }}>✓</span> : <span style={{ fontSize: 10, color: T.amber, fontWeight: 700 }}>✗</span>}
                       </td>
                       <td style={{ padding: "9px 12px", maxWidth: 130 }}>
                         <span style={{ fontSize: 11, color: T.t4, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1817,19 +992,11 @@ export default function RevenueExpensePage() {
                   ))}
                 </DetailTable>
 
-                {/* ── Credits Table ── */}
+                {/* Credits table */}
                 <DetailTable
                   accentColor={T.purple} accentBg={T.purpleBg} icon="⟳" title="Credits Taken"
                   count={credits.length}
-                  headers={[
-                    { label: "Date" },
-                    { label: "User" },
-                    { label: "Category" },
-                    { label: "Project" },
-                    { label: "Amount", right: true },
-                    { label: "Status" },
-                    { label: "Remarks" },
-                  ]}
+                  headers={[{ label: "Date" }, { label: "User" }, { label: "Category" }, { label: "Project" }, { label: "Amount", right: true }, { label: "Status" }, { label: "Remarks" }]}
                   loading={loading} empty="No credit entries"
                 >
                   {credits.map((c: CreditRow, idx: number) => (
@@ -1857,7 +1024,6 @@ export default function RevenueExpensePage() {
                     </tr>
                   ))}
                 </DetailTable>
-
               </div>
             )}
           </div>

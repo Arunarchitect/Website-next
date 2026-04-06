@@ -802,7 +802,7 @@ export default function DashboardPage() {
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "8px" }}>
             <NavButton icon={<WorklogIcon />} label="Detailed Worklog" href="/new/hour/hournormal" />
             <NavButton icon={<WorklogIcon />} label="Worklog Overview" href="/new/hour/houradmin" />
-            <NavButton icon={<OrgIcon />} label="Company Finance" href="/new/stat/pie" />
+            <NavButton icon={<OrgIcon />} label="Company Finance" href="/new/stat/numbers" />
             <NavButton icon={<OrgIcon />} label="Finance Pie" href="/new/stat/pie" />
             <NavButton icon={<OrgIcon />} label="Add Expense" href="/new/exp/expnormal" />
             <NavButton icon={<OrgIcon />} label="Expense Overview" href="/new/exp/expadmin" />

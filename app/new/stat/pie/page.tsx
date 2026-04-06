@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
 "use client";
 
@@ -6,11 +7,14 @@ import {
   fetchOrganisations,
   fetchProjectsByOrg,
   fetchBalanceSheet,
+  fetchTaxRules,
+  computeTaxForRevenues,
   type BalanceSheetResponse,
   type BalanceSheetParams,
   type OrganisationOption,
   type ProjectOption,
   type ExpenseRow,
+  type TaxRule,
 } from "@/app/new/revenueExpenseApi";
 import { GROUPS, GROUP_MAP, type GroupKey, type GroupDef } from "./types";
 
@@ -21,6 +25,12 @@ const MONTHS = [
 ];
 const DAYS = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const AVAILABLE_YEARS = [2022, 2023, 2024, 2025, 2026];
+
+// ─── Tax category prefix — so tax names never collide with real expense cats ──
+const TAX_PREFIX = "__tax__:";
+function taxCatKey(name: string) { return `${TAX_PREFIX}${name}`; }
+function isTaxCat(key: string)   { return key.startsWith(TAX_PREFIX); }
+function taxCatLabel(key: string) { return key.replace(TAX_PREFIX, ""); }
 
 // ─── Auto-categorisation keywords ────────────────────────────────────────────
 const TECHNICAL_KEYWORDS = [
@@ -36,6 +46,7 @@ const OVERHEAD_KEYWORDS = [
 ];
 
 function autoGroup(cat: string): GroupKey | null {
+  if (isTaxCat(cat)) return "overheads"; // taxes always default to overheads
   const l = cat.toLowerCase();
   if (TECHNICAL_KEYWORDS.some((k) => l.includes(k))) return "technical";
   if (OVERHEAD_KEYWORDS.some((k) => l.includes(k))) return "overheads";
@@ -83,6 +94,7 @@ const T = {
   green:   "#1ec99a", greenBg: "rgba(30,201,154,0.09)",
   red:     "#f0686a", redBg:   "rgba(240,104,106,0.09)",
   amber:   "#fb923c", amberBg: "rgba(251,146,60,0.09)",
+  tax:     "#e879f9", taxBg:   "rgba(232,121,249,0.09)",
 };
 
 const Divider = () => <div style={{ height: 1, background: T.divider, flexShrink: 0 }} />;
@@ -174,6 +186,7 @@ interface SubSlice {
   pctOfRevenue: number;
   idealPct:     number;
   isBalance:    boolean;
+  isTax:        boolean;
 }
 
 // ─── Donut ────────────────────────────────────────────────────────────────────
@@ -189,22 +202,16 @@ function DonutChart({
 }) {
   const SIZE = 260, cx = 130, cy = 130, OR = 102, IR = 62;
 
-  function buildArc(
-    startA: number, endA: number,
-    outerR: number, innerR: number,
-    expandDir?: number,
-    expandAmt = 0,
-  ) {
+  function buildArc(startA: number, endA: number, outerR: number, innerR: number, expandDir?: number, expandAmt = 0) {
     const ox = expandDir !== undefined ? cx + expandAmt * Math.cos(expandDir) : cx;
     const oy = expandDir !== undefined ? cy + expandAmt * Math.sin(expandDir) : cy;
     const ro = outerR + expandAmt;
-    const ri = innerR;
     const sx = ox + ro * Math.cos(startA), sy = oy + ro * Math.sin(startA);
     const ex = ox + ro * Math.cos(endA),   ey = oy + ro * Math.sin(endA);
-    const eix = ox + ri * Math.cos(endA),  eiy = oy + ri * Math.sin(endA);
-    const six = ox + ri * Math.cos(startA), siy = oy + ri * Math.sin(startA);
+    const eix = ox + innerR * Math.cos(endA),  eiy = oy + innerR * Math.sin(endA);
+    const six = ox + innerR * Math.cos(startA), siy = oy + innerR * Math.sin(startA);
     const large = (endA - startA) > Math.PI ? 1 : 0;
-    return `M${sx} ${sy} A${ro} ${ro} 0 ${large} 1 ${ex} ${ey} L${eix} ${eiy} A${ri} ${ri} 0 ${large} 0 ${six} ${siy}Z`;
+    return `M${sx} ${sy} A${ro} ${ro} 0 ${large} 1 ${ex} ${ey} L${eix} ${eiy} A${innerR} ${innerR} 0 ${large} 0 ${six} ${siy}Z`;
   }
 
   const GRO = OR + 16, GRI = OR + 11;
@@ -213,26 +220,21 @@ function DonutChart({
   GROUPS.forEach((g) => {
     const angle = (g.idealPct / 100) * 2 * Math.PI, gap = 0.022;
     const a0 = gc + gap / 2, a1 = gc + angle - gap / 2;
-    if (a1 - a0 > 0.01) { ghosts.push({ d: buildArc(a0, a1, GRO, GRI), color: g.color }); }
+    if (a1 - a0 > 0.01) ghosts.push({ d: buildArc(a0, a1, GRO, GRI), color: g.color });
     gc += angle;
   });
 
-  interface Arc { d: string; color: string; idx: number; groupKey: GroupKey; isBalance: boolean; }
+  interface Arc { d: string; color: string; idx: number; groupKey: GroupKey; isBalance: boolean; isTax: boolean; }
   const arcs: Arc[] = [];
   let cum = -Math.PI / 2;
-
   subSlices.forEach((sl, i) => {
     const angle = revenue > 0 ? (sl.value / revenue) * 2 * Math.PI : 0;
     if (angle < 0.002) { cum += angle; return; }
     const isHovGroup = hoveredGroup === sl.groupKey;
     const mid = cum + angle / 2;
-    const d = buildArc(
-      cum, cum + angle, OR, IR,
-      isHovGroup ? mid : undefined,
-      isHovGroup ? (sl.isBalance ? 4 : 7) : 0,
-    );
+    const d = buildArc(cum, cum + angle, OR, IR, isHovGroup ? mid : undefined, isHovGroup ? (sl.isBalance ? 4 : 7) : 0);
     cum += angle;
-    arcs.push({ d, color: sl.color, idx: i, groupKey: sl.groupKey, isBalance: sl.isBalance });
+    arcs.push({ d, color: sl.color, idx: i, groupKey: sl.groupKey, isBalance: sl.isBalance, isTax: sl.isTax });
   });
 
   const hovGroupDef    = hoveredGroup ? GROUP_MAP[hoveredGroup] : null;
@@ -245,23 +247,17 @@ function DonutChart({
       <defs>
         <filter id="gh2"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         <filter id="gg2"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="gt2"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
       </defs>
-
-      {ghosts.map((g, i) => (
-        <path key={`g${i}`} d={g.d} fill={g.color} opacity={0.15} stroke={T.bg} strokeWidth={1} />
-      ))}
-
+      {ghosts.map((g, i) => <path key={`g${i}`} d={g.d} fill={g.color} opacity={0.15} stroke={T.bg} strokeWidth={1} />)}
       {arcs.map((arc) => {
         const isActive = hoveredGroup === null || arc.groupKey === hoveredGroup;
         return (
-          <path
-            key={arc.idx}
-            d={arc.d}
-            fill={arc.color}
+          <path key={arc.idx} d={arc.d} fill={arc.color}
             opacity={isActive ? 1 : 0.18}
-            filter={isActive && hoveredGroup !== null ? (arc.isBalance ? "url(#gg2)" : "url(#gh2)") : undefined}
-            stroke={T.bg}
-            strokeWidth={2}
+            filter={isActive && hoveredGroup !== null ? (arc.isTax ? "url(#gt2)" : arc.isBalance ? "url(#gg2)" : "url(#gh2)") : undefined}
+            stroke={T.bg} strokeWidth={arc.isTax ? 1.5 : 2}
+            strokeDasharray={arc.isTax ? "3 1.5" : undefined}
             style={{ transition: "opacity 0.15s", cursor: "pointer" }}
             onMouseEnter={() => onHoverGroup(arc.groupKey)}
             onMouseLeave={() => onHoverGroup(null)}
@@ -269,23 +265,20 @@ function DonutChart({
           />
         );
       })}
-
       {hovGroupDef ? (
         <>
           <text x={cx} y={cy - 20} textAnchor="middle" fill={hovGroupDef.color} fontSize={20} fontWeight={800} fontFamily="'Sora',sans-serif">{hovGroupPct.toFixed(1)}%</text>
           <text x={cx} y={cy - 4}  textAnchor="middle" fill={T.t4} fontSize={8} fontWeight={700} fontFamily="'DM Sans',sans-serif" letterSpacing="1.2">OF REVENUE</text>
           <text x={cx} y={cy + 12} textAnchor="middle" fill={T.t3} fontSize={11} fontFamily="'DM Sans',sans-serif">{fmtINR(hovGroupTotal)}</text>
           <text x={cx} y={cy + 27} textAnchor="middle" fill={T.t5} fontSize={8.5} fontFamily="'DM Sans',sans-serif">{hovGroupDef.label}</text>
-          <text x={cx} y={cy + 41} textAnchor="middle"
-            fill={hovGroupPct <= hovGroupDef.idealPct ? T.green : T.red}
-            fontSize={8.5} fontWeight={700} fontFamily="'DM Sans',sans-serif">
+          <text x={cx} y={cy + 41} textAnchor="middle" fill={hovGroupPct <= hovGroupDef.idealPct ? T.green : T.red} fontSize={8.5} fontWeight={700} fontFamily="'DM Sans',sans-serif">
             {hovGroupPct <= hovGroupDef.idealPct ? "▼ under" : "▲ over"} {Math.abs(hovGroupPct - hovGroupDef.idealPct).toFixed(1)}% vs 33%
           </text>
         </>
       ) : (
         <>
           <text x={cx} y={cy - 10} textAnchor="middle" fill={T.t2} fontSize={14} fontWeight={700} fontFamily="'Sora',sans-serif">{fmtINR(totalExpenses)}</text>
-          <text x={cx} y={cy + 8}  textAnchor="middle" fill={T.t5} fontSize={8} fontWeight={700} fontFamily="'DM Sans',sans-serif" letterSpacing="1">EXPENSES</text>
+          <text x={cx} y={cy + 8}  textAnchor="middle" fill={T.t5} fontSize={8} fontWeight={700} fontFamily="'DM Sans',sans-serif" letterSpacing="1">EXPENSES+TAX</text>
           <text x={cx} y={cy + 24} textAnchor="middle" fill={balance >= 0 ? T.green : T.red} fontSize={10} fontWeight={700} fontFamily="'DM Sans',sans-serif">
             {balance >= 0 ? "+" : "−"}{fmtINR(Math.abs(balance))} net
           </text>
@@ -301,7 +294,7 @@ function GroupColumn({
   revenue, onAssign, onRemove, isHovered, onHover,
 }: {
   group:         GroupDef;
-  categories:    string[];
+  categories:    string[];       // includes tax cat keys
   groupMap:      Record<string, GroupKey>;
   assignedTotal: number;
   balanceAmount: number;
@@ -312,7 +305,7 @@ function GroupColumn({
   onHover:   (v: boolean) => void;
 }) {
   const assignedCats  = categories.filter((c) => groupMap[c] === group.key);
-  const availableCats = categories.filter((c) => !groupMap[c]);
+  const availableCats = categories.filter((c) => !groupMap[c] && !isTaxCat(c)); // taxes not in "add" dropdown
 
   const displayTotal = group.key === "investors"
     ? assignedTotal + Math.max(0, balanceAmount)
@@ -326,14 +319,7 @@ function GroupColumn({
     <div
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{
-        flex: 1, minWidth: 0,
-        background: isHovered ? group.dimColor : T.panel,
-        border: `1px solid ${isHovered ? group.color + "45" : T.panelB}`,
-        borderRadius: 12, padding: "13px 13px 11px",
-        display: "flex", flexDirection: "column", gap: 9,
-        transition: "all 0.18s", cursor: "default",
-      }}
+      style={{ flex: 1, minWidth: 0, background: isHovered ? group.dimColor : T.panel, border: `1px solid ${isHovered ? group.color + "45" : T.panelB}`, borderRadius: 12, padding: "13px 13px 11px", display: "flex", flexDirection: "column", gap: 9, transition: "all 0.18s", cursor: "default" }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
         <span style={{ width: 9, height: 9, borderRadius: 3, background: group.color, flexShrink: 0, boxShadow: `0 0 7px ${group.color}55` }} />
@@ -374,11 +360,16 @@ function GroupColumn({
       {assignedCats.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {assignedCats.map((cat, ci) => {
-            const shade = group.shades[ci % group.shades.length];
+            const shade    = group.shades[ci % group.shades.length];
+            const isTax    = isTaxCat(cat);
+            const label    = isTax ? taxCatLabel(cat) : cat;
             return (
-              <span key={cat} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, color: shade, background: shade + "20", border: `1px solid ${shade}35`, borderRadius: 20, padding: "2px 7px 2px 8px" }}>
-                {cat}
-                <button onClick={() => onRemove(cat)} style={{ background: "none", border: "none", color: shade, cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1, opacity: 0.6, display: "flex", alignItems: "center", marginLeft: 1 }} title="Remove">×</button>
+              <span key={cat} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, color: isTax ? T.tax : shade, background: (isTax ? T.tax : shade) + "20", border: `1px solid ${(isTax ? T.tax : shade)}35`, borderRadius: 20, padding: "2px 7px 2px 8px" }}>
+                {isTax && <span style={{ fontSize: 8, opacity: 0.7, marginRight: 1 }}>⊕</span>}
+                {label}
+                {!isTax && (
+                  <button onClick={() => onRemove(cat)} style={{ background: "none", border: "none", color: shade, cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1, opacity: 0.6, display: "flex", alignItems: "center", marginLeft: 1 }} title="Remove">×</button>
+                )}
               </span>
             );
           })}
@@ -386,11 +377,8 @@ function GroupColumn({
       )}
 
       {availableCats.length > 0 ? (
-        <select
-          value=""
-          onChange={(e) => { if (e.target.value) { onAssign(e.target.value, group.key); } }}
-          style={{ background: T.bg, border: `1px dashed ${group.color}38`, borderRadius: 7, padding: "5px 24px 5px 9px", fontSize: 10, color: T.t4, outline: "none", fontFamily: "'DM Sans',sans-serif", cursor: "pointer", appearance: "none", WebkitAppearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%2339475a'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "calc(100% - 7px) center", transition: "border-color 0.15s" }}
-        >
+        <select value="" onChange={(e) => { if (e.target.value) onAssign(e.target.value, group.key); }}
+          style={{ background: T.bg, border: `1px dashed ${group.color}38`, borderRadius: 7, padding: "5px 24px 5px 9px", fontSize: 10, color: T.t4, outline: "none", fontFamily: "'DM Sans',sans-serif", cursor: "pointer", appearance: "none", WebkitAppearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%2339475a'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "calc(100% - 7px) center" }}>
           <option value="">+ Add category…</option>
           {availableCats.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
@@ -420,20 +408,11 @@ export default function ExpensesChartPage() {
   useEffect(() => { setGroupMap(loadGroupMap()); }, []);
 
   const assignCategory = useCallback((cat: string, grp: GroupKey) => {
-    setGroupMap((prev) => {
-      const next = { ...prev, [cat]: grp };
-      saveGroupMap(next);
-      return next;
-    });
+    setGroupMap((prev) => { const next = { ...prev, [cat]: grp }; saveGroupMap(next); return next; });
   }, []);
-
   const removeCategory = useCallback((cat: string) => {
-    setGroupMap((prev) => {
-      const next = { ...prev };
-      delete next[cat];
-      saveGroupMap(next);
-      return next;
-    });
+    if (isTaxCat(cat)) return; // tax categories cannot be manually removed
+    setGroupMap((prev) => { const next = { ...prev }; delete next[cat]; saveGroupMap(next); return next; });
   }, []);
 
   const [orgs, setOrgs]         = useState<OrganisationOption[]>([]);
@@ -460,21 +439,21 @@ export default function ExpensesChartPage() {
   const handleRangeFrom = useCallback((v: string) => {
     setRangeFrom(v);
     if (v) { setFilterMode("range"); setSelDates(new Set()); setSelMonth(null); }
-    else if (!rangeTo) { setFilterMode("none"); }
+    else if (!rangeTo) setFilterMode("none");
   }, [rangeTo]);
-
   const handleRangeTo = useCallback((v: string) => {
     setRangeTo(v);
     if (v) { setFilterMode("range"); setSelDates(new Set()); setSelMonth(null); }
-    else if (!rangeFrom) { setFilterMode("none"); }
+    else if (!rangeFrom) setFilterMode("none");
   }, [rangeFrom]);
 
   const [data, setData]       = useState<BalanceSheetResponse | null>(null);
+  const [taxes, setTaxes]     = useState<TaxRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
   const { dateFrom, dateTo } = useMemo(() => {
-    if (filterMode === "range") { return { dateFrom: rangeFrom, dateTo: rangeTo }; }
+    if (filterMode === "range") return { dateFrom: rangeFrom, dateTo: rangeTo };
     if (filterMode === "calendar" && selDates.size > 0) {
       const s = Array.from(selDates).sort();
       return { dateFrom: s[0], dateTo: s[s.length - 1] };
@@ -489,30 +468,46 @@ export default function ExpensesChartPage() {
       project_id:      selectedProject ?? undefined,
       view_all:        true,
     };
-    if (filterMode === "range")         { if (rangeFrom) { p.from = rangeFrom; } if (rangeTo) { p.to = rangeTo; } }
+    if (filterMode === "range")         { if (rangeFrom) p.from = rangeFrom; if (rangeTo) p.to = rangeTo; }
     else if (filterMode === "month")    { p.year = selYear; p.month = selMonth !== null ? selMonth + 1 : undefined; }
-    else if (filterMode === "calendar") { if (dateFrom) { p.from = dateFrom; } if (dateTo) { p.to = dateTo; } }
+    else if (filterMode === "calendar") { if (dateFrom) p.from = dateFrom; if (dateTo) p.to = dateTo; }
     else                                { p.year = selYear; }
-    fetchBalanceSheet(p)
-      .then((d) => {
+
+    // Fetch balance sheet + taxes in parallel
+    Promise.all([
+      fetchBalanceSheet(p),
+      fetchTaxRules({ organisation_id: selectedOrg ?? undefined, is_active: true }),
+    ])
+      .then(([d, t]) => {
         setData(d);
+        setTaxes(t);
+
         const dates = new Set<string>([
           ...(d.revenues ?? []).map((r) => r.date),
           ...(d.expenses ?? []).map((e: ExpenseRow) => e.date),
         ]);
         setActiveDates(dates);
+
+        // Auto-assign expense categories
         const currentMap = loadGroupMap();
         let changed = false;
         const seen = new Set<string>();
         (d.expenses ?? []).forEach((e: ExpenseRow) => {
           const label = e.category_label || e.category || "";
-          if (!label || seen.has(label)) { return; }
+          if (!label || seen.has(label)) return;
           seen.add(label);
           if (!currentMap[label]) {
             const g = autoGroup(label);
             if (g) { currentMap[label] = g; changed = true; }
           }
         });
+
+        // Auto-assign tax categories to overheads (always)
+        t.forEach((tax) => {
+          const key = taxCatKey(tax.name);
+          if (currentMap[key] !== "overheads") { currentMap[key] = "overheads"; changed = true; }
+        });
+
         if (changed) { saveGroupMap(currentMap); setGroupMap({ ...currentMap }); }
       })
       .catch((e: Error) => setError(e.message))
@@ -525,89 +520,118 @@ export default function ExpensesChartPage() {
   const expenses      = useMemo(() => data?.expenses ?? [], [data]);
   const totalRevenue  = revenues.reduce((s, r) => s + r.amount, 0);
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const balance       = totalRevenue - totalExpenses;
 
-  const uniqueCategories = useMemo(() => {
+  // ── Tax computation (pure frontend) ──────────────────────────────────────
+  const { totalTax, byName: taxByName } = useMemo(
+    () => computeTaxForRevenues(revenues, taxes),
+    [revenues, taxes],
+  );
+
+  // Total for balance = expenses + tax (tax is a liability on top of expenses)
+  const totalWithTax = totalExpenses + totalTax;
+  const balance      = totalRevenue - totalWithTax;
+
+  // ── Synthetic tax categories injected into the category/group system ──────
+  // Each tax name becomes a virtual category keyed as "__tax__:<name>"
+  const taxCategories = useMemo(
+    () => Object.entries(taxByName).map(([name, amt]) => ({ key: taxCatKey(name), label: name, amount: amt })),
+    [taxByName],
+  );
+
+  const uniqueExpenseCategories = useMemo(() => {
     const seen = new Set<string>();
-    expenses.forEach((e) => { const l = e.category_label || e.category || ""; if (l) { seen.add(l); } });
+    expenses.forEach((e) => { const l = e.category_label || e.category || ""; if (l) seen.add(l); });
     return Array.from(seen).sort();
   }, [expenses]);
 
+  // All categories = real expense cats + tax virtual cats
+  const allCategories = useMemo(
+    () => [...uniqueExpenseCategories, ...taxCategories.map((t) => t.key)],
+    [uniqueExpenseCategories, taxCategories],
+  );
+
+  // Ensure tax cats are always in groupMap as "overheads"
+  useEffect(() => {
+    if (taxCategories.length === 0) return;
+    setGroupMap((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      taxCategories.forEach(({ key }) => {
+        if (next[key] !== "overheads") { next[key] = "overheads"; changed = true; }
+      });
+      if (changed) { saveGroupMap(next); return next; }
+      return prev;
+    });
+  }, [taxCategories]);
+
   const groupTotals = useMemo(() => {
     const totals: Record<GroupKey, number> = { investors: 0, overheads: 0, technical: 0 };
+    // Real expenses
     expenses.forEach((e) => {
       const l = e.category_label || e.category || "";
       const g = groupMap[l];
-      if (g) { totals[g] += e.amount; }
+      if (g) totals[g] += e.amount;
+    });
+    // Tax amounts
+    taxCategories.forEach(({ key, amount }) => {
+      const g = groupMap[key];
+      if (g) totals[g] += amount;
     });
     return totals;
-  }, [expenses, groupMap]);
+  }, [expenses, groupMap, taxCategories]);
 
-  const unassignedTotal = useMemo(() =>
-    expenses.reduce((s, e) => {
+  const unassignedTotal = useMemo(
+    () => expenses.reduce((s, e) => {
       const l = e.category_label || e.category || "";
       return s + (groupMap[l] ? 0 : e.amount);
     }, 0),
-  [expenses, groupMap]);
+    [expenses, groupMap],
+  );
 
   const subSlices = useMemo((): SubSlice[] => {
     const result: SubSlice[] = [];
     GROUPS.forEach((g) => {
-      const cats = uniqueCategories.filter((c) => groupMap[c] === g.key);
+      // Real expense sub-slices
+      const cats = uniqueExpenseCategories.filter((c) => groupMap[c] === g.key);
       cats.forEach((cat, ci) => {
-        const amt = expenses
-          .filter((e) => (e.category_label || e.category || "") === cat)
-          .reduce((s, e) => s + e.amount, 0);
-        if (amt <= 0) { return; }
-        result.push({
-          label: cat, value: amt, color: g.shades[ci % g.shades.length],
-          groupKey: g.key, pctOfRevenue: totalRevenue > 0 ? (amt / totalRevenue) * 100 : 0,
-          idealPct: g.idealPct, isBalance: false,
-        });
+        const amt = expenses.filter((e) => (e.category_label || e.category || "") === cat).reduce((s, e) => s + e.amount, 0);
+        if (amt <= 0) return;
+        result.push({ label: cat, value: amt, color: g.shades[ci % g.shades.length], groupKey: g.key, pctOfRevenue: totalRevenue > 0 ? (amt / totalRevenue) * 100 : 0, idealPct: g.idealPct, isBalance: false, isTax: false });
       });
+      // Tax sub-slices
+      taxCategories.filter(({ key }) => groupMap[key] === g.key).forEach(({ key, label, amount }, ti) => {
+        if (amount <= 0) return;
+        result.push({ label, value: amount, color: T.tax, groupKey: g.key, pctOfRevenue: totalRevenue > 0 ? (amount / totalRevenue) * 100 : 0, idealPct: g.idealPct, isBalance: false, isTax: true });
+      });
+      // Balance slice for investors
       if (g.key === "investors" && balance > 0) {
-        result.push({
-          label: "Net Balance", value: balance, color: g.shades[cats.length % g.shades.length],
-          groupKey: "investors", pctOfRevenue: totalRevenue > 0 ? (balance / totalRevenue) * 100 : 0,
-          idealPct: 0, isBalance: true,
-        });
+        result.push({ label: "Net Balance", value: balance, color: g.shades[cats.length % g.shades.length], groupKey: "investors", pctOfRevenue: totalRevenue > 0 ? (balance / totalRevenue) * 100 : 0, idealPct: 0, isBalance: true, isTax: false });
       }
     });
     return result;
-  }, [expenses, groupMap, uniqueCategories, balance, totalRevenue]);
+  }, [expenses, groupMap, uniqueExpenseCategories, taxCategories, balance, totalRevenue]);
 
   const [hoveredGroup, setHoveredGroup] = useState<GroupKey | null>(null);
 
-  const clearAll = () => {
-    setSelDates(new Set()); setSelMonth(null); setRangeFrom(""); setRangeTo("");
-    setFilterMode("none"); setSelectedOrg(null); setSelectedProject(null);
-  };
-  const clearDateFilters = () => {
-    setSelDates(new Set()); setSelMonth(null); setRangeFrom(""); setRangeTo(""); setFilterMode("none");
-  };
+  const clearAll = () => { setSelDates(new Set()); setSelMonth(null); setRangeFrom(""); setRangeTo(""); setFilterMode("none"); setSelectedOrg(null); setSelectedProject(null); };
+  const clearDateFilters = () => { setSelDates(new Set()); setSelMonth(null); setRangeFrom(""); setRangeTo(""); setFilterMode("none"); };
   const toggleDate = (iso: string) => {
     setFilterMode("calendar"); setRangeFrom(""); setRangeTo(""); setSelMonth(null);
-    setSelDates((p) => {
-      const n = new Set(p);
-      if (n.has(iso)) { n.delete(iso); } else { n.add(iso); }
-      if (n.size === 0) { setFilterMode("none"); }
-      return n;
-    });
+    setSelDates((p) => { const n = new Set(p); if (n.has(iso)) n.delete(iso); else n.add(iso); if (n.size === 0) setFilterMode("none"); return n; });
   };
   const selectMonth = (idx: number) => {
     if (selMonth === idx && filterMode === "month") { setSelMonth(null); setFilterMode("none"); }
     else { setSelMonth(idx); setFilterMode("month"); setSelDates(new Set()); setRangeFrom(""); setRangeTo(""); }
   };
-  const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else { setCalMonth(m => m - 1); } };
-  const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else { setCalMonth(m => m + 1); } };
+  const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); };
+  const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); };
 
   const hasFilter         = filterMode !== "none" || !!selectedOrg || !!selectedProject;
   const activeFilterCount = [filterMode !== "none", !!selectedOrg, !!selectedProject].filter(Boolean).length;
-
-  const rangeLabelShort = useMemo(() => {
-    if (filterMode !== "range") { return ""; }
-    if (rangeFrom && rangeTo) { return `${fmtDateDisplay(rangeFrom)} – ${fmtDateDisplay(rangeTo)}`; }
-    if (rangeFrom) { return `From ${fmtDateDisplay(rangeFrom)}`; }
+  const rangeLabelShort   = useMemo(() => {
+    if (filterMode !== "range") return "";
+    if (rangeFrom && rangeTo) return `${fmtDateDisplay(rangeFrom)} – ${fmtDateDisplay(rangeTo)}`;
+    if (rangeFrom) return `From ${fmtDateDisplay(rangeFrom)}`;
     return `Until ${fmtDateDisplay(rangeTo)}`;
   }, [filterMode, rangeFrom, rangeTo]);
 
@@ -616,9 +640,7 @@ export default function ExpensesChartPage() {
       <div style={{ padding: "14px 14px 12px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: T.t5, letterSpacing: "0.09em", textTransform: "uppercase" }}>Date Range</div>
-          {filterMode === "range" && (rangeFrom || rangeTo) && (
-            <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11, padding: "1px 4px" }}>✕ Clear</button>
-          )}
+          {filterMode === "range" && (rangeFrom || rangeTo) && <button onClick={clearDateFilters} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 11, padding: "1px 4px" }}>✕ Clear</button>}
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           <DateInput label="From" value={filterMode === "range" ? rangeFrom : ""} onChange={handleRangeFrom} max={filterMode === "range" && rangeTo ? rangeTo : undefined} />
@@ -640,13 +662,7 @@ export default function ExpensesChartPage() {
           </div>
           <button onClick={nextMonth} style={{ width: 30, height: 30, borderRadius: 6, background: T.panel2, border: `1px solid ${T.panel2B}`, color: T.t4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>›</button>
         </div>
-        <CalGrid year={calYear} month={calMonth}
-          selDates={filterMode === "calendar" ? selDates : new Set()}
-          activeDates={activeDates}
-          rangeFrom={filterMode === "range" ? rangeFrom : ""}
-          rangeTo={filterMode === "range" ? rangeTo : ""}
-          onToggle={toggleDate}
-        />
+        <CalGrid year={calYear} month={calMonth} selDates={filterMode === "calendar" ? selDates : new Set()} activeDates={activeDates} rangeFrom={filterMode === "range" ? rangeFrom : ""} rangeTo={filterMode === "range" ? rangeTo : ""} onToggle={toggleDate} />
         {filterMode === "calendar" && selDates.size > 0 && (
           <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", background: T.acLight, borderRadius: 6, padding: "5px 9px" }}>
             <span style={{ fontSize: 10.5, color: T.acText, fontWeight: 600 }}>{selDates.size} date{selDates.size > 1 ? "s" : ""} selected</span>
@@ -661,9 +677,7 @@ export default function ExpensesChartPage() {
           {MONTHS.map((m, i) => {
             const active = filterMode === "month" && selMonth === i;
             const dimmed = filterMode === "range" || filterMode === "calendar";
-            return (
-              <button key={m} onClick={() => selectMonth(i)} style={{ background: active ? T.acLight : "transparent", border: `1px solid ${active ? T.acMid : T.divider}`, borderRadius: 5, color: active ? T.acText : T.t5, fontSize: 10, padding: "6px 0", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: active ? 700 : 400, minHeight: 32, opacity: dimmed ? 0.4 : 1 }}>{m.slice(0, 3)}</button>
-            );
+            return <button key={m} onClick={() => selectMonth(i)} style={{ background: active ? T.acLight : "transparent", border: `1px solid ${active ? T.acMid : T.divider}`, borderRadius: 5, color: active ? T.acText : T.t5, fontSize: 10, padding: "6px 0", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: active ? 700 : 400, minHeight: 32, opacity: dimmed ? 0.4 : 1 }}>{m.slice(0, 3)}</button>;
           })}
         </div>
       </div>
@@ -672,9 +686,7 @@ export default function ExpensesChartPage() {
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
           {AVAILABLE_YEARS.map((y) => {
             const active = selYear === y && (filterMode === "month" || filterMode === "none");
-            return (
-              <button key={y} onClick={() => setSelYear(y)} style={{ flex: "1 1 0", background: active ? T.acLight : "transparent", border: `1px solid ${active ? T.acMid : T.divider}`, borderRadius: 5, color: active ? T.acText : T.t5, fontSize: 10, padding: "6px 0", cursor: "pointer", fontWeight: active ? 700 : 400, minHeight: 32, opacity: filterMode === "range" || filterMode === "calendar" ? 0.4 : 1 }}>{y}</button>
-            );
+            return <button key={y} onClick={() => setSelYear(y)} style={{ flex: "1 1 0", background: active ? T.acLight : "transparent", border: `1px solid ${active ? T.acMid : T.divider}`, borderRadius: 5, color: active ? T.acText : T.t5, fontSize: 10, padding: "6px 0", cursor: "pointer", fontWeight: active ? 700 : 400, minHeight: 32, opacity: filterMode === "range" || filterMode === "calendar" ? 0.4 : 1 }}>{y}</button>;
           })}
         </div>
       </div>
@@ -694,8 +706,7 @@ export default function ExpensesChartPage() {
         <>
           <Divider />
           <div style={{ padding: "10px 14px 20px" }}>
-            <button
-              onClick={() => { clearAll(); setDrawerOpen(false); }}
+            <button onClick={() => { clearAll(); setDrawerOpen(false); }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = T.red; (e.currentTarget as HTMLElement).style.borderColor = T.red + "40"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = T.t5; (e.currentTarget as HTMLElement).style.borderColor = T.divider; }}
               style={{ width: "100%", background: "transparent", border: `1px solid ${T.divider}`, borderRadius: 7, padding: "8px 0", fontSize: 11, color: T.t5, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", minHeight: 38 }}>
@@ -735,7 +746,7 @@ export default function ExpensesChartPage() {
           </div>
           <div style={{ minWidth: 0 }}>
             <h1 style={{ fontSize: isMobile ? 16 : 21, fontWeight: 700, fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em", color: T.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Revenue vs Expenses</h1>
-            {!isMobile && <p style={{ color: T.t5, fontSize: 11.5, marginTop: 1 }}>Assign categories to groups · each targeting 33.3% of revenue · balance → investors</p>}
+            {!isMobile && <p style={{ color: T.t5, fontSize: 11.5, marginTop: 1 }}>Assign categories to groups · taxes auto-assigned to overheads · balance → investors</p>}
           </div>
         </div>
         {isMobile ? (
@@ -747,9 +758,10 @@ export default function ExpensesChartPage() {
         ) : data && (
           <div style={{ display: "flex", gap: 8 }}>
             {[
-              { label: "Revenue",     val: fmtINR(totalRevenue),  color: T.green },
-              { label: "Expenses",    val: fmtINR(totalExpenses), color: T.red   },
-              { label: "Net Balance", val: (balance >= 0 ? "+" : "−") + fmtINR(Math.abs(balance)), color: balance >= 0 ? T.green : T.red },
+              { label: "Revenue",      val: fmtINR(totalRevenue),   color: T.green },
+              { label: "Expenses",     val: fmtINR(totalExpenses),  color: T.red   },
+              { label: "Tax Liability",val: fmtINR(totalTax),       color: T.tax   },
+              { label: "Net Balance",  val: (balance >= 0 ? "+" : "−") + fmtINR(Math.abs(balance)), color: balance >= 0 ? T.green : T.red },
             ].map((s) => (
               <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 8, padding: "6px 14px", textAlign: "center" }}>
                 <div style={{ fontSize: 9, color: T.t5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>{s.label}</div>
@@ -761,10 +773,11 @@ export default function ExpensesChartPage() {
       </div>
 
       {isMobile && data && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 12 }}>
           {[
             { label: "Revenue",  val: fmtINR(totalRevenue),  color: T.green },
             { label: "Expenses", val: fmtINR(totalExpenses), color: T.red   },
+            { label: "Tax",      val: fmtINR(totalTax),      color: T.tax   },
             { label: "Net",      val: (balance >= 0 ? "+" : "−") + fmtINR(Math.abs(balance)), color: balance >= 0 ? T.green : T.red },
           ].map((s) => (
             <div key={s.label} style={{ background: T.panel, border: `1px solid ${T.panelB}`, borderRadius: 10, padding: "9px 10px" }}>
@@ -783,9 +796,8 @@ export default function ExpensesChartPage() {
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-          {error && (
-            <div style={{ padding: "11px 16px", color: T.red, fontSize: 12.5, background: T.redBg, borderRadius: 10, border: `1px solid ${T.red}30` }}>⚠ {error}</div>
-          )}
+          {error && <div style={{ padding: "11px 16px", color: T.red, fontSize: 12.5, background: T.redBg, borderRadius: 10, border: `1px solid ${T.red}30` }}>⚠ {error}</div>}
+
           {filterMode !== "none" && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 8, background: T.acLight, border: `1px solid ${T.acMid}`, fontSize: 11, color: T.acText }}>
               <svg width={12} height={12} viewBox="0 0 20 20" fill="none"><rect x={2} y={3} width={16} height={16} rx={3} stroke={T.acText} strokeWidth={1.5} /><path d="M2 8h16M6 1v4M14 1v4" stroke={T.acText} strokeWidth={1.5} strokeLinecap="round" /></svg>
@@ -811,22 +823,37 @@ export default function ExpensesChartPage() {
               </div>
             ) : (
               <div style={{ padding: isMobile ? "16px 12px" : "24px 28px" }}>
-                <div style={{ marginBottom: 18, padding: "12px 16px", borderRadius: 10, background: T.greenBg, border: `1px solid ${T.green}20`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+
+                {/* Revenue banner */}
+                <div style={{ marginBottom: 12, padding: "12px 16px", borderRadius: 10, background: T.greenBg, border: `1px solid ${T.green}20`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, color: T.green, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 2 }}>Total Revenue</div>
                     <div style={{ fontSize: 10.5, color: T.t4 }}>
-                      Expenses consume{" "}
-                      <span style={{ color: T.red, fontWeight: 700 }}>{totalRevenue > 0 ? ((totalExpenses / totalRevenue) * 100).toFixed(1) : 0}%</span>
-                      {" "}· Balance retains{" "}
-                      <span style={{ color: balance >= 0 ? T.green : T.red, fontWeight: 700 }}>{totalRevenue > 0 ? Math.abs((balance / totalRevenue) * 100).toFixed(1) : 0}%</span>
-                      {" "}· Flows to investors
+                      Expenses <span style={{ color: T.red, fontWeight: 700 }}>{totalRevenue > 0 ? ((totalExpenses / totalRevenue) * 100).toFixed(1) : 0}%</span>
+                      {" "}· Tax <span style={{ color: T.tax, fontWeight: 700 }}>{totalRevenue > 0 ? ((totalTax / totalRevenue) * 100).toFixed(1) : 0}%</span>
+                      {" "}· Net <span style={{ color: balance >= 0 ? T.green : T.red, fontWeight: 700 }}>{totalRevenue > 0 ? Math.abs((balance / totalRevenue) * 100).toFixed(1) : 0}%</span>
                     </div>
                   </div>
                   <div style={{ fontSize: 22, fontWeight: 800, color: T.green, fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em" }}>{fmtINR(totalRevenue)}</div>
                 </div>
 
+                {/* Tax breakdown banner — only shown when taxes exist */}
+                {totalTax > 0 && (
+                  <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: T.taxBg, border: `1px solid ${T.tax}25`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: T.tax, letterSpacing: "0.1em", textTransform: "uppercase", marginRight: 4 }}>⊕ Tax Liability</span>
+                      {Object.entries(taxByName).map(([name, amt]) => (
+                        <span key={name} style={{ fontSize: 9.5, color: T.tax, background: T.tax + "18", border: `1px solid ${T.tax}30`, borderRadius: 20, padding: "2px 8px" }}>
+                          {name}: {fmtINR(amt)}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: T.tax, fontFamily: "'Sora',sans-serif" }}>{fmtINR(totalTax)}</div>
+                  </div>
+                )}
+
                 {unassignedTotal > 0 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: T.amberBg, border: `1px solid ${T.amber}30`, fontSize: 11, color: T.amber, marginBottom: 18 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: T.amberBg, border: `1px solid ${T.amber}30`, fontSize: 11, color: T.amber, marginBottom: 12 }}>
                     <svg width={13} height={13} viewBox="0 0 20 20" fill="none"><path d="M10 2l8 16H2L10 2z" stroke={T.amber} strokeWidth={1.5} strokeLinejoin="round"/><path d="M10 8v4M10 14.5v.5" stroke={T.amber} strokeWidth={1.5} strokeLinecap="round"/></svg>
                     <span><strong>{fmtINR(unassignedTotal)}</strong> unassigned — assign categories using the dropdowns below.</span>
                   </div>
@@ -834,14 +861,7 @@ export default function ExpensesChartPage() {
 
                 <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "center" : "flex-start", gap: isMobile ? 20 : 28, marginBottom: 20 }}>
                   <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                    <DonutChart
-                      subSlices={subSlices}
-                      revenue={totalRevenue}
-                      totalExpenses={totalExpenses}
-                      balance={balance}
-                      hoveredGroup={hoveredGroup}
-                      onHoverGroup={setHoveredGroup}
-                    />
+                    <DonutChart subSlices={subSlices} revenue={totalRevenue} totalExpenses={totalWithTax} balance={balance} hoveredGroup={hoveredGroup} onHoverGroup={setHoveredGroup} />
                     <div style={{ display: "flex", gap: 12, fontSize: 9.5, color: T.t4, flexWrap: "wrap", justifyContent: "center" }}>
                       {GROUPS.map((g) => (
                         <span key={g.key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -849,6 +869,12 @@ export default function ExpensesChartPage() {
                           {g.label}
                         </span>
                       ))}
+                      {totalTax > 0 && (
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ width: 7, height: 7, borderRadius: 2, background: T.tax, display: "inline-block" }} />
+                          Tax (in Overheads)
+                        </span>
+                      )}
                       {balance > 0 && (
                         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ width: 7, height: 7, borderRadius: 2, background: GROUPS[0].shades[2], display: "inline-block", opacity: 0.7 }} />
@@ -858,16 +884,16 @@ export default function ExpensesChartPage() {
                     </div>
                     <div style={{ fontSize: 8, color: T.t5, display: "flex", alignItems: "center", gap: 4 }}>
                       <span style={{ width: 14, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.1)", display: "inline-block" }} />
-                      Outer ring = 33.3% ideal target · shades = sub-categories
+                      Outer ring = 33.3% ideal · dashed = tax slices
                     </div>
                   </div>
 
                   {!isMobile && (
-                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end", paddingBottom: 4 }}>
+                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10, justifyContent: "flex-end", paddingBottom: 4 }}>
                       <div style={{ padding: "14px 18px", borderRadius: 10, background: balance >= 0 ? T.greenBg : T.redBg, border: `1px solid ${balance >= 0 ? T.green : T.red}22`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                         <div>
                           <div style={{ fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>Net Balance → Investors</div>
-                          <div style={{ fontSize: 10.5, color: T.t4 }}>Revenue − All Expenses · auto-included in Investors Share</div>
+                          <div style={{ fontSize: 10.5, color: T.t4 }}>Revenue − Expenses − Tax · auto-included in Investors Share</div>
                         </div>
                         <div style={{ textAlign: "right" }}>
                           <div style={{ fontSize: 22, fontWeight: 800, color: balance >= 0 ? T.green : T.red, fontFamily: "'Sora',sans-serif", letterSpacing: "-0.03em" }}>
@@ -887,7 +913,7 @@ export default function ExpensesChartPage() {
                     <GroupColumn
                       key={g.key}
                       group={g}
-                      categories={uniqueCategories}
+                      categories={allCategories}
                       groupMap={groupMap}
                       assignedTotal={groupTotals[g.key]}
                       balanceAmount={g.key === "investors" ? balance : 0}
@@ -904,7 +930,7 @@ export default function ExpensesChartPage() {
                   <div style={{ marginTop: 14, padding: "11px 14px", borderRadius: 10, background: balance >= 0 ? T.greenBg : T.redBg, border: `1px solid ${balance >= 0 ? T.green : T.red}22`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                     <div>
                       <div style={{ fontSize: 10, fontWeight: 700, color: T.t5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 1 }}>Net Balance → Investors</div>
-                      <div style={{ fontSize: 10.5, color: T.t4 }}>Auto-included in Investors Share</div>
+                      <div style={{ fontSize: 10.5, color: T.t4 }}>Revenue − Expenses − Tax</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ fontSize: 18, fontWeight: 800, color: balance >= 0 ? T.green : T.red, fontFamily: "'Sora',sans-serif" }}>
