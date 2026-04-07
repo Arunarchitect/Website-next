@@ -175,6 +175,17 @@ export async function cancelLeaveRequest(id: number): Promise<void> {
   if (!res.ok) throw new Error("Failed to cancel");
 }
 
+// Add this function to your leaveApi.ts file
+
+export async function deletePublicHoliday(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/api/v2/leave/holidays/${id}/`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to delete holiday");
+}
+
+
 export async function actionLeaveRequest(
   id: number,
   action: "approved" | "rejected",
