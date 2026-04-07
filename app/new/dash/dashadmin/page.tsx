@@ -15,7 +15,7 @@ import {
   type DashboardQuickAccess,
   type DashboardData,
 } from "@/app/new/api";
-
+import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
 
 async function checkIsUser(): Promise<boolean> {
   const token = localStorage.getItem("access");
@@ -35,12 +35,21 @@ function fmtTimeInput(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-function parseTimeInput(value: string): Date | null {
-  const [h, m] = value.split(":").map(Number);
-  if (isNaN(h) || isNaN(m)) return null;
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d;
+function fmtDateInput(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm   = String(date.getMonth() + 1).padStart(2, "0");
+  const dd   = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Build a Date from separate yyyy-mm-dd and HH:mm strings. */
+function parseDateTimeInputs(dateVal: string, timeVal: string): Date | null {
+  if (!dateVal || !timeVal) return null;
+  const [yyyy, mo, dd] = dateVal.split("-").map(Number);
+  const [hh, min]      = timeVal.split(":").map(Number);
+  if ([yyyy, mo, dd, hh, min].some((n) => isNaN(n))) return null;
+  const d = new Date(yyyy, mo - 1, dd, hh, min, 0, 0);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 function formatElapsed(seconds: number): string {
@@ -70,14 +79,14 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; lab
 };
 
 function StatusPill({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG["pending"];
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 5,
       padding: "3px 10px", borderRadius: 99,
       background: cfg.bg, color: cfg.text,
       fontSize: 11, fontWeight: 600, letterSpacing: "0.03em",
-      whiteSpace: "nowrap" as const,
+      whiteSpace: "nowrap",
     }}>
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.dot, flexShrink: 0 }} />
       {cfg.label}
@@ -102,7 +111,8 @@ interface TimerEntry {
   elapsed: number;
   sessionStart: Date | null;
   sessionEnd: Date | null;
-  endInput: string;
+  endDateInput: string; // yyyy-mm-dd
+  endTimeInput: string; // HH:mm
   endError: string;
   remarks: string;
   remarksSaved: boolean;
@@ -125,7 +135,8 @@ function makeEntryFromAssignment(a: DashboardAssignment): TimerEntry {
     elapsed: 0,
     sessionStart: null,
     sessionEnd: null,
-    endInput: "",
+    endDateInput: "",
+    endTimeInput: "",
     endError: "",
     remarks: "",
     remarksSaved: false,
@@ -142,7 +153,8 @@ function makeEntryFromQuickAccess(q: DashboardQuickAccess): TimerEntry {
     elapsed: 0,
     sessionStart: null,
     sessionEnd: null,
-    endInput: "",
+    endDateInput: "",
+    endTimeInput: "",
     endError: "",
     remarks: "",
     remarksSaved: false,
@@ -233,7 +245,7 @@ function ModelflickMark() {
   );
 }
 
-// ── Nav buttons ───────────────────────────────────────────────────────────────
+// ── Nav button ────────────────────────────────────────────────────────────────
 
 function NavButton({ label, href }: { label: string; href: string }) {
   const [hovered, setHovered] = useState(false);
@@ -248,7 +260,7 @@ function NavButton({ label, href }: { label: string; href: string }) {
         background: hovered ? "#F5F5F5" : "#FAFAFA",
         border: `1px solid ${hovered ? "#D5D5D5" : "#E8E8E8"}`,
         color: "#333", fontSize: 12, fontWeight: 600,
-        textDecoration: "none", transition: "all 0.12s", textAlign: "center" as const,
+        textDecoration: "none", transition: "all 0.12s", textAlign: "center",
         letterSpacing: "0.01em",
       }}
     >
@@ -257,7 +269,108 @@ function NavButton({ label, href }: { label: string; href: string }) {
   );
 }
 
-// ── Assignment card (mobile-friendly card style) ──────────────────────────────
+// ── Running controls (shared by AssignmentCard and QuickRow) ──────────────────
+
+interface RunningControlsProps {
+  entry: TimerEntry;
+  nearEnd: boolean;
+  onEndDateChange: (id: string, v: string) => void;
+  onEndTimeChange: (id: string, v: string) => void;
+  onRemarksChange: (id: string, v: string) => void;
+  onRemarksSave:  (id: string) => void;
+}
+
+function RunningControls({ entry, nearEnd, onEndDateChange, onEndTimeChange, onRemarksChange, onRemarksSave }: RunningControlsProps) {
+  const accent     = nearEnd ? "#C2410C" : "#E53935";
+  const bg         = nearEnd ? "#FFF7ED" : "#FFF5F5";
+  const borderTop  = nearEnd ? "#FED7AA" : "#FFE4E4";
+  const inputBdr   = entry.endError ? "#F43F5E" : nearEnd ? "#FB923C" : "#FFBBBB";
+  const inputBg    = entry.endError ? "#FFF1F2" : bg;
+  const inputColor = entry.endError ? "#BE123C" : accent;
+
+  return (
+    <div style={{
+      display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8,
+      padding: "8px 12px 10px",
+      borderTop: `1px solid ${borderTop}`,
+      background: bg,
+    }}>
+      {/* Start */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>Start</span>
+        <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: accent, fontWeight: 600 }}>
+          {entry.sessionStart ? fmt24(entry.sessionStart) : "—"}
+        </span>
+      </div>
+
+      <div style={{ width: 1, height: 14, background: "#E0E0E0", flexShrink: 0 }} />
+
+      {/* End date + time */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>End</span>
+        <input
+          type="date"
+          value={entry.endDateInput}
+          onChange={(e) => onEndDateChange(entry.id, e.target.value)}
+          style={{
+            fontSize: 12,
+            border: `1px solid ${inputBdr}`,
+            borderRadius: 5, padding: "2px 6px",
+            background: inputBg, color: inputColor,
+            fontWeight: 600, outline: "none",
+            cursor: "pointer", boxSizing: "border-box",
+          }}
+        />
+        <input
+          type="time"
+          value={entry.endTimeInput}
+          onChange={(e) => onEndTimeChange(entry.id, e.target.value)}
+          style={{
+            fontSize: 12, fontVariantNumeric: "tabular-nums",
+            border: `1px solid ${inputBdr}`,
+            borderRadius: 5, padding: "2px 6px",
+            background: inputBg, color: inputColor,
+            fontWeight: 600, outline: "none", textAlign: "center",
+            cursor: "pointer", boxSizing: "border-box",
+          }}
+        />
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      {/* Remarks */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+        <input
+          type="text"
+          value={entry.remarks}
+          onChange={(e) => onRemarksChange(entry.id, e.target.value)}
+          placeholder="Add a note…"
+          style={{
+            fontSize: 12, border: "1px solid #E5E5E5", borderRadius: 6,
+            padding: "4px 8px", background: "#fff", color: "#333",
+            outline: "none", width: 150, boxSizing: "border-box",
+          }}
+        />
+        <button
+          onClick={() => onRemarksSave(entry.id)}
+          title="Save note"
+          style={{
+            width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+            border: `1px solid ${entry.remarksSaved ? "#22C55E" : "#E0E0E0"}`,
+            background: entry.remarksSaved ? "#F0FDF4" : "#fff",
+            color: entry.remarksSaved ? "#15803D" : "#AAAAAA",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", transition: "all 0.15s", padding: 0,
+          }}
+        >
+          <TickIcon />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Assignment card ───────────────────────────────────────────────────────────
 
 interface AssignmentCardProps {
   entry: TimerEntry;
@@ -265,53 +378,63 @@ interface AssignmentCardProps {
   liveSeconds: number;
   onPlay: (id: string) => void;
   onStop: (id: string) => void;
-  onEndChange: (id: string, v: string) => void;
+  onEndDateChange: (id: string, v: string) => void;
+  onEndTimeChange: (id: string, v: string) => void;
   onRemarksChange: (id: string, v: string) => void;
-  onRemarksSave: (id: string) => void;
-  onSubmit?: (assignmentId: number) => void;
+  onRemarksSave:  (id: string) => void;
+  onSubmit?:   (assignmentId: number) => void;
   onResubmit?: (assignmentId: number) => void;
 }
 
 function AssignmentCard({
   entry, isRunning, liveSeconds,
-  onPlay, onStop, onEndChange, onRemarksChange, onRemarksSave,
+  onPlay, onStop, onEndDateChange, onEndTimeChange, onRemarksChange, onRemarksSave,
   onSubmit, onResubmit,
 }: AssignmentCardProps) {
-  const nearEnd = isRunning && entry.sessionEnd && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
+  const nearEnd     = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
   const isRejected  = entry.assignmentStatus === "rejected";
   const isPending   = entry.assignmentStatus === "pending";
+  const isSubmitted = entry.assignmentStatus === "submitted";
 
-  const canSubmit   = entry.assignmentId && (isPending || isRejected) && !isRunning;
-  const canResubmit = entry.assignmentId && isRejected && !isRunning;
+  // Disable recording when submitted
+  const timerDisabled = isSubmitted && !isRunning;
+
+  const canSubmit   = entry.assignmentId != null && (isPending || isRejected) && !isRunning;
+  const canResubmit = entry.assignmentId != null && isRejected && !isRunning;
 
   const borderColor = isRunning
     ? (nearEnd ? "#FB923C" : "#E53935")
-    : isRejected
-    ? "#FCA5A5"
+    : isRejected  ? "#FCA5A5"
+    : isSubmitted ? "#FDE68A"
     : "#E8E8E8";
 
   const cardBg = isRunning
     ? (nearEnd ? "#FFFAF5" : "#FFF9F9")
-    : isRejected
-    ? "#FFF9F9"
+    : isRejected  ? "#FFF9F9"
+    : isSubmitted ? "#FFFDF0"
     : "#FAFAFA";
 
   return (
     <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${borderColor}`, background: cardBg, transition: "border-color 0.2s, background 0.2s" }}>
-      {/* Main row */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
 
         {/* Timer button */}
         <button
-          onClick={() => isRunning ? onStop(entry.id) : onPlay(entry.id)}
-          title={isRunning ? "Stop timer" : "Start timer"}
+          onClick={() => {
+            if (timerDisabled) return;
+            if (isRunning) onStop(entry.id);
+            else onPlay(entry.id);
+          }}
+          title={timerDisabled ? "Cannot record — assignment is submitted" : isRunning ? "Stop timer" : "Start timer"}
+          disabled={timerDisabled}
           style={{
             width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-            border: `2px solid ${isRunning ? "#E53935" : "#AAAAAA"}`,
-            background: isRunning ? "#E53935" : "transparent",
-            color: isRunning ? "#fff" : "#666",
+            border: `2px solid ${timerDisabled ? "#DDD" : isRunning ? "#E53935" : "#AAAAAA"}`,
+            background: timerDisabled ? "#F5F5F5" : isRunning ? "#E53935" : "transparent",
+            color: timerDisabled ? "#CCC" : isRunning ? "#fff" : "#666",
             display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", transition: "all 0.15s", padding: 0,
+            cursor: timerDisabled ? "not-allowed" : "pointer",
+            transition: "all 0.15s", padding: 0,
           }}
         >
           {isRunning ? <StopIcon /> : <PlayIcon />}
@@ -320,31 +443,38 @@ function AssignmentCard({
         {/* Elapsed */}
         <div style={{
           width: 68, flexShrink: 0, fontVariantNumeric: "tabular-nums",
-          fontSize: 13, fontWeight: 700, textAlign: "center" as const,
-          color: isRunning ? "#E53935" : "#BBBBBB",
-          letterSpacing: "0.03em",
+          fontSize: 13, fontWeight: 700, textAlign: "center",
+          color: isRunning ? "#E53935" : "#BBBBBB", letterSpacing: "0.03em",
         }}>
           {formatElapsed(liveSeconds)}
         </div>
 
         {/* Meta */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#111", whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {entry.assignmentName ?? entry.deliverableName}
           </div>
-          <div style={{ fontSize: 11, color: "#999", marginTop: 2, whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div style={{ fontSize: 11, color: "#999", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {entry.orgName} · {entry.projectName}
             {entry.dueDate ? ` · Due ${entry.dueDate}` : ""}
           </div>
+          {timerDisabled && (
+            <div style={{ fontSize: 10, color: "#B45309", marginTop: 2, fontWeight: 600 }}>
+              Recording disabled — awaiting review
+            </div>
+          )}
         </div>
 
         {/* Status */}
         {entry.assignmentStatus && <StatusPill status={entry.assignmentStatus} />}
 
-        {/* Submit / Re-submit button */}
+        {/* Submit / Re-submit */}
         {(canSubmit || canResubmit) && (
           <button
-            onClick={() => canResubmit ? onResubmit?.(entry.assignmentId!) : onSubmit?.(entry.assignmentId!)}
+            onClick={() => {
+              if (canResubmit) onResubmit?.(entry.assignmentId!);
+              else onSubmit?.(entry.assignmentId!);
+            }}
             style={{
               display: "flex", alignItems: "center", gap: 5,
               padding: "6px 12px", borderRadius: 7, flexShrink: 0,
@@ -360,67 +490,15 @@ function AssignmentCard({
         )}
       </div>
 
-      {/* Running controls row */}
+      {/* Running controls */}
       {isRunning && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 12px 10px",
-          borderTop: `1px solid ${nearEnd ? "#FED7AA" : "#FFE4E4"}`,
-          background: nearEnd ? "#FFF7ED" : "#FFF5F5",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>Start</span>
-            <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "#E53935", fontWeight: 600 }}>
-              {entry.sessionStart ? fmt24(entry.sessionStart) : "—"}
-            </span>
-          </div>
-          <div style={{ width: 1, height: 14, background: "#E0E0E0" }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>End</span>
-            <input
-              type="time"
-              value={entry.endInput}
-              onChange={(e) => onEndChange(entry.id, e.target.value)}
-              style={{
-                fontSize: 12, fontVariantNumeric: "tabular-nums",
-                border: `1px solid ${entry.endError ? "#F43F5E" : nearEnd ? "#FB923C" : "#FFBBBB"}`,
-                borderRadius: 5, padding: "2px 6px",
-                background: entry.endError ? "#FFF1F2" : nearEnd ? "#FFF7ED" : "#FFF5F5",
-                color: entry.endError ? "#BE123C" : nearEnd ? "#C2410C" : "#E53935",
-                fontWeight: 600, outline: "none", textAlign: "center" as const,
-                cursor: "pointer", boxSizing: "border-box" as const,
-              }}
-            />
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <input
-              type="text"
-              value={entry.remarks}
-              onChange={(e) => onRemarksChange(entry.id, e.target.value)}
-              placeholder="Add a note…"
-              style={{
-                fontSize: 12, border: "1px solid #E5E5E5", borderRadius: 6,
-                padding: "4px 8px", background: "#fff", color: "#333",
-                outline: "none", width: 160, boxSizing: "border-box" as const,
-              }}
-            />
-            <button
-              onClick={() => onRemarksSave(entry.id)}
-              title="Save note"
-              style={{
-                width: 26, height: 26, borderRadius: 6, flexShrink: 0,
-                border: `1px solid ${entry.remarksSaved ? "#22C55E" : "#E0E0E0"}`,
-                background: entry.remarksSaved ? "#F0FDF4" : "#fff",
-                color: entry.remarksSaved ? "#15803D" : "#AAAAAA",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", transition: "all 0.15s", padding: 0,
-              }}
-            >
-              <TickIcon />
-            </button>
-          </div>
-        </div>
+        <RunningControls
+          entry={entry} nearEnd={nearEnd}
+          onEndDateChange={onEndDateChange}
+          onEndTimeChange={onEndTimeChange}
+          onRemarksChange={onRemarksChange}
+          onRemarksSave={onRemarksSave}
+        />
       )}
 
       {/* End error */}
@@ -451,13 +529,13 @@ function AssignmentCard({
   );
 }
 
-// ── Quick access row (simpler, no assignment features) ───────────────────────
+// ── Quick row ─────────────────────────────────────────────────────────────────
 
 function QuickRow({
   entry, isRunning, liveSeconds,
-  onPlay, onStop, onEndChange, onRemarksChange, onRemarksSave,
+  onPlay, onStop, onEndDateChange, onEndTimeChange, onRemarksChange, onRemarksSave,
 }: AssignmentCardProps) {
-  const nearEnd = isRunning && entry.sessionEnd && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
+  const nearEnd = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
 
   return (
     <div style={{
@@ -480,11 +558,13 @@ function QuickRow({
         >
           {isRunning ? <StopIcon /> : <PlayIcon />}
         </button>
-        <div style={{ width: 68, flexShrink: 0, fontVariantNumeric: "tabular-nums", fontSize: 13, fontWeight: 700, textAlign: "center" as const, color: isRunning ? "#E53935" : "#BBBBBB" }}>
+
+        <div style={{ width: 68, flexShrink: 0, fontVariantNumeric: "tabular-nums", fontSize: 13, fontWeight: 700, textAlign: "center", color: isRunning ? "#E53935" : "#BBBBBB" }}>
           {formatElapsed(liveSeconds)}
         </div>
+
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#111", whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {entry.deliverableName}
           </div>
           <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>
@@ -494,60 +574,18 @@ function QuickRow({
       </div>
 
       {isRunning && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 12px 10px",
-          borderTop: `1px solid ${nearEnd ? "#FED7AA" : "#FFE4E4"}`,
-          background: nearEnd ? "#FFF7ED" : "#FFF5F5",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "#999" }}>Start</span>
-            <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "#E53935", fontWeight: 600 }}>
-              {entry.sessionStart ? fmt24(entry.sessionStart) : "—"}
-            </span>
-          </div>
-          <div style={{ width: 1, height: 14, background: "#E0E0E0" }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "#999" }}>End</span>
-            <input
-              type="time" value={entry.endInput}
-              onChange={(e) => onEndChange(entry.id, e.target.value)}
-              style={{
-                fontSize: 12, border: `1px solid ${nearEnd ? "#FB923C" : "#FFBBBB"}`,
-                borderRadius: 5, padding: "2px 6px",
-                background: nearEnd ? "#FFF7ED" : "#FFF5F5",
-                color: nearEnd ? "#C2410C" : "#E53935",
-                fontWeight: 600, outline: "none", textAlign: "center" as const,
-                boxSizing: "border-box" as const,
-              }}
-            />
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <input
-              type="text" value={entry.remarks}
-              onChange={(e) => onRemarksChange(entry.id, e.target.value)}
-              placeholder="Add a note…"
-              style={{
-                fontSize: 12, border: "1px solid #E5E5E5", borderRadius: 6,
-                padding: "4px 8px", background: "#fff", color: "#333",
-                outline: "none", width: 160, boxSizing: "border-box" as const,
-              }}
-            />
-            <button
-              onClick={() => onRemarksSave(entry.id)}
-              style={{
-                width: 26, height: 26, borderRadius: 6, flexShrink: 0,
-                border: `1px solid ${entry.remarksSaved ? "#22C55E" : "#E0E0E0"}`,
-                background: entry.remarksSaved ? "#F0FDF4" : "#fff",
-                color: entry.remarksSaved ? "#15803D" : "#AAAAAA",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", padding: 0,
-              }}
-            >
-              <TickIcon />
-            </button>
-          </div>
+        <RunningControls
+          entry={entry} nearEnd={nearEnd}
+          onEndDateChange={onEndDateChange}
+          onEndTimeChange={onEndTimeChange}
+          onRemarksChange={onRemarksChange}
+          onRemarksSave={onRemarksSave}
+        />
+      )}
+
+      {entry.endError && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#FFF1F2", borderTop: "1px solid #FCA5A5", fontSize: 11, color: "#BE123C" }}>
+          <AlertIcon /> {entry.endError}
         </div>
       )}
     </div>
@@ -573,7 +611,7 @@ function ApprovedCard({ assignment }: { assignment: DashboardAssignment }) {
         </svg>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#14532D", whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#14532D", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {assignment.name}
         </div>
         <div style={{ fontSize: 11, color: "#4ADE80", marginTop: 2 }}>
@@ -589,10 +627,12 @@ function ApprovedCard({ assignment }: { assignment: DashboardAssignment }) {
   );
 }
 
+// ── Misc UI ───────────────────────────────────────────────────────────────────
+
 function SectionHeader({ label, count, accent }: { label: string; count?: number; accent?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: "0.07em", textTransform: "uppercase" as const }}>{label}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: "0.07em", textTransform: "uppercase" }}>{label}</span>
       {count !== undefined && (
         <span style={{
           fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99,
@@ -615,12 +655,29 @@ function FullScreenMessage({ message, color = "#999" }: { message: string; color
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+export default function DashAdminPage() {
   const isMobile = useWindowWidth() < 640;
-  const router = useRouter();
+  const router   = useRouter();
+
   const [authChecked, setAuthChecked] = useState(false);
+
+  // ── Admin guard ───────────────────────────────────────────────────────────
+  const {
+    data: memberships = [],
+    isLoading: isMembershipLoading,
+    isFetching: isMembershipFetching,
+  } = useGetMyMembershipsQuery();
+
+  useEffect(() => {
+    if (isMembershipLoading || isMembershipFetching) return;
+    const isAdmin = memberships.some((m) => m.role === "admin");
+    if (!isAdmin) router.replace("/new/dash/dashnormal");
+  }, [memberships, isMembershipLoading, isMembershipFetching, router]);
+
+  const isAdmin = memberships.some((m) => m.role === "admin");
+  // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     checkIsUser().then((ok) => {
@@ -629,9 +686,9 @@ export default function DashboardPage() {
     });
   }, [router]);
 
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
+  const [dashboard, setDashboard]     = useState<DashboardData | null>(null);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState<string | null>(null);
 
   useEffect(() => {
     if (!authChecked) return;
@@ -641,20 +698,19 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [authChecked]);
 
-  const [entries, setEntries]       = useState<Record<string, TimerEntry>>({});
-  const [runningId, setRunningId]   = useState<string | null>(null);
-  const startRef                    = useRef<number | null>(null);
-  const worklogIdRef                = useRef<number | null>(null);
-  const endTimeDebounceRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [tick, setTick]             = useState(0);
-  const [pending, setPending]       = useState<{ action: "stop" | "switch"; nextId?: string } | null>(null);
-  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [entries, setEntries]     = useState<Record<string, TimerEntry>>({});
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const startRef                  = useRef<number | null>(null);
+  const worklogIdRef              = useRef<number | null>(null);
+  const endDebounceRef            = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tick, setTick]           = useState(0);
+  const [pending, setPending]     = useState<{ action: "stop" | "switch"; nextId?: string } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [approvedAssignments, setApprovedAssignments] = useState<DashboardAssignment[]>([]);
 
-  // Build entries from dashboard
   useEffect(() => {
     if (!dashboard) return;
-    const active  = dashboard.assignments.filter((a) => a.status !== "approved");
+    const active   = dashboard.assignments.filter((a) => a.status !== "approved");
     const approved = dashboard.assignments.filter((a) => a.status === "approved");
     const list: TimerEntry[] = [
       ...active.map(makeEntryFromAssignment),
@@ -664,7 +720,6 @@ export default function DashboardPage() {
     setApprovedAssignments(approved);
   }, [dashboard]);
 
-  // Restore active worklog
   useEffect(() => {
     if (!dashboard) return;
     fetchActiveWorkLog().then((active) => {
@@ -680,97 +735,87 @@ export default function DashboardPage() {
       const elapsed = Math.floor((now - sessionStart.getTime()) / 1000);
       worklogIdRef.current = active.id;
       startRef.current     = sessionStart.getTime();
-      setTick(elapsed); setRunningId(entryId);
+      setTick(elapsed);
+      setRunningId(entryId);
       setEntries((prev) => ({
         ...prev,
-        [entryId]: { ...prev[entryId], sessionStart, sessionEnd, endInput: fmtTimeInput(sessionEnd), endError: "", remarks: active.remarks, remarksSaved: false },
+        [entryId]: {
+          ...prev[entryId],
+          sessionStart,
+          sessionEnd,
+          endDateInput: fmtDateInput(sessionEnd),
+          endTimeInput: fmtTimeInput(sessionEnd),
+          endError: "",
+          remarks: active.remarks,
+          remarksSaved: false,
+        },
       }));
     }).catch(() => {});
   }, [dashboard]);
 
-  // Tick
   useEffect(() => {
     if (!runningId) return;
     const iv = setInterval(() => setTick(Math.floor((Date.now() - (startRef.current ?? Date.now())) / 1000)), 1000);
     return () => clearInterval(iv);
   }, [runningId]);
 
-  // Auto-clear when session end is reached
   useEffect(() => {
     if (!runningId) return;
     const end = entries[runningId]?.sessionEnd;
     if (!end) return;
     const rem = end.getTime() - Date.now();
     const clearUI = () => {
-      setEntries((prev) => ({ ...prev, [runningId]: { ...prev[runningId], sessionStart: null, sessionEnd: null, endInput: "", endError: "", remarks: "", remarksSaved: false } }));
-      worklogIdRef.current = null; startRef.current = null; setTick(0); setRunningId(null);
+      setEntries((prev) => ({
+        ...prev,
+        [runningId]: { ...prev[runningId], sessionStart: null, sessionEnd: null, endDateInput: "", endTimeInput: "", endError: "", remarks: "", remarksSaved: false },
+      }));
+      worklogIdRef.current = null;
+      startRef.current     = null;
+      setTick(0);
+      setRunningId(null);
     };
     if (rem <= 0) { clearUI(); return; }
     const t = setTimeout(clearUI, rem);
     return () => clearTimeout(t);
-  }, [runningId, entries[runningId ?? ""]?.sessionEnd?.getTime()]); // eslint-disable-line
+  }, [runningId, entries[runningId ?? ""]?.sessionEnd?.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const commitStart = useCallback(async (id: string) => {
-    const entry = entries[id];
-    if (!entry) return;
-    try {
-      const result = await startWorkLog(entry.deliverableId);
-      const sessionStart = new Date(result.start_time);
-      const sessionEnd   = new Date(result.end_time);
-      worklogIdRef.current = result.id; startRef.current = sessionStart.getTime();
-      setTick(0); setRunningId(id);
-      setEntries((prev) => ({ ...prev, [id]: { ...prev[id], sessionStart, sessionEnd, endInput: fmtTimeInput(sessionEnd), endError: "", remarks: "", remarksSaved: false } }));
-    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : "Failed to start"); }
-  }, [entries]);
-
-  const commitStop = useCallback(async (id: string) => {
-    if (!worklogIdRef.current) return;
-    const entry = entries[id];
-    try {
-      await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
-      setSaveError(null);
-    } catch (e: unknown) { setSaveError(`Failed to save: ${e instanceof Error ? e.message : "unknown"}`); }
-    worklogIdRef.current = null;
-    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], elapsed: 0, sessionStart: null, sessionEnd: null, endInput: "", endError: "", remarks: "", remarksSaved: false } }));
-    startRef.current = null; setTick(0); setRunningId(null);
-  }, [entries]);
-
-  const discardCurrent = useCallback(async () => {
-    if (!runningId) return;
-    if (worklogIdRef.current) {
-      try { await discardWorkLog(worklogIdRef.current); }
-      catch (e: unknown) { setSaveError(`Failed to discard: ${e instanceof Error ? e.message : "unknown"}`); }
-      worklogIdRef.current = null;
-    }
-    setEntries((prev) => ({ ...prev, [runningId]: { ...prev[runningId], sessionStart: null, sessionEnd: null, endInput: "", endError: "", remarks: "", remarksSaved: false } }));
-    startRef.current = null; setTick(0); setRunningId(null);
-  }, [runningId]);
-
-  const handlePlay = useCallback((id: string) => {
-    if (!runningId) { commitStart(id); return; }
-    if (runningId === id) return;
-    setPending({ action: "switch", nextId: id });
-  }, [runningId, commitStart]);
-
-  const handleStop = useCallback(() => { setPending({ action: "stop" }); }, []);
-
-  const handleEndChange = useCallback((id: string, v: string) => {
-    const parsed = parseTimeInput(v);
-    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endInput: v } }));
-    if (!parsed || !worklogIdRef.current) return;
+  /** Debounced API call whenever date or time changes and both are valid. */
+  const scheduleEndUpdate = useCallback((id: string, dateVal: string, timeVal: string) => {
+    const parsed = parseDateTimeInputs(dateVal, timeVal);
+    if (!parsed) return; // wait for both fields to be filled
     const now = new Date();
     if (parsed <= now) {
-      setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endInput: v, endError: "End time must be in the future." } }));
+      setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: "End date/time must be in the future." } }));
       return;
     }
-    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endInput: v, endError: "", sessionEnd: parsed } }));
-    if (endTimeDebounceRef.current) clearTimeout(endTimeDebounceRef.current);
-    endTimeDebounceRef.current = setTimeout(async () => {
+    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: "", sessionEnd: parsed } }));
+    if (endDebounceRef.current) clearTimeout(endDebounceRef.current);
+    endDebounceRef.current = setTimeout(async () => {
       if (!worklogIdRef.current) return;
       try { await updateWorkLogEndTime(worklogIdRef.current, parsed); }
-      catch (e: unknown) { setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: e instanceof Error ? e.message : "Error" } })); }
+      catch (e: unknown) {
+        setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: e instanceof Error ? e.message : "Error updating end time" } }));
+      }
     }, 1500);
   }, []);
+
+  const handleEndDateChange = useCallback((id: string, v: string) => {
+    setEntries((prev) => {
+      const cur     = prev[id];
+      const updated = { ...cur, endDateInput: v };
+      scheduleEndUpdate(id, v, cur.endTimeInput);
+      return { ...prev, [id]: updated };
+    });
+  }, [scheduleEndUpdate]);
+
+  const handleEndTimeChange = useCallback((id: string, v: string) => {
+    setEntries((prev) => {
+      const cur     = prev[id];
+      const updated = { ...cur, endTimeInput: v };
+      scheduleEndUpdate(id, cur.endDateInput, v);
+      return { ...prev, [id]: updated };
+    });
+  }, [scheduleEndUpdate]);
 
   const handleRemarksChange = useCallback((id: string, v: string) => {
     setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarks: v, remarksSaved: false } }));
@@ -782,8 +827,82 @@ export default function DashboardPage() {
     try {
       await updateWorkLogRemarks(worklogIdRef.current, entry.remarks ?? "");
       setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarksSaved: true } }));
-    } catch (e: unknown) { setSaveError(`Failed to save note: ${e instanceof Error ? e.message : "unknown"}`); }
+    } catch (e: unknown) {
+      setSaveError(`Failed to save note: ${e instanceof Error ? e.message : "unknown"}`);
+    }
   }, [entries]);
+
+  const commitStart = useCallback(async (id: string) => {
+    const entry = entries[id];
+    if (!entry) return;
+    try {
+      const result       = await startWorkLog(entry.deliverableId);
+      const sessionStart = new Date(result.start_time);
+      const sessionEnd   = new Date(result.end_time);
+      worklogIdRef.current = result.id;
+      startRef.current     = sessionStart.getTime();
+      setTick(0);
+      setRunningId(id);
+      setEntries((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          sessionStart,
+          sessionEnd,
+          endDateInput: fmtDateInput(sessionEnd),
+          endTimeInput: fmtTimeInput(sessionEnd),
+          endError: "",
+          remarks: "",
+          remarksSaved: false,
+        },
+      }));
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Failed to start");
+    }
+  }, [entries]);
+
+  const commitStop = useCallback(async (id: string) => {
+    if (!worklogIdRef.current) return;
+    const entry = entries[id];
+    try {
+      await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
+      setSaveError(null);
+    } catch (e: unknown) {
+      setSaveError(`Failed to save: ${e instanceof Error ? e.message : "unknown"}`);
+    }
+    worklogIdRef.current = null;
+    setEntries((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], elapsed: 0, sessionStart: null, sessionEnd: null, endDateInput: "", endTimeInput: "", endError: "", remarks: "", remarksSaved: false },
+    }));
+    startRef.current = null;
+    setTick(0);
+    setRunningId(null);
+  }, [entries]);
+
+  const discardCurrent = useCallback(async () => {
+    if (!runningId) return;
+    if (worklogIdRef.current) {
+      try { await discardWorkLog(worklogIdRef.current); }
+      catch (e: unknown) { setSaveError(`Failed to discard: ${e instanceof Error ? e.message : "unknown"}`); }
+      worklogIdRef.current = null;
+    }
+    setEntries((prev) => ({
+      ...prev,
+      [runningId]: { ...prev[runningId], sessionStart: null, sessionEnd: null, endDateInput: "", endTimeInput: "", endError: "", remarks: "", remarksSaved: false },
+    }));
+    startRef.current = null;
+    setTick(0);
+    setRunningId(null);
+  }, [runningId]);
+
+  const handlePlay = useCallback((id: string) => {
+    if (!runningId) { commitStart(id); return; }
+    if (runningId === id) return;
+    setPending({ action: "switch", nextId: id });
+  }, [runningId, commitStart]);
+
+  const handleStop = useCallback(() => { setPending({ action: "stop" }); }, []);
 
   const handleSubmit = useCallback(async (assignmentId: number) => {
     try {
@@ -794,7 +913,9 @@ export default function DashboardPage() {
         [entryId]: { ...prev[entryId], assignmentStatus: updated.status, rejectionReason: updated.rejection_reason },
       }));
       setSaveError(null);
-    } catch (e: unknown) { setSaveError(`Submit failed: ${e instanceof Error ? e.message : "unknown"}`); }
+    } catch (e: unknown) {
+      setSaveError(`Submit failed: ${e instanceof Error ? e.message : "unknown"}`);
+    }
   }, []);
 
   const handleResubmit = useCallback(async (assignmentId: number) => {
@@ -806,7 +927,9 @@ export default function DashboardPage() {
         [entryId]: { ...prev[entryId], assignmentStatus: updated.status, rejectionReason: updated.rejection_reason, rejectionCount: updated.rejection_count },
       }));
       setSaveError(null);
-    } catch (e: unknown) { setSaveError(`Re-submit failed: ${e instanceof Error ? e.message : "unknown"}`); }
+    } catch (e: unknown) {
+      setSaveError(`Re-submit failed: ${e instanceof Error ? e.message : "unknown"}`);
+    }
   }, []);
 
   const handleConfirm = async () => {
@@ -815,6 +938,7 @@ export default function DashboardPage() {
     if (pending.action === "switch" && pending.nextId) await commitStart(pending.nextId);
     setPending(null);
   };
+
   const handleDiscard = async () => {
     if (!pending || !runningId) return;
     const nextId = pending.action === "switch" ? pending.nextId : undefined;
@@ -832,15 +956,20 @@ export default function DashboardPage() {
   const [first, ...rest] = userName.split(" ");
 
   const sharedRowProps = {
-    onPlay: handlePlay, onStop: handleStop,
-    onEndChange: handleEndChange,
+    onPlay:          handlePlay,
+    onStop:          handleStop,
+    onEndDateChange: handleEndDateChange,
+    onEndTimeChange: handleEndTimeChange,
     onRemarksChange: handleRemarksChange,
-    onRemarksSave: handleRemarksSave,
+    onRemarksSave:   handleRemarksSave,
   };
 
-  if (!authChecked) return <FullScreenMessage message="Checking access…" />;
-  if (loading)      return <FullScreenMessage message="Loading dashboard…" />;
-  if (error)        return <FullScreenMessage message={error} color="#E53935" />;
+  if (!authChecked || isMembershipLoading || isMembershipFetching) {
+    return <FullScreenMessage message="Checking access…" />;
+  }
+  if (!isAdmin) return null;
+  if (loading)  return <FullScreenMessage message="Loading dashboard…" />;
+  if (error)    return <FullScreenMessage message={error} color="#E53935" />;
 
   return (
     <>
@@ -868,7 +997,7 @@ export default function DashboardPage() {
           boxSizing: "border-box",
         }}>
 
-          {/* ── Header ── */}
+          {/* Header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
             <div>
               <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 300, color: "#111", lineHeight: 1.3 }}>
@@ -881,31 +1010,26 @@ export default function DashboardPage() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#FFF5F5", border: "1px solid #FFD6D6", borderRadius: 8, padding: "6px 10px" }}>
               <ModelflickMark />
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#E53935", letterSpacing: "0.07em", textTransform: "uppercase" as const }}>Modelflick</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#E53935", letterSpacing: "0.07em", textTransform: "uppercase" }}>Modelflick</span>
             </div>
           </div>
 
-          {/* ── Save error ── */}
+          {/* Save error */}
           {saveError && (
             <div style={{ display: "flex", alignItems: "center", gap: 7, background: "#FFF1F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "10px 14px", marginBottom: 18, fontSize: 12, color: "#BE123C" }}>
               <AlertIcon /> {saveError}
             </div>
           )}
 
-          {/* ── Assigned deliverables ── */}
-          <SectionHeader
-            label="My Assignments"
-            count={assignedEntries.length}
-            accent="#6366F1"
-          />
+          {/* Assignments */}
+          <SectionHeader label="My Assignments" count={assignedEntries.length} accent="#6366F1" />
           {assignedEntries.length === 0
             ? <div style={{ fontSize: 13, color: "#CCC", padding: "12px 0" }}>No assignments yet.</div>
             : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {assignedEntries.map((e) => (
                   <AssignmentCard
-                    key={e.id}
-                    entry={e}
+                    key={e.id} entry={e}
                     isRunning={runningId === e.id}
                     liveSeconds={liveSeconds(e.id)}
                     onSubmit={handleSubmit}
@@ -919,12 +1043,8 @@ export default function DashboardPage() {
 
           <Divider />
 
-          {/* ── Quick access ── */}
-          <SectionHeader
-            label="Quick Access"
-            count={quickEntries.length}
-            accent="#E53935"
-          />
+          {/* Quick access */}
+          <SectionHeader label="Quick Access" count={quickEntries.length} accent="#E53935" />
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 10, marginTop: -6 }}>
             <span style={{ color: "#E53935", opacity: 0.7 }}><PinIcon /></span>
             <span style={{ fontSize: 11, color: "#BBBBBB" }}>Pinned deliverables</span>
@@ -935,8 +1055,7 @@ export default function DashboardPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {quickEntries.map((e) => (
                   <QuickRow
-                    key={e.id}
-                    entry={e}
+                    key={e.id} entry={e}
                     isRunning={runningId === e.id}
                     liveSeconds={liveSeconds(e.id)}
                     {...sharedRowProps}
@@ -946,15 +1065,11 @@ export default function DashboardPage() {
             )
           }
 
-          {/* ── Approved assignments ── */}
+          {/* Approved */}
           {approvedAssignments.length > 0 && (
             <>
               <Divider />
-              <SectionHeader
-                label="Approved Assignments"
-                count={approvedAssignments.length}
-                accent="#22C55E"
-              />
+              <SectionHeader label="Approved Assignments" count={approvedAssignments.length} accent="#22C55E" />
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                 {approvedAssignments.map((a) => (
                   <ApprovedCard key={a.id} assignment={a} />
@@ -965,7 +1080,7 @@ export default function DashboardPage() {
 
           <Divider />
 
-          {/* ── Nav grid ── */}
+          {/* Nav */}
           <SectionHeader label="Navigate" />
           <div style={{
             display: "grid",
@@ -981,6 +1096,7 @@ export default function DashboardPage() {
             <NavButton label="Salary Calc"      href="/new/pay" />
             <NavButton label="Add Revenue"      href="/new/revenue" />
             <NavButton label="Project Info"     href="/new/projectdash" />
+            <NavButton label="Leaves"           href="/new/leave" />
           </div>
         </div>
       </div>
