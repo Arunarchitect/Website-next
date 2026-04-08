@@ -76,6 +76,13 @@ export interface AssignmentEntry {
   assigned_by_name: string;
   start_date: string | null;
   due_date: string | null;
+  initial_due_date: string | null;
+  status: string;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by_name: string | null;
+  rejection_reason: string | null;
+  rejection_count: number;
 }
 
 export interface MetaData {
@@ -96,39 +103,15 @@ export interface DeliverableOption {
   stage_display: string;
 }
 
-export interface AssignmentEntry {
-  id: number;
-  name: string;
-  deliverable_id: number;
-  deliverable_name: string;
-  project_id: number;
-  project_name: string;
-  organisation_id: number;
-  organisation_name: string;
-  assigned_to_id: number;
-  assigned_to_name: string;
-  assigned_by_id: number;
-  assigned_by_name: string;
-  start_date: string | null;
-  due_date: string | null;
-  initial_due_date: string | null;   // ← add
-  status: string;                    // ← add
-  submitted_at: string | null;       // ← add
-  reviewed_at: string | null;        // ← add
-  reviewed_by_name: string | null;   // ← add
-  rejection_reason: string | null;   // ← add
-  rejection_count: number;           // ← add
-}
-
 export async function reviewAssignment(
   id: number,
-  action: 'approve' | 'reject',
+  action: "approve" | "reject",
   reason?: string,
 ): Promise<AssignmentEntry> {
   const res = await fetch(`${BASE}/api/v2/manager/assignments/${id}/review/`, {
-    method: 'PATCH',
+    method: "PATCH",
     headers: authHeaders(),
-    body: JSON.stringify({ action, reason: reason ?? '' }),
+    body: JSON.stringify({ action, reason: reason ?? "" }),
   });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
@@ -192,26 +175,101 @@ export async function fetchMemberWorkLogs(params: {
   page?: number;
 }): Promise<WorkLogPage> {
   const url = new URL(`${BASE}/api/v2/manager/worklogs/`);
-  if (params.member_id)
-    url.searchParams.set("member_id", String(params.member_id));
-  if (params.org_id) url.searchParams.set("org_id", String(params.org_id));
-  if (params.project_id)
-    url.searchParams.set("project_id", String(params.project_id));
-  if (params.deliverable_id)
-    url.searchParams.set("deliverable_id", String(params.deliverable_id));
-  if (params.from) url.searchParams.set("from", params.from);
-  if (params.to) url.searchParams.set("to", params.to);
-  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.member_id)      url.searchParams.set("member_id",      String(params.member_id));
+  if (params.org_id)         url.searchParams.set("org_id",         String(params.org_id));
+  if (params.project_id)     url.searchParams.set("project_id",     String(params.project_id));
+  if (params.deliverable_id) url.searchParams.set("deliverable_id", String(params.deliverable_id));
+  if (params.from)           url.searchParams.set("from",           params.from);
+  if (params.to)             url.searchParams.set("to",             params.to);
+  if (params.page)           url.searchParams.set("page",           String(params.page));
   const res = await fetch(url.toString(), { headers: authHeaders() });
   if (!res.ok) throw new Error(`Worklogs failed: ${res.status}`);
   const data = await res.json();
   return {
-    count: data.count,
-    page: data.page,
-    pages: data.pages,
+    count:         data.count,
+    page:          data.page,
+    pages:         data.pages,
     total_minutes: data.total_minutes ?? 0,
-    results: data.results.map(mapWorklog),
+    results:       data.results.map(mapWorklog),
   };
+}
+
+/**
+ * Fetch the distinct dates (YYYY-MM-DD) that have worklogs matching the given
+ * filters. Hits the dedicated lightweight dates endpoint so we get the FULL
+ * picture for the calendar regardless of which page of results is displayed.
+ *
+ * Backend endpoint required:
+ *   GET /api/v2/manager/worklogs/dates/
+ *   Query params: from, to, member_id, org_id, project_id, deliverable_id
+ *   Returns: string[]  e.g. ["2025-04-01", "2025-04-03", ...]
+ *
+ * Add to new_worklog_views.py:
+ * ---
+ * class ManagerWorkLogDatesView(APIView):
+ *     permission_classes = [IsAuthenticated]
+ *
+ *     def get(self, request):
+ *         my_org_ids = OrganisationMembership.objects.filter(
+ *             user=request.user
+ *         ).values_list('organisation_id', flat=True)
+ *
+ *         member_id      = request.query_params.get('member_id')
+ *         date_from      = request.query_params.get('from')
+ *         date_to        = request.query_params.get('to')
+ *         org_id         = request.query_params.get('org_id')
+ *         project_id     = request.query_params.get('project_id')
+ *         deliverable_id = request.query_params.get('deliverable_id')
+ *
+ *         if member_id:
+ *             qs = WorkLog.objects.filter(employee_id=member_id, finalised=True)
+ *         else:
+ *             qs = WorkLog.objects.filter(
+ *                 employee__organisation_memberships__organisation_id__in=my_org_ids,
+ *                 finalised=True,
+ *             ).distinct()
+ *
+ *         if org_id:
+ *             qs = qs.filter(deliverable__project__organisation_id=org_id)
+ *         if project_id:
+ *             qs = qs.filter(deliverable__project_id=project_id)
+ *         if deliverable_id:
+ *             qs = qs.filter(deliverable_id=deliverable_id)
+ *         if date_from:
+ *             qs = qs.filter(start_time__date__gte=date_from)
+ *         if date_to:
+ *             qs = qs.filter(start_time__date__lte=date_to)
+ *
+ *         from django.db.models.functions import TruncDate, Coalesce
+ *         dates = (
+ *             qs.annotate(wdate=TruncDate(Coalesce('end_time', 'start_time')))
+ *               .values_list('wdate', flat=True)
+ *               .distinct()
+ *               .order_by('wdate')
+ *         )
+ *         return Response([d.isoformat() for d in dates if d])
+ * ---
+ * Add to v2_urlpatterns:
+ *   path('manager/worklogs/dates/', ManagerWorkLogDatesView.as_view(), name='v2-manager-worklog-dates'),
+ */
+export async function fetchManagerWorkLogDates(params: {
+  from?: string;
+  to?: string;
+  member_id?: number;
+  org_id?: number;
+  project_id?: number;
+  deliverable_id?: number;
+}): Promise<string[]> {
+  const url = new URL(`${BASE}/api/v2/manager/worklogs/dates/`);
+  if (params.from)           url.searchParams.set("from",           params.from);
+  if (params.to)             url.searchParams.set("to",             params.to);
+  if (params.member_id)      url.searchParams.set("member_id",      String(params.member_id));
+  if (params.org_id)         url.searchParams.set("org_id",         String(params.org_id));
+  if (params.project_id)     url.searchParams.set("project_id",     String(params.project_id));
+  if (params.deliverable_id) url.searchParams.set("deliverable_id", String(params.deliverable_id));
+  const res = await fetch(url.toString(), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Fetch manager worklog dates failed: ${res.status}`);
+  return res.json();
 }
 
 export async function fetchAssignments(

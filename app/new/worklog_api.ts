@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const BASE = process.env.NEXT_PUBLIC_HOST ;
+const BASE = process.env.NEXT_PUBLIC_HOST;
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
@@ -57,8 +57,6 @@ export interface MetaData {
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
-
-
 function mapWorklog(w: any): WorkLogEntry {
   const st = w.start_time ? new Date(w.start_time) : null;
   const et = w.end_time   ? new Date(w.end_time)   : null;
@@ -95,13 +93,29 @@ export async function fetchMyWorkLogs(params?: {
   from?: string; to?: string; page?: number;
 }): Promise<WorkLogPage> {
   const url = new URL(`${BASE}/api/v2/hour/worklogs/`);
-  if (params?.from) url.searchParams.set('from',  params.from);
-  if (params?.to)   url.searchParams.set('to',    params.to);
-  if (params?.page) url.searchParams.set('page',  String(params.page));
+  if (params?.from) url.searchParams.set("from",  params.from);
+  if (params?.to)   url.searchParams.set("to",    params.to);
+  if (params?.page) url.searchParams.set("page",  String(params.page));
   const res = await fetch(url.toString(), { headers: authHeaders() });
   if (!res.ok) throw new Error(`Fetch worklogs failed: ${res.status}`);
   const data = await res.json();
   return { count: data.count, page: data.page, pages: data.pages, results: data.results.map(mapWorklog) };
+}
+
+/**
+ * Fetches the distinct dates (YYYY-MM-DD) that have finalised worklogs
+ * within the given date range. Hits a lightweight backend endpoint that
+ * returns only dates — no pagination, no heavy serialisation.
+ */
+export async function fetchWorkLogDates(params?: {
+  from?: string; to?: string;
+}): Promise<string[]> {
+  const url = new URL(`${BASE}/api/v2/hour/worklogs/dates/`);
+  if (params?.from) url.searchParams.set("from", params.from);
+  if (params?.to)   url.searchParams.set("to",   params.to);
+  const res = await fetch(url.toString(), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Fetch worklog dates failed: ${res.status}`);
+  return res.json();
 }
 
 export async function fetchMeta(): Promise<MetaData> {
@@ -112,7 +126,7 @@ export async function fetchMeta(): Promise<MetaData> {
 
 export async function fetchDeliverablesByProject(projectId?: number): Promise<DeliverableOption[]> {
   const url = new URL(`${BASE}/api/v2/hour/deliverables/`);
-  if (projectId) url.searchParams.set('project_id', String(projectId));
+  if (projectId) url.searchParams.set("project_id", String(projectId));
   const res = await fetch(url.toString(), { headers: authHeaders() });
   if (!res.ok) throw new Error(`Fetch deliverables failed: ${res.status}`);
   return (await res.json()).map(mapDeliverable);

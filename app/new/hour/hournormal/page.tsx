@@ -8,6 +8,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import {
   fetchMyWorkLogs, fetchMeta, fetchMyPinnedIds,
   fetchDeliverablesByProject, fetchInitialDeliverables,
+  fetchWorkLogDates,
   createWorkLog, editWorkLog, deleteWorkLog,
   pinDeliverable, unpinDeliverable, currentWeekRange,
   type WorkLogEntry, type WorkLogPage, type MetaData,
@@ -19,7 +20,6 @@ const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
 function getFirstDay(y: number, m: number)    { return new Date(y, m, 1).getDay(); }
 function pad(n: number) { return String(n).padStart(2, "0"); }
-function toLocalISO(dt: Date) { return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`; }
 function monthRange(year: number, month: number) {
   return {
     from: `${year}-${pad(month+1)}-01`,
@@ -178,7 +178,6 @@ function WorklogCard({ row, meta, deliverables, onSave, onDelete }: {
       {showDel && <DeleteModal onConfirm={() => { setShowDel(false); deleteWorkLog(row.id).then(() => onDelete(row.id)).catch(e => setError(e.message)); }} onCancel={() => setShowDel(false)} />}
       <div style={{ background:bg, border, borderRadius:12, padding:"12px 14px", transition:"all 0.15s" }}>
         <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:10 }}>
-          {/* Action buttons LEFT */}
           <div style={{ display:"flex", gap:4, flexShrink:0, paddingTop:2 }}>
             {editing ? (
               <>
@@ -485,8 +484,6 @@ function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
         <div style={{ fontSize:11.5, color:T.t5 }}>Select an organisation to browse and pin deliverables.</div>
       </div>
       <Divider />
-
-      {/* Filters */}
       <div style={{ display:"grid", gridTemplateColumns:selOrg ? "1fr 1fr" : "1fr", gap:10 }}>
         <div>
           <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Organisation</div>
@@ -505,30 +502,18 @@ function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
           </div>
         )}
       </div>
-
-      {/* Loading bar */}
       {loading && (
         <div style={{ height:3, background:T.panel2B, borderRadius:2, overflow:"hidden" }}>
           <div style={{ height:"100%", background:`linear-gradient(90deg,${T.ac},#a78bfa)`, borderRadius:2, animation:"pulse 1s ease-in-out infinite alternate" }} />
           <style>{`@keyframes pulse{from{width:20%;margin-left:0}to{width:60%;margin-left:30%}}`}</style>
         </div>
       )}
-
       {!selOrg && (
         <div style={{ fontSize:12, color:T.t6 }}>Select an organisation to see deliverables.</div>
       )}
-
       {selOrg > 0 && !loading && loaded && (
         <>
-          {/* Search */}
-          <input
-            value={search}
-            onChange={e => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search deliverables…"
-            style={inp}
-          />
-
-          {/* Count + pagination info */}
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search deliverables…" style={inp} />
           {filteredDelivs.length > 0 && (
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:6 }}>
               <span style={{ fontSize:11, color:T.t5 }}>
@@ -559,8 +544,6 @@ function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
               )}
             </div>
           )}
-
-          {/* Deliverable list — paginated */}
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             {pagedDelivs.length === 0 && (
               <div style={{ fontSize:12, color:T.t6, padding:"8px 0" }}>
@@ -591,8 +574,6 @@ function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
               );
             })}
           </div>
-
-          {/* Bottom pagination repeat for long lists */}
           {totalPages > 1 && (
             <div style={{ display:"flex", gap:4, alignItems:"center", justifyContent:"center", paddingTop:4 }}>
               <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page===1}
@@ -631,9 +612,29 @@ export default function WorklogPage() {
   const [rowsLoading,         setRowsLoading]         = useState(false);
   const [error,               setError]               = useState<string|null>(null);
 
+  // ── allActiveDates: full set of dates with worklogs for the current
+  //    calendar view — fetched independently from paginated rows so the
+  //    calendar always shows the complete picture regardless of page.
+  const [allActiveDates, setAllActiveDates] = useState<Set<string>>(new Set());
+  const [datesLoading,   setDatesLoading]   = useState(false);
+
   const dateRangeRef = useRef<{from?:string;to?:string}>({});
 
-  async function loadRows(params:{from?:string;to?:string;page?:number}) {
+  // Fetch all worklog dates for a range (no pagination, just dates).
+  // Runs in parallel with loadRows so neither blocks the other.
+  async function loadActiveDates(params: {from?:string; to?:string}) {
+    setDatesLoading(true);
+    try {
+      const dates = await fetchWorkLogDates(params);
+      setAllActiveDates(new Set(dates));
+    } catch {
+      // Non-fatal — calendar dots simply won't show
+    } finally {
+      setDatesLoading(false);
+    }
+  }
+
+  async function loadRows(params: {from?:string; to?:string; page?:number}) {
     dateRangeRef.current = {from:params.from, to:params.to};
     setRowsLoading(true);
     try {
@@ -644,47 +645,66 @@ export default function WorklogPage() {
     finally { setRowsLoading(false); }
   }
 
+  // Load rows + dates together when filter changes (dates fetch separately, non-blocking)
+  async function loadAll(params: {from?:string; to?:string; page?:number}) {
+    // Dates and rows are independent — fire both, don't await dates before rows
+    loadActiveDates({from:params.from, to:params.to});
+    await loadRows(params);
+  }
+
+  // Initial load
   useEffect(() => {
     const {from, to} = currentWeekRange();
-    fetchMyWorkLogs({from, to, page:1}).then(async data => {
+    Promise.all([
+      fetchMyWorkLogs({from, to, page:1}),
+      fetchWorkLogDates({from, to}),
+      fetchMeta(),
+      fetchMyPinnedIds(),
+    ]).then(async ([data, dates, m, pins]) => {
       setRows(data.results); setTotalPages(data.pages);
       setTotalCount(data.count); setCurrentPage(1);
-      setLoading(false); dateRangeRef.current = {from, to};
-      setInitialDeliverables(await fetchInitialDeliverables(data.results[0]??null));
+      setAllActiveDates(new Set(dates));
+      setLoading(false);
+      dateRangeRef.current = {from, to};
+      setInitialDeliverables(await fetchInitialDeliverables(data.results[0] ?? null));
+      setMeta(m); setPinnedIds(new Set(pins));
     }).catch(e => { setError(e.message); setLoading(false); });
-    Promise.all([fetchMeta(), fetchMyPinnedIds()])
-      .then(([m, pins]) => { setMeta(m); setPinnedIds(new Set(pins)); })
-      .catch(e => setError(e.message));
   }, []);
 
+  // Re-fetch when filter selection changes
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
-    let from:string, to:string;
+    let from: string, to: string;
     if (selDates.size > 0) {
       const s = Array.from(selDates).sort(); from = s[0]; to = s[s.length-1];
     } else {
-      const year = selYear ?? today.getFullYear(), month = selMonth ?? today.getMonth();
+      const year  = selYear  ?? today.getFullYear();
+      const month = selMonth ?? today.getMonth();
       ({from, to} = monthRange(year, month));
     }
-    loadRows({from, to, page:1});
+    loadAll({from, to, page:1});
   }, [selDates, selMonth, selYear]);
 
-  function goToPage(p:number) { loadRows({...dateRangeRef.current, page:p}); }
+  // Pagination — only re-fetches rows (dates don't change between pages)
+  function goToPage(p: number) { loadRows({...dateRangeRef.current, page:p}); }
 
-  const activeDates  = useMemo(() => new Set(rows.map(r => r.end_date_fmt ?? r.start_date_fmt).filter(Boolean) as string[]), [rows]);
-  const totalMinutes = useMemo(() => rows.reduce((s,r) => {
+  const totalMinutes = useMemo(() => rows.reduce((s, r) => {
     if (!r.start_time || !r.end_time) return s;
     return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
   }, 0), [rows]);
-  const availableYears = useMemo(() => Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort(), [rows]);
-  const hasFilter      = selDates.size > 0 || selMonth !== null || selYear !== null;
 
-  function saveRow(id:number, data:WorkLogEntry) { setRows(p => p.map(r => r.id===id ? data : r)); }
-  function deleteRow(id:number)                  { setRows(p => p.filter(r => r.id!==id)); setTotalCount(c => c-1); }
-  function addRow(w:WorkLogEntry)                { setRows(p => [w, ...p.slice(0,9)]); setTotalCount(c => c+1); }
+  const availableYears = useMemo(() =>
+    Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort()
+  , [rows]);
 
-  async function togglePin(deliverableId:number) {
+  const hasFilter = selDates.size > 0 || selMonth !== null || selYear !== null;
+
+  function saveRow(id: number, data: WorkLogEntry) { setRows(p => p.map(r => r.id===id ? data : r)); }
+  function deleteRow(id: number) { setRows(p => p.filter(r => r.id!==id)); setTotalCount(c => c-1); }
+  function addRow(w: WorkLogEntry) { setRows(p => [w, ...p.slice(0,9)]); setTotalCount(c => c+1); }
+
+  async function togglePin(deliverableId: number) {
     const pinned = pinnedIds.has(deliverableId);
     try {
       if (pinned) { await unpinDeliverable(deliverableId); setPinnedIds(p => { const n=new Set(p); n.delete(deliverableId); return n; }); }
@@ -692,13 +712,16 @@ export default function WorklogPage() {
     } catch(e:any) { alert(e.message); }
   }
 
-  function toggleDate(iso:string) { setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; }); }
+  function toggleDate(iso: string) { setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; }); }
+
   function prevMonth() {
-    const m=calMonth===0?11:calMonth-1, y=calMonth===0?calYear-1:calYear;
+    const m = calMonth===0 ? 11 : calMonth-1;
+    const y = calMonth===0 ? calYear-1 : calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
   }
   function nextMonth() {
-    const m=calMonth===11?0:calMonth+1, y=calMonth===11?calYear+1:calYear;
+    const m = calMonth===11 ? 0 : calMonth+1;
+    const y = calMonth===11 ? calYear+1 : calYear;
     setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
   }
   function clearAll() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
@@ -716,15 +739,28 @@ export default function WorklogPage() {
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", color:T.red, fontFamily:"'DM Sans',sans-serif" }}>{error}</div>
   );
 
-  // ── Calendar panel (shared between mobile/desktop) ────────────────────────
+  // ── Calendar panel ────────────────────────────────────────────────────────
   const CalendarPanel = (
     <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:16, padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
         <button onClick={prevMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
-        <span style={{ fontSize:12, fontWeight:600, color:T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontSize:12, fontWeight:600, color:T.t2 }}>{MONTHS[calMonth]} {calYear}</span>
+          {datesLoading && (
+            <span style={{ width:12, height:12, borderRadius:"50%", border:`2px solid ${T.acMid}`, borderTopColor:"transparent", display:"inline-block", animation:"spin 0.7s linear infinite" }} />
+          )}
+        </div>
         <button onClick={nextMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
       </div>
-      <CalGrid year={calYear} month={calMonth} activeDates={activeDates} selDates={selDates} onToggle={toggleDate} />
+      {/* Calendar uses allActiveDates so ALL days with worklogs are shown,
+          not just those on the current paginated page */}
+      <CalGrid
+        year={calYear}
+        month={calMonth}
+        activeDates={allActiveDates}
+        selDates={selDates}
+        onToggle={toggleDate}
+      />
       {selDates.size > 0 && (
         <div style={{ textAlign:"center", fontSize:11, color:T.acText }}>
           {selDates.size} date{selDates.size>1?"s":""} selected &nbsp;
@@ -758,9 +794,9 @@ export default function WorklogPage() {
       )}
       <Divider />
       {[
-        {label:"Entries",    val:`${rows.length}/${totalCount}`},
-        {label:"Hours",      val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
-        {label:"Pinned",     val:String(pinnedIds.size)},
+        {label:"Entries", val:`${rows.length}/${totalCount}`},
+        {label:"Hours",   val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
+        {label:"Pinned",  val:String(pinnedIds.size)},
       ].map(({label,val}) => (
         <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <span style={{ fontSize:11, color:T.t4 }}>{label}</span>
@@ -778,6 +814,7 @@ export default function WorklogPage() {
           </button>
         </>
       )}
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 
@@ -795,7 +832,7 @@ export default function WorklogPage() {
     </div>
   );
 
-  // ── Pagination controls ───────────────────────────────────────────────────
+  // ── Pagination ────────────────────────────────────────────────────────────
   const PaginationControls = totalPages > 1 ? (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, paddingTop:4, flexWrap:"wrap" }}>
       <button onClick={() => goToPage(currentPage-1)} disabled={currentPage===1}
@@ -847,7 +884,6 @@ export default function WorklogPage() {
         </div>
 
         {isMobile ? (
-          // ── MOBILE: Calendar → Worklogs → Pin ────────────────────────────
           <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
             {CalendarPanel}
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -858,7 +894,6 @@ export default function WorklogPage() {
             <PinDeliverableSection meta={meta} pinnedIds={pinnedIds} onToggle={togglePin} />
           </div>
         ) : (
-          // ── DESKTOP: two-column ───────────────────────────────────────────
           <>
             <div style={{ display:"grid", gridTemplateColumns:"240px 1fr", gap:20, alignItems:"start", marginBottom:20 }}>
               {CalendarPanel}
