@@ -4,7 +4,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   fetchMyWorkLogs, fetchMeta, fetchMyPinnedIds,
   fetchDeliverablesByProject, fetchInitialDeliverables,
@@ -77,32 +77,84 @@ function ProgressBar({ loading }: { loading: boolean }) {
   );
 }
 
+// ─── Loading spinner for worklog list ─────────────────────────────────────────
+function WorklogListLoader() {
+  return (
+    <div style={{ 
+      background: T.panel, 
+      border: `1px solid ${T.panelB}`, 
+      borderRadius: 12, 
+      padding: "60px 16px", 
+      display: "flex", 
+      flexDirection: "column", 
+      alignItems: "center", 
+      justifyContent: "center",
+      gap: 16
+    }}>
+      <div style={{ 
+        width: 36, 
+        height: 36, 
+        border: `3px solid ${T.panel2B}`, 
+        borderTopColor: T.ac, 
+        borderRadius: "50%", 
+        animation: "spin 0.8s linear infinite" 
+      }} />
+      <span style={{ fontSize: 13, color: T.t5 }}>Loading entries…</span>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+// ─── Skeleton stat value (shown while loading) ────────────────────────────────
+function StatSkeleton() {
+  return (
+    <div style={{
+      display: "inline-block",
+      width: 42,
+      height: 14,
+      borderRadius: 4,
+      background: T.panel2B,
+      animation: "pulse 1.4s ease-in-out infinite",
+      verticalAlign: "middle",
+    }} />
+  );
+}
+
 // ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalGrid({ year, month, activeDates, selDates, onToggle }: {
+function CalGrid({ year, month, activeDates, selDates, onToggle, datesLoading }: {
   year:number; month:number; activeDates:Set<string>; selDates:Set<string>; onToggle:(d:string)=>void;
+  datesLoading?: boolean;
 }) {
   const total = getDaysInMonth(year, month);
   const first = getFirstDay(year, month);
   const cells: (number|null)[] = [...Array(first).fill(null), ...Array.from({length:total},(_,i)=>i+1)];
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
-      {DAYS.map(d => (
-        <div key={d} style={{ textAlign:"center", fontSize:9, color:T.t5, fontWeight:600, letterSpacing:"0.06em", padding:"4px 0", textTransform:"uppercase" }}>{d}</div>
-      ))}
-      {cells.map((day, i) => {
-        if (!day) return <div key={`_${i}`} />;
-        const iso = `${year}-${pad(month+1)}-${pad(day)}`;
-        const has = activeDates.has(iso), sel = selDates.has(iso);
-        return (
-          <button key={iso} onClick={() => onToggle(iso)}
-            style={{ background:sel?T.ac:"transparent", border:`1px solid ${sel?T.ac:"transparent"}`, borderRadius:6, cursor:"pointer", color:sel?"#fff":has?T.t2:T.t4, fontSize:11, padding:"6px 0", width:"100%", fontFamily:"'DM Sans',sans-serif", fontWeight:sel?600:400, display:"flex", flexDirection:"column", alignItems:"center", gap:1, transition:"all 0.15s" }}
-            onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = T.panel2; }}
-            onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-            {day}
-            {has && <span style={{ display:"block", width:3, height:3, borderRadius:"50%", background:sel?"#fff":T.acText }} />}
-          </button>
-        );
-      })}
+    <div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+        {DAYS.map(d => (
+          <div key={d} style={{ textAlign:"center", fontSize:9, color:T.t5, fontWeight:600, letterSpacing:"0.06em", padding:"4px 0", textTransform:"uppercase" }}>{d}</div>
+        ))}
+        {cells.map((day, i) => {
+          if (!day) return <div key={`_${i}`} />;
+          const iso = `${year}-${pad(month+1)}-${pad(day)}`;
+          const has = activeDates.has(iso), sel = selDates.has(iso);
+          return (
+            <button key={iso} onClick={() => onToggle(iso)}
+              style={{ background:sel?T.ac:"transparent", border:`1px solid ${sel?T.ac:"transparent"}`, borderRadius:6, cursor:"pointer", color:sel?"#fff":has?T.t2:T.t4, fontSize:11, padding:"6px 0", width:"100%", fontFamily:"'DM Sans',sans-serif", fontWeight:sel?600:400, display:"flex", flexDirection:"column", alignItems:"center", gap:1, transition:"all 0.15s" }}
+              onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = T.panel2; }}
+              onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
+              {day}
+              {has && <span style={{ display:"block", width:datesLoading?0:3, height:datesLoading?0:3, borderRadius:"50%", background:sel?"#fff":T.acText }} />}
+            </button>
+          );
+        })}
+      </div>
+      {datesLoading && (
+        <div style={{ marginTop: 8, height: 2, background: T.panel2B, borderRadius: 2, overflow: "hidden" }}>
+          <div style={{ height: "100%", background: `linear-gradient(90deg,${T.ac},#a78bfa)`, borderRadius: 2, animation: "calPulse 1s ease-in-out infinite alternate" }} />
+          <style>{`@keyframes calPulse{from{width:20%;margin-left:0}to{width:60%;margin-left:30%}}`}</style>
+        </div>
+      )}
     </div>
   );
 }
@@ -384,7 +436,7 @@ function AddWorklogForm({ meta, initialDeliverables, onAdd }: {
                   <option value={0}>— select —</option>
                   {deliverables.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
-            }
+          }
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
             <div>
@@ -419,7 +471,7 @@ function AddWorklogForm({ meta, initialDeliverables, onAdd }: {
   );
 }
 
-// ─── Pin section with paginated deliverable list ──────────────────────────────
+// ─── Pin section ──────────────────────────────────────────────────────────────
 const PIN_PAGE_SIZE = 10;
 
 function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
@@ -597,13 +649,26 @@ export default function WorklogPage() {
 
   const [calYear,  setCalYear]  = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
+
+  // FIX: Use a single unified filter state instead of three separate states
+  // that caused race conditions. One source of truth for what to load.
+  type FilterMode = 
+    | { type: "week"; from: string; to: string }
+    | { type: "dates"; dates: string[] }
+    | { type: "month"; year: number; month: number }
+    | { type: "year"; year: number };
+
+  const [filter,    setFilter]    = useState<FilterMode>(() => {
+    const { from, to } = currentWeekRange();
+    return { type: "week", from, to };
+  });
+  // Derived: which dates are highlighted in the calendar
   const [selDates, setSelDates] = useState<Set<string>>(new Set());
-  const [selMonth, setSelMonth] = useState<number|null>(null);
-  const [selYear,  setSelYear]  = useState<number|null>(null);
 
   const [rows,                setRows]                = useState<WorkLogEntry[]>([]);
   const [totalPages,          setTotalPages]          = useState(1);
   const [totalCount,          setTotalCount]          = useState(0);
+  const [totalMinutes,        setTotalMinutes]        = useState<number | null>(null); // null = loading
   const [currentPage,         setCurrentPage]         = useState(1);
   const [meta,                setMeta]                = useState<MetaData>({organisations:[],projects:[],members:[]});
   const [initialDeliverables, setInitialDeliverables] = useState<DeliverableOption[]>([]);
@@ -612,119 +677,206 @@ export default function WorklogPage() {
   const [rowsLoading,         setRowsLoading]         = useState(false);
   const [error,               setError]               = useState<string|null>(null);
 
-  // ── allActiveDates: full set of dates with worklogs for the current
-  //    calendar view — fetched independently from paginated rows so the
-  //    calendar always shows the complete picture regardless of page.
   const [allActiveDates, setAllActiveDates] = useState<Set<string>>(new Set());
   const [datesLoading,   setDatesLoading]   = useState(false);
 
-  const dateRangeRef = useRef<{from?:string;to?:string}>({});
+  // FIX: Use a request counter to discard stale responses from old fetches
+  const fetchSeq = useRef(0);
 
-  // Fetch all worklog dates for a range (no pagination, just dates).
-  // Runs in parallel with loadRows so neither blocks the other.
-  async function loadActiveDates(params: {from?:string; to?:string}) {
+  // Derive the from/to range from the current filter
+  function filterToRange(f: FilterMode): { from: string; to: string } {
+    if (f.type === "week")  return { from: f.from, to: f.to };
+    if (f.type === "dates") {
+      const s = [...f.dates].sort();
+      return { from: s[0], to: s[s.length - 1] };
+    }
+    if (f.type === "month") return monthRange(f.year, f.month);
+    // year
+    return { from: `${f.year}-01-01`, to: `${f.year}-12-31` };
+  }
+
+  async function loadActiveDates(from: string, to: string, seq: number) {
     setDatesLoading(true);
     try {
-      const dates = await fetchWorkLogDates(params);
+      const dates = await fetchWorkLogDates({ from, to });
+      // Discard if a newer fetch has started
+      if (seq !== fetchSeq.current) return;
       setAllActiveDates(new Set(dates));
     } catch {
-      // Non-fatal — calendar dots simply won't show
+      // Non-fatal
     } finally {
-      setDatesLoading(false);
+      if (seq === fetchSeq.current) setDatesLoading(false);
     }
   }
 
-  async function loadRows(params: {from?:string; to?:string; page?:number}) {
-    dateRangeRef.current = {from:params.from, to:params.to};
+  // FIX: Reset stats immediately when loading starts so stale values never show
+  async function loadRows(from: string, to: string, page: number, seq: number) {
     setRowsLoading(true);
+    setRows([]);
+    setTotalMinutes(null); // immediately clear so skeleton shows, not stale value
+    setTotalCount(0);
     try {
-      const data = await fetchMyWorkLogs(params);
-      setRows(data.results); setTotalPages(data.pages);
-      setTotalCount(data.count); setCurrentPage(data.page);
-    } catch(e:any) { setError(e.message); }
-    finally { setRowsLoading(false); }
+      const data = await fetchMyWorkLogs({ from, to, page });
+      if (seq !== fetchSeq.current) return; // stale response, discard
+      setRows(data.results);
+      setTotalPages(data.pages);
+      setTotalCount(data.count);
+      setCurrentPage(data.page);
+      setTotalMinutes(data.total_minutes ?? 0);
+    } catch(e:any) {
+      if (seq !== fetchSeq.current) return;
+      setError(e.message);
+      setRows([]);
+      setTotalMinutes(0);
+    } finally {
+      if (seq === fetchSeq.current) setRowsLoading(false);
+    }
   }
 
-  // Load rows + dates together when filter changes (dates fetch separately, non-blocking)
-  async function loadAll(params: {from?:string; to?:string; page?:number}) {
-    // Dates and rows are independent — fire both, don't await dates before rows
-    loadActiveDates({from:params.from, to:params.to});
-    await loadRows(params);
+  // Central loader — increments seq so any in-flight request with old seq is ignored
+  function loadAll(f: FilterMode, page = 1) {
+    const seq = ++fetchSeq.current;
+    const { from, to } = filterToRange(f);
+    loadActiveDates(from, to, seq);
+    loadRows(from, to, page, seq);
   }
 
   // Initial load
   useEffect(() => {
-    const {from, to} = currentWeekRange();
+    const { from, to } = currentWeekRange();
+    const seq = ++fetchSeq.current;
     Promise.all([
-      fetchMyWorkLogs({from, to, page:1}),
-      fetchWorkLogDates({from, to}),
+      fetchMyWorkLogs({ from, to, page: 1 }),
+      fetchWorkLogDates({ from, to }),
       fetchMeta(),
       fetchMyPinnedIds(),
     ]).then(async ([data, dates, m, pins]) => {
-      setRows(data.results); setTotalPages(data.pages);
-      setTotalCount(data.count); setCurrentPage(1);
+      if (seq !== fetchSeq.current) return;
+      setRows(data.results);
+      setTotalPages(data.pages);
+      setTotalCount(data.count);
+      setTotalMinutes(data.total_minutes ?? 0);
+      setCurrentPage(1);
       setAllActiveDates(new Set(dates));
       setLoading(false);
-      dateRangeRef.current = {from, to};
       setInitialDeliverables(await fetchInitialDeliverables(data.results[0] ?? null));
-      setMeta(m); setPinnedIds(new Set(pins));
-    }).catch(e => { setError(e.message); setLoading(false); });
+      setMeta(m);
+      setPinnedIds(new Set(pins));
+    }).catch(e => {
+      if (seq !== fetchSeq.current) return;
+      setError(e.message);
+      setLoading(false);
+    });
   }, []);
 
-  // Re-fetch when filter selection changes
+  // FIX: Single effect watches `filter`. No more separate selDates/selMonth/selYear effects
+  // that could fire in wrong order or conflict with each other.
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
-    let from: string, to: string;
-    if (selDates.size > 0) {
-      const s = Array.from(selDates).sort(); from = s[0]; to = s[s.length-1];
-    } else {
-      const year  = selYear  ?? today.getFullYear();
-      const month = selMonth ?? today.getMonth();
-      ({from, to} = monthRange(year, month));
-    }
-    loadAll({from, to, page:1});
-  }, [selDates, selMonth, selYear]);
+    loadAll(filter, 1);
+  }, [filter]);
 
-  // Pagination — only re-fetches rows (dates don't change between pages)
-  function goToPage(p: number) { loadRows({...dateRangeRef.current, page:p}); }
+  function goToPage(p: number) {
+    const seq = ++fetchSeq.current;
+    const { from, to } = filterToRange(filter);
+    setRows([]);
+    setTotalMinutes(null);
+    loadRows(from, to, p, seq);
+  }
 
-  const totalMinutes = useMemo(() => rows.reduce((s, r) => {
-    if (!r.start_time || !r.end_time) return s;
-    return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
-  }, 0), [rows]);
-
-  const availableYears = useMemo(() =>
-    Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort()
-  , [rows]);
-
-  const hasFilter = selDates.size > 0 || selMonth !== null || selYear !== null;
-
-  function saveRow(id: number, data: WorkLogEntry) { setRows(p => p.map(r => r.id===id ? data : r)); }
-  function deleteRow(id: number) { setRows(p => p.filter(r => r.id!==id)); setTotalCount(c => c-1); }
-  function addRow(w: WorkLogEntry) { setRows(p => [w, ...p.slice(0,9)]); setTotalCount(c => c+1); }
+  function saveRow(id: number, data: WorkLogEntry) { setRows(p => p.map(r => r.id === id ? data : r)); }
+  function deleteRow(id: number) { setRows(p => p.filter(r => r.id !== id)); setTotalCount(c => c - 1); }
+  function addRow(w: WorkLogEntry) { setRows(p => [w, ...p.slice(0, 9)]); setTotalCount(c => c + 1); }
 
   async function togglePin(deliverableId: number) {
     const pinned = pinnedIds.has(deliverableId);
     try {
-      if (pinned) { await unpinDeliverable(deliverableId); setPinnedIds(p => { const n=new Set(p); n.delete(deliverableId); return n; }); }
-      else        { await pinDeliverable(deliverableId);   setPinnedIds(p => new Set([...p, deliverableId])); }
+      if (pinned) {
+        await unpinDeliverable(deliverableId);
+        setPinnedIds(p => { const n = new Set(p); n.delete(deliverableId); return n; });
+      } else {
+        await pinDeliverable(deliverableId);
+        setPinnedIds(p => new Set([...p, deliverableId]));
+      }
     } catch(e:any) { alert(e.message); }
   }
 
-  function toggleDate(iso: string) { setSelDates(p => { const n=new Set(p); n.has(iso)?n.delete(iso):n.add(iso); return n; }); }
+  // FIX: toggleDate now directly sets filter to type "dates", no intermediate state
+  function toggleDate(iso: string) {
+    const next = new Set(selDates);
+    next.has(iso) ? next.delete(iso) : next.add(iso);
+    setSelDates(next);
+    if (next.size === 0) {
+      // Revert to current calendar month
+      const f: FilterMode = { type: "month", year: calYear, month: calMonth };
+      setFilter(f);
+    } else {
+      setFilter({ type: "dates", dates: Array.from(next) });
+    }
+  }
 
   function prevMonth() {
-    const m = calMonth===0 ? 11 : calMonth-1;
-    const y = calMonth===0 ? calYear-1 : calYear;
-    setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
+    const m = calMonth === 0 ? 11 : calMonth - 1;
+    const y = calMonth === 0 ? calYear - 1 : calYear;
+    setCalMonth(m); setCalYear(y);
+    setSelDates(new Set());
+    setFilter({ type: "month", year: y, month: m });
   }
   function nextMonth() {
-    const m = calMonth===11 ? 0 : calMonth+1;
-    const y = calMonth===11 ? calYear+1 : calYear;
-    setCalMonth(m); setCalYear(y); setSelMonth(m); setSelYear(y); setSelDates(new Set());
+    const m = calMonth === 11 ? 0 : calMonth + 1;
+    const y = calMonth === 11 ? calYear + 1 : calYear;
+    setCalMonth(m); setCalYear(y);
+    setSelDates(new Set());
+    setFilter({ type: "month", year: y, month: m });
   }
-  function clearAll() { setSelDates(new Set()); setSelMonth(null); setSelYear(null); }
+
+  function selectMonth(m: number) {
+    const isActive = filter.type === "month" && filter.month === m && filter.year === calYear;
+    if (isActive) {
+      // Deselect month → revert to week
+      const { from, to } = currentWeekRange();
+      setFilter({ type: "week", from, to });
+      setSelDates(new Set());
+    } else {
+      setCalMonth(m);
+      setSelDates(new Set());
+      setFilter({ type: "month", year: calYear, month: m });
+    }
+  }
+
+  function selectYear(y: number) {
+    const isActive = filter.type === "year" && filter.year === y;
+    if (isActive) {
+      const { from, to } = currentWeekRange();
+      setFilter({ type: "week", from, to });
+    } else {
+      setCalYear(y);
+      setSelDates(new Set());
+      setFilter({ type: "year", year: y });
+    }
+  }
+
+  function clearAll() {
+    const { from, to } = currentWeekRange();
+    setSelDates(new Set());
+    setFilter({ type: "week", from, to });
+  }
+
+  const hasFilter = filter.type !== "week";
+
+  // Derive selMonth/selYear from filter for calendar highlighting
+  const activeMonth = filter.type === "month" ? filter.month : null;
+  const activeYear  = filter.type === "year"  ? filter.year  : null;
+
+  const availableYears = useMemo(() =>
+    Array.from({ length: 5 }, (_, i) => today.getFullYear() - 2 + i)
+  , []);
+
+  // Formatted hours string — null means loading
+  const hoursStr = totalMinutes === null
+    ? null
+    : `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:T.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, fontFamily:"'DM Sans',sans-serif" }}>
@@ -752,29 +904,28 @@ export default function WorklogPage() {
         </div>
         <button onClick={nextMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
       </div>
-      {/* Calendar uses allActiveDates so ALL days with worklogs are shown,
-          not just those on the current paginated page */}
       <CalGrid
         year={calYear}
         month={calMonth}
         activeDates={allActiveDates}
         selDates={selDates}
         onToggle={toggleDate}
+        datesLoading={datesLoading}
       />
       {selDates.size > 0 && (
         <div style={{ textAlign:"center", fontSize:11, color:T.acText }}>
-          {selDates.size} date{selDates.size>1?"s":""} selected &nbsp;
-          <button onClick={() => setSelDates(new Set())} style={{ background:"none", border:"none", color:T.red, cursor:"pointer", fontSize:11 }}>✕</button>
+          {selDates.size} date{selDates.size > 1 ? "s" : ""} selected &nbsp;
+          <button onClick={() => { setSelDates(new Set()); const f: FilterMode = { type:"month", year:calYear, month:calMonth }; setFilter(f); }} style={{ background:"none", border:"none", color:T.red, cursor:"pointer", fontSize:11 }}>✕</button>
         </div>
       )}
       <Divider />
       <div>
         <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Month</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:3 }}>
-          {MONTHS.map((m,i) => (
-            <button key={m} onClick={() => { const n=selMonth===i?null:i; setSelMonth(n); if(n!==null){setCalMonth(n);setSelDates(new Set());} }}
-              style={{ background:selMonth===i?T.acLight:T.panel2, border:`1px solid ${selMonth===i?T.acMid:T.panel2B}`, borderRadius:5, color:selMonth===i?T.acText:T.t4, fontSize:9, padding:"4px 0", cursor:"pointer", textTransform:"uppercase", fontWeight:selMonth===i?600:400, transition:"all 0.15s" }}>
-              {m.slice(0,3)}
+          {MONTHS.map((m, i) => (
+            <button key={m} onClick={() => selectMonth(i)}
+              style={{ background:activeMonth===i?T.acLight:T.panel2, border:`1px solid ${activeMonth===i?T.acMid:T.panel2B}`, borderRadius:5, color:activeMonth===i?T.acText:T.t4, fontSize:9, padding:"4px 0", cursor:"pointer", textTransform:"uppercase", fontWeight:activeMonth===i?600:400, transition:"all 0.15s" }}>
+              {m.slice(0, 3)}
             </button>
           ))}
         </div>
@@ -784,8 +935,8 @@ export default function WorklogPage() {
           <div style={{ fontSize:10, fontWeight:600, color:T.t5, letterSpacing:"0.07em", textTransform:"uppercase", marginBottom:6 }}>Year</div>
           <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
             {availableYears.map(y => (
-              <button key={y} onClick={() => { const n=selYear===y?null:y; setSelYear(n); if(n!==null){setCalYear(n);setSelDates(new Set());} }}
-                style={{ background:selYear===y?T.acLight:T.panel2, border:`1px solid ${selYear===y?T.acMid:T.panel2B}`, borderRadius:5, color:selYear===y?T.acText:T.t4, fontSize:9, padding:"4px 8px", cursor:"pointer", fontWeight:selYear===y?600:400, transition:"all 0.15s" }}>
+              <button key={y} onClick={() => selectYear(y)}
+                style={{ background:activeYear===y?T.acLight:T.panel2, border:`1px solid ${activeYear===y?T.acMid:T.panel2B}`, borderRadius:5, color:activeYear===y?T.acText:T.t4, fontSize:9, padding:"4px 8px", cursor:"pointer", fontWeight:activeYear===y?600:400, transition:"all 0.15s" }}>
                 {y}
               </button>
             ))}
@@ -793,14 +944,17 @@ export default function WorklogPage() {
         </div>
       )}
       <Divider />
+      {/* FIX: Stats show skeleton while loading instead of stale values */}
       {[
-        {label:"Entries", val:`${rows.length}/${totalCount}`},
-        {label:"Hours",   val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
-        {label:"Pinned",  val:String(pinnedIds.size)},
-      ].map(({label,val}) => (
+        { label:"Entries", val: rowsLoading ? null : `${rows.length}/${totalCount}` },
+        { label:"Hours",   val: hoursStr },
+        { label:"Pinned",  val: String(pinnedIds.size) },
+      ].map(({ label, val }) => (
         <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <span style={{ fontSize:11, color:T.t4 }}>{label}</span>
-          <span style={{ fontSize:12, color:T.acText, fontWeight:600 }}>{val}</span>
+          <span style={{ fontSize:12, color:T.acText, fontWeight:600 }}>
+            {val === null ? <StatSkeleton /> : val}
+          </span>
         </div>
       ))}
       {hasFilter && (
@@ -814,14 +968,16 @@ export default function WorklogPage() {
           </button>
         </>
       )}
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
     </div>
   );
 
   // ── Worklog list ──────────────────────────────────────────────────────────
   const WorklogList = (
     <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-      {rows.length === 0 ? (
+      {rowsLoading ? (
+        <WorklogListLoader />
+      ) : rows.length === 0 ? (
         <div style={{ background:T.panel, border:`1px solid ${T.panelB}`, borderRadius:12, padding:"40px 16px", display:"flex", flexDirection:"column", alignItems:"center", gap:10, color:T.t6 }}>
           <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke={T.t6} strokeWidth={1.2}><circle cx={12} cy={12} r={10}/><path d="M12 6v6l4 2"/></svg>
           <span style={{ fontSize:13 }}>No entries for this selection</span>
@@ -833,7 +989,7 @@ export default function WorklogPage() {
   );
 
   // ── Pagination ────────────────────────────────────────────────────────────
-  const PaginationControls = totalPages > 1 ? (
+  const PaginationControls = totalPages > 1 && !rowsLoading ? (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, paddingTop:4, flexWrap:"wrap" }}>
       <button onClick={() => goToPage(currentPage-1)} disabled={currentPage===1}
         style={{ padding:"6px 12px", borderRadius:7, border:`1px solid ${T.panel2B}`, background:T.panel2, color:currentPage===1?T.t6:T.t3, cursor:currentPage===1?"default":"pointer", fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>
@@ -880,7 +1036,11 @@ export default function WorklogPage() {
 
         <div style={{ marginBottom:isMobile?14:22 }}>
           <h1 style={{ fontSize:isMobile?20:24, fontWeight:700, fontFamily:"'Sora',sans-serif", letterSpacing:"-0.03em", color:T.t1, margin:0 }}>Worklog</h1>
-          <p style={{ color:T.t5, fontSize:12, margin:"3px 0 0" }}>Current week · {totalCount} total entries</p>
+          <p style={{ color:T.t5, fontSize:12, margin:"3px 0 0" }}>
+            {filter.type === "week" ? "Current week" : filter.type === "month" ? `${MONTHS[filter.month]} ${filter.year}` : filter.type === "year" ? String(filter.year) : `${selDates.size} date${selDates.size > 1 ? "s" : ""} selected`}
+            {" · "}
+            {rowsLoading ? "Loading…" : `${totalCount} total entries`}
+          </p>
         </div>
 
         {isMobile ? (
