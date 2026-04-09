@@ -741,33 +741,39 @@ export default function WorklogPage() {
     loadRows(from, to, page, seq);
   }
 
-  // Initial load
-  useEffect(() => {
-    const { from, to } = currentWeekRange();
-    const seq = ++fetchSeq.current;
-    Promise.all([
-      fetchMyWorkLogs({ from, to, page: 1 }),
-      fetchWorkLogDates({ from, to }),
-      fetchMeta(),
-      fetchMyPinnedIds(),
-    ]).then(async ([data, dates, m, pins]) => {
-      if (seq !== fetchSeq.current) return;
-      setRows(data.results);
-      setTotalPages(data.pages);
-      setTotalCount(data.count);
-      setTotalMinutes(data.total_minutes ?? 0);
-      setCurrentPage(1);
-      setAllActiveDates(new Set(dates));
-      setLoading(false);
-      setInitialDeliverables(await fetchInitialDeliverables(data.results[0] ?? null));
-      setMeta(m);
-      setPinnedIds(new Set(pins));
-    }).catch(e => {
-      if (seq !== fetchSeq.current) return;
-      setError(e.message);
-      setLoading(false);
-    });
-  }, []);
+ // Initial load
+useEffect(() => {
+  const { from, to } = currentWeekRange();
+  const seq = ++fetchSeq.current;
+
+  // ── OLD (slow): fetchMyWorkLogs → .then(async → fetchInitialDeliverables)
+  //    fetchWorkLogDates, fetchMeta, fetchMyPinnedIds all chain sequentially
+  //
+  // ── FIX: fire ALL 5 fetches simultaneously
+  Promise.all([
+    fetchMyWorkLogs({ from, to, page: 1 }),
+    fetchWorkLogDates({ from, to }),
+    fetchMeta(),
+    fetchMyPinnedIds(),
+    fetchInitialDeliverables(null),   // ← start immediately, don't wait for worklogs
+  ]).then(([data, dates, m, pins, deliverables]) => {
+    if (seq !== fetchSeq.current) return;
+    setRows(data.results);
+    setTotalPages(data.pages);
+    setTotalCount(data.count);
+    setTotalMinutes(data.total_minutes ?? 0);
+    setCurrentPage(1);
+    setAllActiveDates(new Set(dates));
+    setMeta(m);
+    setPinnedIds(new Set(pins));
+    setInitialDeliverables(deliverables);
+    setLoading(false);
+  }).catch(e => {
+    if (seq !== fetchSeq.current) return;
+    setError(e.message);
+    setLoading(false);
+  });
+}, []);
 
   // FIX: Single effect watches `filter`. No more separate selDates/selMonth/selYear effects
   // that could fire in wrong order or conflict with each other.

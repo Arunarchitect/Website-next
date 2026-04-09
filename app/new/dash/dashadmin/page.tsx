@@ -16,6 +16,7 @@ import {
   type DashboardData,
 } from "@/app/new/api";
 import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
+import LiveWorkersPanel from "@/app/new/dash/LiveWorkersPanel";
 
 async function checkIsUser(): Promise<boolean> {
   const token = localStorage.getItem("access");
@@ -23,11 +24,11 @@ async function checkIsUser(): Promise<boolean> {
 }
 
 function fmt24(date: Date): string {
-  const dd   = String(date.getDate()).padStart(2, "0");
-  const mm   = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
   const yyyy = date.getFullYear();
-  const hh   = String(date.getHours()).padStart(2, "0");
-  const min  = String(date.getMinutes()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
   return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
 }
 
@@ -37,8 +38,8 @@ function fmtTimeInput(date: Date): string {
 
 function fmtDateInput(date: Date): string {
   const yyyy = date.getFullYear();
-  const mm   = String(date.getMonth() + 1).padStart(2, "0");
-  const dd   = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 
@@ -46,7 +47,7 @@ function fmtDateInput(date: Date): string {
 function parseDateTimeInputs(dateVal: string, timeVal: string): Date | null {
   if (!dateVal || !timeVal) return null;
   const [yyyy, mo, dd] = dateVal.split("-").map(Number);
-  const [hh, min]      = timeVal.split(":").map(Number);
+  const [hh, min] = timeVal.split(":").map(Number);
   if ([yyyy, mo, dd, hh, min].some((n) => isNaN(n))) return null;
   const d = new Date(yyyy, mo - 1, dd, hh, min, 0, 0);
   return isNaN(d.getTime()) ? null : d;
@@ -62,9 +63,9 @@ function formatElapsed(seconds: number): string {
 function useWindowWidth() {
   const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
   useEffect(() => {
-    const h = () => setW(window.innerWidth);
-    window.addEventListener("resize", h);
-    return () => window.removeEventListener("resize", h);
+    const handleResize = () => setW(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
   return w;
 }
@@ -72,23 +73,39 @@ function useWindowWidth() {
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  pending:   { bg: "#F5F5F5", text: "#888",    dot: "#CCC",    label: "Pending"   },
+  pending: { bg: "#F5F5F5", text: "#888", dot: "#CCC", label: "Pending" },
   submitted: { bg: "#FFFBEB", text: "#B45309", dot: "#F59E0B", label: "Submitted" },
-  approved:  { bg: "#F0FDF4", text: "#15803D", dot: "#22C55E", label: "Approved"  },
-  rejected:  { bg: "#FFF1F2", text: "#BE123C", dot: "#F43F5E", label: "Rejected"  },
+  approved: { bg: "#F0FDF4", text: "#15803D", dot: "#22C55E", label: "Approved" },
+  rejected: { bg: "#FFF1F2", text: "#BE123C", dot: "#F43F5E", label: "Rejected" },
 };
 
 function StatusPill({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG["pending"];
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5,
-      padding: "3px 10px", borderRadius: 99,
-      background: cfg.bg, color: cfg.text,
-      fontSize: 11, fontWeight: 600, letterSpacing: "0.03em",
-      whiteSpace: "nowrap",
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.dot, flexShrink: 0 }} />
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "3px 10px",
+        borderRadius: 99,
+        background: cfg.bg,
+        color: cfg.text,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: "0.03em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: cfg.dot,
+          flexShrink: 0,
+        }}
+      />
       {cfg.label}
     </span>
   );
@@ -111,8 +128,8 @@ interface TimerEntry {
   elapsed: number;
   sessionStart: Date | null;
   sessionEnd: Date | null;
-  endDateInput: string; // yyyy-mm-dd
-  endTimeInput: string; // HH:mm
+  endDateInput: string;
+  endTimeInput: string;
   endError: string;
   remarks: string;
   remarksSaved: boolean;
@@ -164,23 +181,63 @@ function makeEntryFromQuickAccess(q: DashboardQuickAccess): TimerEntry {
 
 // ── Confirm dialog ────────────────────────────────────────────────────────────
 
-function ConfirmDialog({ message, onConfirm, onDiscard, onCancel }: {
-  message: string; onConfirm: () => void; onDiscard: () => void; onCancel: () => void;
+function ConfirmDialog({
+  message,
+  onConfirm,
+  onDiscard,
+  onCancel,
+}: {
+  message: string;
+  onConfirm: () => void;
+  onDiscard: () => void;
+  onCancel: () => void;
 }) {
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(2px)" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        backdropFilter: "blur(2px)",
+      }}
       onClick={onCancel}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: "#fff", borderRadius: 14, padding: "28px 28px 22px", maxWidth: 360, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", fontFamily: "inherit" }}
+        style={{
+          background: "#fff",
+          borderRadius: 14,
+          padding: "28px 28px 22px",
+          maxWidth: 360,
+          width: "90%",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+          fontFamily: "inherit",
+        }}
       >
-        <div style={{ fontSize: 14, color: "#222", lineHeight: 1.65, marginBottom: 22 }}>{message}</div>
+        <div
+          style={{
+            fontSize: 14,
+            color: "#222",
+            lineHeight: 1.65,
+            marginBottom: 22,
+          }}
+        >
+          {message}
+        </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onCancel}  style={ghostBtn}>Cancel</button>
-          <button onClick={onDiscard} style={outlineBtn("#F43F5E")}>Discard</button>
-          <button onClick={onConfirm} style={solidBtn("#1a1a1a")}>Record &amp; Continue</button>
+          <button onClick={onCancel} style={ghostBtn}>
+            Cancel
+          </button>
+          <button onClick={onDiscard} style={outlineBtn("#F43F5E")}>
+            Discard
+          </button>
+          <button onClick={onConfirm} style={solidBtn("#1a1a1a")}>
+            Record & Continue
+          </button>
         </div>
       </div>
     </div>
@@ -188,15 +245,43 @@ function ConfirmDialog({ message, onConfirm, onDiscard, onCancel }: {
 }
 
 const ghostBtn: React.CSSProperties = {
-  padding: "8px 16px", borderRadius: 8, border: "1px solid #E5E5E5",
-  background: "#FAFAFA", color: "#555", fontSize: 13, fontWeight: 500,
-  cursor: "pointer", fontFamily: "inherit",
+  padding: "8px 16px",
+  borderRadius: 8,
+  border: "1px solid #E5E5E5",
+  background: "#FAFAFA",
+  color: "#555",
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: "pointer",
+  fontFamily: "inherit",
 };
+
 function outlineBtn(color: string): React.CSSProperties {
-  return { padding: "8px 16px", borderRadius: 8, border: `1px solid ${color}`, background: "transparent", color, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+  return {
+    padding: "8px 16px",
+    borderRadius: 8,
+    border: `1px solid ${color}`,
+    background: "transparent",
+    color,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  };
 }
+
 function solidBtn(bg: string): React.CSSProperties {
-  return { padding: "8px 18px", borderRadius: 8, border: "none", background: bg, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+  return {
+    padding: "8px 18px",
+    borderRadius: 8,
+    border: "none",
+    background: bg,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  };
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -206,26 +291,48 @@ const PlayIcon = () => (
     <polygon points="0,0 10,6 0,12" fill="currentColor" />
   </svg>
 );
+
 const StopIcon = () => (
   <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
     <rect width="10" height="10" rx="2" fill="currentColor" />
   </svg>
 );
+
 const TickIcon = () => (
   <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-    <polyline points="1,6 4.5,9.5 11,2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline
+      points="1,6 4.5,9.5 11,2.5"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </svg>
 );
+
 const PinIcon = () => (
   <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-    <path d="M8.5 1.5L10.5 3.5L7 5.5V9L5 11V7L1.5 5L3.5 3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    <path
+      d="M8.5 1.5L10.5 3.5L7 5.5V9L5 11V7L1.5 5L3.5 3Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
   </svg>
 );
+
 const SubmitIcon = () => (
   <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-    <path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    <path
+      d="M2 7h10M8 3l4 4-4 4"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </svg>
 );
+
 const AlertIcon = () => (
   <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
     <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.4" />
@@ -255,12 +362,19 @@ function NavButton({ label, href }: { label: string; href: string }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "11px 10px", borderRadius: 9,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "11px 10px",
+        borderRadius: 9,
         background: hovered ? "#F5F5F5" : "#FAFAFA",
         border: `1px solid ${hovered ? "#D5D5D5" : "#E8E8E8"}`,
-        color: "#333", fontSize: 12, fontWeight: 600,
-        textDecoration: "none", transition: "all 0.12s", textAlign: "center",
+        color: "#333",
+        fontSize: 12,
+        fontWeight: 600,
+        textDecoration: "none",
+        transition: "all 0.12s",
+        textAlign: "center",
         letterSpacing: "0.01em",
       }}
     >
@@ -277,28 +391,47 @@ interface RunningControlsProps {
   onEndDateChange: (id: string, v: string) => void;
   onEndTimeChange: (id: string, v: string) => void;
   onRemarksChange: (id: string, v: string) => void;
-  onRemarksSave:  (id: string) => void;
+  onRemarksSave: (id: string) => void;
 }
 
-function RunningControls({ entry, nearEnd, onEndDateChange, onEndTimeChange, onRemarksChange, onRemarksSave }: RunningControlsProps) {
-  const accent     = nearEnd ? "#C2410C" : "#E53935";
-  const bg         = nearEnd ? "#FFF7ED" : "#FFF5F5";
-  const borderTop  = nearEnd ? "#FED7AA" : "#FFE4E4";
-  const inputBdr   = entry.endError ? "#F43F5E" : nearEnd ? "#FB923C" : "#FFBBBB";
-  const inputBg    = entry.endError ? "#FFF1F2" : bg;
+function RunningControls({
+  entry,
+  nearEnd,
+  onEndDateChange,
+  onEndTimeChange,
+  onRemarksChange,
+  onRemarksSave,
+}: RunningControlsProps) {
+  const accent = nearEnd ? "#C2410C" : "#E53935";
+  const bg = nearEnd ? "#FFF7ED" : "#FFF5F5";
+  const borderTop = nearEnd ? "#FED7AA" : "#FFE4E4";
+  const inputBdr = entry.endError ? "#F43F5E" : nearEnd ? "#FB923C" : "#FFBBBB";
+  const inputBg = entry.endError ? "#FFF1F2" : bg;
   const inputColor = entry.endError ? "#BE123C" : accent;
 
   return (
-    <div style={{
-      display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8,
-      padding: "8px 12px 10px",
-      borderTop: `1px solid ${borderTop}`,
-      background: bg,
-    }}>
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px 10px",
+        borderTop: `1px solid ${borderTop}`,
+        background: bg,
+      }}
+    >
       {/* Start */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
         <span style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>Start</span>
-        <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: accent, fontWeight: 600 }}>
+        <span
+          style={{
+            fontSize: 12,
+            fontVariantNumeric: "tabular-nums",
+            color: accent,
+            fontWeight: 600,
+          }}
+        >
           {entry.sessionStart ? fmt24(entry.sessionStart) : "—"}
         </span>
       </div>
@@ -315,10 +448,14 @@ function RunningControls({ entry, nearEnd, onEndDateChange, onEndTimeChange, onR
           style={{
             fontSize: 12,
             border: `1px solid ${inputBdr}`,
-            borderRadius: 5, padding: "2px 6px",
-            background: inputBg, color: inputColor,
-            fontWeight: 600, outline: "none",
-            cursor: "pointer", boxSizing: "border-box",
+            borderRadius: 5,
+            padding: "2px 6px",
+            background: inputBg,
+            color: inputColor,
+            fontWeight: 600,
+            outline: "none",
+            cursor: "pointer",
+            boxSizing: "border-box",
           }}
         />
         <input
@@ -326,12 +463,18 @@ function RunningControls({ entry, nearEnd, onEndDateChange, onEndTimeChange, onR
           value={entry.endTimeInput}
           onChange={(e) => onEndTimeChange(entry.id, e.target.value)}
           style={{
-            fontSize: 12, fontVariantNumeric: "tabular-nums",
+            fontSize: 12,
+            fontVariantNumeric: "tabular-nums",
             border: `1px solid ${inputBdr}`,
-            borderRadius: 5, padding: "2px 6px",
-            background: inputBg, color: inputColor,
-            fontWeight: 600, outline: "none", textAlign: "center",
-            cursor: "pointer", boxSizing: "border-box",
+            borderRadius: 5,
+            padding: "2px 6px",
+            background: inputBg,
+            color: inputColor,
+            fontWeight: 600,
+            outline: "none",
+            textAlign: "center",
+            cursor: "pointer",
+            boxSizing: "border-box",
           }}
         />
       </div>
@@ -346,21 +489,34 @@ function RunningControls({ entry, nearEnd, onEndDateChange, onEndTimeChange, onR
           onChange={(e) => onRemarksChange(entry.id, e.target.value)}
           placeholder="Add a note…"
           style={{
-            fontSize: 12, border: "1px solid #E5E5E5", borderRadius: 6,
-            padding: "4px 8px", background: "#fff", color: "#333",
-            outline: "none", width: 150, boxSizing: "border-box",
+            fontSize: 12,
+            border: "1px solid #E5E5E5",
+            borderRadius: 6,
+            padding: "4px 8px",
+            background: "#fff",
+            color: "#333",
+            outline: "none",
+            width: 150,
+            boxSizing: "border-box",
           }}
         />
         <button
           onClick={() => onRemarksSave(entry.id)}
           title="Save note"
           style={{
-            width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+            width: 26,
+            height: 26,
+            borderRadius: 6,
+            flexShrink: 0,
             border: `1px solid ${entry.remarksSaved ? "#22C55E" : "#E0E0E0"}`,
             background: entry.remarksSaved ? "#F0FDF4" : "#fff",
             color: entry.remarksSaved ? "#15803D" : "#AAAAAA",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", transition: "all 0.15s", padding: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "all 0.15s",
+            padding: 0,
           }}
         >
           <TickIcon />
@@ -381,43 +537,66 @@ interface AssignmentCardProps {
   onEndDateChange: (id: string, v: string) => void;
   onEndTimeChange: (id: string, v: string) => void;
   onRemarksChange: (id: string, v: string) => void;
-  onRemarksSave:  (id: string) => void;
-  onSubmit?:   (assignmentId: number) => void;
+  onRemarksSave: (id: string) => void;
+  onSubmit?: (assignmentId: number) => void;
   onResubmit?: (assignmentId: number) => void;
 }
 
 function AssignmentCard({
-  entry, isRunning, liveSeconds,
-  onPlay, onStop, onEndDateChange, onEndTimeChange, onRemarksChange, onRemarksSave,
-  onSubmit, onResubmit,
+  entry,
+  isRunning,
+  liveSeconds,
+  onPlay,
+  onStop,
+  onEndDateChange,
+  onEndTimeChange,
+  onRemarksChange,
+  onRemarksSave,
+  onSubmit,
+  onResubmit,
 }: AssignmentCardProps) {
-  const nearEnd     = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
-  const isRejected  = entry.assignmentStatus === "rejected";
-  const isPending   = entry.assignmentStatus === "pending";
+  const nearEnd = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
+  const isRejected = entry.assignmentStatus === "rejected";
+  const isPending = entry.assignmentStatus === "pending";
   const isSubmitted = entry.assignmentStatus === "submitted";
 
   // Disable recording when submitted
   const timerDisabled = isSubmitted && !isRunning;
 
-  const canSubmit   = entry.assignmentId != null && (isPending || isRejected) && !isRunning;
+  const canSubmit = entry.assignmentId != null && (isPending || isRejected) && !isRunning;
   const canResubmit = entry.assignmentId != null && isRejected && !isRunning;
 
   const borderColor = isRunning
-    ? (nearEnd ? "#FB923C" : "#E53935")
-    : isRejected  ? "#FCA5A5"
-    : isSubmitted ? "#FDE68A"
+    ? nearEnd
+      ? "#FB923C"
+      : "#E53935"
+    : isRejected
+    ? "#FCA5A5"
+    : isSubmitted
+    ? "#FDE68A"
     : "#E8E8E8";
 
   const cardBg = isRunning
-    ? (nearEnd ? "#FFFAF5" : "#FFF9F9")
-    : isRejected  ? "#FFF9F9"
-    : isSubmitted ? "#FFFDF0"
+    ? nearEnd
+      ? "#FFFAF5"
+      : "#FFF9F9"
+    : isRejected
+    ? "#FFF9F9"
+    : isSubmitted
+    ? "#FFFDF0"
     : "#FAFAFA";
 
   return (
-    <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${borderColor}`, background: cardBg, transition: "border-color 0.2s, background 0.2s" }}>
+    <div
+      style={{
+        borderRadius: 10,
+        overflow: "hidden",
+        border: `1px solid ${borderColor}`,
+        background: cardBg,
+        transition: "border-color 0.2s, background 0.2s",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
-
         {/* Timer button */}
         <button
           onClick={() => {
@@ -425,41 +604,85 @@ function AssignmentCard({
             if (isRunning) onStop(entry.id);
             else onPlay(entry.id);
           }}
-          title={timerDisabled ? "Cannot record — assignment is submitted" : isRunning ? "Stop timer" : "Start timer"}
+          title={
+            timerDisabled
+              ? "Cannot record — assignment is submitted"
+              : isRunning
+              ? "Stop timer"
+              : "Start timer"
+          }
           disabled={timerDisabled}
           style={{
-            width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            flexShrink: 0,
             border: `2px solid ${timerDisabled ? "#DDD" : isRunning ? "#E53935" : "#AAAAAA"}`,
             background: timerDisabled ? "#F5F5F5" : isRunning ? "#E53935" : "transparent",
             color: timerDisabled ? "#CCC" : isRunning ? "#fff" : "#666",
-            display: "flex", alignItems: "center", justifyContent: "center",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
             cursor: timerDisabled ? "not-allowed" : "pointer",
-            transition: "all 0.15s", padding: 0,
+            transition: "all 0.15s",
+            padding: 0,
           }}
         >
           {isRunning ? <StopIcon /> : <PlayIcon />}
         </button>
 
         {/* Elapsed */}
-        <div style={{
-          width: 68, flexShrink: 0, fontVariantNumeric: "tabular-nums",
-          fontSize: 13, fontWeight: 700, textAlign: "center",
-          color: isRunning ? "#E53935" : "#BBBBBB", letterSpacing: "0.03em",
-        }}>
+        <div
+          style={{
+            width: 68,
+            flexShrink: 0,
+            fontVariantNumeric: "tabular-nums",
+            fontSize: 13,
+            fontWeight: 700,
+            textAlign: "center",
+            color: isRunning ? "#E53935" : "#BBBBBB",
+            letterSpacing: "0.03em",
+          }}
+        >
           {formatElapsed(liveSeconds)}
         </div>
 
         {/* Meta */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#111",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
             {entry.assignmentName ?? entry.deliverableName}
           </div>
-          <div style={{ fontSize: 11, color: "#999", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: "#999",
+              marginTop: 2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
             {entry.orgName} · {entry.projectName}
             {entry.dueDate ? ` · Due ${entry.dueDate}` : ""}
           </div>
           {timerDisabled && (
-            <div style={{ fontSize: 10, color: "#B45309", marginTop: 2, fontWeight: 600 }}>
+            <div
+              style={{
+                fontSize: 10,
+                color: "#B45309",
+                marginTop: 2,
+                fontWeight: 600,
+              }}
+            >
               Recording disabled — awaiting review
             </div>
           )}
@@ -476,12 +699,19 @@ function AssignmentCard({
               else onSubmit?.(entry.assignmentId!);
             }}
             style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "6px 12px", borderRadius: 7, flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "6px 12px",
+              borderRadius: 7,
+              flexShrink: 0,
               background: canResubmit ? "#FFFBEB" : "#F0F9FF",
               border: `1px solid ${canResubmit ? "#F59E0B" : "#38BDF8"}`,
               color: canResubmit ? "#B45309" : "#0369A1",
-              fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
             }}
           >
             <SubmitIcon />
@@ -493,7 +723,8 @@ function AssignmentCard({
       {/* Running controls */}
       {isRunning && (
         <RunningControls
-          entry={entry} nearEnd={nearEnd}
+          entry={entry}
+          nearEnd={nearEnd}
           onEndDateChange={onEndDateChange}
           onEndTimeChange={onEndTimeChange}
           onRemarksChange={onRemarksChange}
@@ -503,24 +734,41 @@ function AssignmentCard({
 
       {/* End error */}
       {entry.endError && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#FFF1F2", borderTop: "1px solid #FCA5A5", fontSize: 11, color: "#BE123C" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px",
+            background: "#FFF1F2",
+            borderTop: "1px solid #FCA5A5",
+            fontSize: 11,
+            color: "#BE123C",
+          }}
+        >
           <AlertIcon /> {entry.endError}
         </div>
       )}
 
       {/* Rejection reason */}
       {isRejected && entry.rejectionReason && (
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: 8,
-          padding: "8px 12px", borderTop: "1px solid #FCA5A5",
-          background: "#FFF1F2",
-        }}>
-          <div style={{ marginTop: 1, color: "#F43F5E", flexShrink: 0 }}><AlertIcon /></div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 12px",
+            borderTop: "1px solid #FCA5A5",
+            background: "#FFF1F2",
+          }}
+        >
+          <div style={{ marginTop: 1, color: "#F43F5E", flexShrink: 0 }}>
+            <AlertIcon />
+          </div>
           <div>
             <span style={{ fontSize: 11, fontWeight: 700, color: "#BE123C" }}>
               Rejected{(entry.rejectionCount ?? 0) > 1 ? ` (×${entry.rejectionCount})` : ""}:
-            </span>
-            {" "}
+            </span>{" "}
             <span style={{ fontSize: 11, color: "#9F1239" }}>{entry.rejectionReason}</span>
           </div>
         </div>
@@ -532,39 +780,75 @@ function AssignmentCard({
 // ── Quick row ─────────────────────────────────────────────────────────────────
 
 function QuickRow({
-  entry, isRunning, liveSeconds,
-  onPlay, onStop, onEndDateChange, onEndTimeChange, onRemarksChange, onRemarksSave,
+  entry,
+  isRunning,
+  liveSeconds,
+  onPlay,
+  onStop,
+  onEndDateChange,
+  onEndTimeChange,
+  onRemarksChange,
+  onRemarksSave,
 }: AssignmentCardProps) {
   const nearEnd = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
 
   return (
-    <div style={{
-      borderRadius: 10, overflow: "hidden",
-      border: `1px solid ${isRunning ? (nearEnd ? "#FB923C" : "#FFBBBB") : "#E8E8E8"}`,
-      background: isRunning ? (nearEnd ? "#FFFAF5" : "#FFF9F9") : "#FAFAFA",
-      transition: "border-color 0.2s",
-    }}>
+    <div
+      style={{
+        borderRadius: 10,
+        overflow: "hidden",
+        border: `1px solid ${isRunning ? (nearEnd ? "#FB923C" : "#FFBBBB") : "#E8E8E8"}`,
+        background: isRunning ? (nearEnd ? "#FFFAF5" : "#FFF9F9") : "#FAFAFA",
+        transition: "border-color 0.2s",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
         <button
-          onClick={() => isRunning ? onStop(entry.id) : onPlay(entry.id)}
+          onClick={() => (isRunning ? onStop(entry.id) : onPlay(entry.id))}
           style={{
-            width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            flexShrink: 0,
             border: `2px solid ${isRunning ? "#E53935" : "#AAAAAA"}`,
             background: isRunning ? "#E53935" : "transparent",
             color: isRunning ? "#fff" : "#666",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", transition: "all 0.15s", padding: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "all 0.15s",
+            padding: 0,
           }}
         >
           {isRunning ? <StopIcon /> : <PlayIcon />}
         </button>
 
-        <div style={{ width: 68, flexShrink: 0, fontVariantNumeric: "tabular-nums", fontSize: 13, fontWeight: 700, textAlign: "center", color: isRunning ? "#E53935" : "#BBBBBB" }}>
+        <div
+          style={{
+            width: 68,
+            flexShrink: 0,
+            fontVariantNumeric: "tabular-nums",
+            fontSize: 13,
+            fontWeight: 700,
+            textAlign: "center",
+            color: isRunning ? "#E53935" : "#BBBBBB",
+          }}
+        >
           {formatElapsed(liveSeconds)}
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#111",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
             {entry.deliverableName}
           </div>
           <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>
@@ -575,7 +859,8 @@ function QuickRow({
 
       {isRunning && (
         <RunningControls
-          entry={entry} nearEnd={nearEnd}
+          entry={entry}
+          nearEnd={nearEnd}
           onEndDateChange={onEndDateChange}
           onEndTimeChange={onEndTimeChange}
           onRemarksChange={onRemarksChange}
@@ -584,7 +869,18 @@ function QuickRow({
       )}
 
       {entry.endError && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#FFF1F2", borderTop: "1px solid #FCA5A5", fontSize: 11, color: "#BE123C" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px",
+            background: "#FFF1F2",
+            borderTop: "1px solid #FCA5A5",
+            fontSize: 11,
+            color: "#BE123C",
+          }}
+        >
           <AlertIcon /> {entry.endError}
         </div>
       )}
@@ -596,31 +892,72 @@ function QuickRow({
 
 function ApprovedCard({ assignment }: { assignment: DashboardAssignment }) {
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 12,
-      padding: "10px 14px", borderRadius: 10,
-      background: "#F0FDF4", border: "1px solid #BBF7D0",
-    }}>
-      <div style={{
-        width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
-        background: "#DCFCE7", border: "1.5px solid #22C55E",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 14px",
+        borderRadius: 10,
+        background: "#F0FDF4",
+        border: "1px solid #BBF7D0",
+        flexWrap: "wrap",
+      }}
+    >
+      <div
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: "#DCFCE7",
+          border: "1.5px solid #22C55E",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <polyline points="1,6 4.5,9.5 11,2.5" stroke="#15803D" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline
+            points="1,6 4.5,9.5 11,2.5"
+            stroke="#15803D"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#14532D", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#14532D",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
           {assignment.name}
         </div>
         <div style={{ fontSize: 11, color: "#4ADE80", marginTop: 2 }}>
           {assignment.org_name} · {assignment.project_name} · {assignment.deliverable_name}
         </div>
       </div>
-      {assignment.due_date && <span style={{ fontSize: 11, color: "#6EE7B7", flexShrink: 0 }}>Due {assignment.due_date}</span>}
+      {assignment.due_date && (
+        <span style={{ fontSize: 11, color: "#6EE7B7", flexShrink: 0 }}>Due {assignment.due_date}</span>
+      )}
       {assignment.reviewed_by_name && (
-        <span style={{ fontSize: 11, color: "#15803D", fontWeight: 600, flexShrink: 0 }}>✓ {assignment.reviewed_by_name}</span>
+        <span
+          style={{
+            fontSize: 11,
+            color: "#15803D",
+            fontWeight: 600,
+            flexShrink: 0,
+          }}
+        >
+          ✓ {assignment.reviewed_by_name}
+        </span>
       )}
       <StatusPill status="approved" />
     </div>
@@ -629,15 +966,41 @@ function ApprovedCard({ assignment }: { assignment: DashboardAssignment }) {
 
 // ── Misc UI ───────────────────────────────────────────────────────────────────
 
-function SectionHeader({ label, count, accent }: { label: string; count?: number; accent?: string }) {
+function SectionHeader({
+  label,
+  count,
+  accent,
+}: {
+  label: string;
+  count?: number;
+  accent?: string;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: "0.07em", textTransform: "uppercase" }}>{label}</span>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: "#999",
+          letterSpacing: "0.07em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </span>
       {count !== undefined && (
-        <span style={{
-          fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99,
-          background: accent ? `${accent}18` : "#F3F4F6", color: accent ?? "#999",
-        }}>{count}</span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "1px 7px",
+            borderRadius: 99,
+            background: accent ? `${accent}18` : "#F3F4F6",
+            color: accent ?? "#999",
+          }}
+        >
+          {count}
+        </span>
       )}
     </div>
   );
@@ -649,7 +1012,17 @@ function Divider() {
 
 function FullScreenMessage({ message, color = "#999" }: { message: string; color?: string }) {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", color, fontSize: 14 }}>
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'DM Sans', sans-serif",
+        color,
+        fontSize: 14,
+      }}
+    >
       {message}
     </div>
   );
@@ -659,7 +1032,7 @@ function FullScreenMessage({ message, color = "#999" }: { message: string; color
 
 export default function DashAdminPage() {
   const isMobile = useWindowWidth() < 640;
-  const router   = useRouter();
+  const router = useRouter();
 
   const [authChecked, setAuthChecked] = useState(false);
 
@@ -686,9 +1059,9 @@ export default function DashAdminPage() {
     });
   }, [router]);
 
-  const [dashboard, setDashboard]     = useState<DashboardData | null>(null);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState<string | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authChecked) return;
@@ -698,19 +1071,19 @@ export default function DashAdminPage() {
       .finally(() => setLoading(false));
   }, [authChecked]);
 
-  const [entries, setEntries]     = useState<Record<string, TimerEntry>>({});
+  const [entries, setEntries] = useState<Record<string, TimerEntry>>({});
   const [runningId, setRunningId] = useState<string | null>(null);
-  const startRef                  = useRef<number | null>(null);
-  const worklogIdRef              = useRef<number | null>(null);
-  const endDebounceRef            = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [tick, setTick]           = useState(0);
-  const [pending, setPending]     = useState<{ action: "stop" | "switch"; nextId?: string } | null>(null);
+  const startRef = useRef<number | null>(null);
+  const worklogIdRef = useRef<number | null>(null);
+  const endDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tick, setTick] = useState(0);
+  const [pending, setPending] = useState<{ action: "stop" | "switch"; nextId?: string } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [approvedAssignments, setApprovedAssignments] = useState<DashboardAssignment[]>([]);
 
   useEffect(() => {
     if (!dashboard) return;
-    const active   = dashboard.assignments.filter((a) => a.status !== "approved");
+    const active = dashboard.assignments.filter((a) => a.status !== "approved");
     const approved = dashboard.assignments.filter((a) => a.status === "approved");
     const list: TimerEntry[] = [
       ...active.map(makeEntryFromAssignment),
@@ -722,41 +1095,48 @@ export default function DashAdminPage() {
 
   useEffect(() => {
     if (!dashboard) return;
-    fetchActiveWorkLog().then((active) => {
-      if (!active || active.finalised) return;
-      const sessionStart = new Date(active.start_time);
-      const sessionEnd   = new Date(active.end_time);
-      const now = Date.now();
-      if (sessionEnd.getTime() <= now) return;
-      const matchA  = dashboard.assignments.find((a) => a.deliverable_id === active.deliverable_id && a.status !== "approved");
-      const matchQ  = dashboard.quick_access.find((q) => q.deliverable_id === active.deliverable_id);
-      const entryId = matchA ? `a-${matchA.id}` : matchQ ? `q-${matchQ.id}` : null;
-      if (!entryId) return;
-      const elapsed = Math.floor((now - sessionStart.getTime()) / 1000);
-      worklogIdRef.current = active.id;
-      startRef.current     = sessionStart.getTime();
-      setTick(elapsed);
-      setRunningId(entryId);
-      setEntries((prev) => ({
-        ...prev,
-        [entryId]: {
-          ...prev[entryId],
-          sessionStart,
-          sessionEnd,
-          endDateInput: fmtDateInput(sessionEnd),
-          endTimeInput: fmtTimeInput(sessionEnd),
-          endError: "",
-          remarks: active.remarks,
-          remarksSaved: false,
-        },
-      }));
-    }).catch(() => {});
+    fetchActiveWorkLog()
+      .then((active) => {
+        if (!active || active.finalised) return;
+        const sessionStart = new Date(active.start_time);
+        const sessionEnd = new Date(active.end_time);
+        const now = Date.now();
+        if (sessionEnd.getTime() <= now) return;
+        const matchA = dashboard.assignments.find(
+          (a) => a.deliverable_id === active.deliverable_id && a.status !== "approved"
+        );
+        const matchQ = dashboard.quick_access.find((q) => q.deliverable_id === active.deliverable_id);
+        const entryId = matchA ? `a-${matchA.id}` : matchQ ? `q-${matchQ.id}` : null;
+        if (!entryId) return;
+        const elapsed = Math.floor((now - sessionStart.getTime()) / 1000);
+        worklogIdRef.current = active.id;
+        startRef.current = sessionStart.getTime();
+        setTick(elapsed);
+        setRunningId(entryId);
+        setEntries((prev) => ({
+          ...prev,
+          [entryId]: {
+            ...prev[entryId],
+            sessionStart,
+            sessionEnd,
+            endDateInput: fmtDateInput(sessionEnd),
+            endTimeInput: fmtTimeInput(sessionEnd),
+            endError: "",
+            remarks: active.remarks,
+            remarksSaved: false,
+          },
+        }));
+      })
+      .catch(() => {});
   }, [dashboard]);
 
   useEffect(() => {
     if (!runningId) return;
-    const iv = setInterval(() => setTick(Math.floor((Date.now() - (startRef.current ?? Date.now())) / 1000)), 1000);
-    return () => clearInterval(iv);
+    const interval = setInterval(
+      () => setTick(Math.floor((Date.now() - (startRef.current ?? Date.now())) / 1000)),
+      1000
+    );
+    return () => clearInterval(interval);
   }, [runningId]);
 
   useEffect(() => {
@@ -767,142 +1147,215 @@ export default function DashAdminPage() {
     const clearUI = () => {
       setEntries((prev) => ({
         ...prev,
-        [runningId]: { ...prev[runningId], sessionStart: null, sessionEnd: null, endDateInput: "", endTimeInput: "", endError: "", remarks: "", remarksSaved: false },
-      }));
-      worklogIdRef.current = null;
-      startRef.current     = null;
-      setTick(0);
-      setRunningId(null);
-    };
-    if (rem <= 0) { clearUI(); return; }
-    const t = setTimeout(clearUI, rem);
-    return () => clearTimeout(t);
-  }, [runningId, entries[runningId ?? ""]?.sessionEnd?.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** Debounced API call whenever date or time changes and both are valid. */
-  const scheduleEndUpdate = useCallback((id: string, dateVal: string, timeVal: string) => {
-    const parsed = parseDateTimeInputs(dateVal, timeVal);
-    if (!parsed) return; // wait for both fields to be filled
-    const now = new Date();
-    if (parsed <= now) {
-      setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: "End date/time must be in the future." } }));
-      return;
-    }
-    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: "", sessionEnd: parsed } }));
-    if (endDebounceRef.current) clearTimeout(endDebounceRef.current);
-    endDebounceRef.current = setTimeout(async () => {
-      if (!worklogIdRef.current) return;
-      try { await updateWorkLogEndTime(worklogIdRef.current, parsed); }
-      catch (e: unknown) {
-        setEntries((prev) => ({ ...prev, [id]: { ...prev[id], endError: e instanceof Error ? e.message : "Error updating end time" } }));
-      }
-    }, 1500);
-  }, []);
-
-  const handleEndDateChange = useCallback((id: string, v: string) => {
-    setEntries((prev) => {
-      const cur     = prev[id];
-      const updated = { ...cur, endDateInput: v };
-      scheduleEndUpdate(id, v, cur.endTimeInput);
-      return { ...prev, [id]: updated };
-    });
-  }, [scheduleEndUpdate]);
-
-  const handleEndTimeChange = useCallback((id: string, v: string) => {
-    setEntries((prev) => {
-      const cur     = prev[id];
-      const updated = { ...cur, endTimeInput: v };
-      scheduleEndUpdate(id, cur.endDateInput, v);
-      return { ...prev, [id]: updated };
-    });
-  }, [scheduleEndUpdate]);
-
-  const handleRemarksChange = useCallback((id: string, v: string) => {
-    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarks: v, remarksSaved: false } }));
-  }, []);
-
-  const handleRemarksSave = useCallback(async (id: string) => {
-    if (!worklogIdRef.current) return;
-    const entry = entries[id];
-    try {
-      await updateWorkLogRemarks(worklogIdRef.current, entry.remarks ?? "");
-      setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarksSaved: true } }));
-    } catch (e: unknown) {
-      setSaveError(`Failed to save note: ${e instanceof Error ? e.message : "unknown"}`);
-    }
-  }, [entries]);
-
-  const commitStart = useCallback(async (id: string) => {
-    const entry = entries[id];
-    if (!entry) return;
-    try {
-      const result       = await startWorkLog(entry.deliverableId);
-      const sessionStart = new Date(result.start_time);
-      const sessionEnd   = new Date(result.end_time);
-      worklogIdRef.current = result.id;
-      startRef.current     = sessionStart.getTime();
-      setTick(0);
-      setRunningId(id);
-      setEntries((prev) => ({
-        ...prev,
-        [id]: {
-          ...prev[id],
-          sessionStart,
-          sessionEnd,
-          endDateInput: fmtDateInput(sessionEnd),
-          endTimeInput: fmtTimeInput(sessionEnd),
+        [runningId]: {
+          ...prev[runningId],
+          sessionStart: null,
+          sessionEnd: null,
+          endDateInput: "",
+          endTimeInput: "",
           endError: "",
           remarks: "",
           remarksSaved: false,
         },
       }));
-    } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : "Failed to start");
+      worklogIdRef.current = null;
+      startRef.current = null;
+      setTick(0);
+      setRunningId(null);
+    };
+    if (rem <= 0) {
+      clearUI();
+      return;
     }
-  }, [entries]);
+    const timeout = setTimeout(clearUI, rem);
+    return () => clearTimeout(timeout);
+  }, [runningId, entries[runningId ?? ""]?.sessionEnd?.getTime()]);
 
-  const commitStop = useCallback(async (id: string) => {
-    if (!worklogIdRef.current) return;
-    const entry = entries[id];
-    try {
-      await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
-      setSaveError(null);
-    } catch (e: unknown) {
-      setSaveError(`Failed to save: ${e instanceof Error ? e.message : "unknown"}`);
-    }
-    worklogIdRef.current = null;
-    setEntries((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], elapsed: 0, sessionStart: null, sessionEnd: null, endDateInput: "", endTimeInput: "", endError: "", remarks: "", remarksSaved: false },
-    }));
-    startRef.current = null;
-    setTick(0);
-    setRunningId(null);
-  }, [entries]);
+  /** Debounced API call whenever date or time changes and both are valid. */
+  const scheduleEndUpdate = useCallback(
+    (id: string, dateVal: string, timeVal: string) => {
+      const parsed = parseDateTimeInputs(dateVal, timeVal);
+      if (!parsed) return; // wait for both fields to be filled
+      const now = new Date();
+      if (parsed <= now) {
+        setEntries((prev) => ({
+          ...prev,
+          [id]: { ...prev[id], endError: "End date/time must be in the future." },
+        }));
+        return;
+      }
+      setEntries((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], endError: "", sessionEnd: parsed },
+      }));
+      if (endDebounceRef.current) clearTimeout(endDebounceRef.current);
+      endDebounceRef.current = setTimeout(async () => {
+        if (!worklogIdRef.current) return;
+        try {
+          await updateWorkLogEndTime(worklogIdRef.current, parsed);
+        } catch (e: unknown) {
+          setEntries((prev) => ({
+            ...prev,
+            [id]: {
+              ...prev[id],
+              endError: e instanceof Error ? e.message : "Error updating end time",
+            },
+          }));
+        }
+      }, 1500);
+    },
+    []
+  );
+
+  const handleEndDateChange = useCallback(
+    (id: string, v: string) => {
+      setEntries((prev) => {
+        const cur = prev[id];
+        const updated = { ...cur, endDateInput: v };
+        scheduleEndUpdate(id, v, cur.endTimeInput);
+        return { ...prev, [id]: updated };
+      });
+    },
+    [scheduleEndUpdate]
+  );
+
+  const handleEndTimeChange = useCallback(
+    (id: string, v: string) => {
+      setEntries((prev) => {
+        const cur = prev[id];
+        const updated = { ...cur, endTimeInput: v };
+        scheduleEndUpdate(id, cur.endDateInput, v);
+        return { ...prev, [id]: updated };
+      });
+    },
+    [scheduleEndUpdate]
+  );
+
+  const handleRemarksChange = useCallback((id: string, v: string) => {
+    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarks: v, remarksSaved: false } }));
+  }, []);
+
+  const handleRemarksSave = useCallback(
+    async (id: string) => {
+      if (!worklogIdRef.current) return;
+      const entry = entries[id];
+      try {
+        await updateWorkLogRemarks(worklogIdRef.current, entry.remarks ?? "");
+        setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarksSaved: true } }));
+      } catch (e: unknown) {
+        setSaveError(`Failed to save note: ${e instanceof Error ? e.message : "unknown"}`);
+      }
+    },
+    [entries]
+  );
+
+  const commitStart = useCallback(
+    async (id: string) => {
+      const entry = entries[id];
+      if (!entry) return;
+      try {
+        const result = await startWorkLog(entry.deliverableId);
+        const sessionStart = new Date(result.start_time);
+        const sessionEnd = new Date(result.end_time);
+        worklogIdRef.current = result.id;
+        startRef.current = sessionStart.getTime();
+        setTick(0);
+        setRunningId(id);
+        setEntries((prev) => ({
+          ...prev,
+          [id]: {
+            ...prev[id],
+            sessionStart,
+            sessionEnd,
+            endDateInput: fmtDateInput(sessionEnd),
+            endTimeInput: fmtTimeInput(sessionEnd),
+            endError: "",
+            remarks: "",
+            remarksSaved: false,
+          },
+        }));
+      } catch (e: unknown) {
+        setSaveError(e instanceof Error ? e.message : "Failed to start");
+      }
+    },
+    [entries]
+  );
+
+  const commitStop = useCallback(
+    async (id: string) => {
+      if (!worklogIdRef.current) return;
+      const entry = entries[id];
+      try {
+        await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
+        setSaveError(null);
+      } catch (e: unknown) {
+        setSaveError(`Failed to save: ${e instanceof Error ? e.message : "unknown"}`);
+      }
+      worklogIdRef.current = null;
+      setEntries((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          elapsed: 0,
+          sessionStart: null,
+          sessionEnd: null,
+          endDateInput: "",
+          endTimeInput: "",
+          endError: "",
+          remarks: "",
+          remarksSaved: false,
+        },
+      }));
+      startRef.current = null;
+      setTick(0);
+      setRunningId(null);
+    },
+    [entries]
+  );
 
   const discardCurrent = useCallback(async () => {
     if (!runningId) return;
     if (worklogIdRef.current) {
-      try { await discardWorkLog(worklogIdRef.current); }
-      catch (e: unknown) { setSaveError(`Failed to discard: ${e instanceof Error ? e.message : "unknown"}`); }
+      try {
+        await discardWorkLog(worklogIdRef.current);
+      } catch (e: unknown) {
+        setSaveError(`Failed to discard: ${e instanceof Error ? e.message : "unknown"}`);
+      }
       worklogIdRef.current = null;
     }
     setEntries((prev) => ({
       ...prev,
-      [runningId]: { ...prev[runningId], sessionStart: null, sessionEnd: null, endDateInput: "", endTimeInput: "", endError: "", remarks: "", remarksSaved: false },
+      [runningId]: {
+        ...prev[runningId],
+        sessionStart: null,
+        sessionEnd: null,
+        endDateInput: "",
+        endTimeInput: "",
+        endError: "",
+        remarks: "",
+        remarksSaved: false,
+      },
     }));
     startRef.current = null;
     setTick(0);
     setRunningId(null);
   }, [runningId]);
 
-  const handlePlay = useCallback((id: string) => {
-    if (!runningId) { commitStart(id); return; }
-    if (runningId === id) return;
-    setPending({ action: "switch", nextId: id });
-  }, [runningId, commitStart]);
+  const handlePlay = useCallback(
+    (id: string) => {
+      if (!runningId) {
+        commitStart(id);
+        return;
+      }
+      if (runningId === id) return;
+      setPending({ action: "switch", nextId: id });
+    },
+    [runningId, commitStart]
+  );
 
-  const handleStop = useCallback(() => { setPending({ action: "stop" }); }, []);
+  const handleStop = useCallback(() => {
+    setPending({ action: "stop" });
+  }, []);
 
   const handleSubmit = useCallback(async (assignmentId: number) => {
     try {
@@ -910,7 +1363,11 @@ export default function DashAdminPage() {
       const entryId = `a-${assignmentId}`;
       setEntries((prev) => ({
         ...prev,
-        [entryId]: { ...prev[entryId], assignmentStatus: updated.status, rejectionReason: updated.rejection_reason },
+        [entryId]: {
+          ...prev[entryId],
+          assignmentStatus: updated.status,
+          rejectionReason: updated.rejection_reason,
+        },
       }));
       setSaveError(null);
     } catch (e: unknown) {
@@ -924,7 +1381,12 @@ export default function DashAdminPage() {
       const entryId = `a-${assignmentId}`;
       setEntries((prev) => ({
         ...prev,
-        [entryId]: { ...prev[entryId], assignmentStatus: updated.status, rejectionReason: updated.rejection_reason, rejectionCount: updated.rejection_count },
+        [entryId]: {
+          ...prev[entryId],
+          assignmentStatus: updated.status,
+          rejectionReason: updated.rejection_reason,
+          rejectionCount: updated.rejection_count,
+        },
       }));
       setSaveError(null);
     } catch (e: unknown) {
@@ -948,155 +1410,247 @@ export default function DashAdminPage() {
   };
 
   const activeAssignmentIds = dashboard?.assignments.filter((a) => a.status !== "approved").map((a) => `a-${a.id}`) ?? [];
-  const assignedEntries     = activeAssignmentIds.map((id) => entries[id]).filter(Boolean) as TimerEntry[];
-  const quickEntries        = (dashboard?.quick_access ?? []).map((q) => entries[`q-${q.id}`]).filter(Boolean) as TimerEntry[];
-  const liveSeconds         = (id: string) => (entries[id]?.elapsed ?? 0) + (runningId === id ? tick : 0);
+  const assignedEntries = activeAssignmentIds.map((id) => entries[id]).filter(Boolean) as TimerEntry[];
+  const quickEntries = (dashboard?.quick_access ?? []).map((q) => entries[`q-${q.id}`]).filter(Boolean) as TimerEntry[];
+  const liveSeconds = (id: string) => (entries[id]?.elapsed ?? 0) + (runningId === id ? tick : 0);
 
   const userName = dashboard?.user.name ?? "";
   const [first, ...rest] = userName.split(" ");
 
   const sharedRowProps = {
-    onPlay:          handlePlay,
-    onStop:          handleStop,
+    onPlay: handlePlay,
+    onStop: handleStop,
     onEndDateChange: handleEndDateChange,
     onEndTimeChange: handleEndTimeChange,
     onRemarksChange: handleRemarksChange,
-    onRemarksSave:   handleRemarksSave,
+    onRemarksSave: handleRemarksSave,
   };
 
   if (!authChecked || isMembershipLoading || isMembershipFetching) {
     return <FullScreenMessage message="Checking access…" />;
   }
   if (!isAdmin) return null;
-  if (loading)  return <FullScreenMessage message="Loading dashboard…" />;
-  if (error)    return <FullScreenMessage message={error} color="#E53935" />;
+  if (loading) return <FullScreenMessage message="Loading dashboard…" />;
+  if (error) return <FullScreenMessage message={error} color="#E53935" />;
 
   return (
     <>
       {pending && (
         <ConfirmDialog
-          message={pending.action === "stop" ? "Save this work session?" : "You have a session running — save it before switching?"}
+          message={
+            pending.action === "stop"
+              ? "Save this work session?"
+              : "You have a session running — save it before switching?"
+          }
           onConfirm={handleConfirm}
           onDiscard={handleDiscard}
           onCancel={() => setPending(null)}
         />
       )}
 
-      <div style={{
-        minHeight: "100vh", background: "#F7F7F7",
-        fontFamily: "'DM Sans', 'Helvetica Neue', Arial, sans-serif",
-        display: "flex", alignItems: "flex-start", justifyContent: "center",
-        padding: isMobile ? "16px 8px" : "48px 24px", boxSizing: "border-box",
-      }}>
-        <div style={{
-          background: "#fff", border: "1px solid #E8E8E8",
-          borderRadius: isMobile ? 14 : 18,
-          padding: isMobile ? "20px 14px" : "38px 42px",
-          width: "100%", maxWidth: 800,
-          boxShadow: "0 2px 24px rgba(0,0,0,0.05)",
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#F7F7F7",
+          fontFamily: "'DM Sans', 'Helvetica Neue', Arial, sans-serif",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          padding: isMobile ? "16px 8px" : "48px 24px",
           boxSizing: "border-box",
-        }}>
-
+        }}
+      >
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #E8E8E8",
+            borderRadius: isMobile ? 14 : 18,
+            padding: isMobile ? "20px 14px" : "38px 42px",
+            width: "100%",
+            maxWidth: 1200,
+            boxShadow: "0 2px 24px rgba(0,0,0,0.05)",
+            boxSizing: "border-box",
+          }}
+        >
           {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 20,
+              flexWrap: "wrap",
+              gap: 12,
+            }}
+          >
             <div>
-              <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 300, color: "#111", lineHeight: 1.3 }}>
+              <div
+                style={{
+                  fontSize: isMobile ? 18 : 22,
+                  fontWeight: 300,
+                  color: "#111",
+                  lineHeight: 1.3,
+                }}
+              >
                 Welcome back, <span style={{ fontWeight: 700 }}>{first}</span>
                 {rest.length > 0 && <span style={{ fontWeight: 300 }}> {rest.join(" ")}</span>}
               </div>
               <div style={{ fontSize: 12, color: "#AAAAAA", marginTop: 3 }}>
-                {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+                {new Date().toLocaleDateString("en-GB", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                })}
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#FFF5F5", border: "1px solid #FFD6D6", borderRadius: 8, padding: "6px 10px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: "#FFF5F5",
+                border: "1px solid #FFD6D6",
+                borderRadius: 8,
+                padding: "6px 10px",
+              }}
+            >
               <ModelflickMark />
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#E53935", letterSpacing: "0.07em", textTransform: "uppercase" }}>Modelflick</span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#E53935",
+                  letterSpacing: "0.07em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Modelflick
+              </span>
             </div>
+          </div>
+
+          {/* Live Workers Panel */}
+          <div style={{ marginBottom: 28 }}>
+            <LiveWorkersPanel />
           </div>
 
           {/* Save error */}
           {saveError && (
-            <div style={{ display: "flex", alignItems: "center", gap: 7, background: "#FFF1F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "10px 14px", marginBottom: 18, fontSize: 12, color: "#BE123C" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                background: "#FFF1F2",
+                border: "1px solid #FCA5A5",
+                borderRadius: 8,
+                padding: "10px 14px",
+                marginBottom: 18,
+                fontSize: 12,
+                color: "#BE123C",
+              }}
+            >
               <AlertIcon /> {saveError}
             </div>
           )}
 
-          {/* Assignments */}
-          <SectionHeader label="My Assignments" count={assignedEntries.length} accent="#6366F1" />
-          {assignedEntries.length === 0
-            ? <div style={{ fontSize: 13, color: "#CCC", padding: "12px 0" }}>No assignments yet.</div>
-            : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {assignedEntries.map((e) => (
-                  <AssignmentCard
-                    key={e.id} entry={e}
-                    isRunning={runningId === e.id}
-                    liveSeconds={liveSeconds(e.id)}
-                    onSubmit={handleSubmit}
-                    onResubmit={handleResubmit}
-                    {...sharedRowProps}
-                  />
-                ))}
-              </div>
-            )
-          }
+          {/* Two-column layout for desktop */}
+          <div
+            style={{
+              display: "flex",
+              gap: 24,
+              flexDirection: isMobile ? "column" : "row",
+            }}
+          >
+            {/* Main content - Left column */}
+            <div style={{ flex: 2, minWidth: 0 }}>
+              {/* Assignments */}
+              <SectionHeader label="My Assignments" count={assignedEntries.length} accent="#6366F1" />
+              {assignedEntries.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#CCC", padding: "12px 0" }}>No assignments yet.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {assignedEntries.map((e) => (
+                    <AssignmentCard
+                      key={e.id}
+                      entry={e}
+                      isRunning={runningId === e.id}
+                      liveSeconds={liveSeconds(e.id)}
+                      onSubmit={handleSubmit}
+                      onResubmit={handleResubmit}
+                      {...sharedRowProps}
+                    />
+                  ))}
+                </div>
+              )}
 
-          <Divider />
-
-          {/* Quick access */}
-          <SectionHeader label="Quick Access" count={quickEntries.length} accent="#E53935" />
-          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 10, marginTop: -6 }}>
-            <span style={{ color: "#E53935", opacity: 0.7 }}><PinIcon /></span>
-            <span style={{ fontSize: 11, color: "#BBBBBB" }}>Pinned deliverables</span>
-          </div>
-          {quickEntries.length === 0
-            ? <div style={{ fontSize: 13, color: "#CCC", padding: "12px 0" }}>No pinned deliverables.</div>
-            : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {quickEntries.map((e) => (
-                  <QuickRow
-                    key={e.id} entry={e}
-                    isRunning={runningId === e.id}
-                    liveSeconds={liveSeconds(e.id)}
-                    {...sharedRowProps}
-                  />
-                ))}
-              </div>
-            )
-          }
-
-          {/* Approved */}
-          {approvedAssignments.length > 0 && (
-            <>
               <Divider />
-              <SectionHeader label="Approved Assignments" count={approvedAssignments.length} accent="#22C55E" />
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {approvedAssignments.map((a) => (
-                  <ApprovedCard key={a.id} assignment={a} />
-                ))}
+
+              {/* Quick access */}
+              <SectionHeader label="Quick Access" count={quickEntries.length} accent="#E53935" />
+              <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 10, marginTop: -6 }}>
+                <span style={{ color: "#E53935", opacity: 0.7 }}>
+                  <PinIcon />
+                </span>
+                <span style={{ fontSize: 11, color: "#BBBBBB" }}>Pinned deliverables</span>
               </div>
-            </>
-          )}
+              {quickEntries.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#CCC", padding: "12px 0" }}>No pinned deliverables.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {quickEntries.map((e) => (
+                    <QuickRow
+                      key={e.id}
+                      entry={e}
+                      isRunning={runningId === e.id}
+                      liveSeconds={liveSeconds(e.id)}
+                      {...sharedRowProps}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Approved */}
+              {approvedAssignments.length > 0 && (
+                <>
+                  <Divider />
+                  <SectionHeader label="Approved Assignments" count={approvedAssignments.length} accent="#22C55E" />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    {approvedAssignments.map((a) => (
+                      <ApprovedCard key={a.id} assignment={a} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Right column - empty for now, can add more widgets later */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Future widgets can go here */}
+            </div>
+          </div>
 
           <Divider />
 
-          {/* Nav */}
+          {/* Navigation */}
           <SectionHeader label="Navigate" />
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
-            gap: 7,
-          }}>
-            <NavButton label="My Worklogs"      href="/new/hour/hournormal" />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
+              gap: 7,
+            }}
+          >
+            <NavButton label="My Worklogs" href="/new/hour/hournormal" />
             <NavButton label="Worklog Overview" href="/new/hour/houradmin" />
-            <NavButton label="Company Finance"  href="/new/stat/numbers" />
-            <NavButton label="Finance Pie"      href="/new/stat/pie" />
-            <NavButton label="Add Expense"      href="/new/exp/expnormal" />
-            <NavButton label="Expenses"         href="/new/exp/expadmin" />
-            <NavButton label="Salary Calc"      href="/new/pay" />
-            <NavButton label="Add Revenue"      href="/new/revenue" />
-            <NavButton label="Project Info"     href="/new/projectdash" />
-            <NavButton label="Leaves"           href="/new/leave" />
+            <NavButton label="Company Finance" href="/new/stat/numbers" />
+            <NavButton label="Finance Pie" href="/new/stat/pie" />
+            <NavButton label="Add Expense" href="/new/exp/expnormal" />
+            <NavButton label="Expenses" href="/new/exp/expadmin" />
+            <NavButton label="Salary Calc" href="/new/pay" />
+            <NavButton label="Add Revenue" href="/new/revenue" />
+            <NavButton label="Project Info" href="/new/projectdash" />
+            <NavButton label="Leaves" href="/new/leave" />
           </div>
         </div>
       </div>

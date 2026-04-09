@@ -143,8 +143,11 @@ export async function fetchDeliverablesByProject(projectId?: number): Promise<De
   return (await res.json()).map(mapDeliverable);
 }
 
-export async function fetchInitialDeliverables(lastWorklog: WorkLogEntry | null): Promise<DeliverableOption[]> {
+export async function fetchInitialDeliverables(
+  lastWorklog: WorkLogEntry | null
+): Promise<DeliverableOption[]> {
   return fetchDeliverablesByProject(lastWorklog?.project_id ?? undefined);
+  //                                ↑ null → undefined → fetches ALL deliverables
 }
 
 export async function createWorkLog(payload: {

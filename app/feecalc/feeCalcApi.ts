@@ -1,0 +1,248 @@
+// app/feecalc/feeCalcApi.ts
+
+const BASE = process.env.NEXT_PUBLIC_HOST ?? "";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface FeeTemplateOption {
+  id: number;
+  name: string;
+  description: string | null;
+  billing_type: "quantity_rate" | "percentage" | "hourly";
+  billing_type_display: string;
+  quantity_unit: {
+    id: number;
+    name: string;
+    symbol: string;
+  } | null;
+  default_rate_per_unit: string | null;
+  default_percentage: string | null;
+  default_hourly_rate: string | null;
+  currency: string;
+  stage_count: number;
+  total_stage_percentage: string;
+  template_stages: FeeTemplateStageDetail[];
+}
+
+export interface FeeTemplateStageDetail {
+  id: number;
+  order: number;
+  fee_percentage: string;
+  payment_terms_days: number;
+  description: string | null;
+  fee_stage: {
+    id: number;
+    name: string;
+    code: string;
+    description: string | null;
+  };
+  deliverable_templates: {
+    id: number;
+    name: string;
+    is_mandatory: boolean;
+    order: number;
+  }[];
+}
+
+export interface FeePreviewStage {
+  order: number;
+  stage_name: string;
+  fee_percentage: string | number;
+  instalment_amount: string | number;
+  payment_terms_days: number;
+  deliverables: {
+    id: number;
+    name: string;
+    is_mandatory: boolean;
+    order: number;
+  }[];
+}
+
+export interface FeePreviewResult {
+  template_id: number;
+  template_name: string;
+  billing_type: string;
+  billing_type_display: string;
+  quantity: string | number;
+  quantity_unit: string | null;
+  rate: string | number | null;
+  currency: string;
+  base_fee: string | number;
+  discount_percentage: string | number;
+  discount_amount: string | number;
+  final_fee: string | number;
+  stages: FeePreviewStage[];
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function authHeaders(): Record<string, string> {
+  const token =
+    typeof window !== "undefined"
+      ? (localStorage.getItem("access") ?? "")
+      : "";
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+// ─── API calls ────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all active fee templates for the given organisation.
+ * Uses the read serializer (nested stages, quantity_unit object, etc.)
+ */
+export async function fetchFeeTemplates(
+  organisationId?: number,
+): Promise<FeeTemplateOption[]> {
+  const qs = new URLSearchParams({ active: "true" });
+  if (organisationId) qs.set("organisation", String(organisationId));
+
+  const res = await fetch(`${BASE}/api/feecalc/fee-templates/?${qs}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch fee templates: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Fetch a single fee template by id (includes nested stages + deliverable templates).
+ */
+export async function fetchFeeTemplate(id: number): Promise<FeeTemplateOption> {
+  const res = await fetch(`${BASE}/api/feecalc/fee-templates/${id}/`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch fee template: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Stateless fee preview — no DB write.
+ * Calls POST /api/feecalc/preview/
+ */
+export async function fetchFeePreview(params: {
+  fee_template_id: number;
+  quantity: number | string;
+  discount_percentage?: number | string;
+  currency?: string;
+}): Promise<FeePreviewResult> {
+  const body = {
+    fee_template_id: params.fee_template_id,
+    quantity: String(params.quantity),
+    discount_percentage: String(params.discount_percentage ?? "0"),
+    currency: params.currency ?? "INR",
+  };
+
+  const res = await fetch(`${BASE}/api/feecalc/preview/`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { detail?: string }).detail ??
+        `Preview failed: ${res.status}`,
+    );
+  }
+  return res.json();
+}
+
+/**
+ * Convenience — get live preview straight from the template's own endpoint.
+ * GET /api/feecalc/fee-templates/{id}/preview/?quantity=…&discount_percentage=…
+ */
+export async function fetchTemplatePreview(
+  templateId: number,
+  quantity: number | string,
+  discountPercentage: number | string = 0,
+  currency = "INR",
+): Promise<FeePreviewResult> {
+  const qs = new URLSearchParams({
+    quantity: String(quantity),
+    discount_percentage: String(discountPercentage),
+    currency,
+  });
+
+  const res = await fetch(
+    `${BASE}/api/feecalc/fee-templates/${templateId}/preview/?${qs}`,
+    { headers: authHeaders() },
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { detail?: string }).detail ??
+        `Preview failed: ${res.status}`,
+    );
+  }
+  return res.json();
+}
+
+// ─── Formatting helpers (re-exported for use in UI) ───────────────────────────
+
+export function fmtCurrency(
+  value: string | number | null | undefined,
+  currency = "INR",
+): string {
+  const n = Number(value ?? 0);
+  if (isNaN(n)) return "—";
+  if (currency === "INR") {
+    return "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+export function billingTypeLabel(type: string): string {
+  switch (type) {
+    case "quantity_rate": return "Quantity × Rate";
+    case "percentage":    return "% of Project Value";
+    case "hourly":        return "Hourly";
+    default:              return type;
+  }
+}
+
+export function billingTypeIcon(type: string): string {
+  switch (type) {
+    case "quantity_rate": return "⬡";
+    case "percentage":    return "%";
+    case "hourly":        return "◷";
+    default:              return "•";
+  }
+}
+
+export function quantityLabel(template: FeeTemplateOption): string {
+  switch (template.billing_type) {
+    case "quantity_rate":
+      return template.quantity_unit
+        ? `Quantity (${template.quantity_unit.symbol})`
+        : "Quantity";
+    case "percentage":
+      return `Project / Contract Value (${template.currency})`;
+    case "hourly":
+      return "Estimated Hours";
+    default:
+      return "Quantity";
+  }
+}
+
+export function quantityPlaceholder(template: FeeTemplateOption): string {
+  switch (template.billing_type) {
+    case "quantity_rate":
+      return template.quantity_unit
+        ? `e.g. 450 ${template.quantity_unit.symbol}`
+        : "Enter quantity";
+    case "percentage":
+      return "e.g. 5000000";
+    case "hourly":
+      return "e.g. 120";
+    default:
+      return "Enter value";
+  }
+}
