@@ -16,7 +16,6 @@ import {
   type DashboardData,
 } from "@/app/new/api";
 import { useGetMyMembershipsQuery } from "@/redux/features/membershipApiSlice";
-import LiveWorkersPanel from "@/app/new/dash/LiveWorkersPanel";
 
 async function checkIsUser(): Promise<boolean> {
   const token = localStorage.getItem("access");
@@ -43,7 +42,6 @@ function fmtDateInput(date: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-/** Build a Date from separate yyyy-mm-dd and HH:mm strings. */
 function parseDateTimeInputs(dateVal: string, timeVal: string): Date | null {
   if (!dateVal || !timeVal) return null;
   const [yyyy, mo, dd] = dateVal.split("-").map(Number);
@@ -73,10 +71,10 @@ function useWindowWidth() {
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  pending: { bg: "#F5F5F5", text: "#888", dot: "#CCC", label: "Pending" },
+  pending:   { bg: "#F5F5F5", text: "#888",    dot: "#CCC",    label: "Pending"   },
   submitted: { bg: "#FFFBEB", text: "#B45309", dot: "#F59E0B", label: "Submitted" },
-  approved: { bg: "#F0FDF4", text: "#15803D", dot: "#22C55E", label: "Approved" },
-  rejected: { bg: "#FFF1F2", text: "#BE123C", dot: "#F43F5E", label: "Rejected" },
+  approved:  { bg: "#F0FDF4", text: "#15803D", dot: "#22C55E", label: "Approved"  },
+  rejected:  { bg: "#FFF1F2", text: "#BE123C", dot: "#F43F5E", label: "Rejected"  },
 };
 
 function StatusPill({ status }: { status: string }) {
@@ -97,15 +95,7 @@ function StatusPill({ status }: { status: string }) {
         whiteSpace: "nowrap",
       }}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: cfg.dot,
-          flexShrink: 0,
-        }}
-      />
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.dot, flexShrink: 0 }} />
       {cfg.label}
     </span>
   );
@@ -179,6 +169,214 @@ function makeEntryFromQuickAccess(q: DashboardQuickAccess): TimerEntry {
   };
 }
 
+// ── Live worker type ──────────────────────────────────────────────────────────
+
+interface LiveWorker {
+  user_id: number;
+  user_name: string;
+  org_name: string;
+  org_id: number;
+  role: string;
+  is_active: boolean;
+  current: {
+    worklog_id: number;
+    deliverable_id: number;
+    deliverable_name: string;
+    project_id: number;
+    project_name: string;
+    org_name: string;
+    start_time: string;
+    end_time: string | null;
+    elapsed_seconds: number | null;
+    remarks: string;
+  } | null;
+  last: {
+    worklog_id: number;
+    deliverable_name: string;
+    project_name: string;
+    org_name: string;
+    start_time: string;
+    end_time: string | null;
+    elapsed_seconds: null;
+    remarks: string;
+  } | null;
+}
+
+// ── Live Bar component ────────────────────────────────────────────────────────
+// Shows active workers inline at top; inactive workers collapsed behind a toggle
+
+function LiveBar() {
+  const [workers, setWorkers] = useState<LiveWorker[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [liveTick, setLiveTick] = useState(0);
+
+  useEffect(() => {
+    const load = () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem("access") ?? "" : "";
+      const base = process.env.NEXT_PUBLIC_HOST ?? "";
+      fetch(`${base}/api/v2/manager/worklogs/live/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data: LiveWorker[]) => setWorkers(data))
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Tick every second to update elapsed displays
+  useEffect(() => {
+    const id = setInterval(() => setLiveTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const active   = workers.filter((w) => w.is_active);
+  const inactive = workers.filter((w) => !w.is_active);
+
+  if (workers.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      {/* ── Active workers — always visible ── */}
+      {active.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: inactive.length > 0 ? 10 : 0 }}>
+          {active.map((w) => {
+            const baseElapsed = w.current?.elapsed_seconds ?? 0;
+            const elapsed = baseElapsed + liveTick;
+            return (
+              <div
+                key={w.user_id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "7px 13px",
+                  borderRadius: 9,
+                  background: "#FFF9F9",
+                  border: "1px solid #FFD6D6",
+                  flexShrink: 0,
+                }}
+              >
+                {/* Green pulse dot */}
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: "50%",
+                    background: "#22C55E",
+                    flexShrink: 0,
+                    boxShadow: "0 0 0 2.5px #BBF7D0",
+                  }}
+                />
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>
+                  {w.user_name}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "#999",
+                    maxWidth: 200,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {w.current?.deliverable_name} · {w.current?.project_name}
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontVariantNumeric: "tabular-nums",
+                    fontWeight: 700,
+                    color: "#E53935",
+                    marginLeft: 2,
+                    flexShrink: 0,
+                  }}
+                >
+                  {formatElapsed(elapsed)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Inactive workers — collapsed by default ── */}
+      {inactive.length > 0 && (
+        <div>
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            style={{
+              fontSize: 11,
+              color: "#BBBBBB",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "2px 0",
+              fontFamily: "inherit",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              userSelect: "none",
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                transition: "transform 0.15s",
+                transform: expanded ? "rotate(90deg)" : "none",
+                fontSize: 9,
+              }}
+            >
+              ▶
+            </span>
+            {inactive.length} team member{inactive.length !== 1 ? "s" : ""} not currently working
+          </button>
+
+          {expanded && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {inactive.map((w) => (
+                <div
+                  key={w.user_id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "5px 11px",
+                    borderRadius: 8,
+                    background: "#F7F7F7",
+                    border: "1px solid #EEEEEE",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "#D1D5DB",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#666" }}>
+                    {w.user_name}
+                  </span>
+                  {w.last && (
+                    <span style={{ fontSize: 11, color: "#BBBBBB" }}>
+                      last: {w.last.deliverable_name} · {w.last.project_name}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Confirm dialog ────────────────────────────────────────────────────────────
 
 function ConfirmDialog({
@@ -218,26 +416,13 @@ function ConfirmDialog({
           fontFamily: "inherit",
         }}
       >
-        <div
-          style={{
-            fontSize: 14,
-            color: "#222",
-            lineHeight: 1.65,
-            marginBottom: 22,
-          }}
-        >
+        <div style={{ fontSize: 14, color: "#222", lineHeight: 1.65, marginBottom: 22 }}>
           {message}
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onCancel} style={ghostBtn}>
-            Cancel
-          </button>
-          <button onClick={onDiscard} style={outlineBtn("#F43F5E")}>
-            Discard
-          </button>
-          <button onClick={onConfirm} style={solidBtn("#1a1a1a")}>
-            Record & Continue
-          </button>
+          <button onClick={onCancel}  style={ghostBtn}>Cancel</button>
+          <button onClick={onDiscard} style={outlineBtn("#F43F5E")}>Discard</button>
+          <button onClick={onConfirm} style={solidBtn("#1a1a1a")}>Record & Continue</button>
         </div>
       </div>
     </div>
@@ -383,7 +568,7 @@ function NavButton({ label, href }: { label: string; href: string }) {
   );
 }
 
-// ── Running controls (shared by AssignmentCard and QuickRow) ──────────────────
+// ── Running controls ──────────────────────────────────────────────────────────
 
 interface RunningControlsProps {
   entry: TimerEntry;
@@ -391,7 +576,7 @@ interface RunningControlsProps {
   onEndDateChange: (id: string, v: string) => void;
   onEndTimeChange: (id: string, v: string) => void;
   onRemarksChange: (id: string, v: string) => void;
-  onRemarksSave: (id: string) => void;
+  onRemarksSave:   (id: string) => void;
 }
 
 function RunningControls({
@@ -402,11 +587,11 @@ function RunningControls({
   onRemarksChange,
   onRemarksSave,
 }: RunningControlsProps) {
-  const accent = nearEnd ? "#C2410C" : "#E53935";
-  const bg = nearEnd ? "#FFF7ED" : "#FFF5F5";
-  const borderTop = nearEnd ? "#FED7AA" : "#FFE4E4";
-  const inputBdr = entry.endError ? "#F43F5E" : nearEnd ? "#FB923C" : "#FFBBBB";
-  const inputBg = entry.endError ? "#FFF1F2" : bg;
+  const accent     = nearEnd ? "#C2410C" : "#E53935";
+  const bg         = nearEnd ? "#FFF7ED" : "#FFF5F5";
+  const borderTop  = nearEnd ? "#FED7AA" : "#FFE4E4";
+  const inputBdr   = entry.endError ? "#F43F5E" : nearEnd ? "#FB923C" : "#FFBBBB";
+  const inputBg    = entry.endError ? "#FFF1F2" : bg;
   const inputColor = entry.endError ? "#BE123C" : accent;
 
   return (
@@ -424,14 +609,7 @@ function RunningControls({
       {/* Start */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
         <span style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>Start</span>
-        <span
-          style={{
-            fontSize: 12,
-            fontVariantNumeric: "tabular-nums",
-            color: accent,
-            fontWeight: 600,
-          }}
-        >
+        <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: accent, fontWeight: 600 }}>
           {entry.sessionStart ? fmt24(entry.sessionStart) : "—"}
         </span>
       </div>
@@ -532,14 +710,14 @@ interface AssignmentCardProps {
   entry: TimerEntry;
   isRunning: boolean;
   liveSeconds: number;
-  onPlay: (id: string) => void;
-  onStop: (id: string) => void;
-  onEndDateChange: (id: string, v: string) => void;
-  onEndTimeChange: (id: string, v: string) => void;
-  onRemarksChange: (id: string, v: string) => void;
-  onRemarksSave: (id: string) => void;
-  onSubmit?: (assignmentId: number) => void;
-  onResubmit?: (assignmentId: number) => void;
+  onPlay:           (id: string) => void;
+  onStop:           (id: string) => void;
+  onEndDateChange:  (id: string, v: string) => void;
+  onEndTimeChange:  (id: string, v: string) => void;
+  onRemarksChange:  (id: string, v: string) => void;
+  onRemarksSave:    (id: string) => void;
+  onSubmit?:        (assignmentId: number) => void;
+  onResubmit?:      (assignmentId: number) => void;
 }
 
 function AssignmentCard({
@@ -555,35 +733,24 @@ function AssignmentCard({
   onSubmit,
   onResubmit,
 }: AssignmentCardProps) {
-  const nearEnd = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
-  const isRejected = entry.assignmentStatus === "rejected";
-  const isPending = entry.assignmentStatus === "pending";
-  const isSubmitted = entry.assignmentStatus === "submitted";
-
-  // Disable recording when submitted
+  const nearEnd      = isRunning && entry.sessionEnd != null && entry.sessionEnd.getTime() - Date.now() < 5 * 60 * 1000;
+  const isRejected   = entry.assignmentStatus === "rejected";
+  const isPending    = entry.assignmentStatus === "pending";
+  const isSubmitted  = entry.assignmentStatus === "submitted";
   const timerDisabled = isSubmitted && !isRunning;
-
-  const canSubmit = entry.assignmentId != null && (isPending || isRejected) && !isRunning;
-  const canResubmit = entry.assignmentId != null && isRejected && !isRunning;
+  const canSubmit    = entry.assignmentId != null && (isPending || isRejected) && !isRunning;
+  const canResubmit  = entry.assignmentId != null && isRejected && !isRunning;
 
   const borderColor = isRunning
-    ? nearEnd
-      ? "#FB923C"
-      : "#E53935"
-    : isRejected
-    ? "#FCA5A5"
-    : isSubmitted
-    ? "#FDE68A"
+    ? nearEnd ? "#FB923C" : "#E53935"
+    : isRejected  ? "#FCA5A5"
+    : isSubmitted ? "#FDE68A"
     : "#E8E8E8";
 
   const cardBg = isRunning
-    ? nearEnd
-      ? "#FFFAF5"
-      : "#FFF9F9"
-    : isRejected
-    ? "#FFF9F9"
-    : isSubmitted
-    ? "#FFFDF0"
+    ? nearEnd ? "#FFFAF5" : "#FFF9F9"
+    : isRejected  ? "#FFF9F9"
+    : isSubmitted ? "#FFFDF0"
     : "#FAFAFA";
 
   return (
@@ -607,9 +774,7 @@ function AssignmentCard({
           title={
             timerDisabled
               ? "Cannot record — assignment is submitted"
-              : isRunning
-              ? "Stop timer"
-              : "Start timer"
+              : isRunning ? "Stop timer" : "Start timer"
           }
           disabled={timerDisabled}
           style={{
@@ -675,14 +840,7 @@ function AssignmentCard({
             {entry.dueDate ? ` · Due ${entry.dueDate}` : ""}
           </div>
           {timerDisabled && (
-            <div
-              style={{
-                fontSize: 10,
-                color: "#B45309",
-                marginTop: 2,
-                fontWeight: 600,
-              }}
-            >
+            <div style={{ fontSize: 10, color: "#B45309", marginTop: 2, fontWeight: 600 }}>
               Recording disabled — awaiting review
             </div>
           )}
@@ -948,14 +1106,7 @@ function ApprovedCard({ assignment }: { assignment: DashboardAssignment }) {
         <span style={{ fontSize: 11, color: "#6EE7B7", flexShrink: 0 }}>Due {assignment.due_date}</span>
       )}
       {assignment.reviewed_by_name && (
-        <span
-          style={{
-            fontSize: 11,
-            color: "#15803D",
-            fontWeight: 600,
-            flexShrink: 0,
-          }}
-        >
+        <span style={{ fontSize: 11, color: "#15803D", fontWeight: 600, flexShrink: 0 }}>
           ✓ {assignment.reviewed_by_name}
         </span>
       )}
@@ -966,15 +1117,7 @@ function ApprovedCard({ assignment }: { assignment: DashboardAssignment }) {
 
 // ── Misc UI ───────────────────────────────────────────────────────────────────
 
-function SectionHeader({
-  label,
-  count,
-  accent,
-}: {
-  label: string;
-  count?: number;
-  accent?: string;
-}) {
+function SectionHeader({ label, count, accent }: { label: string; count?: number; accent?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
       <span
@@ -1032,11 +1175,10 @@ function FullScreenMessage({ message, color = "#999" }: { message: string; color
 
 export default function DashAdminPage() {
   const isMobile = useWindowWidth() < 640;
-  const router = useRouter();
+  const router   = useRouter();
 
   const [authChecked, setAuthChecked] = useState(false);
 
-  // ── Admin guard ───────────────────────────────────────────────────────────
   const {
     data: memberships = [],
     isLoading: isMembershipLoading,
@@ -1050,7 +1192,6 @@ export default function DashAdminPage() {
   }, [memberships, isMembershipLoading, isMembershipFetching, router]);
 
   const isAdmin = memberships.some((m) => m.role === "admin");
-  // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     checkIsUser().then((ok) => {
@@ -1059,9 +1200,9 @@ export default function DashAdminPage() {
     });
   }, [router]);
 
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [dashboard, setDashboard]   = useState<DashboardData | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
 
   useEffect(() => {
     if (!authChecked) return;
@@ -1071,19 +1212,27 @@ export default function DashAdminPage() {
       .finally(() => setLoading(false));
   }, [authChecked]);
 
-  const [entries, setEntries] = useState<Record<string, TimerEntry>>({});
-  const [runningId, setRunningId] = useState<string | null>(null);
-  const startRef = useRef<number | null>(null);
-  const worklogIdRef = useRef<number | null>(null);
-  const endDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [tick, setTick] = useState(0);
-  const [pending, setPending] = useState<{ action: "stop" | "switch"; nextId?: string } | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [entries, setEntries]       = useState<Record<string, TimerEntry>>({});
+  const [runningId, setRunningId]   = useState<string | null>(null);
+  const startRef                    = useRef<number | null>(null);
+  const worklogIdRef                = useRef<number | null>(null);
+  const endDebounceRef              = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tick, setTick]             = useState(0);
+  const [pending, setPending]       = useState<{ action: "stop" | "switch"; nextId?: string } | null>(null);
+  const [saveError, setSaveError]   = useState<string | null>(null);
   const [approvedAssignments, setApprovedAssignments] = useState<DashboardAssignment[]>([]);
+
+  // Keep a stable ref to entries so async callbacks can read latest value
+  const entriesRef = useRef(entries);
+  useEffect(() => { entriesRef.current = entries; }, [entries]);
+
+  // Keep a stable ref to runningId for the timeout callback
+  const runningIdRef = useRef(runningId);
+  useEffect(() => { runningIdRef.current = runningId; }, [runningId]);
 
   useEffect(() => {
     if (!dashboard) return;
-    const active = dashboard.assignments.filter((a) => a.status !== "approved");
+    const active  = dashboard.assignments.filter((a) => a.status !== "approved");
     const approved = dashboard.assignments.filter((a) => a.status === "approved");
     const list: TimerEntry[] = [
       ...active.map(makeEntryFromAssignment),
@@ -1093,24 +1242,25 @@ export default function DashAdminPage() {
     setApprovedAssignments(approved);
   }, [dashboard]);
 
+  // Restore active worklog on load
   useEffect(() => {
     if (!dashboard) return;
     fetchActiveWorkLog()
       .then((active) => {
         if (!active || active.finalised) return;
         const sessionStart = new Date(active.start_time);
-        const sessionEnd = new Date(active.end_time);
-        const now = Date.now();
+        const sessionEnd   = new Date(active.end_time);
+        const now          = Date.now();
         if (sessionEnd.getTime() <= now) return;
-        const matchA = dashboard.assignments.find(
+        const matchA  = dashboard.assignments.find(
           (a) => a.deliverable_id === active.deliverable_id && a.status !== "approved"
         );
-        const matchQ = dashboard.quick_access.find((q) => q.deliverable_id === active.deliverable_id);
+        const matchQ  = dashboard.quick_access.find((q) => q.deliverable_id === active.deliverable_id);
         const entryId = matchA ? `a-${matchA.id}` : matchQ ? `q-${matchQ.id}` : null;
         if (!entryId) return;
         const elapsed = Math.floor((now - sessionStart.getTime()) / 1000);
         worklogIdRef.current = active.id;
-        startRef.current = sessionStart.getTime();
+        startRef.current     = sessionStart.getTime();
         setTick(elapsed);
         setRunningId(entryId);
         setEntries((prev) => ({
@@ -1130,6 +1280,7 @@ export default function DashAdminPage() {
       .catch(() => {});
   }, [dashboard]);
 
+  // Tick every second while running
   useEffect(() => {
     if (!runningId) return;
     const interval = setInterval(
@@ -1139,43 +1290,65 @@ export default function DashAdminPage() {
     return () => clearInterval(interval);
   }, [runningId]);
 
+  // ── Auto-finalise when sessionEnd is reached ─────────────────────────────
+  // FIX: call endWorkLog so finalised=True is saved to backend on timer expiry
   useEffect(() => {
     if (!runningId) return;
     const end = entries[runningId]?.sessionEnd;
     if (!end) return;
     const rem = end.getTime() - Date.now();
-    const clearUI = () => {
-      setEntries((prev) => ({
-        ...prev,
-        [runningId]: {
-          ...prev[runningId],
-          sessionStart: null,
-          sessionEnd: null,
-          endDateInput: "",
-          endTimeInput: "",
-          endError: "",
-          remarks: "",
-          remarksSaved: false,
-        },
-      }));
+
+    const finaliseAndClear = async () => {
+      const wlId        = worklogIdRef.current;
+      const currentId   = runningIdRef.current;
+      const currentEntry = entriesRef.current[currentId ?? ""];
+
+      // Persist finalised=True to backend
+      if (wlId) {
+        try {
+          await endWorkLog(wlId, currentEntry?.remarks ?? "");
+        } catch {
+          // best-effort — timer expired so we still clear UI
+        }
+      }
+
       worklogIdRef.current = null;
-      startRef.current = null;
+      startRef.current     = null;
       setTick(0);
       setRunningId(null);
+
+      if (currentId) {
+        setEntries((prev) => {
+          const cur = prev[currentId];
+          if (!cur) return prev;
+          return {
+            ...prev,
+            [currentId]: {
+              ...cur,
+              sessionStart:  null,
+              sessionEnd:    null,
+              endDateInput:  "",
+              endTimeInput:  "",
+              endError:      "",
+              remarks:       "",
+              remarksSaved:  false,
+            },
+          };
+        });
+      }
     };
-    if (rem <= 0) {
-      clearUI();
-      return;
-    }
-    const timeout = setTimeout(clearUI, rem);
+
+    if (rem <= 0) { finaliseAndClear(); return; }
+    const timeout = setTimeout(finaliseAndClear, rem);
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningId, entries[runningId ?? ""]?.sessionEnd?.getTime()]);
 
-  /** Debounced API call whenever date or time changes and both are valid. */
+  // Debounced end-time update
   const scheduleEndUpdate = useCallback(
     (id: string, dateVal: string, timeVal: string) => {
       const parsed = parseDateTimeInputs(dateVal, timeVal);
-      if (!parsed) return; // wait for both fields to be filled
+      if (!parsed) return;
       const now = new Date();
       if (parsed <= now) {
         setEntries((prev) => ({
@@ -1210,7 +1383,7 @@ export default function DashAdminPage() {
   const handleEndDateChange = useCallback(
     (id: string, v: string) => {
       setEntries((prev) => {
-        const cur = prev[id];
+        const cur     = prev[id];
         const updated = { ...cur, endDateInput: v };
         scheduleEndUpdate(id, v, cur.endTimeInput);
         return { ...prev, [id]: updated };
@@ -1222,7 +1395,7 @@ export default function DashAdminPage() {
   const handleEndTimeChange = useCallback(
     (id: string, v: string) => {
       setEntries((prev) => {
-        const cur = prev[id];
+        const cur     = prev[id];
         const updated = { ...cur, endTimeInput: v };
         scheduleEndUpdate(id, cur.endDateInput, v);
         return { ...prev, [id]: updated };
@@ -1238,7 +1411,7 @@ export default function DashAdminPage() {
   const handleRemarksSave = useCallback(
     async (id: string) => {
       if (!worklogIdRef.current) return;
-      const entry = entries[id];
+      const entry = entriesRef.current[id];
       try {
         await updateWorkLogRemarks(worklogIdRef.current, entry.remarks ?? "");
         setEntries((prev) => ({ ...prev, [id]: { ...prev[id], remarksSaved: true } }));
@@ -1246,75 +1419,71 @@ export default function DashAdminPage() {
         setSaveError(`Failed to save note: ${e instanceof Error ? e.message : "unknown"}`);
       }
     },
-    [entries]
+    []
   );
 
-  const commitStart = useCallback(
-    async (id: string) => {
-      const entry = entries[id];
-      if (!entry) return;
-      try {
-        const result = await startWorkLog(entry.deliverableId);
-        const sessionStart = new Date(result.start_time);
-        const sessionEnd = new Date(result.end_time);
-        worklogIdRef.current = result.id;
-        startRef.current = sessionStart.getTime();
-        setTick(0);
-        setRunningId(id);
-        setEntries((prev) => ({
-          ...prev,
-          [id]: {
-            ...prev[id],
-            sessionStart,
-            sessionEnd,
-            endDateInput: fmtDateInput(sessionEnd),
-            endTimeInput: fmtTimeInput(sessionEnd),
-            endError: "",
-            remarks: "",
-            remarksSaved: false,
-          },
-        }));
-      } catch (e: unknown) {
-        setSaveError(e instanceof Error ? e.message : "Failed to start");
-      }
-    },
-    [entries]
-  );
-
-  const commitStop = useCallback(
-    async (id: string) => {
-      if (!worklogIdRef.current) return;
-      const entry = entries[id];
-      try {
-        await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
-        setSaveError(null);
-      } catch (e: unknown) {
-        setSaveError(`Failed to save: ${e instanceof Error ? e.message : "unknown"}`);
-      }
-      worklogIdRef.current = null;
+  const commitStart = useCallback(async (id: string) => {
+    const entry = entriesRef.current[id];
+    if (!entry) return;
+    try {
+      const result       = await startWorkLog(entry.deliverableId);
+      const sessionStart = new Date(result.start_time);
+      const sessionEnd   = new Date(result.end_time);
+      worklogIdRef.current = result.id;
+      startRef.current     = sessionStart.getTime();
+      setTick(0);
+      setRunningId(id);
       setEntries((prev) => ({
         ...prev,
         [id]: {
           ...prev[id],
-          elapsed: 0,
-          sessionStart: null,
-          sessionEnd: null,
-          endDateInput: "",
-          endTimeInput: "",
-          endError: "",
-          remarks: "",
+          sessionStart,
+          sessionEnd,
+          endDateInput: fmtDateInput(sessionEnd),
+          endTimeInput: fmtTimeInput(sessionEnd),
+          endError:     "",
+          remarks:      "",
           remarksSaved: false,
         },
       }));
-      startRef.current = null;
-      setTick(0);
-      setRunningId(null);
-    },
-    [entries]
-  );
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Failed to start");
+    }
+  }, []);
+
+  // FIX: commitStop calls endWorkLog which sets finalised=True on backend
+  const commitStop = useCallback(async (id: string) => {
+    if (!worklogIdRef.current) return;
+    const entry = entriesRef.current[id];
+    try {
+      await endWorkLog(worklogIdRef.current, entry.remarks ?? "");
+      setSaveError(null);
+    } catch (e: unknown) {
+      setSaveError(`Failed to save: ${e instanceof Error ? e.message : "unknown"}`);
+    }
+    worklogIdRef.current = null;
+    setEntries((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        elapsed:      0,
+        sessionStart: null,
+        sessionEnd:   null,
+        endDateInput: "",
+        endTimeInput: "",
+        endError:     "",
+        remarks:      "",
+        remarksSaved: false,
+      },
+    }));
+    startRef.current = null;
+    setTick(0);
+    setRunningId(null);
+  }, []);
 
   const discardCurrent = useCallback(async () => {
-    if (!runningId) return;
+    const currentId = runningIdRef.current;
+    if (!currentId) return;
     if (worklogIdRef.current) {
       try {
         await discardWorkLog(worklogIdRef.current);
@@ -1325,37 +1494,43 @@ export default function DashAdminPage() {
     }
     setEntries((prev) => ({
       ...prev,
-      [runningId]: {
-        ...prev[runningId],
+      [currentId]: {
+        ...prev[currentId],
         sessionStart: null,
-        sessionEnd: null,
+        sessionEnd:   null,
         endDateInput: "",
         endTimeInput: "",
-        endError: "",
-        remarks: "",
+        endError:     "",
+        remarks:      "",
         remarksSaved: false,
       },
     }));
     startRef.current = null;
     setTick(0);
     setRunningId(null);
-  }, [runningId]);
+  }, []);
 
+  // FIX: handlePlay uses runningId from state correctly
   const handlePlay = useCallback(
     (id: string) => {
       if (!runningId) {
         commitStart(id);
         return;
       }
-      if (runningId === id) return;
+      if (runningId === id) return; // already running this one
       setPending({ action: "switch", nextId: id });
     },
     [runningId, commitStart]
   );
 
-  const handleStop = useCallback(() => {
-    setPending({ action: "stop" });
-  }, []);
+  // FIX: handleStop now accepts the id and guards against wrong id
+  const handleStop = useCallback(
+    (id: string) => {
+      if (id !== runningId) return;
+      setPending({ action: "stop" });
+    },
+    [runningId]
+  );
 
   const handleSubmit = useCallback(async (assignmentId: number) => {
     try {
@@ -1366,7 +1541,7 @@ export default function DashAdminPage() {
         [entryId]: {
           ...prev[entryId],
           assignmentStatus: updated.status,
-          rejectionReason: updated.rejection_reason,
+          rejectionReason:  updated.rejection_reason,
         },
       }));
       setSaveError(null);
@@ -1384,8 +1559,8 @@ export default function DashAdminPage() {
         [entryId]: {
           ...prev[entryId],
           assignmentStatus: updated.status,
-          rejectionReason: updated.rejection_reason,
-          rejectionCount: updated.rejection_count,
+          rejectionReason:  updated.rejection_reason,
+          rejectionCount:   updated.rejection_count,
         },
       }));
       setSaveError(null);
@@ -1402,7 +1577,7 @@ export default function DashAdminPage() {
   };
 
   const handleDiscard = async () => {
-    if (!pending || !runningId) return;
+    if (!pending) return;
     const nextId = pending.action === "switch" ? pending.nextId : undefined;
     await discardCurrent();
     if (nextId) await commitStart(nextId);
@@ -1410,28 +1585,28 @@ export default function DashAdminPage() {
   };
 
   const activeAssignmentIds = dashboard?.assignments.filter((a) => a.status !== "approved").map((a) => `a-${a.id}`) ?? [];
-  const assignedEntries = activeAssignmentIds.map((id) => entries[id]).filter(Boolean) as TimerEntry[];
-  const quickEntries = (dashboard?.quick_access ?? []).map((q) => entries[`q-${q.id}`]).filter(Boolean) as TimerEntry[];
-  const liveSeconds = (id: string) => (entries[id]?.elapsed ?? 0) + (runningId === id ? tick : 0);
+  const assignedEntries     = activeAssignmentIds.map((id) => entries[id]).filter(Boolean) as TimerEntry[];
+  const quickEntries        = (dashboard?.quick_access ?? []).map((q) => entries[`q-${q.id}`]).filter(Boolean) as TimerEntry[];
+  const liveSeconds         = (id: string) => (entries[id]?.elapsed ?? 0) + (runningId === id ? tick : 0);
 
   const userName = dashboard?.user.name ?? "";
   const [first, ...rest] = userName.split(" ");
 
   const sharedRowProps = {
-    onPlay: handlePlay,
-    onStop: handleStop,
+    onPlay:          handlePlay,
+    onStop:          handleStop,
     onEndDateChange: handleEndDateChange,
     onEndTimeChange: handleEndTimeChange,
     onRemarksChange: handleRemarksChange,
-    onRemarksSave: handleRemarksSave,
+    onRemarksSave:   handleRemarksSave,
   };
 
   if (!authChecked || isMembershipLoading || isMembershipFetching) {
     return <FullScreenMessage message="Checking access…" />;
   }
-  if (!isAdmin) return null;
-  if (loading) return <FullScreenMessage message="Loading dashboard…" />;
-  if (error) return <FullScreenMessage message={error} color="#E53935" />;
+  if (!isAdmin)  return null;
+  if (loading)   return <FullScreenMessage message="Loading dashboard…" />;
+  if (error)     return <FullScreenMessage message={error} color="#E53935" />;
 
   return (
     <>
@@ -1484,14 +1659,7 @@ export default function DashAdminPage() {
             }}
           >
             <div>
-              <div
-                style={{
-                  fontSize: isMobile ? 18 : 22,
-                  fontWeight: 300,
-                  color: "#111",
-                  lineHeight: 1.3,
-                }}
-              >
+              <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 300, color: "#111", lineHeight: 1.3 }}>
                 Welcome back, <span style={{ fontWeight: 700 }}>{first}</span>
                 {rest.length > 0 && <span style={{ fontWeight: 300 }}> {rest.join(" ")}</span>}
               </div>
@@ -1529,10 +1697,8 @@ export default function DashAdminPage() {
             </div>
           </div>
 
-          {/* Live Workers Panel */}
-          <div style={{ marginBottom: 28 }}>
-            <LiveWorkersPanel />
-          </div>
+          {/* ── Live bar: active workers shown, inactive collapsed ── */}
+          <LiveBar />
 
           {/* Save error */}
           {saveError && (
@@ -1554,15 +1720,9 @@ export default function DashAdminPage() {
             </div>
           )}
 
-          {/* Two-column layout for desktop */}
-          <div
-            style={{
-              display: "flex",
-              gap: 24,
-              flexDirection: isMobile ? "column" : "row",
-            }}
-          >
-            {/* Main content - Left column */}
+          {/* Two-column layout */}
+          <div style={{ display: "flex", gap: 24, flexDirection: isMobile ? "column" : "row" }}>
+            {/* Left column */}
             <div style={{ flex: 2, minWidth: 0 }}>
               {/* Assignments */}
               <SectionHeader label="My Assignments" count={assignedEntries.length} accent="#6366F1" />
@@ -1624,10 +1784,8 @@ export default function DashAdminPage() {
               )}
             </div>
 
-            {/* Right column - empty for now, can add more widgets later */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {/* Future widgets can go here */}
-            </div>
+            {/* Right column */}
+            <div style={{ flex: 1, minWidth: 0 }} />
           </div>
 
           <Divider />
@@ -1641,16 +1799,16 @@ export default function DashAdminPage() {
               gap: 7,
             }}
           >
-            <NavButton label="My Worklogs" href="/new/hour/hournormal" />
-            <NavButton label="Worklog Overview" href="/new/hour/houradmin" />
-            <NavButton label="Company Finance" href="/new/stat/numbers" />
-            <NavButton label="Finance Pie" href="/new/stat/pie" />
-            <NavButton label="Add Expense" href="/new/exp/expnormal" />
-            <NavButton label="Expenses" href="/new/exp/expadmin" />
-            <NavButton label="Salary Calc" href="/new/pay" />
-            <NavButton label="Add Revenue" href="/new/revenue" />
-            <NavButton label="Project Info" href="/new/projectdash" />
-            <NavButton label="Leaves" href="/new/leave" />
+            <NavButton label="My Worklogs"       href="/new/hour/hournormal"  />
+            <NavButton label="Worklog Overview"   href="/new/hour/houradmin"   />
+            <NavButton label="Company Finance"    href="/new/stat/numbers"     />
+            <NavButton label="Finance Pie"        href="/new/stat/pie"         />
+            <NavButton label="Add Expense"        href="/new/exp/expnormal"    />
+            <NavButton label="Expenses"           href="/new/exp/expadmin"     />
+            <NavButton label="Salary Calc"        href="/new/pay"              />
+            <NavButton label="Add Revenue"        href="/new/revenue"          />
+            <NavButton label="Project Info"       href="/new/projectdash"      />
+            <NavButton label="Leaves"             href="/new/leave"            />
           </div>
         </div>
       </div>

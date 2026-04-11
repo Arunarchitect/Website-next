@@ -85,7 +85,7 @@ export default function LiveWorkersPanel({ orgId }: { orgId?: number }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
         <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: activeCount > 0 ? "#1D9E75" : "#888" }} />
         <span style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: "0.07em", textTransform: "uppercase" }}>
-          Who's working now
+          Who`&apos;`s working now
         </span>
         <span style={{ fontSize: 10, color: "#999", background: "#F3F4F6", borderRadius: 99, padding: "1px 8px" }}>
           {activeCount} active · {entries.length - activeCount} idle

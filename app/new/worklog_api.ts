@@ -33,16 +33,12 @@ export interface WorkLogEntry {
   finalised: boolean;
 }
 
-// Update the WorkLogPage interface
 export interface WorkLogPage {
   count:   number;
   page:    number;
   pages:   number;
-  total_minutes: number;  // ← ADD THIS
   results: WorkLogEntry[];
 }
-
-
 
 export interface OrgOption     { id: number; name: string; }
 export interface ProjectOption { id: number; name: string; organisation_id: number; }
@@ -93,7 +89,6 @@ export function currentWeekRange(): { from: string; to: string } {
   return { from: fmt(mon), to: fmt(sun) };
 }
 
-// Update fetchMyWorkLogs function
 export async function fetchMyWorkLogs(params?: {
   from?: string; to?: string; page?: number;
 }): Promise<WorkLogPage> {
@@ -104,13 +99,7 @@ export async function fetchMyWorkLogs(params?: {
   const res = await fetch(url.toString(), { headers: authHeaders() });
   if (!res.ok) throw new Error(`Fetch worklogs failed: ${res.status}`);
   const data = await res.json();
-  return { 
-    count: data.count, 
-    page: data.page, 
-    pages: data.pages, 
-    total_minutes: data.total_minutes ?? 0,  // ← ADD THIS
-    results: data.results.map(mapWorklog) 
-  };
+  return { count: data.count, page: data.page, pages: data.pages, results: data.results.map(mapWorklog) };
 }
 
 /**
@@ -143,11 +132,8 @@ export async function fetchDeliverablesByProject(projectId?: number): Promise<De
   return (await res.json()).map(mapDeliverable);
 }
 
-export async function fetchInitialDeliverables(
-  lastWorklog: WorkLogEntry | null
-): Promise<DeliverableOption[]> {
+export async function fetchInitialDeliverables(lastWorklog: WorkLogEntry | null): Promise<DeliverableOption[]> {
   return fetchDeliverablesByProject(lastWorklog?.project_id ?? undefined);
-  //                                ↑ null → undefined → fetches ALL deliverables
 }
 
 export async function createWorkLog(payload: {
