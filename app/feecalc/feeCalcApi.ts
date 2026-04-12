@@ -4,6 +4,19 @@ const BASE = process.env.NEXT_PUBLIC_HOST ?? "";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface MemberBillingRateItem {
+  id: number;
+  user: number;
+  user_display: string;       // e.g. "Arjun Menon"  — returned by read serializer
+  rate_per_hour: string;
+  currency: string;
+  effective_from: string;     // "YYYY-MM-DD"
+  effective_to: string | null;
+  is_active: boolean;
+  project: number | null;     // null = template-wide rate
+  remarks: string | null;
+}
+
 export interface FeeTemplateOption {
   id: number;
   name: string;
@@ -22,6 +35,8 @@ export interface FeeTemplateOption {
   stage_count: number;
   total_stage_percentage: string;
   template_stages: FeeTemplateStageDetail[];
+  // Only populated for hourly templates (nested by read serializer)
+  member_billing_rates: MemberBillingRateItem[];
 }
 
 export interface FeeTemplateStageDetail {
@@ -89,10 +104,6 @@ function authHeaders(): Record<string, string> {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-/**
- * Fetch all active fee templates for the given organisation.
- * Uses the read serializer (nested stages, quantity_unit object, etc.)
- */
 export async function fetchFeeTemplates(
   organisationId?: number,
 ): Promise<FeeTemplateOption[]> {
@@ -106,9 +117,6 @@ export async function fetchFeeTemplates(
   return res.json();
 }
 
-/**
- * Fetch a single fee template by id (includes nested stages + deliverable templates).
- */
 export async function fetchFeeTemplate(id: number): Promise<FeeTemplateOption> {
   const res = await fetch(`${BASE}/api/feecalc/fee-templates/${id}/`, {
     headers: authHeaders(),
@@ -117,10 +125,6 @@ export async function fetchFeeTemplate(id: number): Promise<FeeTemplateOption> {
   return res.json();
 }
 
-/**
- * Stateless fee preview — no DB write.
- * Calls POST /api/feecalc/preview/
- */
 export async function fetchFeePreview(params: {
   fee_template_id: number;
   quantity: number | string;
@@ -143,17 +147,12 @@ export async function fetchFeePreview(params: {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
-      (err as { detail?: string }).detail ??
-        `Preview failed: ${res.status}`,
+      (err as { detail?: string }).detail ?? `Preview failed: ${res.status}`,
     );
   }
   return res.json();
 }
 
-/**
- * Convenience — get live preview straight from the template's own endpoint.
- * GET /api/feecalc/fee-templates/{id}/preview/?quantity=…&discount_percentage=…
- */
 export async function fetchTemplatePreview(
   templateId: number,
   quantity: number | string,
@@ -174,14 +173,13 @@ export async function fetchTemplatePreview(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
-      (err as { detail?: string }).detail ??
-        `Preview failed: ${res.status}`,
+      (err as { detail?: string }).detail ?? `Preview failed: ${res.status}`,
     );
   }
   return res.json();
 }
 
-// ─── Formatting helpers (re-exported for use in UI) ───────────────────────────
+// ─── Formatting helpers ───────────────────────────────────────────────────────
 
 export function fmtCurrency(
   value: string | number | null | undefined,
