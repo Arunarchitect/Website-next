@@ -8,6 +8,7 @@ export interface MemberBillingRateItem {
   id: number;
   user: number;
   user_display: string;       // e.g. "Arjun Menon"  — returned by read serializer
+  role?: string | null;       // e.g. "Project Head" — designation/role
   rate_per_hour: string;
   currency: string;
   effective_from: string;     // "YYYY-MM-DD"
