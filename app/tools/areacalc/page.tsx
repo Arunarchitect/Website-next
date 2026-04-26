@@ -1,6 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
 
 // ─── CONSTANTS ───────────────────────────────────────────────
 
@@ -82,14 +84,70 @@ const CATEGORY_META = {
   hospitality: { label: "Hospitality", color: "#9D174D", bg: "#FDF2F8", border: "#FBCFE8", badge: "#831843", badgeBg: "#FCE7F3" },
 };
 
-const FLOOR_LABELS = { "-1": "Basement", 0: "Ground Floor", 1: "First Floor", 2: "Second Floor", 3: "Third Floor", 4: "Fourth Floor", 5: "Fifth Floor" };
+const FLOOR_LABELS: Record<number, string> = { "-1": "Basement", 0: "Ground Floor", 1: "First Floor", 2: "Second Floor", 3: "Third Floor", 4: "Fourth Floor", 5: "Fifth Floor" };
 const FLOORS = [-1, 0, 1, 2, 3, 4, 5];
 
-const getFloorLabel = (f) => FLOOR_LABELS[f] ?? `Floor ${f}`;
+const getFloorLabel = (f: number) => FLOOR_LABELS[f] ?? `Floor ${f}`;
+
+// ─── TYPES ────────────────────────────────────────────────────
+
+type UnitKey = keyof typeof UNIT_SYSTEMS;
+type CategoryKey = keyof typeof CATEGORY_META;
+type StateKey = keyof typeof LOCATION_RATES;
+
+interface SubSpaceTemplate {
+  id: string;
+  name: string;
+  L: number;
+  B: number;
+  remarks: string;
+}
+
+interface SpaceTemplate {
+  id: string;
+  name: string;
+  category: CategoryKey;
+  L: number;
+  B: number;
+  icon: string;
+  remarks: string;
+  subSpaces?: SubSpaceTemplate[];
+}
+
+interface SubSpaceInstance {
+  instanceId: string;
+  templateId: string;
+  name: string;
+  L: number;
+  B: number;
+  remarks: string;
+}
+
+interface SpaceInstance {
+  instanceId: string;
+  templateId: string;
+  name: string;
+  category: CategoryKey;
+  L: number;
+  B: number;
+  floor: number;
+  remarks: string;
+  icon: string;
+  subSpaces: SubSpaceInstance[];
+  isCustom: boolean;
+}
+
+interface ProjectTemplate {
+  id: string;
+  label: string;
+  description: string;
+  icon: string;
+  spaces: { templateId: string; floor: number; L: number; B: number; subIds: string[] }[];
+}
 
 // ─── SPACE DATA ──────────────────────────────────────────────
 
-const SPACE_TEMPLATES = [
+const SPACE_TEMPLATES: SpaceTemplate[] = [
   // RESIDENCE
   { id: "res_master_bed", name: "Master Bedroom", category: "residence", L: 14, B: 12, icon: "🛏️", remarks: "Primary bedroom with attached bath", subSpaces: [
     { id: "sub_att_toilet", name: "Attached Toilet", L: 8, B: 5, remarks: "En-suite bathroom" },
@@ -168,7 +226,7 @@ const SPACE_TEMPLATES = [
 ];
 
 // ─── PROJECT TEMPLATES ────────────────────────────────────────
-const PROJECT_TEMPLATES = [
+const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: "tpl_budget_home",
     label: "Budget Home",
@@ -230,43 +288,43 @@ const PROJECT_TEMPLATES = [
 let _id = 0;
 const uid = () => `inst_${++_id}_${Math.random().toString(36).slice(2, 7)}`;
 
-function toUnit(sqftVal, unit) {
+function toUnit(sqftVal: number, unit: UnitKey) {
   if (unit === "sqm") return sqftVal * 0.0929;
   return sqftVal;
 }
-function fromUnit(val, unit) {
+function fromUnit(val: number, unit: UnitKey) {
   if (unit === "sqm") return val / 0.0929;
   return val;
 }
-function dimToUnit(ftVal, unit) {
+function dimToUnit(ftVal: number, unit: UnitKey) {
   if (unit === "sqm") return ftVal * 0.3048;
   return ftVal;
 }
-function dimFromUnit(val, unit) {
+function dimFromUnit(val: number, unit: UnitKey) {
   if (unit === "sqm") return val / 0.3048;
   return val;
 }
 
-function fmt(n, unit) {
+function fmt(n: number, unit: UnitKey) {
   const display = toUnit(n, unit);
   return display.toLocaleString("en-IN", { maximumFractionDigits: 1 });
 }
-function fmtDim(ft, unit) {
+function fmtDim(ft: number, unit: UnitKey) {
   return dimToUnit(ft, unit).toFixed(unit === "sqm" ? 2 : 1);
 }
-function fmtCost(n) {
+function fmtCost(n: number) {
   if (n >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
   if (n >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
   return `₹${n.toLocaleString("en-IN")}`;
 }
 
-function calcSpaceArea(space) {
+function calcSpaceArea(space: SpaceInstance) {
   const main = space.L * space.B;
   const sub = space.subSpaces.reduce((a, s) => a + s.L * s.B, 0);
   return main + sub;
 }
 
-function calcGrossArea(spaces, wall, circ, costPerSqft) {
+function calcGrossArea(spaces: SpaceInstance[], wall: number, circ: number, costPerSqft: number) {
   const net = spaces.reduce((a, s) => a + calcSpaceArea(s), 0);
   const wallA = (net * wall) / 100;
   const circA = (net * circ) / 100;
@@ -274,23 +332,23 @@ function calcGrossArea(spaces, wall, circ, costPerSqft) {
   return { net, wallA, circA, gross, cost: gross * costPerSqft };
 }
 
-function groupByFloor(spaces) {
-  const map = new Map();
+function groupByFloor(spaces: SpaceInstance[]) {
+  const map = new Map<number, SpaceInstance[]>();
   for (const s of spaces) {
     if (!map.has(s.floor)) map.set(s.floor, []);
-    map.get(s.floor).push(s);
+    map.get(s.floor)!.push(s);
   }
   return new Map([...map.entries()].sort((a, b) => a[0] - b[0]));
 }
 
-function makeSpaceFromTemplate(t, floor, subIds, overrideL, overrideB) {
+function makeSpaceFromTemplate(t: SpaceTemplate, floor: number, subIds: string[], overrideL?: number, overrideB?: number): SpaceInstance {
   const L = overrideL ?? t.L;
   const B = overrideB ?? t.B;
   const subSpaces = (subIds ?? []).map((sid) => {
     const subT = t.subSpaces?.find((s) => s.id === sid);
     if (!subT) return null;
     return { instanceId: uid(), templateId: subT.id, name: subT.name, L: subT.L, B: subT.B, remarks: subT.remarks };
-  }).filter(Boolean);
+  }).filter((x): x is SubSpaceInstance => x !== null);
   return {
     instanceId: uid(),
     templateId: t.id,
@@ -307,8 +365,8 @@ function makeSpaceFromTemplate(t, floor, subIds, overrideL, overrideB) {
 
 // ─── COMPONENTS ───────────────────────────────────────────────
 
-function DimAreaInput({ space, onUpdate, unit }) {
-  const [editMode, setEditMode] = useState("dims");
+function DimAreaInput({ space, onUpdate, unit }: { space: SpaceInstance; onUpdate: (s: SpaceInstance) => void; unit: UnitKey }) {
+  const [editMode, setEditMode] = useState<"dims" | "area">("dims");
   const uLabel = UNIT_SYSTEMS[unit].dimLabel;
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
 
@@ -316,15 +374,15 @@ function DimAreaInput({ space, onUpdate, unit }) {
   const displayB = parseFloat(fmtDim(space.B, unit));
   const displayArea = parseFloat(fmt(space.L * space.B, unit));
 
-  function handleL(val) {
+  function handleL(val: string) {
     const ft = dimFromUnit(parseFloat(val) || 1, unit);
     onUpdate({ ...space, L: ft });
   }
-  function handleB(val) {
+  function handleB(val: string) {
     const ft = dimFromUnit(parseFloat(val) || 1, unit);
     onUpdate({ ...space, B: ft });
   }
-  function handleArea(val) {
+  function handleArea(val: string) {
     const targetSqft = fromUnit(parseFloat(val) || 1, unit);
     const curArea = space.L * space.B;
     if (curArea === 0) return;
@@ -358,7 +416,7 @@ function DimAreaInput({ space, onUpdate, unit }) {
   );
 }
 
-function SubSpaceRow({ sub, onUpdate, onRemove, unit }) {
+function SubSpaceRow({ sub, onUpdate, onRemove, unit }: { sub: SubSpaceInstance; onUpdate: (s: SubSpaceInstance) => void; onRemove: () => void; unit: UnitKey }) {
   const uLabel = UNIT_SYSTEMS[unit].dimLabel;
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   const dL = parseFloat(fmtDim(sub.L, unit));
@@ -378,7 +436,7 @@ function SubSpaceRow({ sub, onUpdate, onRemove, unit }) {
   );
 }
 
-function SpaceCard({ space, onUpdate, onRemove, unit }) {
+function SpaceCard({ space, onUpdate, onRemove, unit }: { space: SpaceInstance; onUpdate: (s: SpaceInstance) => void; onRemove: () => void; unit: UnitKey }) {
   const [expanded, setExpanded] = useState(true);
   const [addingCustomSub, setAddingCustomSub] = useState(false);
   const [customSubName, setCustomSubName] = useState("");
@@ -391,7 +449,7 @@ function SpaceCard({ space, onUpdate, onRemove, unit }) {
   const hasSubs = space.subSpaces.length > 0;
   const availableSubs = template?.subSpaces ?? [];
 
-  function addSubFromTemplate(subId) {
+  function addSubFromTemplate(subId: string) {
     const subT = availableSubs.find((s) => s.id === subId);
     if (!subT) return;
     onUpdate({ ...space, subSpaces: [...space.subSpaces, { instanceId: uid(), templateId: subT.id, name: subT.name, L: subT.L, B: subT.B, remarks: subT.remarks }] });
@@ -404,10 +462,10 @@ function SpaceCard({ space, onUpdate, onRemove, unit }) {
     setAddingCustomSub(false);
     setAddSubOpen(false);
   }
-  function updateSub(id, updated) {
+  function updateSub(id: string, updated: SubSpaceInstance) {
     onUpdate({ ...space, subSpaces: space.subSpaces.map((s) => s.instanceId === id ? updated : s) });
   }
-  function removeSub(id) {
+  function removeSub(id: string) {
     onUpdate({ ...space, subSpaces: space.subSpaces.filter((s) => s.instanceId !== id) });
   }
 
@@ -472,9 +530,9 @@ function SpaceCard({ space, onUpdate, onRemove, unit }) {
   );
 }
 
-function CustomSpaceModal({ onAdd, onClose }) {
+function CustomSpaceModal({ onAdd, onClose }: { onAdd: (s: SpaceInstance) => void; onClose: () => void }) {
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("residence");
+  const [category, setCategory] = useState<CategoryKey>("residence");
   const [L, setL] = useState(12);
   const [B, setB] = useState(10);
   const [icon, setIcon] = useState("📐");
@@ -494,7 +552,7 @@ function CustomSpaceModal({ onAdd, onClose }) {
         <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Space Name *</label>
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Server Room, Prayer Hall…" style={{ width: "100%", fontSize: 14, padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", marginBottom: 12, boxSizing: "border-box" }} />
         <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Category</label>
-        <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", marginBottom: 12 }}>
+        <select value={category} onChange={(e) => setCategory(e.target.value as CategoryKey)} style={{ width: "100%", fontSize: 14, padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", marginBottom: 12 }}>
           {Object.entries(CATEGORY_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
         <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
@@ -524,236 +582,24 @@ function CustomSpaceModal({ onAdd, onClose }) {
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────
-export default function App() {
-  const [spaces, setSpaces] = useState([]);
-  const [unit, setUnit] = useState("sqft");
-  const [wall, setWall] = useState(10);
-  const [circ, setCirc] = useState(15);
-  const [stateKey, setStateKey] = useState("kerala");
-  const [regionKey, setRegionKey] = useState("kochi");
-  const [customRate, setCustomRate] = useState(null);
-  const [activeCategory, setActiveCategory] = useState("all");
-  const [searchQ, setSearchQ] = useState("");
-  const [activeFloor, setActiveFloor] = useState("all");
-  const [projectName, setProjectName] = useState("Untitled Project");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [showCustomModal, setShowCustomModal] = useState(false);
-  const [showTemplatePanel, setShowTemplatePanel] = useState(false);
-
-  const costPerSqft = customRate ?? LOCATION_RATES[stateKey]?.regions[regionKey]?.rate ?? 2000;
-  const aLabel = UNIT_SYSTEMS[unit].areaLabel;
-
-  const stateObj = LOCATION_RATES[stateKey];
-  const regionOptions = stateObj ? Object.entries(stateObj.regions) : [];
-
-  const filteredTemplates = useMemo(() => SPACE_TEMPLATES.filter((t) => {
-    const catOk = activeCategory === "all" || t.category === activeCategory;
-    const qOk = !searchQ.trim() || t.name.toLowerCase().includes(searchQ.toLowerCase());
-    return catOk && qOk;
-  }), [activeCategory, searchQ]);
-
-  const addSpace = useCallback((templateId) => {
-    const t = SPACE_TEMPLATES.find((x) => x.id === templateId);
-    if (!t) return;
-    const floor = typeof activeFloor === "number" ? activeFloor : 0;
-    setSpaces((prev) => [...prev, makeSpaceFromTemplate(t, floor, [])]);
-  }, [activeFloor]);
-
-  const addCustomSpace = useCallback((space) => {
-    setSpaces((prev) => [...prev, space]);
-  }, []);
-
-  const updateSpace = useCallback((id, updated) => {
-    setSpaces((prev) => prev.map((s) => s.instanceId === id ? updated : s));
-  }, []);
-
-  const removeSpace = useCallback((id) => {
-    setSpaces((prev) => prev.filter((s) => s.instanceId !== id));
-  }, []);
-
-  function loadTemplate(tpl) {
-    const newSpaces = tpl.spaces.map(({ templateId, floor, L, B, subIds }) => {
-      const t = SPACE_TEMPLATES.find((x) => x.id === templateId);
-      if (!t) return null;
-      return makeSpaceFromTemplate(t, floor, subIds, L, B);
-    }).filter(Boolean);
-    setSpaces(newSpaces);
-    setProjectName(tpl.label);
-    setShowTemplatePanel(false);
-  }
-
-  const totals = useMemo(() => calcGrossArea(spaces, wall, circ, costPerSqft), [spaces, wall, circ, costPerSqft]);
-  const floorGroups = useMemo(() => groupByFloor(spaces), [spaces]);
-  const usedFloors = useMemo(() => Array.from(floorGroups.keys()).sort((a, b) => a - b), [floorGroups]);
-  const visibleSpaces = useMemo(() => activeFloor === "all" ? spaces : spaces.filter((s) => s.floor === activeFloor), [spaces, activeFloor]);
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#f8f7f4", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
-      {/* HEADER */}
-      <header style={{ position: "sticky", top: 0, zIndex: 100, background: "#fff", borderBottom: "1px solid #e5e7eb", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "10px 16px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <span style={{ fontSize: 22 }}>📐</span>
-          <div>
-            <input value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ fontSize: 16, fontWeight: 700, color: "#111827", background: "transparent", border: "none", borderBottom: "2px solid transparent", outline: "none", maxWidth: 200 }} onFocus={(e) => e.target.style.borderBottomColor="#f59e0b"} onBlur={(e) => e.target.style.borderBottomColor="transparent"} />
-            <p style={{ fontSize: 11, color: "#9ca3af", margin: 0 }}>Area Calculator</p>
-          </div>
-
-          {/* Quick stats */}
-          <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
-            <div style={{ textAlign: "center", display: "none" }} className="sm-show">
-              <p style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", margin: 0 }}>Net Area</p>
-              <p style={{ fontFamily: "monospace", fontWeight: 700, color: "#374151", margin: 0, fontSize: 14 }}>{fmt(totals.net, unit)} {aLabel}</p>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", margin: 0 }}>Gross</p>
-              <p style={{ fontFamily: "monospace", fontWeight: 700, color: "#d97706", margin: 0, fontSize: 14 }}>{fmt(totals.gross, unit)} {aLabel}</p>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", margin: 0 }}>Est. Cost</p>
-              <p style={{ fontFamily: "monospace", fontWeight: 700, color: "#059669", margin: 0, fontSize: 14 }}>{fmtCost(totals.cost)}</p>
-            </div>
-
-            {/* Unit toggle */}
-            <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
-              {Object.entries(UNIT_SYSTEMS).map(([k, v]) => (
-                <button key={k} onClick={() => setUnit(k)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "none", background: unit === k ? "#fff" : "transparent", fontWeight: unit === k ? 700 : 400, cursor: "pointer", color: unit === k ? "#111827" : "#6b7280", boxShadow: unit === k ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>{v.areaLabel}</button>
-              ))}
-            </div>
-
-            <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ fontSize: 13, padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: settingsOpen ? "#fef3c7" : "#fff", cursor: "pointer", color: "#374151" }}>⚙️ Settings</button>
-          </div>
-        </div>
-
-        {/* Settings panel */}
-        {settingsOpen && (
-          <div style={{ background: "#fffbeb", borderTop: "1px solid #fde68a", padding: "12px 16px" }}>
-            <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-end" }}>
-              {/* State/Region */}
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>STATE</label>
-                <select value={stateKey} onChange={(e) => { setStateKey(e.target.value); const first = Object.keys(LOCATION_RATES[e.target.value].regions)[0]; setRegionKey(first); setCustomRate(null); }} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", minWidth: 140 }}>
-                  {Object.entries(LOCATION_RATES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>CITY / REGION</label>
-                <select value={regionKey} onChange={(e) => { setRegionKey(e.target.value); setCustomRate(null); }} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", minWidth: 180 }}>
-                  {regionOptions.map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>RATE (₹/sqft) <span style={{ fontWeight: 400, color: "#9ca3af" }}>— override</span></label>
-                <input type="number" min={500} step={100} value={customRate ?? costPerSqft} onChange={(e) => setCustomRate(parseInt(e.target.value)||null)} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", width: 100 }} />
-                {customRate && <button onClick={() => setCustomRate(null)} style={{ marginLeft: 6, fontSize: 11, color: "#ef4444", background: "none", border: "none", cursor: "pointer" }}>reset</button>}
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>WALL THICKNESS: {wall}%</label>
-                <input type="range" min={5} max={20} step={1} value={wall} onChange={(e) => setWall(parseInt(e.target.value))} style={{ width: 120, accentColor: "#f59e0b" }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>CIRCULATION: {circ}%</label>
-                <input type="range" min={5} max={25} step={1} value={circ} onChange={(e) => setCirc(parseInt(e.target.value))} style={{ width: 120, accentColor: "#f59e0b" }} />
-              </div>
-              <div style={{ fontSize: 12, color: "#6b7280", borderLeft: "2px solid #fcd34d", paddingLeft: 12 }}>
-                <strong style={{ color: "#92400e" }}>₹{costPerSqft.toLocaleString("en-IN")}/sqft</strong><br />
-                <span style={{ fontSize: 11 }}>{stateObj?.label} · {regionOptions.find(([k]) => k === regionKey)?.[1]?.label}</span>
-              </div>
-            </div>
-          </div>
-        )}
-      </header>
-
-      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "16px", display: "flex", gap: 16, alignItems: "flex-start" }}>
-        {/* PALETTE — desktop sidebar / mobile drawer */}
-        <aside style={{ width: 260, flexShrink: 0, display: "none" }} id="desktop-palette">
-          <PalettePanel filteredTemplates={filteredTemplates} activeCategory={activeCategory} setActiveCategory={setActiveCategory} searchQ={searchQ} setSearchQ={setSearchQ} addSpace={addSpace} showTemplatePanel={showTemplatePanel} setShowTemplatePanel={setShowTemplatePanel} loadTemplate={loadTemplate} setShowCustomModal={setShowCustomModal} />
-        </aside>
-
-        {/* MAIN */}
-        <main style={{ flex: 1, minWidth: 0 }}>
-          {/* Mobile FABs */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <button onClick={() => setPaletteOpen(true)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>📦 Add Space</button>
-            <button onClick={() => setShowTemplatePanel(!showTemplatePanel)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: showTemplatePanel ? "#fef3c7" : "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>🏗️ Templates</button>
-            <button onClick={() => setShowCustomModal(true)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>✏️ Custom Space</button>
-          </div>
-
-          {/* Templates strip */}
-          {showTemplatePanel && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16, padding: 16, background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb" }}>
-              <p style={{ width: "100%", margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" }}>Project Templates — click to load</p>
-              {PROJECT_TEMPLATES.map((tpl) => (
-                <button key={tpl.id} onClick={() => loadTemplate(tpl)} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, padding: "12px 16px", borderRadius: 12, border: "2px solid #e5e7eb", background: "#f9fafb", cursor: "pointer", minWidth: 180, textAlign: "left" }}>
-                  <span style={{ fontSize: 28 }}>{tpl.icon}</span>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>{tpl.label}</span>
-                  <span style={{ fontSize: 11, color: "#6b7280" }}>{tpl.description}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Floor tabs */}
-          <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 12 }}>
-            <button onClick={() => setActiveFloor("all")} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: "none", background: activeFloor === "all" ? "#374151" : "#fff", color: activeFloor === "all" ? "#fff" : "#6b7280", fontWeight: 700, fontSize: 12, cursor: "pointer", border: activeFloor !== "all" ? "1px solid #e5e7eb" : "none" }}>All</button>
-            {usedFloors.map((f) => (
-              <button key={f} onClick={() => setActiveFloor(f)} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: activeFloor !== f ? "1px solid #e5e7eb" : "none", background: activeFloor === f ? "#f59e0b" : "#fff", color: activeFloor === f ? "#fff" : "#6b7280", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                {getFloorLabel(f)} <span style={{ opacity: 0.7 }}>({floorGroups.get(f)?.length ?? 0})</span>
-              </button>
-            ))}
-            {FLOORS.filter((f) => !usedFloors.includes(f)).map((f) => (
-              <button key={f} onClick={() => setActiveFloor(f)} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: "1px dashed #d1d5db", background: "transparent", color: "#9ca3af", fontSize: 12, cursor: "pointer" }}>+ {getFloorLabel(f)}</button>
-            ))}
-          </div>
-
-          {/* Spaces */}
-          {visibleSpaces.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderRadius: 16, border: "2px dashed #d1d5db", background: "#fff", padding: "60px 24px", textAlign: "center" }}>
-              <span style={{ fontSize: 48, marginBottom: 12 }}>🏗️</span>
-              <p style={{ fontSize: 18, fontWeight: 700, color: "#9ca3af", margin: "0 0 6px" }}>No spaces yet</p>
-              <p style={{ fontSize: 14, color: "#d1d5db", margin: 0 }}>Use "Add Space", "Templates" or "Custom Space" above</p>
-            </div>
-          ) : activeFloor === "all" ? (
-            Array.from(floorGroups.entries()).map(([floor, fs]) => (
-              <div key={floor} style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" }}>{getFloorLabel(floor)}</span>
-                  <div style={{ flex: 1, borderTop: "1px solid #e5e7eb" }} />
-                  <span style={{ fontSize: 12, fontFamily: "monospace", color: "#9ca3af" }}>{fmt(fs.reduce((a, s) => a + calcSpaceArea(s), 0), unit)} {aLabel}</span>
-                </div>
-                {fs.map((s) => <SpaceCard key={s.instanceId} space={s} unit={unit} onUpdate={(u) => updateSpace(s.instanceId, u)} onRemove={() => removeSpace(s.instanceId)} />)}
-              </div>
-            ))
-          ) : (
-            visibleSpaces.map((s) => <SpaceCard key={s.instanceId} space={s} unit={unit} onUpdate={(u) => updateSpace(s.instanceId, u)} onRemove={() => removeSpace(s.instanceId)} />)
-          )}
-
-          {/* SUMMARY */}
-          {spaces.length > 0 && <SummaryCard totals={totals} unit={unit} wall={wall} circ={circ} costPerSqft={costPerSqft} spaces={spaces} floorGroups={floorGroups} stateKey={stateKey} regionKey={regionKey} />}
-        </main>
-      </div>
-
-      {/* Mobile palette drawer */}
-      {paletteOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 150, display: "flex" }}>
-          <div style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} onClick={() => setPaletteOpen(false)} />
-          <div style={{ width: 300, background: "#fff", height: "100%", overflowY: "auto", padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontWeight: 700, fontSize: 14 }}>Space Palette</span>
-              <button onClick={() => setPaletteOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#6b7280" }}>✕</button>
-            </div>
-            <PalettePanel filteredTemplates={filteredTemplates} activeCategory={activeCategory} setActiveCategory={setActiveCategory} searchQ={searchQ} setSearchQ={setSearchQ} addSpace={(id) => { addSpace(id); setPaletteOpen(false); }} showTemplatePanel={false} setShowTemplatePanel={() => {}} loadTemplate={() => {}} setShowCustomModal={() => { setShowCustomModal(true); setPaletteOpen(false); }} />
-          </div>
-        </div>
-      )}
-
-      {showCustomModal && <CustomSpaceModal onAdd={addCustomSpace} onClose={() => setShowCustomModal(false)} />}
-    </div>
-  );
-}
-
-function PalettePanel({ filteredTemplates, activeCategory, setActiveCategory, searchQ, setSearchQ, addSpace, setShowCustomModal }) {
+// ─── PALETTE PANEL ────────────────────────────────────────────
+function PalettePanel({
+  filteredTemplates,
+  activeCategory,
+  setActiveCategory,
+  searchQ,
+  setSearchQ,
+  addSpace,
+  setShowCustomModal,
+}: {
+  filteredTemplates: SpaceTemplate[];
+  activeCategory: string;
+  setActiveCategory: (c: string) => void;
+  searchQ: string;
+  setSearchQ: (q: string) => void;
+  addSpace: (id: string) => void;
+  setShowCustomModal: (v: boolean) => void;
+}) {
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
       <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, margin: "0 0 8px" }}>Space Palette</p>
@@ -770,7 +616,7 @@ function PalettePanel({ filteredTemplates, activeCategory, setActiveCategory, se
             <span style={{ fontSize: 18 }}>{t.icon}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</p>
-              <p style={{ fontSize: 10, color: "#9ca3af", margin: 0 }}>{t.L}′ × {t.B}′ = {t.L * t.B} sqft</p>
+              <p style={{ fontSize: 10, color: "#9ca3af", margin: 0 }}>{t.L}&apos; × {t.B}&apos; = {t.L * t.B} sqft</p>
             </div>
             <span style={{ fontSize: 16, color: "#d1d5db" }}>+</span>
           </button>
@@ -782,10 +628,31 @@ function PalettePanel({ filteredTemplates, activeCategory, setActiveCategory, se
   );
 }
 
-function SummaryCard({ totals, unit, wall, circ, costPerSqft, spaces, floorGroups, stateKey, regionKey }) {
+// ─── SUMMARY CARD ─────────────────────────────────────────────
+function SummaryCard({
+  totals,
+  unit,
+  wall,
+  circ,
+  costPerSqft,
+  spaces,
+  floorGroups,
+  stateKey,
+  regionKey,
+}: {
+  totals: { net: number; wallA: number; circA: number; gross: number; cost: number };
+  unit: UnitKey;
+  wall: number;
+  circ: number;
+  costPerSqft: number;
+  spaces: SpaceInstance[];
+  floorGroups: Map<number, SpaceInstance[]>;
+  stateKey: StateKey;
+  regionKey: string;
+}) {
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   const stateLabel = LOCATION_RATES[stateKey]?.label;
-  const regionLabel = Object.values(LOCATION_RATES[stateKey]?.regions ?? {}).find((_, i) => Object.keys(LOCATION_RATES[stateKey]?.regions ?? {})[i] === regionKey)?.label;
+  const regionLabel = Object.entries(LOCATION_RATES[stateKey]?.regions ?? {}).find(([k]) => k === regionKey)?.[1]?.label;
 
   return (
     <div style={{ borderRadius: 16, border: "1px solid #e5e7eb", background: "#fff", padding: 20, marginTop: 8 }}>
@@ -846,6 +713,235 @@ function SummaryCard({ totals, unit, wall, circ, costPerSqft, spaces, floorGroup
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────
+export default function App() {
+  const [spaces, setSpaces] = useState<SpaceInstance[]>([]);
+  const [unit, setUnit] = useState<UnitKey>("sqft");
+  const [wall, setWall] = useState(10);
+  const [circ, setCirc] = useState(15);
+  const [stateKey, setStateKey] = useState<StateKey>("kerala");
+  const [regionKey, setRegionKey] = useState("kochi");
+  const [customRate, setCustomRate] = useState<number | null>(null);
+  const [activeCategory, setActiveCategory] = useState("all");
+  const [searchQ, setSearchQ] = useState("");
+  const [activeFloor, setActiveFloor] = useState<number | "all">("all");
+  const [projectName, setProjectName] = useState("Untitled Project");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [showTemplatePanel, setShowTemplatePanel] = useState(false);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const costPerSqft = customRate ?? (LOCATION_RATES[stateKey]?.regions as any)[regionKey]?.rate ?? 2000;
+  const aLabel = UNIT_SYSTEMS[unit].areaLabel;
+
+  const stateObj = LOCATION_RATES[stateKey];
+  const regionOptions = stateObj ? Object.entries(stateObj.regions) : [];
+
+  const filteredTemplates = useMemo(() => SPACE_TEMPLATES.filter((t) => {
+    const catOk = activeCategory === "all" || t.category === activeCategory;
+    const qOk = !searchQ.trim() || t.name.toLowerCase().includes(searchQ.toLowerCase());
+    return catOk && qOk;
+  }), [activeCategory, searchQ]);
+
+  const addSpace = useCallback((templateId: string) => {
+    const t = SPACE_TEMPLATES.find((x) => x.id === templateId);
+    if (!t) return;
+    const floor = typeof activeFloor === "number" ? activeFloor : 0;
+    setSpaces((prev) => [...prev, makeSpaceFromTemplate(t, floor, [])]);
+  }, [activeFloor]);
+
+  const addCustomSpace = useCallback((space: SpaceInstance) => {
+    setSpaces((prev) => [...prev, space]);
+  }, []);
+
+  const updateSpace = useCallback((id: string, updated: SpaceInstance) => {
+    setSpaces((prev) => prev.map((s) => s.instanceId === id ? updated : s));
+  }, []);
+
+  const removeSpace = useCallback((id: string) => {
+    setSpaces((prev) => prev.filter((s) => s.instanceId !== id));
+  }, []);
+
+  function loadTemplate(tpl: ProjectTemplate) {
+    const newSpaces = tpl.spaces.map(({ templateId, floor, L, B, subIds }) => {
+      const t = SPACE_TEMPLATES.find((x) => x.id === templateId);
+      if (!t) return null;
+      return makeSpaceFromTemplate(t, floor, subIds, L, B);
+    }).filter((x): x is SpaceInstance => x !== null);
+    setSpaces(newSpaces);
+    setProjectName(tpl.label);
+    setShowTemplatePanel(false);
+  }
+
+  const totals = useMemo(() => calcGrossArea(spaces, wall, circ, costPerSqft), [spaces, wall, circ, costPerSqft]);
+  const floorGroups = useMemo(() => groupByFloor(spaces), [spaces]);
+  const usedFloors = useMemo(() => Array.from(floorGroups.keys()).sort((a, b) => a - b), [floorGroups]);
+  const visibleSpaces = useMemo(() => activeFloor === "all" ? spaces : spaces.filter((s) => s.floor === activeFloor), [spaces, activeFloor]);
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8f7f4", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+      {/* HEADER */}
+      <header style={{ position: "sticky", top: 0, zIndex: 100, background: "#fff", borderBottom: "1px solid #e5e7eb", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "10px 16px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <span style={{ fontSize: 22 }}>📐</span>
+          <div>
+            <input value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ fontSize: 16, fontWeight: 700, color: "#111827", background: "transparent", border: "none", borderBottom: "2px solid transparent", outline: "none", maxWidth: 200 }} onFocus={(e) => (e.target.style.borderBottomColor = "#f59e0b")} onBlur={(e) => (e.target.style.borderBottomColor = "transparent")} />
+            <p style={{ fontSize: 11, color: "#9ca3af", margin: 0 }}>Area Calculator</p>
+          </div>
+
+          {/* Quick stats */}
+          <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", margin: 0 }}>Gross</p>
+              <p style={{ fontFamily: "monospace", fontWeight: 700, color: "#d97706", margin: 0, fontSize: 14 }}>{fmt(totals.gross, unit)} {aLabel}</p>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", margin: 0 }}>Est. Cost</p>
+              <p style={{ fontFamily: "monospace", fontWeight: 700, color: "#059669", margin: 0, fontSize: 14 }}>{fmtCost(totals.cost)}</p>
+            </div>
+
+            {/* Unit toggle */}
+            <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
+              {Object.entries(UNIT_SYSTEMS).map(([k, v]) => (
+                <button key={k} onClick={() => setUnit(k as UnitKey)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "none", background: unit === k ? "#fff" : "transparent", fontWeight: unit === k ? 700 : 400, cursor: "pointer", color: unit === k ? "#111827" : "#6b7280", boxShadow: unit === k ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>{v.areaLabel}</button>
+              ))}
+            </div>
+
+            <button onClick={() => setSettingsOpen(!settingsOpen)} style={{ fontSize: 13, padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: settingsOpen ? "#fef3c7" : "#fff", cursor: "pointer", color: "#374151" }}>⚙️ Settings</button>
+          </div>
+        </div>
+
+        {/* Settings panel */}
+        {settingsOpen && (
+          <div style={{ background: "#fffbeb", borderTop: "1px solid #fde68a", padding: "12px 16px" }}>
+            <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-end" }}>
+              {/* State/Region */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>STATE</label>
+                <select value={stateKey} onChange={(e) => { const sk = e.target.value as StateKey; setStateKey(sk); const first = Object.keys(LOCATION_RATES[sk].regions)[0]; setRegionKey(first); setCustomRate(null); }} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", minWidth: 140 }}>
+                  {Object.entries(LOCATION_RATES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>CITY / REGION</label>
+                <select value={regionKey} onChange={(e) => { setRegionKey(e.target.value); setCustomRate(null); }} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", minWidth: 180 }}>
+                  {regionOptions.map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>RATE (₹/sqft) <span style={{ fontWeight: 400, color: "#9ca3af" }}>— override</span></label>
+                <input type="number" min={500} step={100} value={customRate ?? costPerSqft} onChange={(e) => setCustomRate(parseInt(e.target.value)||null)} style={{ fontSize: 13, padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", width: 100 }} />
+                {customRate && <button onClick={() => setCustomRate(null)} style={{ marginLeft: 6, fontSize: 11, color: "#ef4444", background: "none", border: "none", cursor: "pointer" }}>reset</button>}
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>WALL THICKNESS: {wall}%</label>
+                <input type="range" min={5} max={20} step={1} value={wall} onChange={(e) => setWall(parseInt(e.target.value))} style={{ width: 120, accentColor: "#f59e0b" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>CIRCULATION: {circ}%</label>
+                <input type="range" min={5} max={25} step={1} value={circ} onChange={(e) => setCirc(parseInt(e.target.value))} style={{ width: 120, accentColor: "#f59e0b" }} />
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", borderLeft: "2px solid #fcd34d", paddingLeft: 12 }}>
+                <strong style={{ color: "#92400e" }}>₹{costPerSqft.toLocaleString("en-IN")}/sqft</strong><br />
+                <span style={{ fontSize: 11 }}>{stateObj?.label} · {regionOptions.find(([k]) => k === regionKey)?.[1]?.label}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </header>
+
+      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "16px", display: "flex", gap: 16, alignItems: "flex-start" }}>
+        {/* MAIN */}
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {/* FABs */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <button onClick={() => setPaletteOpen(true)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>📦 Add Space</button>
+            <button onClick={() => setShowTemplatePanel(!showTemplatePanel)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: showTemplatePanel ? "#fef3c7" : "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>🏗️ Templates</button>
+            <button onClick={() => setShowCustomModal(true)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>✏️ Custom Space</button>
+          </div>
+
+          {/* Templates strip */}
+          {showTemplatePanel && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 16, padding: 16, background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb" }}>
+              <p style={{ width: "100%", margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" }}>Project Templates — click to load</p>
+              {PROJECT_TEMPLATES.map((tpl) => (
+                <button key={tpl.id} onClick={() => loadTemplate(tpl)} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, padding: "12px 16px", borderRadius: 12, border: "2px solid #e5e7eb", background: "#f9fafb", cursor: "pointer", minWidth: 180, textAlign: "left" }}>
+                  <span style={{ fontSize: 28 }}>{tpl.icon}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>{tpl.label}</span>
+                  <span style={{ fontSize: 11, color: "#6b7280" }}>{tpl.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Floor tabs */}
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 12 }}>
+            <button onClick={() => setActiveFloor("all")} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: activeFloor !== "all" ? "1px solid #e5e7eb" : "none", background: activeFloor === "all" ? "#374151" : "#fff", color: activeFloor === "all" ? "#fff" : "#6b7280", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>All</button>
+            {usedFloors.map((f) => (
+              <button key={f} onClick={() => setActiveFloor(f)} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: activeFloor !== f ? "1px solid #e5e7eb" : "none", background: activeFloor === f ? "#f59e0b" : "#fff", color: activeFloor === f ? "#fff" : "#6b7280", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                {getFloorLabel(f)} <span style={{ opacity: 0.7 }}>({floorGroups.get(f)?.length ?? 0})</span>
+              </button>
+            ))}
+            {FLOORS.filter((f) => !usedFloors.includes(f)).map((f) => (
+              <button key={f} onClick={() => setActiveFloor(f)} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, border: "1px dashed #d1d5db", background: "transparent", color: "#9ca3af", fontSize: 12, cursor: "pointer" }}>+ {getFloorLabel(f)}</button>
+            ))}
+          </div>
+
+          {/* Spaces */}
+          {visibleSpaces.length === 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderRadius: 16, border: "2px dashed #d1d5db", background: "#fff", padding: "60px 24px", textAlign: "center" }}>
+              <span style={{ fontSize: 48, marginBottom: 12 }}>🏗️</span>
+              <p style={{ fontSize: 18, fontWeight: 700, color: "#9ca3af", margin: "0 0 6px" }}>No spaces yet</p>
+              <p style={{ fontSize: 14, color: "#d1d5db", margin: 0 }}>Use &ldquo;Add Space&rdquo;, &ldquo;Templates&rdquo; or &ldquo;Custom Space&rdquo; above</p>
+            </div>
+          ) : activeFloor === "all" ? (
+            Array.from(floorGroups.entries()).map(([floor, fs]) => (
+              <div key={floor} style={{ marginBottom: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" }}>{getFloorLabel(floor)}</span>
+                  <div style={{ flex: 1, borderTop: "1px solid #e5e7eb" }} />
+                  <span style={{ fontSize: 12, fontFamily: "monospace", color: "#9ca3af" }}>{fmt(fs.reduce((a, s) => a + calcSpaceArea(s), 0), unit)} {aLabel}</span>
+                </div>
+                {fs.map((s) => <SpaceCard key={s.instanceId} space={s} unit={unit} onUpdate={(u) => updateSpace(s.instanceId, u)} onRemove={() => removeSpace(s.instanceId)} />)}
+              </div>
+            ))
+          ) : (
+            visibleSpaces.map((s) => <SpaceCard key={s.instanceId} space={s} unit={unit} onUpdate={(u) => updateSpace(s.instanceId, u)} onRemove={() => removeSpace(s.instanceId)} />)
+          )}
+
+          {/* SUMMARY */}
+          {spaces.length > 0 && <SummaryCard totals={totals} unit={unit} wall={wall} circ={circ} costPerSqft={costPerSqft} spaces={spaces} floorGroups={floorGroups} stateKey={stateKey} regionKey={regionKey} />}
+        </main>
+      </div>
+
+      {/* Mobile palette drawer */}
+      {paletteOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 150, display: "flex" }}>
+          <div style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} onClick={() => setPaletteOpen(false)} />
+          <div style={{ width: 300, background: "#fff", height: "100%", overflowY: "auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>Space Palette</span>
+              <button onClick={() => setPaletteOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#6b7280" }}>✕</button>
+            </div>
+            <PalettePanel
+              filteredTemplates={filteredTemplates}
+              activeCategory={activeCategory}
+              setActiveCategory={setActiveCategory}
+              searchQ={searchQ}
+              setSearchQ={setSearchQ}
+              addSpace={(id) => { addSpace(id); setPaletteOpen(false); }}
+              setShowCustomModal={() => { setShowCustomModal(true); setPaletteOpen(false); }}
+            />
+          </div>
+        </div>
+      )}
+
+      {showCustomModal && <CustomSpaceModal onAdd={addCustomSpace} onClose={() => setShowCustomModal(false)} />}
     </div>
   );
 }
