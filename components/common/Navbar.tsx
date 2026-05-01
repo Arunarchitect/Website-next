@@ -55,9 +55,9 @@ export default function Navbar() {
 
   const modelBlogLink = (isMobile: boolean) => (
     <NavLink
-      isSelected={isSelected("/modelblog")}
+      isSelected={isSelected("/modelblog/blog")}
       isMobile={isMobile}
-      href="/modelblog"
+      href="/modelblog/blog"
     >
       ModelBlog
     </NavLink>
