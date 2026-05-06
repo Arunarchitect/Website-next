@@ -1,57 +1,48 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CATEGORIES,
   AUTHORS,
-  searchPosts,
-  getFeaturedPosts,
+  CATEGORIES,
   formatDate,
-  type BlogPost,
+  getCoverImage,
+  getFeaturedPosts,
+  searchPosts,
   type Author,
   type AuthorRole,
+  type BlogPost,
 } from "@/app/modelblog/blogapi";
 
 type Theme = "dark" | "light";
 
-// ─── Day/Night Toggle ─────────────────────────────────────────────────────────
-
-function ThemeToggle({
-  theme,
-  onToggle,
-}: {
-  theme: Theme;
-  onToggle: () => void;
-}) {
+function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
   const isDark = theme === "dark";
+
   return (
     <button
       onClick={onToggle}
       aria-label="Toggle theme"
-      className={`relative w-14 h-7 rounded-full border transition-colors duration-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500
-        ${isDark ? "bg-stone-900 border-stone-700" : "bg-sky-100 border-sky-300"}`}
+      className={`relative h-7 w-14 rounded-full border transition-colors duration-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
+        isDark ? "border-stone-700 bg-stone-900" : "border-sky-300 bg-sky-100"
+      }`}
     >
-      {/* Stars in dark mode */}
       {isDark && (
         <>
-          <span className="absolute top-1 left-1.5 w-0.5 h-0.5 rounded-full bg-stone-500 opacity-70" />
-          <span className="absolute top-3 left-3 w-0.5 h-0.5 rounded-full bg-stone-500 opacity-50" />
-          <span className="absolute top-1.5 left-5 w-0.5 h-0.5 rounded-full bg-stone-500 opacity-60" />
+          <span className="absolute left-1.5 top-1 h-0.5 w-0.5 rounded-full bg-stone-500 opacity-70" />
+          <span className="absolute left-3 top-3 h-0.5 w-0.5 rounded-full bg-stone-500 opacity-50" />
+          <span className="absolute left-5 top-1.5 h-0.5 w-0.5 rounded-full bg-stone-500 opacity-60" />
         </>
       )}
-      {/* Cloud in light mode */}
-      {!isDark && (
-        <span className="absolute top-1.5 left-1.5 w-4 h-2 rounded-full bg-white opacity-80" />
-      )}
-      {/* Knob */}
+
+      {!isDark && <span className="absolute left-1.5 top-1.5 h-2 w-4 rounded-full bg-white opacity-80" />}
+
       <span
-        className={`absolute top-0.5 w-6 h-6 rounded-full shadow-md flex items-center justify-center text-sm transition-all duration-500
-          ${isDark
-            ? "translate-x-7 bg-stone-800 border border-stone-600"
-            : "translate-x-0.5 bg-amber-400 border border-amber-300"
-          }`}
+        className={`absolute top-0.5 flex h-6 w-6 items-center justify-center rounded-full border text-sm shadow-md transition-all duration-500 ${
+          isDark
+            ? "translate-x-7 border-stone-600 bg-stone-800"
+            : "translate-x-0.5 border-amber-300 bg-amber-400"
+        }`}
       >
         {isDark ? "🌙" : "☀️"}
       </span>
@@ -59,13 +50,12 @@ function ThemeToggle({
   );
 }
 
-// ─── Shared sub-components ────────────────────────────────────────────────────
-
 function AuthorPip({ author, size = "sm" }: { author: Author; size?: "sm" | "md" }) {
-  const dim = size === "sm" ? "w-7 h-7 text-xs" : "w-9 h-9 text-sm";
+  const dimension = size === "md" ? "h-9 w-9 text-sm" : "h-7 w-7 text-xs";
+
   return (
     <span
-      className={`${dim} rounded-full flex items-center justify-center font-bold text-white ring-2 shrink-0`}
+      className={`${dimension} flex shrink-0 items-center justify-center rounded-full font-bold text-white ring-2 ring-white/20`}
       style={{ backgroundColor: author.avatarColor }}
       title={author.name}
     >
@@ -80,6 +70,7 @@ const ROLE_STYLES_DARK: Record<AuthorRole, string> = {
   Guest: "bg-emerald-900/40 text-emerald-300 border border-emerald-700/40",
   Staff: "bg-stone-800 text-stone-400 border border-stone-700",
 };
+
 const ROLE_STYLES_LIGHT: Record<AuthorRole, string> = {
   Eminent: "bg-amber-100 text-amber-800 border border-amber-300",
   Editorial: "bg-sky-100 text-sky-800 border border-sky-300",
@@ -89,62 +80,68 @@ const ROLE_STYLES_LIGHT: Record<AuthorRole, string> = {
 
 function RoleBadge({ role, theme }: { role: AuthorRole; theme: Theme }) {
   const styles = theme === "dark" ? ROLE_STYLES_DARK : ROLE_STYLES_LIGHT;
+
   return (
-    <span className={`text-[10px] font-semibold tracking-widest uppercase px-2 py-0.5 rounded-full ${styles[role]}`}>
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${styles[role]}`}>
       {role}
     </span>
   );
 }
 
-function AuthorCard({ author, theme }: { author: Author; theme: Theme }) {
-  const isDark = theme === "dark";
-  return (
-    <div className="flex items-start gap-3 py-2">
-      <AuthorPip author={author} size="md" />
-      <div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-sm font-semibold ${isDark ? "text-stone-100" : "text-stone-900"}`}>
-            {author.name}
-          </span>
-          <RoleBadge role={author.role} theme={theme} />
-        </div>
-        <p className={`text-xs mt-0.5 ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-          {author.title}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function FeaturedCard({
-  post, index, theme, onClick,
+  post,
+  index,
+  theme,
+  onClick,
 }: {
-  post: BlogPost; index: number; theme: Theme; onClick: () => void;
+  post: BlogPost;
+  index: number;
+  theme: Theme;
+  onClick: () => void;
 }) {
   const isWide = index === 0;
   const isDark = theme === "dark";
+  const coverImage = getCoverImage(post);
+
   return (
     <article
-      className={`relative rounded-2xl overflow-hidden border group cursor-pointer flex flex-col transition-all duration-200
-        ${isWide ? "md:col-span-2" : ""}
-        ${isDark ? "bg-stone-950 border-stone-800 hover:border-stone-600" : "bg-white border-stone-200 hover:border-stone-400 shadow-sm hover:shadow-md"}`}
       onClick={onClick}
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border transition-all duration-200 ${
+        isWide ? "md:col-span-2" : ""
+      } ${
+        isDark
+          ? "border-stone-800 bg-stone-950 hover:border-stone-600"
+          : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
+      }`}
     >
+      {coverImage && (
+        <div className="relative h-60 overflow-hidden">
+          <img
+            src={coverImage.src}
+            alt={coverImage.alt}
+            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+          />
+          <div className={`absolute inset-0 ${isDark ? "bg-stone-950/25" : "bg-white/5"}`} />
+        </div>
+      )}
+
       <div className="h-1 w-full shrink-0" style={{ background: post.coverAccent }} />
-      <div className="flex flex-col flex-1 p-6 gap-4">
+
+      <div className="flex flex-1 flex-col gap-4 p-6">
         <div className="flex items-center justify-between">
-          <span className={`text-[11px] font-semibold tracking-widest uppercase ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+          <span className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
             {post.category}
           </span>
           <span className={`text-[11px] ${isDark ? "text-stone-600" : "text-stone-400"}`}>
             {post.readingTimeMinutes} min read
           </span>
         </div>
+
         <div>
           <h2
-            className={`font-bold leading-tight transition-colors
-              ${isWide ? "text-2xl md:text-3xl" : "text-xl"}
-              ${isDark ? "text-stone-100 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"}`}
+            className={`font-bold leading-tight transition-colors ${
+              isWide ? "text-2xl md:text-3xl" : "text-xl"
+            } ${isDark ? "text-stone-100 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"}`}
             style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
           >
             {post.title}
@@ -153,17 +150,21 @@ function FeaturedCard({
             {post.subtitle}
           </p>
         </div>
-        <div className="flex items-center gap-2 mt-auto">
+
+        <div className="mt-auto flex items-center gap-2">
           <div className="flex -space-x-2">
-            {post.authors.map((a) => <AuthorPip key={a.id} author={a} />)}
+            {post.authors.map((author) => (
+              <AuthorPip key={author.id} author={author} />
+            ))}
           </div>
           <span className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-            {post.authors.map((a) => a.name).join(" & ")}
+            {post.authors.map((author) => author.name).join(" & ")}
           </span>
           <span className={`ml-auto text-xs ${isDark ? "text-stone-700" : "text-stone-400"}`}>
             {formatDate(post.publishedAt)}
           </span>
         </div>
+
         <p className={`text-[10px] transition-colors ${isDark ? "text-stone-700 group-hover:text-stone-500" : "text-stone-400 group-hover:text-stone-600"}`}>
           Click to read →
         </p>
@@ -174,38 +175,58 @@ function FeaturedCard({
 
 function PostCard({ post, theme, onClick }: { post: BlogPost; theme: Theme; onClick: () => void }) {
   const isDark = theme === "dark";
+  const coverImage = getCoverImage(post);
+
   return (
     <article
-      className={`border rounded-xl overflow-hidden flex flex-col cursor-pointer group transition-all duration-200
-        ${isDark ? "bg-stone-950 border-stone-800 hover:border-stone-600" : "bg-white border-stone-200 hover:border-stone-400 shadow-sm hover:shadow-md"}`}
       onClick={onClick}
+      className={`group flex cursor-pointer flex-col overflow-hidden rounded-xl border transition-all duration-200 ${
+        isDark
+          ? "border-stone-800 bg-stone-950 hover:border-stone-600"
+          : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
+      }`}
     >
+      {coverImage && (
+        <img
+          src={coverImage.src}
+          alt={coverImage.alt}
+          className="h-44 w-full object-cover transition duration-500 group-hover:scale-105"
+        />
+      )}
+
       <div className="h-[3px] w-full" style={{ background: post.coverAccent }} />
-      <div className="p-5 flex flex-col gap-3 flex-1">
+
+      <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-center justify-between">
-          <span className={`text-[10px] font-semibold tracking-widest uppercase ${isDark ? "text-stone-600" : "text-stone-400"}`}>
+          <span className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>
             {post.category}
           </span>
           <span className={`text-[10px] ${isDark ? "text-stone-700" : "text-stone-400"}`}>
             {post.readingTimeMinutes} min
           </span>
         </div>
+
         <h3
-          className={`text-base font-bold leading-snug transition-colors
-            ${isDark ? "text-stone-200 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"}`}
+          className={`text-base font-bold leading-snug transition-colors ${
+            isDark ? "text-stone-200 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"
+          }`}
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
           {post.title}
         </h3>
-        <p className={`text-xs leading-relaxed line-clamp-2 ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-          {post.subtitle}
+
+        <p className={`line-clamp-2 text-xs leading-relaxed ${isDark ? "text-stone-500" : "text-stone-500"}`}>
+          {post.excerpt}
         </p>
-        <div className={`flex items-center gap-2 mt-auto pt-2 border-t ${isDark ? "border-stone-900" : "border-stone-100"}`}>
+
+        <div className={`mt-auto flex items-center gap-2 border-t pt-2 ${isDark ? "border-stone-900" : "border-stone-100"}`}>
           <div className="flex -space-x-1.5">
-            {post.authors.map((a) => <AuthorPip key={a.id} author={a} />)}
+            {post.authors.map((author) => (
+              <AuthorPip key={author.id} author={author} />
+            ))}
           </div>
-          <span className={`text-[11px] truncate ${isDark ? "text-stone-600" : "text-stone-500"}`}>
-            {post.authors.map((a) => a.name).join(" & ")}
+          <span className={`truncate text-[11px] ${isDark ? "text-stone-600" : "text-stone-500"}`}>
+            {post.authors.map((author) => author.name).join(" & ")}
           </span>
         </div>
       </div>
@@ -215,25 +236,31 @@ function PostCard({ post, theme, onClick }: { post: BlogPost; theme: Theme; onCl
 
 function AuthorsSidebar({ theme }: { theme: Theme }) {
   const isDark = theme === "dark";
+
   return (
-    <aside className={`border rounded-xl p-5 ${isDark ? "bg-stone-950 border-stone-800" : "bg-white border-stone-200 shadow-sm"}`}>
+    <aside className={`rounded-xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}>
       <h3
-        className={`text-xs font-semibold tracking-widest uppercase mb-4 ${isDark ? "text-stone-500" : "text-stone-400"}`}
+        className={`mb-4 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}
         style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
       >
         Contributors
       </h3>
+
       <div className={`divide-y ${isDark ? "divide-stone-900" : "divide-stone-100"}`}>
-        {Object.values(AUTHORS).map((a) => (
-          <div key={a.id} className="py-3">
-            <div className="flex items-center gap-2 mb-1">
-              <AuthorPip author={a} size="sm" />
+        {Object.values(AUTHORS).map((author) => (
+          <div key={author.id} className="py-3">
+            <div className="mb-1 flex items-center gap-2">
+              <AuthorPip author={author} />
               <div>
-                <p className={`text-xs font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}>{a.name}</p>
-                <RoleBadge role={a.role} theme={theme} />
+                <p className={`text-xs font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}>
+                  {author.name}
+                </p>
+                <RoleBadge role={author.role} theme={theme} />
               </div>
             </div>
-            <p className={`text-[11px] leading-snug ml-9 ${isDark ? "text-stone-600" : "text-stone-500"}`}>{a.bio}</p>
+            <p className={`ml-9 text-[11px] leading-snug ${isDark ? "text-stone-600" : "text-stone-500"}`}>
+              {author.bio}
+            </p>
           </div>
         ))}
       </div>
@@ -241,45 +268,39 @@ function AuthorsSidebar({ theme }: { theme: Theme }) {
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 export default function ModelBlogPage() {
   const router = useRouter();
 
-  const [theme, setTheme] = useState<Theme>(() =>
-    typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: light)").matches
-      ? "light"
-      : "dark"
-  );
-
-  // Keep in sync with OS-level changes
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: light)");
-    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? "light" : "dark");
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-
+  const [theme, setTheme] = useState<Theme>("dark");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [showSidebar, setShowSidebar] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+    setTheme(prefersLight ? "light" : "dark");
+  }, []);
 
   const isDark = theme === "dark";
   const featured = getFeaturedPosts();
 
-  const results = useMemo(() => searchPosts(searchTerm, selectedCategory), [searchTerm, selectedCategory]);
-  const nonFeatured = useMemo(
-    () => results.filter((p) => !p.featured || searchTerm || selectedCategory !== "All"),
-    [results, searchTerm, selectedCategory]
+  const results = useMemo(
+    () => searchPosts(searchTerm, selectedCategory),
+    [searchTerm, selectedCategory],
   );
-  const showFeatured = !searchTerm && selectedCategory === "All";
 
-  const navigateToPost = (slug: string) => router.push(`/modelblog/blog/${slug}`);
+  const nonFeatured = useMemo(
+    () => results.filter((post) => !post.featured || searchTerm || selectedCategory !== "All"),
+    [results, searchTerm, selectedCategory],
+  );
+
+  const showFeatured = !searchTerm && selectedCategory === "All";
 
   return (
     <div
-      className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"}`}
+      className={`min-h-screen transition-colors duration-300 ${
+        isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"
+      }`}
       style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
     >
       <style>{`
@@ -292,9 +313,10 @@ export default function ModelBlogPage() {
         }
       `}</style>
 
-      {/* ── Header ── */}
-      <header className={`sticky top-0 z-30 backdrop-blur border-b transition-colors duration-300 ${isDark ? "bg-stone-950/90 border-stone-900" : "bg-stone-50/90 border-stone-200"}`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
+      <header className={`sticky top-0 z-30 border-b backdrop-blur transition-colors duration-300 ${
+        isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"
+      }`}>
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div>
             <span
               className={`text-xl font-bold tracking-tight ${isDark ? "text-stone-100" : "text-stone-900"}`}
@@ -302,16 +324,20 @@ export default function ModelBlogPage() {
             >
               Model<span className="text-amber-500">Blog</span>
             </span>
-            <span className={`hidden sm:inline text-xs ml-3 tracking-widest uppercase ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-              Architecture · Cities · Environment
+            <span className={`ml-3 hidden text-xs uppercase tracking-widest sm:inline ${isDark ? "text-stone-600" : "text-stone-400"}`}>
+              Architecture · BIM · Visualisation
             </span>
           </div>
+
           <div className="flex items-center gap-3">
             <ThemeToggle theme={theme} onToggle={() => setTheme(isDark ? "light" : "dark")} />
             <button
-              onClick={() => setShowSidebar((s) => !s)}
-              className={`text-xs border rounded-lg px-3 py-1.5 transition-colors
-                ${isDark ? "text-stone-500 border-stone-800 hover:text-stone-200" : "text-stone-500 border-stone-300 hover:text-stone-800"}`}
+              onClick={() => setShowSidebar((value) => !value)}
+              className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                isDark
+                  ? "border-stone-800 text-stone-500 hover:text-stone-200"
+                  : "border-stone-300 text-stone-500 hover:text-stone-800"
+              }`}
             >
               Contributors
             </button>
@@ -319,128 +345,119 @@ export default function ModelBlogPage() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        {/* Dev notice */}
-        <div className={`mb-8 px-4 py-3 rounded-lg border text-xs ${isDark ? "border-amber-900/50 bg-amber-950/30 text-amber-400/80" : "border-amber-300 bg-amber-50 text-amber-700"}`}>
-          This blog is in active development. Articles are just sample draft, not original ones.
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className={`mb-8 rounded-lg border px-4 py-3 text-xs ${
+          isDark
+            ? "border-amber-900/50 bg-amber-950/30 text-amber-400/80"
+            : "border-amber-300 bg-amber-50 text-amber-700"
+        }`}>
+          This blog is a prototype. Articles, images, captions, and references are sample content.
         </div>
 
-        {/* Search + Filter */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-8">
+        <div className="mb-8 flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <input
-              ref={inputRef}
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="Search articles, authors, topics…"
-              className={`w-full border rounded-xl px-4 py-2.5 text-sm placeholder-stone-500 focus:outline-none transition-colors
-                ${isDark ? "bg-stone-900 border-stone-800 text-stone-200 focus:border-amber-700" : "bg-white border-stone-300 text-stone-800 focus:border-amber-500"}`}
+              className={`w-full rounded-xl border px-4 py-2.5 text-sm placeholder-stone-500 transition-colors focus:outline-none ${
+                isDark
+                  ? "border-stone-800 bg-stone-900 text-stone-200 focus:border-amber-700"
+                  : "border-stone-300 bg-white text-stone-800 focus:border-amber-500"
+              }`}
             />
+
             {searchTerm && (
               <button
                 onClick={() => setSearchTerm("")}
-                className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? "text-stone-600 hover:text-stone-300" : "text-stone-400 hover:text-stone-700"}`}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 ${
+                  isDark ? "text-stone-600 hover:text-stone-300" : "text-stone-400 hover:text-stone-700"
+                }`}
               >
                 ✕
               </button>
             )}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {CATEGORIES.map((cat) => (
+
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((category) => (
               <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-2 rounded-xl text-xs font-medium transition-all
-                  ${selectedCategory === cat
+                key={category}
+                onClick={() => setSelectedCategory(category)}
+                className={`rounded-xl px-3 py-2 text-xs font-medium transition-all ${
+                  selectedCategory === category
                     ? "bg-amber-600 text-amber-100"
                     : isDark
-                      ? "bg-stone-900 text-stone-500 border border-stone-800 hover:text-stone-200 hover:border-stone-600"
-                      : "bg-white text-stone-500 border border-stone-300 hover:text-stone-800 hover:border-stone-500"
-                  }`}
+                      ? "bg-stone-900 text-stone-500 hover:text-stone-200"
+                      : "bg-white text-stone-500 shadow-sm hover:text-stone-900"
+                }`}
               >
-                {cat}
+                {category}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="flex gap-8">
-          <main className="flex-1 min-w-0">
-            {/* Featured */}
+        <div className={`grid gap-8 ${showSidebar ? "lg:grid-cols-[1fr_300px]" : ""}`}>
+          <main>
             {showFeatured && (
-              <section className="mb-12">
-                <div className="flex items-center gap-3 mb-5">
-                  <h2 className={`text-xs font-semibold tracking-widest uppercase ${isDark ? "text-stone-500" : "text-stone-400"}`}
-                    style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-                    Featured
-                  </h2>
-                  <div className={`flex-1 h-px ${isDark ? "bg-stone-900" : "bg-stone-200"}`} />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {featured.map((post, i) => (
-                    <FeaturedCard key={post.id} post={post} index={i} theme={theme} onClick={() => navigateToPost(post.slug)} />
+              <section className="mb-10">
+                <h2
+                  className={`mb-4 text-xs font-semibold uppercase tracking-widest ${
+                    isDark ? "text-stone-500" : "text-stone-400"
+                  }`}
+                >
+                  Featured
+                </h2>
+
+                <div className="grid gap-5 md:grid-cols-3">
+                  {featured.map((post, index) => (
+                    <FeaturedCard
+                      key={post.id}
+                      post={post}
+                      index={index}
+                      theme={theme}
+                      onClick={() => router.push(`/modelblog/blog/${post.slug}`)}
+                    />
                   ))}
                 </div>
               </section>
             )}
 
-            {/* All / Filtered */}
             <section>
-              <div className="flex items-center gap-3 mb-5">
-                <h2 className={`text-xs font-semibold tracking-widest uppercase ${isDark ? "text-stone-500" : "text-stone-400"}`}
-                  style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-                  {searchTerm
-                    ? `${results.length} result${results.length !== 1 ? "s" : ""} for "${searchTerm}"`
-                    : selectedCategory !== "All" ? selectedCategory : "All Articles"}
-                </h2>
-                <div className={`flex-1 h-px ${isDark ? "bg-stone-900" : "bg-stone-200"}`} />
-              </div>
+              <h2
+                className={`mb-4 text-xs font-semibold uppercase tracking-widest ${
+                  isDark ? "text-stone-500" : "text-stone-400"
+                }`}
+              >
+                {searchTerm || selectedCategory !== "All" ? "Results" : "Latest Articles"}
+              </h2>
 
-              {(showFeatured ? nonFeatured : results).length === 0 ? (
-                <div className={`text-sm py-16 text-center ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-                  No articles match your search.
+              {nonFeatured.length === 0 ? (
+                <div className={`rounded-xl border p-8 text-center text-sm ${
+                  isDark ? "border-stone-800 bg-stone-950 text-stone-500" : "border-stone-200 bg-white text-stone-500"
+                }`}>
+                  No articles found.
                 </div>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {(showFeatured ? nonFeatured : results).map((post) => (
-                    <PostCard key={post.id} post={post} theme={theme} onClick={() => navigateToPost(post.slug)} />
+                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                  {nonFeatured.map((post) => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      theme={theme}
+                      onClick={() => router.push(`/modelblog/blog/${post.slug}`)}
+                    />
                   ))}
                 </div>
               )}
             </section>
           </main>
 
-          {/* Sidebar Desktop */}
-          {showSidebar && (
-            <aside className="hidden lg:block w-72 shrink-0">
-              <div className="sticky top-24">
-                <AuthorsSidebar theme={theme} />
-              </div>
-            </aside>
-          )}
+          {showSidebar && <AuthorsSidebar theme={theme} />}
         </div>
       </div>
-
-      {/* Mobile Sidebar Drawer */}
-      {showSidebar && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShowSidebar(false)} />
-          <div className={`absolute right-0 top-0 bottom-0 w-80 border-l overflow-y-auto p-5 ${isDark ? "bg-stone-950 border-stone-800" : "bg-white border-stone-200"}`}>
-            <button
-              className={`text-sm mb-4 ${isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-800"}`}
-              onClick={() => setShowSidebar(false)}
-            >
-              ✕ Close
-            </button>
-            <AuthorsSidebar theme={theme} />
-          </div>
-        </div>
-      )}
-
-      <footer className={`border-t mt-20 py-8 text-center text-xs transition-colors duration-300 ${isDark ? "border-stone-900 text-stone-700" : "border-stone-200 text-stone-400"}`}>
-        ModelBlog — informed writing on architecture, cities, and the built environment. All articles are independently authored and editorially reviewed.
-      </footer>
     </div>
   );
 }
