@@ -1,417 +1,101 @@
-
-
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
-
-// ─── CONSTANTS ───────────────────────────────────────────────
-
-const UNIT_SYSTEMS = {
-  sqft: { label: "sq ft", areaLabel: "sqft", factor: 1, dimLabel: "ft", dimFactor: 1 },
-  sqm: { label: "sq m", areaLabel: "sqm", factor: 0.0929, dimLabel: "m", dimFactor: 0.3048 },
-};
-
-const LOCATION_RATES = {
-  kerala: {
-    label: "Kerala",
-    regions: {
-      trivandrum: { label: "Thiruvananthapuram", rate: 2200 },
-      kochi: { label: "Kochi / Ernakulam", rate: 2600 },
-      kozhikode: { label: "Kozhikode", rate: 2100 },
-      thrissur: { label: "Thrissur", rate: 2000 },
-      kollam: { label: "Kollam", rate: 1900 },
-      palakkad: { label: "Palakkad", rate: 1800 },
-      kottayam: { label: "Kottayam", rate: 2000 },
-      malappuram: { label: "Malappuram", rate: 1850 },
-      kannur: { label: "Kannur", rate: 1950 },
-      other_kerala: { label: "Other Kerala", rate: 1750 },
-    },
-  },
-  tamilnadu: {
-    label: "Tamil Nadu",
-    regions: {
-      chennai: { label: "Chennai", rate: 3200 },
-      coimbatore: { label: "Coimbatore", rate: 2400 },
-      madurai: { label: "Madurai", rate: 2100 },
-      salem: { label: "Salem", rate: 1900 },
-      tiruchirappalli: { label: "Tiruchirappalli", rate: 2000 },
-      tirunelveli: { label: "Tirunelveli", rate: 1850 },
-      vellore: { label: "Vellore", rate: 1950 },
-      other_tn: { label: "Other Tamil Nadu", rate: 1800 },
-    },
-  },
-  karnataka: {
-    label: "Karnataka",
-    regions: {
-      bangalore: { label: "Bengaluru", rate: 3500 },
-      mysore: { label: "Mysuru", rate: 2300 },
-      hubli: { label: "Hubballi-Dharwad", rate: 2000 },
-      mangalore: { label: "Mangaluru", rate: 2400 },
-      other_ka: { label: "Other Karnataka", rate: 1900 },
-    },
-  },
-  andhra: {
-    label: "Andhra Pradesh",
-    regions: {
-      visakhapatnam: { label: "Visakhapatnam", rate: 2200 },
-      vijayawada: { label: "Vijayawada", rate: 2000 },
-      guntur: { label: "Guntur", rate: 1900 },
-      other_ap: { label: "Other AP", rate: 1750 },
-    },
-  },
-  telangana: {
-    label: "Telangana",
-    regions: {
-      hyderabad: { label: "Hyderabad", rate: 3000 },
-      warangal: { label: "Warangal", rate: 2100 },
-      other_tg: { label: "Other Telangana", rate: 1900 },
-    },
-  },
-  goa: {
-    label: "Goa",
-    regions: {
-      panaji: { label: "Panaji / North Goa", rate: 3800 },
-      south_goa: { label: "South Goa", rate: 3400 },
-    },
-  },
-};
-
-const CATEGORY_META = {
-  residence: { label: "Residence", color: "#B45309", bg: "#FEF3C7", border: "#FCD34D", badge: "#92400E", badgeBg: "#FEF3C7" },
-  school: { label: "Education", color: "#1D4ED8", bg: "#EFF6FF", border: "#BFDBFE", badge: "#1E3A8A", badgeBg: "#DBEAFE" },
-  commercial: { label: "Commercial", color: "#6D28D9", bg: "#F5F3FF", border: "#DDD6FE", badge: "#4C1D95", badgeBg: "#EDE9FE" },
-  healthcare: { label: "Healthcare", color: "#047857", bg: "#ECFDF5", border: "#A7F3D0", badge: "#064E3B", badgeBg: "#D1FAE5" },
-  hospitality: { label: "Hospitality", color: "#9D174D", bg: "#FDF2F8", border: "#FBCFE8", badge: "#831843", badgeBg: "#FCE7F3" },
-};
-
-const FLOOR_LABELS: Record<number, string> = { "-1": "Basement", 0: "Ground Floor", 1: "First Floor", 2: "Second Floor", 3: "Third Floor", 4: "Fourth Floor", 5: "Fifth Floor" };
-const FLOORS = [-1, 0, 1, 2, 3, 4, 5];
-
-const getFloorLabel = (f: number) => FLOOR_LABELS[f] ?? `Floor ${f}`;
-
-// ─── TYPES ────────────────────────────────────────────────────
-
-type UnitKey = keyof typeof UNIT_SYSTEMS;
-type CategoryKey = keyof typeof CATEGORY_META;
-type StateKey = keyof typeof LOCATION_RATES;
-
-interface SubSpaceTemplate {
-  id: string;
-  name: string;
-  L: number;
-  B: number;
-  remarks: string;
-}
-
-interface SpaceTemplate {
-  id: string;
-  name: string;
-  category: CategoryKey;
-  L: number;
-  B: number;
-  icon: string;
-  remarks: string;
-  subSpaces?: SubSpaceTemplate[];
-}
-
-interface SubSpaceInstance {
-  instanceId: string;
-  templateId: string;
-  name: string;
-  L: number;
-  B: number;
-  remarks: string;
-}
-
-interface SpaceInstance {
-  instanceId: string;
-  templateId: string;
-  name: string;
-  category: CategoryKey;
-  L: number;
-  B: number;
-  floor: number;
-  remarks: string;
-  icon: string;
-  subSpaces: SubSpaceInstance[];
-  isCustom: boolean;
-}
-
-interface ProjectTemplate {
-  id: string;
-  label: string;
-  description: string;
-  icon: string;
-  spaces: { templateId: string; floor: number; L: number; B: number; subIds: string[] }[];
-}
-
-// ─── SPACE DATA ──────────────────────────────────────────────
-
-const SPACE_TEMPLATES: SpaceTemplate[] = [
-  // RESIDENCE
-  { id: "res_master_bed", name: "Master Bedroom", category: "residence", L: 14, B: 12, icon: "🛏️", remarks: "Primary bedroom with attached bath", subSpaces: [
-    { id: "sub_att_toilet", name: "Attached Toilet", L: 8, B: 5, remarks: "En-suite bathroom" },
-    { id: "sub_wardrobe", name: "Wardrobe Alcove", L: 6, B: 2, remarks: "Built-in wardrobe" },
-    { id: "sub_balcony", name: "Balcony", L: 10, B: 4, remarks: "Private balcony" },
-  ]},
-  { id: "res_bedroom", name: "Bedroom", category: "residence", L: 12, B: 10, icon: "🛏️", remarks: "Standard bedroom", subSpaces: [
-    { id: "sub_common_wc", name: "Common Toilet", L: 7, B: 4, remarks: "Shared bathroom" },
-    { id: "sub_study_nook", name: "Study Nook", L: 5, B: 4, remarks: "Reading/study alcove" },
-  ]},
-  { id: "res_living", name: "Living Room", category: "residence", L: 18, B: 14, icon: "🛋️", remarks: "Primary social space", subSpaces: [
-    { id: "sub_foyer", name: "Foyer / Entry", L: 6, B: 5, remarks: "Entry zone" },
-    { id: "sub_pooja", name: "Pooja Room", L: 5, B: 4, remarks: "Prayer alcove — Kerala homes" },
-  ]},
-  { id: "res_dining", name: "Dining Room", category: "residence", L: 14, B: 10, icon: "🍽️", remarks: "Dining for 6–8 persons", subSpaces: [] },
-  { id: "res_kitchen", name: "Kitchen", category: "residence", L: 14, B: 10, icon: "🍳", remarks: "Modular kitchen", subSpaces: [
-    { id: "sub_utility", name: "Utility / Wash", L: 8, B: 5, remarks: "Washing + drying area" },
-    { id: "sub_store", name: "Store Room", L: 6, B: 5, remarks: "Dry storage" },
-    { id: "sub_pantry", name: "Pantry", L: 5, B: 4, remarks: "Walk-in pantry" },
-  ]},
-  { id: "res_toilet", name: "Common Toilet", category: "residence", L: 7, B: 4, icon: "🚿", remarks: "Guest toilet on ground floor", subSpaces: [] },
-  { id: "res_sit_out", name: "Sit-out / Verandah", category: "residence", L: 14, B: 6, icon: "🌿", remarks: "Semi-open Kerala-style verandah", subSpaces: [] },
-  { id: "res_car_porch", name: "Car Porch", category: "residence", L: 18, B: 12, icon: "🚗", remarks: "Covered parking 1–2 vehicles", subSpaces: [] },
-  { id: "res_staircase", name: "Staircase", category: "residence", L: 12, B: 5, icon: "🪜", remarks: "Stair + landing", subSpaces: [] },
-  { id: "res_passage", name: "Corridor / Passage", category: "residence", L: 14, B: 4, icon: "↔️", remarks: "Internal corridor", subSpaces: [] },
-  // SCHOOL
-  { id: "sch_classroom", name: "Classroom", category: "school", L: 28, B: 24, icon: "📚", remarks: "40-student classroom", subSpaces: [
-    { id: "sub_storage_cab", name: "Storage Cabinet", L: 4, B: 2, remarks: "Built-in storage" },
-  ]},
-  { id: "sch_staff_room", name: "Staff Room", category: "school", L: 20, B: 16, icon: "👩‍🏫", remarks: "Common room for teaching staff", subSpaces: [] },
-  { id: "sch_principal", name: "Principal's Office", category: "school", L: 16, B: 14, icon: "🏫", remarks: "Admin office", subSpaces: [
-    { id: "sub_waiting", name: "Waiting Area", L: 10, B: 8, remarks: "Visitor seating" },
-  ]},
-  { id: "sch_library", name: "Library", category: "school", L: 30, B: 24, icon: "📖", remarks: "Reading room + stacks", subSpaces: [] },
-  { id: "sch_lab", name: "Science / Computer Lab", category: "school", L: 30, B: 24, icon: "🔬", remarks: "Lab with power/water provisions", subSpaces: [
-    { id: "sub_prep_room", name: "Prep Room", L: 12, B: 8, remarks: "Chemical/equipment storage" },
-  ]},
-  { id: "sch_toilet_block", name: "Toilet Block", category: "school", L: 20, B: 10, icon: "🚽", remarks: "Boys + Girls per floor", subSpaces: [] },
-  { id: "sch_assembly", name: "Assembly Hall", category: "school", L: 60, B: 40, icon: "🎭", remarks: "Multi-purpose hall with stage", subSpaces: [
-    { id: "sub_stage", name: "Stage", L: 30, B: 16, remarks: "Raised performance stage" },
-    { id: "sub_green_room", name: "Green Room", L: 12, B: 10, remarks: "Backstage dressing room" },
-  ]},
-  // COMMERCIAL
-  { id: "com_retail", name: "Retail Shop Unit", category: "commercial", L: 20, B: 15, icon: "🛍️", remarks: "Standard shop unit", subSpaces: [
-    { id: "sub_back_store", name: "Back Storage", L: 8, B: 6, remarks: "Stock room at rear" },
-  ]},
-  { id: "com_office", name: "Office Space", category: "commercial", L: 30, B: 20, icon: "💼", remarks: "Open-plan office", subSpaces: [
-    { id: "sub_cabin", name: "Manager Cabin", L: 12, B: 10, remarks: "Enclosed cabin" },
-    { id: "sub_conf", name: "Conference Room", L: 16, B: 12, remarks: "Meeting room 8–10" },
-    { id: "sub_pantry_off", name: "Pantry", L: 10, B: 6, remarks: "Office kitchen" },
-  ]},
-  { id: "com_lobby", name: "Lobby / Reception", category: "commercial", L: 24, B: 18, icon: "🏢", remarks: "Building entry lobby", subSpaces: [] },
-  { id: "com_restaurant", name: "Restaurant / Café", category: "commercial", L: 40, B: 30, icon: "🍴", remarks: "Dining ~15 sqft/cover", subSpaces: [
-    { id: "sub_com_kitchen", name: "Commercial Kitchen", L: 20, B: 14, remarks: "Full kitchen zone" },
-    { id: "sub_toilet_cust", name: "Customer Toilets", L: 14, B: 8, remarks: "Male + Female" },
-  ]},
-  { id: "com_parking", name: "Parking Level", category: "commercial", L: 80, B: 50, icon: "🅿️", remarks: "~300 sqft/car including aisle", subSpaces: [] },
-  // HEALTHCARE
-  { id: "hc_consult", name: "Doctor's Consultation", category: "healthcare", L: 14, B: 12, icon: "🩺", remarks: "Private consultation room", subSpaces: [
-    { id: "sub_exam_alcove", name: "Examination Alcove", L: 7, B: 5, remarks: "Screened exam area" },
-  ]},
-  { id: "hc_waiting", name: "Waiting Area", category: "healthcare", L: 20, B: 14, icon: "🪑", remarks: "Patient waiting ~4 sqft/seat", subSpaces: [] },
-  { id: "hc_ward", name: "General Ward", category: "healthcare", L: 30, B: 20, icon: "🏥", remarks: "6–8 bed ward", subSpaces: [] },
-  { id: "hc_pharmacy", name: "Pharmacy", category: "healthcare", L: 16, B: 12, icon: "💊", remarks: "Dispensing + drug storage", subSpaces: [] },
-  // HOSPITALITY
-  { id: "hot_std_room", name: "Standard Hotel Room", category: "hospitality", L: 16, B: 14, icon: "🛎️", remarks: "Double-occupancy room", subSpaces: [
-    { id: "sub_hotel_bath", name: "Attached Bathroom", L: 8, B: 6, remarks: "Bath + WC + basin" },
-    { id: "sub_hotel_ward", name: "Wardrobe", L: 5, B: 2, remarks: "Built-in wardrobe" },
-  ]},
-  { id: "hot_suite", name: "Suite", category: "hospitality", L: 24, B: 18, icon: "✨", remarks: "Premium room with living area", subSpaces: [
-    { id: "sub_suite_living", name: "Sitting Area", L: 12, B: 10, remarks: "Lounge zone" },
-    { id: "sub_suite_bath", name: "Suite Bathroom", L: 10, B: 8, remarks: "Luxury bath with tub" },
-  ]},
-  { id: "hot_lobby", name: "Hotel Lobby", category: "hospitality", L: 40, B: 30, icon: "🏨", remarks: "Grand reception + lounge", subSpaces: [] },
-  { id: "hot_banquet", name: "Banquet Hall", category: "hospitality", L: 80, B: 50, icon: "🎉", remarks: "~10 sqft/person banquet", subSpaces: [] },
-];
-
-// ─── PROJECT TEMPLATES ────────────────────────────────────────
-const PROJECT_TEMPLATES: ProjectTemplate[] = [
-  {
-    id: "tpl_budget_home",
-    label: "Budget Home",
-    description: "2BHK · ~900 sqft · Simple, efficient layout",
-    icon: "🏠",
-    spaces: [
-      { templateId: "res_living", floor: 0, L: 14, B: 12, subIds: [] },
-      { templateId: "res_kitchen", floor: 0, L: 10, B: 8, subIds: ["sub_utility"] },
-      { templateId: "res_dining", floor: 0, L: 10, B: 8, subIds: [] },
-      { templateId: "res_toilet", floor: 0, L: 6, B: 4, subIds: [] },
-      { templateId: "res_bedroom", floor: 0, L: 10, B: 10, subIds: [] },
-      { templateId: "res_master_bed", floor: 0, L: 12, B: 10, subIds: ["sub_att_toilet"] },
-      { templateId: "res_car_porch", floor: 0, L: 14, B: 10, subIds: [] },
-    ],
-  },
-  {
-    id: "tpl_mid_home",
-    label: "Mid-Range Home",
-    description: "3BHK · ~1,500 sqft · Two floors, pooja room",
-    icon: "🏡",
-    spaces: [
-      { templateId: "res_sit_out", floor: 0, L: 14, B: 6, subIds: [] },
-      { templateId: "res_living", floor: 0, L: 18, B: 14, subIds: ["sub_foyer", "sub_pooja"] },
-      { templateId: "res_dining", floor: 0, L: 14, B: 10, subIds: [] },
-      { templateId: "res_kitchen", floor: 0, L: 14, B: 10, subIds: ["sub_utility", "sub_store"] },
-      { templateId: "res_toilet", floor: 0, L: 7, B: 4, subIds: [] },
-      { templateId: "res_car_porch", floor: 0, L: 18, B: 12, subIds: [] },
-      { templateId: "res_staircase", floor: 0, L: 12, B: 5, subIds: [] },
-      { templateId: "res_master_bed", floor: 1, L: 14, B: 12, subIds: ["sub_att_toilet", "sub_balcony"] },
-      { templateId: "res_bedroom", floor: 1, L: 12, B: 10, subIds: ["sub_common_wc"] },
-      { templateId: "res_bedroom", floor: 1, L: 11, B: 10, subIds: [] },
-      { templateId: "res_passage", floor: 1, L: 14, B: 4, subIds: [] },
-    ],
-  },
-  {
-    id: "tpl_luxury_home",
-    label: "Luxury Home",
-    description: "4BHK + · ~3,000 sqft · Premium finishes, two floors",
-    icon: "🏰",
-    spaces: [
-      { templateId: "res_sit_out", floor: 0, L: 20, B: 8, subIds: [] },
-      { templateId: "res_living", floor: 0, L: 22, B: 18, subIds: ["sub_foyer", "sub_pooja"] },
-      { templateId: "res_dining", floor: 0, L: 18, B: 14, subIds: [] },
-      { templateId: "res_kitchen", floor: 0, L: 16, B: 14, subIds: ["sub_utility", "sub_store", "sub_pantry"] },
-      { templateId: "res_bedroom", floor: 0, L: 14, B: 12, subIds: ["sub_common_wc"] },
-      { templateId: "res_toilet", floor: 0, L: 8, B: 5, subIds: [] },
-      { templateId: "res_car_porch", floor: 0, L: 22, B: 14, subIds: [] },
-      { templateId: "res_staircase", floor: 0, L: 14, B: 6, subIds: [] },
-      { templateId: "res_master_bed", floor: 1, L: 18, B: 14, subIds: ["sub_att_toilet", "sub_wardrobe", "sub_balcony"] },
-      { templateId: "res_bedroom", floor: 1, L: 14, B: 12, subIds: ["sub_att_toilet"] },
-      { templateId: "res_bedroom", floor: 1, L: 14, B: 12, subIds: ["sub_common_wc"] },
-      { templateId: "res_bedroom", floor: 1, L: 13, B: 11, subIds: ["sub_study_nook"] },
-      { templateId: "res_passage", floor: 1, L: 18, B: 5, subIds: [] },
-    ],
-  },
-];
-
-// ─── UTILITIES ────────────────────────────────────────────────
-let _id = 0;
-const uid = () => `inst_${++_id}_${Math.random().toString(36).slice(2, 7)}`;
-
-function toUnit(sqftVal: number, unit: UnitKey) {
-  if (unit === "sqm") return sqftVal * 0.0929;
-  return sqftVal;
-}
-function fromUnit(val: number, unit: UnitKey) {
-  if (unit === "sqm") return val / 0.0929;
-  return val;
-}
-function dimToUnit(ftVal: number, unit: UnitKey) {
-  if (unit === "sqm") return ftVal * 0.3048;
-  return ftVal;
-}
-function dimFromUnit(val: number, unit: UnitKey) {
-  if (unit === "sqm") return val / 0.3048;
-  return val;
-}
-
-function fmt(n: number, unit: UnitKey) {
-  const display = toUnit(n, unit);
-  return display.toLocaleString("en-IN", { maximumFractionDigits: 1 });
-}
-function fmtDim(ft: number, unit: UnitKey) {
-  return dimToUnit(ft, unit).toFixed(unit === "sqm" ? 2 : 1);
-}
-function fmtCost(n: number) {
-  if (n >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
-  if (n >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
-  return `₹${n.toLocaleString("en-IN")}`;
-}
-
-function calcSpaceArea(space: SpaceInstance) {
-  const main = space.L * space.B;
-  const sub = space.subSpaces.reduce((a, s) => a + s.L * s.B, 0);
-  return main + sub;
-}
-
-function calcGrossArea(spaces: SpaceInstance[], wall: number, circ: number, costPerSqft: number) {
-  const net = spaces.reduce((a, s) => a + calcSpaceArea(s), 0);
-  const wallA = (net * wall) / 100;
-  const circA = (net * circ) / 100;
-  const gross = net + wallA + circA;
-  return { net, wallA, circA, gross, cost: gross * costPerSqft };
-}
-
-function groupByFloor(spaces: SpaceInstance[]) {
-  const map = new Map<number, SpaceInstance[]>();
-  for (const s of spaces) {
-    if (!map.has(s.floor)) map.set(s.floor, []);
-    map.get(s.floor)!.push(s);
-  }
-  return new Map([...map.entries()].sort((a, b) => a[0] - b[0]));
-}
-
-function makeSpaceFromTemplate(t: SpaceTemplate, floor: number, subIds: string[], overrideL?: number, overrideB?: number): SpaceInstance {
-  const L = overrideL ?? t.L;
-  const B = overrideB ?? t.B;
-  const subSpaces = (subIds ?? []).map((sid) => {
-    const subT = t.subSpaces?.find((s) => s.id === sid);
-    if (!subT) return null;
-    return { instanceId: uid(), templateId: subT.id, name: subT.name, L: subT.L, B: subT.B, remarks: subT.remarks };
-  }).filter((x): x is SubSpaceInstance => x !== null);
-  return {
-    instanceId: uid(),
-    templateId: t.id,
-    name: t.name,
-    category: t.category,
-    L, B,
-    floor: floor ?? 0,
-    remarks: t.remarks,
-    icon: t.icon,
-    subSpaces,
-    isCustom: false,
-  };
-}
+import { useState, useCallback, useMemo, useEffect } from "react";
+import SpaceRequirementPdfButton from "./SpaceRequirementPdfButton";
+import {
+  UNIT_SYSTEMS,
+  LOCATION_RATES,
+  CATEGORY_META,
+  FLOORS,
+  getFloorLabel,
+  SPACE_TEMPLATES,
+  PROJECT_TEMPLATES,
+  uid,
+  dimFromUnit,
+  fmt,
+  fmtDim,
+  fmtCost,
+  calcSpaceArea,
+  calcGrossArea,
+  groupByFloor,
+  makeSpaceFromTemplate,
+  getLocationRate,
+  getRateDataStatus,
+  type UnitKey,
+  type CategoryKey,
+  type StateKey,
+  type SpaceTemplate,
+  type SubSpaceInstance,
+  type SpaceInstance,
+  type ProjectTemplate,
+} from "./areadata";
 
 // ─── COMPONENTS ───────────────────────────────────────────────
 
 function DimAreaInput({ space, onUpdate, unit }: { space: SpaceInstance; onUpdate: (s: SpaceInstance) => void; unit: UnitKey }) {
-  const [editMode, setEditMode] = useState<"dims" | "area">("dims");
   const uLabel = UNIT_SYSTEMS[unit].dimLabel;
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
 
   const displayL = parseFloat(fmtDim(space.L, unit));
   const displayB = parseFloat(fmtDim(space.B, unit));
-  const displayArea = parseFloat(fmt(space.L * space.B, unit));
+  const calculatedArea = parseFloat(fmt(space.L * space.B, unit).replace(/,/g, ""));
+  const [areaDraft, setAreaDraft] = useState(String(calculatedArea));
+  const [areaError, setAreaError] = useState("");
+
+  useEffect(() => {
+    setAreaDraft(String(parseFloat(fmt(space.L * space.B, unit).replace(/,/g, ""))));
+    setAreaError("");
+  }, [space.L, space.B, unit]);
 
   function handleL(val: string) {
     const ft = dimFromUnit(parseFloat(val) || 1, unit);
     onUpdate({ ...space, L: ft });
   }
+
   function handleB(val: string) {
     const ft = dimFromUnit(parseFloat(val) || 1, unit);
     onUpdate({ ...space, B: ft });
   }
-  function handleArea(val: string) {
-    const targetSqft = fromUnit(parseFloat(val) || 1, unit);
-    const curArea = space.L * space.B;
-    if (curArea === 0) return;
-    const ratio = Math.sqrt(targetSqft / curArea);
-    const newL = Math.round((space.L * ratio) * 2) / 2;
-    const newB = Math.round((space.B * ratio) * 2) / 2;
-    onUpdate({ ...space, L: newL, B: newB });
+
+  function confirmArea() {
+    const targetDisplayArea = parseFloat(areaDraft);
+    const currentDisplayArea = parseFloat(fmt(space.L * space.B, unit).replace(/,/g, ""));
+
+    if (!Number.isFinite(targetDisplayArea) || targetDisplayArea <= 0) {
+      setAreaError("Area must be above 0");
+      return;
+    }
+    if (!Number.isFinite(currentDisplayArea) || currentDisplayArea <= 0) return;
+
+    // This follows your requested behaviour:
+    // 10 sqm -> 5 sqm means ratio 0.5, so L and B are both multiplied by 0.5.
+    // Direct L/B edits still update the area normally.
+    const ratio = targetDisplayArea / currentDisplayArea;
+    const nextL = Math.max(0.01, space.L * ratio);
+    const nextB = Math.max(0.01, space.B * ratio);
+    onUpdate({ ...space, L: nextL, B: nextB });
+    setAreaError("");
   }
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "flex-end" }}>
-      <div style={{ display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 8, padding: 2 }}>
-        <button onClick={() => setEditMode("dims")} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "none", background: editMode === "dims" ? "#fff" : "transparent", cursor: "pointer", fontWeight: editMode === "dims" ? 600 : 400, color: editMode === "dims" ? "#1f2937" : "#6b7280" }}>L × B</button>
-        <button onClick={() => setEditMode("area")} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "none", background: editMode === "area" ? "#fff" : "transparent", cursor: "pointer", fontWeight: editMode === "area" ? 600 : 400, color: editMode === "area" ? "#1f2937" : "#6b7280" }}>Area</button>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}>
+      <div>
+        <label style={{ fontSize: 11, color: "#9ca3af", display: "block", marginBottom: 2 }}>Length ({uLabel})</label>
+        <input type="number" min={0.01} step={unit === "sqm" ? 0.1 : 0.5} value={displayL} onChange={(e) => handleL(e.target.value)} style={{ width: 82, fontSize: 13, padding: "5px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }} />
       </div>
-      {editMode === "dims" ? (
-        <>
-          <label style={{ fontSize: 11, color: "#9ca3af" }}>L ({uLabel})</label>
-          <input type="number" min={0.5} step={unit === "sqm" ? 0.1 : 0.5} value={displayL} onChange={(e) => handleL(e.target.value)} style={{ width: 70, fontSize: 13, padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }} />
-          <label style={{ fontSize: 11, color: "#9ca3af" }}>B ({uLabel})</label>
-          <input type="number" min={0.5} step={unit === "sqm" ? 0.1 : 0.5} value={displayB} onChange={(e) => handleB(e.target.value)} style={{ width: 70, fontSize: 13, padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }} />
-        </>
-      ) : (
-        <>
-          <label style={{ fontSize: 11, color: "#9ca3af" }}>Area ({aLabel})</label>
-          <input type="number" min={1} step={1} value={displayArea} onChange={(e) => handleArea(e.target.value)} style={{ width: 90, fontSize: 13, padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }} />
-          <span style={{ fontSize: 10, color: "#9ca3af" }}>ratio kept</span>
-        </>
-      )}
+      <div>
+        <label style={{ fontSize: 11, color: "#9ca3af", display: "block", marginBottom: 2 }}>Breadth ({uLabel})</label>
+        <input type="number" min={0.01} step={unit === "sqm" ? 0.1 : 0.5} value={displayB} onChange={(e) => handleB(e.target.value)} style={{ width: 82, fontSize: 13, padding: "5px 8px", borderRadius: 6, border: "1px solid #e5e7eb" }} />
+      </div>
+      <div>
+        <label style={{ fontSize: 11, color: "#9ca3af", display: "block", marginBottom: 2 }}>Area ({aLabel})</label>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input type="number" min={0.01} step={unit === "sqm" ? 0.1 : 1} value={areaDraft} onChange={(e) => { setAreaDraft(e.target.value); setAreaError(""); }} onKeyDown={(e) => { if (e.key === "Enter") confirmArea(); }} style={{ width: 104, fontSize: 13, padding: "5px 8px", borderRadius: 6, border: areaError ? "1px solid #ef4444" : "1px solid #e5e7eb" }} />
+          <button type="button" onClick={confirmArea} title="Apply edited area" style={{ height: 30, minWidth: 32, borderRadius: 6, border: "1px solid #16a34a", background: "#dcfce7", color: "#166534", cursor: "pointer", fontWeight: 800 }}>✓</button>
+        </div>
+        {areaError && <p style={{ fontSize: 10, color: "#ef4444", margin: "3px 0 0" }}>{areaError}</p>}
+      </div>
+      <span style={{ fontSize: 10, color: "#9ca3af", paddingTop: 22 }}>Press ✓ to apply edited area</span>
     </div>
   );
 }
@@ -421,17 +105,42 @@ function SubSpaceRow({ sub, onUpdate, onRemove, unit }: { sub: SubSpaceInstance;
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   const dL = parseFloat(fmtDim(sub.L, unit));
   const dB = parseFloat(fmtDim(sub.B, unit));
-  const area = fmt(sub.L * sub.B, unit);
+  const calculatedArea = parseFloat(fmt(sub.L * sub.B, unit).replace(/,/g, ""));
+  const [areaDraft, setAreaDraft] = useState(String(calculatedArea));
+  const [areaError, setAreaError] = useState("");
+
+  useEffect(() => {
+    setAreaDraft(String(parseFloat(fmt(sub.L * sub.B, unit).replace(/,/g, ""))));
+    setAreaError("");
+  }, [sub.L, sub.B, unit]);
+
+  function confirmArea() {
+    const targetDisplayArea = parseFloat(areaDraft);
+    const currentDisplayArea = parseFloat(fmt(sub.L * sub.B, unit).replace(/,/g, ""));
+
+    if (!Number.isFinite(targetDisplayArea) || targetDisplayArea <= 0) {
+      setAreaError("Area must be above 0");
+      return;
+    }
+    if (!Number.isFinite(currentDisplayArea) || currentDisplayArea <= 0) return;
+
+    const ratio = targetDisplayArea / currentDisplayArea;
+    onUpdate({ ...sub, L: Math.max(0.01, sub.L * ratio), B: Math.max(0.01, sub.B * ratio) });
+    setAreaError("");
+  }
 
   return (
     <div style={{ marginLeft: 16, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 12px" }}>
       <span style={{ fontSize: 13, color: "#6b7280", minWidth: 12 }}>↳</span>
       <span style={{ fontSize: 13, fontWeight: 500, color: "#374151", minWidth: 110 }}>{sub.name}</span>
-      <input type="number" min={0.5} step={unit === "sqm" ? 0.1 : 0.5} value={dL} onChange={(e) => { const ft = dimFromUnit(parseFloat(e.target.value)||1,unit); onUpdate({...sub,L:ft}); }} style={{ width: 65, fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid #e5e7eb" }} placeholder={`L ${uLabel}`} />
-      <input type="number" min={0.5} step={unit === "sqm" ? 0.1 : 0.5} value={dB} onChange={(e) => { const ft = dimFromUnit(parseFloat(e.target.value)||1,unit); onUpdate({...sub,B:ft}); }} style={{ width: 65, fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid #e5e7eb" }} placeholder={`B ${uLabel}`} />
-      <span style={{ fontSize: 12, fontFamily: "monospace", color: "#374151", background: "#fff", border: "1px solid #e5e7eb", padding: "3px 8px", borderRadius: 6 }}>{area} {aLabel}</span>
-      <input type="text" value={sub.remarks} onChange={(e) => onUpdate({...sub, remarks: e.target.value})} placeholder="Notes…" style={{ flex: 1, minWidth: 80, fontSize: 11, padding: "3px 6px", borderRadius: 6, border: "1px solid #e5e7eb", color: "#6b7280" }} />
+      <input type="number" min={0.01} step={unit === "sqm" ? 0.1 : 0.5} value={dL} onChange={(e) => { const ft = dimFromUnit(parseFloat(e.target.value)||1,unit); onUpdate({...sub,L:ft}); }} style={{ width: 65, fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid #e5e7eb" }} placeholder={`L ${uLabel}`} />
+      <input type="number" min={0.01} step={unit === "sqm" ? 0.1 : 0.5} value={dB} onChange={(e) => { const ft = dimFromUnit(parseFloat(e.target.value)||1,unit); onUpdate({...sub,B:ft}); }} style={{ width: 65, fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid #e5e7eb" }} placeholder={`B ${uLabel}`} />
+      <input type="number" min={0.01} step={unit === "sqm" ? 0.1 : 1} value={areaDraft} onChange={(e) => { setAreaDraft(e.target.value); setAreaError(""); }} onKeyDown={(e) => { if (e.key === "Enter") confirmArea(); }} style={{ width: 84, fontSize: 12, padding: "3px 6px", borderRadius: 6, border: areaError ? "1px solid #ef4444" : "1px solid #e5e7eb", fontFamily: "monospace" }} />
+      <span style={{ fontSize: 11, color: "#6b7280" }}>{aLabel}</span>
+      <button type="button" onClick={confirmArea} title="Apply edited area" style={{ fontSize: 12, color: "#166534", background: "#dcfce7", border: "1px solid #16a34a", cursor: "pointer", padding: "2px 7px", borderRadius: 5, fontWeight: 800 }}>✓</button>
+      <input type="text" value={sub.description} onChange={(e) => onUpdate({...sub, description: e.target.value})} placeholder="Description…" style={{ flex: 1, minWidth: 80, fontSize: 11, padding: "3px 6px", borderRadius: 6, border: "1px solid #e5e7eb", color: "#6b7280" }} />
       <button onClick={onRemove} style={{ fontSize: 12, color: "#ef4444", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: 4 }}>✕</button>
+      {areaError && <span style={{ fontSize: 10, color: "#ef4444" }}>{areaError}</span>}
     </div>
   );
 }
@@ -452,12 +161,12 @@ function SpaceCard({ space, onUpdate, onRemove, unit }: { space: SpaceInstance; 
   function addSubFromTemplate(subId: string) {
     const subT = availableSubs.find((s) => s.id === subId);
     if (!subT) return;
-    onUpdate({ ...space, subSpaces: [...space.subSpaces, { instanceId: uid(), templateId: subT.id, name: subT.name, L: subT.L, B: subT.B, remarks: subT.remarks }] });
+    onUpdate({ ...space, subSpaces: [...space.subSpaces, { instanceId: uid(), templateId: subT.id, name: subT.name, L: subT.L, B: subT.B, description: subT.description }] });
     setAddSubOpen(false);
   }
   function addCustomSub() {
     if (!customSubName.trim()) return;
-    onUpdate({ ...space, subSpaces: [...space.subSpaces, { instanceId: uid(), templateId: "custom", name: customSubName.trim(), L: 8, B: 6, remarks: "" }] });
+    onUpdate({ ...space, subSpaces: [...space.subSpaces, { instanceId: uid(), templateId: "custom", name: customSubName.trim(), L: 8, B: 6, description: "" }] });
     setCustomSubName("");
     setAddingCustomSub(false);
     setAddSubOpen(false);
@@ -497,7 +206,7 @@ function SpaceCard({ space, onUpdate, onRemove, unit }: { space: SpaceInstance; 
       {expanded && (
         <div style={{ padding: "0 12px 12px" }}>
           <DimAreaInput space={space} onUpdate={onUpdate} unit={unit} />
-          <input type="text" value={space.remarks} onChange={(e) => onUpdate({ ...space, remarks: e.target.value })} placeholder="Remarks / notes…" style={{ width: "100%", marginTop: 8, fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb", color: "#6b7280", boxSizing: "border-box" }} />
+          <textarea value={space.description ?? ""} onChange={(e) => onUpdate({ ...space, description: e.target.value })} placeholder="Description…" rows={2} style={{ width: "100%", marginTop: 8, fontSize: 12, padding: "6px 8px", borderRadius: 6, border: "1px solid #e5e7eb", color: "#374151", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
           {space.subSpaces.map((sub) => (
             <SubSpaceRow key={sub.instanceId} sub={sub} unit={unit} onUpdate={(u) => updateSub(sub.instanceId, u)} onRemove={() => removeSub(sub.instanceId)} />
           ))}
@@ -541,7 +250,7 @@ function CustomSpaceModal({ onAdd, onClose }: { onAdd: (s: SpaceInstance) => voi
 
   function handleAdd() {
     if (!name.trim()) return;
-    onAdd({ instanceId: uid(), templateId: "custom", name: name.trim(), category, L, B, floor, icon, remarks: "", subSpaces: [], isCustom: true });
+    onAdd({ instanceId: uid(), templateId: "custom", name: name.trim(), category, L, B, floor, icon, description: "", subSpaces: [], isCustom: true });
     onClose();
   }
 
@@ -612,7 +321,7 @@ function PalettePanel({
       </div>
       <div style={{ maxHeight: 420, overflowY: "auto" }}>
         {filteredTemplates.map((t) => (
-          <button key={t.id} onClick={() => addSpace(t.id)} title={t.remarks} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #f3f4f6", background: "#f9fafb", marginBottom: 4, cursor: "pointer", textAlign: "left" }}>
+          <button key={t.id} onClick={() => addSpace(t.id)} title={t.description} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #f3f4f6", background: "#f9fafb", marginBottom: 4, cursor: "pointer", textAlign: "left" }}>
             <span style={{ fontSize: 18 }}>{t.icon}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</p>
@@ -730,13 +439,17 @@ export default function App() {
   const [searchQ, setSearchQ] = useState("");
   const [activeFloor, setActiveFloor] = useState<number | "all">("all");
   const [projectName, setProjectName] = useState("Untitled Project");
+  const [clientName, setClientName] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const costPerSqft = customRate ?? (LOCATION_RATES[stateKey]?.regions as any)[regionKey]?.rate ?? 2000;
+  const rateCategory = (spaces[0]?.category ?? "residence");
+  const surveyRate = getLocationRate(stateKey, regionKey, rateCategory);
+  const rateStatus = getRateDataStatus(stateKey, regionKey, rateCategory);
+  const costPerSqft = customRate ?? surveyRate;
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
 
   const stateObj = LOCATION_RATES[stateKey];
@@ -793,6 +506,10 @@ export default function App() {
             <input value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ fontSize: 16, fontWeight: 700, color: "#111827", background: "transparent", border: "none", borderBottom: "2px solid transparent", outline: "none", maxWidth: 200 }} onFocus={(e) => (e.target.style.borderBottomColor = "#f59e0b")} onBlur={(e) => (e.target.style.borderBottomColor = "transparent")} />
             <p style={{ fontSize: 11, color: "#9ca3af", margin: 0 }}>Area Calculator</p>
           </div>
+          <div style={{ minWidth: 180 }}>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", display: "block", marginBottom: 2 }}>Client name</label>
+            <input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Optional" style={{ width: "100%", fontSize: 13, padding: "5px 8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", boxSizing: "border-box" }} />
+          </div>
 
           {/* Quick stats */}
           <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
@@ -839,12 +556,18 @@ export default function App() {
                 {customRate && <button onClick={() => setCustomRate(null)} style={{ marginLeft: 6, fontSize: 11, color: "#ef4444", background: "none", border: "none", cursor: "pointer" }}>reset</button>}
               </div>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>WALL THICKNESS: {wall}%</label>
-                <input type="range" min={5} max={20} step={1} value={wall} onChange={(e) => setWall(parseInt(e.target.value))} style={{ width: 120, accentColor: "#f59e0b" }} />
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>WALL AREA (%)</label>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input type="number" min={0} max={50} step={1} value={wall} onChange={(e) => setWall(Math.max(0, parseFloat(e.target.value) || 0))} style={{ fontSize: 13, padding: "6px 8px", borderRadius: 8, border: "1px solid #e5e7eb", width: 64 }} />
+                  <input type="range" min={0} max={100} step={1} value={wall} onChange={(e) => setWall(parseInt(e.target.value))} style={{ width: 90, accentColor: "#f59e0b" }} />
+                </div>
               </div>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>CIRCULATION: {circ}%</label>
-                <input type="range" min={5} max={25} step={1} value={circ} onChange={(e) => setCirc(parseInt(e.target.value))} style={{ width: 120, accentColor: "#f59e0b" }} />
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>CIRCULATION AREA (%)</label>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input type="number" min={0} max={100} step={1} value={circ} onChange={(e) => setCirc(Math.max(0, parseFloat(e.target.value) || 0))} style={{ fontSize: 13, padding: "6px 8px", borderRadius: 8, border: "1px solid #e5e7eb", width: 64 }} />
+                  <input type="range" min={0} max={50} step={1} value={circ} onChange={(e) => setCirc(parseInt(e.target.value))} style={{ width: 90, accentColor: "#f59e0b" }} />
+                </div>
               </div>
               <div style={{ fontSize: 12, color: "#6b7280", borderLeft: "2px solid #fcd34d", paddingLeft: 12 }}>
                 <strong style={{ color: "#92400e" }}>₹{costPerSqft.toLocaleString("en-IN")}/sqft</strong><br />
@@ -863,6 +586,20 @@ export default function App() {
             <button onClick={() => setPaletteOpen(true)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>📦 Add Space</button>
             <button onClick={() => setShowTemplatePanel(!showTemplatePanel)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: showTemplatePanel ? "#fef3c7" : "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>🏗️ Templates</button>
             <button onClick={() => setShowCustomModal(true)} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 600, color: "#374151" }}>✏️ Custom Space</button>
+            <SpaceRequirementPdfButton
+              projectName={projectName}
+              clientName={clientName}
+              spaces={spaces}
+              unit={unit}
+              wall={wall}
+              circ={circ}
+              costPerSqft={costPerSqft}
+              totals={totals}
+              floorGroups={floorGroups}
+              stateKey={stateKey}
+              regionKey={regionKey}
+              disabled={spaces.length === 0}
+            />
           </div>
 
           {/* Templates strip */}
