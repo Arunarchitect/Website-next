@@ -67,9 +67,6 @@ function DimAreaInput({ space, onUpdate, unit }: { space: SpaceInstance; onUpdat
     }
     if (!Number.isFinite(currentDisplayArea) || currentDisplayArea <= 0) return;
 
-    // This follows your requested behaviour:
-    // 10 sqm -> 5 sqm means ratio 0.5, so L and B are both multiplied by 0.5.
-    // Direct L/B edits still update the area normally.
     const ratio = targetDisplayArea / currentDisplayArea;
     const nextL = Math.max(0.01, space.L * ratio);
     const nextB = Math.max(0.01, space.B * ratio);
@@ -426,6 +423,31 @@ function SummaryCard({
   );
 }
 
+// ─── RATE STATUS BADGE ────────────────────────────────────────
+function RateStatusBadge({ source, label }: { source: string; label: string }) {
+  const styles: Record<string, { bg: string; color: string; border: string }> = {
+    survey:                { bg: "#ecfdf5", color: "#047857", border: "#a7f3d0" },
+    survey_all_categories: { bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
+    fallback:              { bg: "#fffbeb", color: "#b45309", border: "#fcd34d" },
+    default:               { bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" },
+  };
+  const s = styles[source] ?? styles.default;
+  return (
+    <span style={{
+      fontSize: 10,
+      fontWeight: 700,
+      padding: "3px 8px",
+      borderRadius: 20,
+      background: s.bg,
+      color: s.color,
+      border: `1px solid ${s.border}`,
+      whiteSpace: "nowrap",
+    }}>
+      {label}
+    </span>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────
 export default function App() {
   const [spaces, setSpaces] = useState<SpaceInstance[]>([]);
@@ -445,7 +467,6 @@ export default function App() {
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rateCategory = (spaces[0]?.category ?? "residence");
   const surveyRate = getLocationRate(stateKey, regionKey, rateCategory);
   const rateStatus = getRateDataStatus(stateKey, regionKey, rateCategory);
@@ -569,9 +590,21 @@ export default function App() {
                   <input type="range" min={0} max={50} step={1} value={circ} onChange={(e) => setCirc(parseInt(e.target.value))} style={{ width: 90, accentColor: "#f59e0b" }} />
                 </div>
               </div>
+
+              {/* Rate info block — now includes rateStatus badge */}
               <div style={{ fontSize: 12, color: "#6b7280", borderLeft: "2px solid #fcd34d", paddingLeft: 12 }}>
-                <strong style={{ color: "#92400e" }}>₹{costPerSqft.toLocaleString("en-IN")}/sqft</strong><br />
+                <strong style={{ color: "#92400e" }}>₹{costPerSqft.toLocaleString("en-IN")}/sqft</strong>
+                {customRate && (
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 20, background: "#fef3c7", color: "#92400e", border: "1px solid #fcd34d" }}>
+                    Custom override
+                  </span>
+                )}
+                <br />
                 <span style={{ fontSize: 11 }}>{stateObj?.label} · {regionOptions.find(([k]) => k === regionKey)?.[1]?.label}</span>
+                <br />
+                <div style={{ marginTop: 5 }}>
+                  <RateStatusBadge source={rateStatus.source} label={rateStatus.label} />
+                </div>
               </div>
             </div>
           </div>

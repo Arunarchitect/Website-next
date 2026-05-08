@@ -6,10 +6,6 @@ export const UNIT_SYSTEMS = {
 };
 
 // ─── SURVEY-BASED LOCATION RATES ──────────────────────────────
-// Add real survey entries here as you collect them from architects,
-// contractors, engineers, or completed projects.
-// The app can use getLocationRate() to calculate the average rate from survey data.
-// If no survey entry exists for a selected location/category, fallbackRate is used.
 
 export type RateProjectCategory =
   | "residence"
@@ -34,7 +30,7 @@ export interface SurveyRateEntry {
   ratePerSqft: number;
   locationNote?: string;
   finishLevel?: "basic" | "standard" | "premium" | "luxury" | "unknown";
-  surveyedOn?: string; // YYYY-MM-DD
+  surveyedOn?: string;
   notes?: string;
 }
 
@@ -49,7 +45,7 @@ export interface SurveyStateRate {
   regions: Record<string, SurveyRegionRate>;
 }
 
-export const LOCATION_RATES = {
+export const LOCATION_RATES: Record<string, SurveyStateRate> = {
   kerala: {
     label: "Kerala",
     regions: {
@@ -129,20 +125,23 @@ export const LOCATION_RATES = {
       south_goa: { label: "South Goa", fallbackRate: 3400, surveyRates: [] },
     },
   },
-} satisfies Record<string, SurveyStateRate>;
+};
+
+// Derive StateKey from the object keys at the type level
+export type StateKey = keyof typeof LOCATION_RATES;
 
 export function getSurveyEntries(
-  stateKey: keyof typeof LOCATION_RATES,
+  stateKey: StateKey,
   regionKey: string,
   projectCategory?: RateProjectCategory,
-) {
+): SurveyRateEntry[] {
   const region = LOCATION_RATES[stateKey]?.regions?.[regionKey];
   if (!region) return [];
   if (!projectCategory) return region.surveyRates;
   return region.surveyRates.filter((entry) => entry.projectCategory === projectCategory);
 }
 
-export function getAverageSurveyRate(entries: SurveyRateEntry[]) {
+export function getAverageSurveyRate(entries: SurveyRateEntry[]): number | null {
   const validRates = entries
     .map((entry) => entry.ratePerSqft)
     .filter((rate) => Number.isFinite(rate) && rate > 0);
@@ -152,10 +151,10 @@ export function getAverageSurveyRate(entries: SurveyRateEntry[]) {
 }
 
 export function getLocationRate(
-  stateKey: keyof typeof LOCATION_RATES,
+  stateKey: StateKey,
   regionKey: string,
   projectCategory: RateProjectCategory = "residence",
-) {
+): number {
   const region = LOCATION_RATES[stateKey]?.regions?.[regionKey];
   if (!region) return 2000;
 
@@ -169,10 +168,10 @@ export function getLocationRate(
 }
 
 export function getRateDataStatus(
-  stateKey: keyof typeof LOCATION_RATES,
+  stateKey: StateKey,
   regionKey: string,
   projectCategory: RateProjectCategory = "residence",
-) {
+): { source: string; sampleCount: number; label: string } {
   const region = LOCATION_RATES[stateKey]?.regions?.[regionKey];
   if (!region) {
     return { source: "default", sampleCount: 0, label: "Default estimate" };
@@ -207,7 +206,15 @@ export const CATEGORY_META = {
   hospitality: { label: "Hospitality", color: "#9D174D", bg: "#FDF2F8", border: "#FBCFE8", badge: "#831843", badgeBg: "#FCE7F3" },
 };
 
-export const FLOOR_LABELS: Record<number, string> = { "-1": "Basement", 0: "Ground Floor", 1: "First Floor", 2: "Second Floor", 3: "Third Floor", 4: "Fourth Floor", 5: "Fifth Floor" };
+export const FLOOR_LABELS: Record<number, string> = {
+  "-1": "Basement",
+  0: "Ground Floor",
+  1: "First Floor",
+  2: "Second Floor",
+  3: "Third Floor",
+  4: "Fourth Floor",
+  5: "Fifth Floor",
+};
 export const FLOORS = [-1, 0, 1, 2, 3, 4, 5];
 
 export const getFloorLabel = (f: number) => FLOOR_LABELS[f] ?? `Floor ${f}`;
@@ -216,7 +223,6 @@ export const getFloorLabel = (f: number) => FLOOR_LABELS[f] ?? `Floor ${f}`;
 
 export type UnitKey = keyof typeof UNIT_SYSTEMS;
 export type CategoryKey = keyof typeof CATEGORY_META;
-export type StateKey = keyof typeof LOCATION_RATES;
 
 export interface SubSpaceTemplate {
   id: string;
@@ -272,78 +278,134 @@ export interface ProjectTemplate {
 
 export const SPACE_TEMPLATES: SpaceTemplate[] = [
   // RESIDENCE
-  { id: "res_master_bed", name: "Master Bedroom", category: "residence", L: 14, B: 12, icon: "🛏️", description: "Primary bedroom with attached bath", subSpaces: [
-    { id: "sub_att_toilet", name: "Attached Toilet", L: 8, B: 5, description: "En-suite bathroom" },
-    { id: "sub_wardrobe", name: "Wardrobe Alcove", L: 6, B: 2, description: "Built-in wardrobe" },
-    { id: "sub_balcony", name: "Balcony", L: 10, B: 4, description: "Private balcony" },
-  ]},
-  { id: "res_bedroom", name: "Bedroom", category: "residence", L: 12, B: 10, icon: "🛏️", description: "Standard bedroom", subSpaces: [
-    { id: "sub_common_wc", name: "Common Toilet", L: 7, B: 4, description: "Shared bathroom" },
-    { id: "sub_study_nook", name: "Study Nook", L: 5, B: 4, description: "Reading/study alcove" },
-  ]},
-  { id: "res_living", name: "Living Room", category: "residence", L: 18, B: 14, icon: "🛋️", description: "Primary social space", subSpaces: [
-    { id: "sub_foyer", name: "Foyer / Entry", L: 6, B: 5, description: "Entry zone" },
-    { id: "sub_pooja", name: "Pooja Room", L: 5, B: 4, description: "Prayer alcove — Kerala homes" },
-  ]},
+  {
+    id: "res_master_bed", name: "Master Bedroom", category: "residence", L: 14, B: 12, icon: "🛏️",
+    description: "Primary bedroom with attached bath",
+    subSpaces: [
+      { id: "sub_att_toilet", name: "Attached Toilet", L: 8, B: 5, description: "En-suite bathroom" },
+      { id: "sub_wardrobe", name: "Wardrobe Alcove", L: 6, B: 2, description: "Built-in wardrobe" },
+      { id: "sub_balcony", name: "Balcony", L: 10, B: 4, description: "Private balcony" },
+    ],
+  },
+  {
+    id: "res_bedroom", name: "Bedroom", category: "residence", L: 12, B: 10, icon: "🛏️",
+    description: "Standard bedroom",
+    subSpaces: [
+      { id: "sub_common_wc", name: "Common Toilet", L: 7, B: 4, description: "Shared bathroom" },
+      { id: "sub_study_nook", name: "Study Nook", L: 5, B: 4, description: "Reading/study alcove" },
+    ],
+  },
+  {
+    id: "res_living", name: "Living Room", category: "residence", L: 18, B: 14, icon: "🛋️",
+    description: "Primary social space",
+    subSpaces: [
+      { id: "sub_foyer", name: "Foyer / Entry", L: 6, B: 5, description: "Entry zone" },
+      { id: "sub_pooja", name: "Pooja Room", L: 5, B: 4, description: "Prayer alcove — Kerala homes" },
+    ],
+  },
   { id: "res_dining", name: "Dining Room", category: "residence", L: 14, B: 10, icon: "🍽️", description: "Dining for 6–8 persons", subSpaces: [] },
-  { id: "res_kitchen", name: "Kitchen", category: "residence", L: 14, B: 10, icon: "🍳", description: "Modular kitchen", subSpaces: [
-    { id: "sub_utility", name: "Utility / Wash", L: 8, B: 5, description: "Washing + drying area" },
-    { id: "sub_store", name: "Store Room", L: 6, B: 5, description: "Dry storage" },
-    { id: "sub_pantry", name: "Pantry", L: 5, B: 4, description: "Walk-in pantry" },
-  ]},
+  {
+    id: "res_kitchen", name: "Kitchen", category: "residence", L: 14, B: 10, icon: "🍳",
+    description: "Modular kitchen",
+    subSpaces: [
+      { id: "sub_utility", name: "Utility / Wash", L: 8, B: 5, description: "Washing + drying area" },
+      { id: "sub_store", name: "Store Room", L: 6, B: 5, description: "Dry storage" },
+      { id: "sub_pantry", name: "Pantry", L: 5, B: 4, description: "Walk-in pantry" },
+    ],
+  },
   { id: "res_toilet", name: "Common Toilet", category: "residence", L: 7, B: 4, icon: "🚿", description: "Guest toilet on ground floor", subSpaces: [] },
   { id: "res_sit_out", name: "Sit-out / Verandah", category: "residence", L: 14, B: 6, icon: "🌿", description: "Semi-open Kerala-style verandah", subSpaces: [] },
   { id: "res_car_porch", name: "Car Porch", category: "residence", L: 18, B: 12, icon: "🚗", description: "Covered parking 1–2 vehicles", subSpaces: [] },
   { id: "res_staircase", name: "Staircase", category: "residence", L: 12, B: 5, icon: "🪜", description: "Stair + landing", subSpaces: [] },
   { id: "res_passage", name: "Corridor / Passage", category: "residence", L: 14, B: 4, icon: "↔️", description: "Internal corridor", subSpaces: [] },
   // SCHOOL
-  { id: "sch_classroom", name: "Classroom", category: "school", L: 28, B: 24, icon: "📚", description: "40-student classroom", subSpaces: [
-    { id: "sub_storage_cab", name: "Storage Cabinet", L: 4, B: 2, description: "Built-in storage" },
-  ]},
+  {
+    id: "sch_classroom", name: "Classroom", category: "school", L: 28, B: 24, icon: "📚",
+    description: "40-student classroom",
+    subSpaces: [
+      { id: "sub_storage_cab", name: "Storage Cabinet", L: 4, B: 2, description: "Built-in storage" },
+    ],
+  },
   { id: "sch_staff_room", name: "Staff Room", category: "school", L: 20, B: 16, icon: "👩‍🏫", description: "Common room for teaching staff", subSpaces: [] },
-  { id: "sch_principal", name: "Principal's Office", category: "school", L: 16, B: 14, icon: "🏫", description: "Admin office", subSpaces: [
-    { id: "sub_waiting", name: "Waiting Area", L: 10, B: 8, description: "Visitor seating" },
-  ]},
+  {
+    id: "sch_principal", name: "Principal's Office", category: "school", L: 16, B: 14, icon: "🏫",
+    description: "Admin office",
+    subSpaces: [
+      { id: "sub_waiting", name: "Waiting Area", L: 10, B: 8, description: "Visitor seating" },
+    ],
+  },
   { id: "sch_library", name: "Library", category: "school", L: 30, B: 24, icon: "📖", description: "Reading room + stacks", subSpaces: [] },
-  { id: "sch_lab", name: "Science / Computer Lab", category: "school", L: 30, B: 24, icon: "🔬", description: "Lab with power/water provisions", subSpaces: [
-    { id: "sub_prep_room", name: "Prep Room", L: 12, B: 8, description: "Chemical/equipment storage" },
-  ]},
+  {
+    id: "sch_lab", name: "Science / Computer Lab", category: "school", L: 30, B: 24, icon: "🔬",
+    description: "Lab with power/water provisions",
+    subSpaces: [
+      { id: "sub_prep_room", name: "Prep Room", L: 12, B: 8, description: "Chemical/equipment storage" },
+    ],
+  },
   { id: "sch_toilet_block", name: "Toilet Block", category: "school", L: 20, B: 10, icon: "🚽", description: "Boys + Girls per floor", subSpaces: [] },
-  { id: "sch_assembly", name: "Assembly Hall", category: "school", L: 60, B: 40, icon: "🎭", description: "Multi-purpose hall with stage", subSpaces: [
-    { id: "sub_stage", name: "Stage", L: 30, B: 16, description: "Raised performance stage" },
-    { id: "sub_green_room", name: "Green Room", L: 12, B: 10, description: "Backstage dressing room" },
-  ]},
+  {
+    id: "sch_assembly", name: "Assembly Hall", category: "school", L: 60, B: 40, icon: "🎭",
+    description: "Multi-purpose hall with stage",
+    subSpaces: [
+      { id: "sub_stage", name: "Stage", L: 30, B: 16, description: "Raised performance stage" },
+      { id: "sub_green_room", name: "Green Room", L: 12, B: 10, description: "Backstage dressing room" },
+    ],
+  },
   // COMMERCIAL
-  { id: "com_retail", name: "Retail Shop Unit", category: "commercial", L: 20, B: 15, icon: "🛍️", description: "Standard shop unit", subSpaces: [
-    { id: "sub_back_store", name: "Back Storage", L: 8, B: 6, description: "Stock room at rear" },
-  ]},
-  { id: "com_office", name: "Office Space", category: "commercial", L: 30, B: 20, icon: "💼", description: "Open-plan office", subSpaces: [
-    { id: "sub_cabin", name: "Manager Cabin", L: 12, B: 10, description: "Enclosed cabin" },
-    { id: "sub_conf", name: "Conference Room", L: 16, B: 12, description: "Meeting room 8–10" },
-    { id: "sub_pantry_off", name: "Pantry", L: 10, B: 6, description: "Office kitchen" },
-  ]},
+  {
+    id: "com_retail", name: "Retail Shop Unit", category: "commercial", L: 20, B: 15, icon: "🛍️",
+    description: "Standard shop unit",
+    subSpaces: [
+      { id: "sub_back_store", name: "Back Storage", L: 8, B: 6, description: "Stock room at rear" },
+    ],
+  },
+  {
+    id: "com_office", name: "Office Space", category: "commercial", L: 30, B: 20, icon: "💼",
+    description: "Open-plan office",
+    subSpaces: [
+      { id: "sub_cabin", name: "Manager Cabin", L: 12, B: 10, description: "Enclosed cabin" },
+      { id: "sub_conf", name: "Conference Room", L: 16, B: 12, description: "Meeting room 8–10" },
+      { id: "sub_pantry_off", name: "Pantry", L: 10, B: 6, description: "Office kitchen" },
+    ],
+  },
   { id: "com_lobby", name: "Lobby / Reception", category: "commercial", L: 24, B: 18, icon: "🏢", description: "Building entry lobby", subSpaces: [] },
-  { id: "com_restaurant", name: "Restaurant / Café", category: "commercial", L: 40, B: 30, icon: "🍴", description: "Dining ~15 sqft/cover", subSpaces: [
-    { id: "sub_com_kitchen", name: "Commercial Kitchen", L: 20, B: 14, description: "Full kitchen zone" },
-    { id: "sub_toilet_cust", name: "Customer Toilets", L: 14, B: 8, description: "Male + Female" },
-  ]},
+  {
+    id: "com_restaurant", name: "Restaurant / Café", category: "commercial", L: 40, B: 30, icon: "🍴",
+    description: "Dining ~15 sqft/cover",
+    subSpaces: [
+      { id: "sub_com_kitchen", name: "Commercial Kitchen", L: 20, B: 14, description: "Full kitchen zone" },
+      { id: "sub_toilet_cust", name: "Customer Toilets", L: 14, B: 8, description: "Male + Female" },
+    ],
+  },
   { id: "com_parking", name: "Parking Level", category: "commercial", L: 80, B: 50, icon: "🅿️", description: "~300 sqft/car including aisle", subSpaces: [] },
   // HEALTHCARE
-  { id: "hc_consult", name: "Doctor's Consultation", category: "healthcare", L: 14, B: 12, icon: "🩺", description: "Private consultation room", subSpaces: [
-    { id: "sub_exam_alcove", name: "Examination Alcove", L: 7, B: 5, description: "Screened exam area" },
-  ]},
+  {
+    id: "hc_consult", name: "Doctor's Consultation", category: "healthcare", L: 14, B: 12, icon: "🩺",
+    description: "Private consultation room",
+    subSpaces: [
+      { id: "sub_exam_alcove", name: "Examination Alcove", L: 7, B: 5, description: "Screened exam area" },
+    ],
+  },
   { id: "hc_waiting", name: "Waiting Area", category: "healthcare", L: 20, B: 14, icon: "🪑", description: "Patient waiting ~4 sqft/seat", subSpaces: [] },
   { id: "hc_ward", name: "General Ward", category: "healthcare", L: 30, B: 20, icon: "🏥", description: "6–8 bed ward", subSpaces: [] },
   { id: "hc_pharmacy", name: "Pharmacy", category: "healthcare", L: 16, B: 12, icon: "💊", description: "Dispensing + drug storage", subSpaces: [] },
   // HOSPITALITY
-  { id: "hot_std_room", name: "Standard Hotel Room", category: "hospitality", L: 16, B: 14, icon: "🛎️", description: "Double-occupancy room", subSpaces: [
-    { id: "sub_hotel_bath", name: "Attached Bathroom", L: 8, B: 6, description: "Bath + WC + basin" },
-    { id: "sub_hotel_ward", name: "Wardrobe", L: 5, B: 2, description: "Built-in wardrobe" },
-  ]},
-  { id: "hot_suite", name: "Suite", category: "hospitality", L: 24, B: 18, icon: "✨", description: "Premium room with living area", subSpaces: [
-    { id: "sub_suite_living", name: "Sitting Area", L: 12, B: 10, description: "Lounge zone" },
-    { id: "sub_suite_bath", name: "Suite Bathroom", L: 10, B: 8, description: "Luxury bath with tub" },
-  ]},
+  {
+    id: "hot_std_room", name: "Standard Hotel Room", category: "hospitality", L: 16, B: 14, icon: "🛎️",
+    description: "Double-occupancy room",
+    subSpaces: [
+      { id: "sub_hotel_bath", name: "Attached Bathroom", L: 8, B: 6, description: "Bath + WC + basin" },
+      { id: "sub_hotel_ward", name: "Wardrobe", L: 5, B: 2, description: "Built-in wardrobe" },
+    ],
+  },
+  {
+    id: "hot_suite", name: "Suite", category: "hospitality", L: 24, B: 18, icon: "✨",
+    description: "Premium room with living area",
+    subSpaces: [
+      { id: "sub_suite_living", name: "Sitting Area", L: 12, B: 10, description: "Lounge zone" },
+      { id: "sub_suite_bath", name: "Suite Bathroom", L: 10, B: 8, description: "Luxury bath with tub" },
+    ],
+  },
   { id: "hot_lobby", name: "Hotel Lobby", category: "hospitality", L: 40, B: 30, icon: "🏨", description: "Grand reception + lounge", subSpaces: [] },
   { id: "hot_banquet", name: "Banquet Hall", category: "hospitality", L: 80, B: 50, icon: "🎉", description: "~10 sqft/person banquet", subSpaces: [] },
 ];
@@ -411,43 +473,48 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
 let _id = 0;
 export const uid = () => `inst_${++_id}_${Math.random().toString(36).slice(2, 7)}`;
 
-export function toUnit(sqftVal: number, unit: UnitKey) {
+export function toUnit(sqftVal: number, unit: UnitKey): number {
   if (unit === "sqm") return sqftVal * 0.0929;
   return sqftVal;
 }
-export function fromUnit(val: number, unit: UnitKey) {
+export function fromUnit(val: number, unit: UnitKey): number {
   if (unit === "sqm") return val / 0.0929;
   return val;
 }
-export function dimToUnit(ftVal: number, unit: UnitKey) {
+export function dimToUnit(ftVal: number, unit: UnitKey): number {
   if (unit === "sqm") return ftVal * 0.3048;
   return ftVal;
 }
-export function dimFromUnit(val: number, unit: UnitKey) {
+export function dimFromUnit(val: number, unit: UnitKey): number {
   if (unit === "sqm") return val / 0.3048;
   return val;
 }
 
-export function fmt(n: number, unit: UnitKey) {
+export function fmt(n: number, unit: UnitKey): string {
   const display = toUnit(n, unit);
   return display.toLocaleString("en-IN", { maximumFractionDigits: 1 });
 }
-export function fmtDim(ft: number, unit: UnitKey) {
+export function fmtDim(ft: number, unit: UnitKey): string {
   return dimToUnit(ft, unit).toFixed(unit === "sqm" ? 2 : 1);
 }
-export function fmtCost(n: number) {
+export function fmtCost(n: number): string {
   if (n >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
   if (n >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
   return `₹${n.toLocaleString("en-IN")}`;
 }
 
-export function calcSpaceArea(space: SpaceInstance) {
+export function calcSpaceArea(space: SpaceInstance): number {
   const main = space.L * space.B;
   const sub = space.subSpaces.reduce((a, s) => a + s.L * s.B, 0);
   return main + sub;
 }
 
-export function calcGrossArea(spaces: SpaceInstance[], wall: number, circ: number, costPerSqft: number) {
+export function calcGrossArea(
+  spaces: SpaceInstance[],
+  wall: number,
+  circ: number,
+  costPerSqft: number,
+): { net: number; wallA: number; circA: number; gross: number; cost: number } {
   const net = spaces.reduce((a, s) => a + calcSpaceArea(s), 0);
   const wallA = (net * wall) / 100;
   const circA = (net * circ) / 100;
@@ -455,7 +522,7 @@ export function calcGrossArea(spaces: SpaceInstance[], wall: number, circ: numbe
   return { net, wallA, circA, gross, cost: gross * costPerSqft };
 }
 
-export function groupByFloor(spaces: SpaceInstance[]) {
+export function groupByFloor(spaces: SpaceInstance[]): Map<number, SpaceInstance[]> {
   const map = new Map<number, SpaceInstance[]>();
   for (const s of spaces) {
     if (!map.has(s.floor)) map.set(s.floor, []);
@@ -464,20 +531,37 @@ export function groupByFloor(spaces: SpaceInstance[]) {
   return new Map([...map.entries()].sort((a, b) => a[0] - b[0]));
 }
 
-export function makeSpaceFromTemplate(t: SpaceTemplate, floor: number, subIds: string[], overrideL?: number, overrideB?: number): SpaceInstance {
+export function makeSpaceFromTemplate(
+  t: SpaceTemplate,
+  floor: number,
+  subIds: string[],
+  overrideL?: number,
+  overrideB?: number,
+): SpaceInstance {
   const L = overrideL ?? t.L;
   const B = overrideB ?? t.B;
-  const subSpaces = (subIds ?? []).map((sid) => {
-    const subT = t.subSpaces?.find((s) => s.id === sid);
-    if (!subT) return null;
-    return { instanceId: uid(), templateId: subT.id, name: subT.name, L: subT.L, B: subT.B, description: subT.description };
-  }).filter((x): x is SubSpaceInstance => x !== null);
+  const subSpaces = (subIds ?? [])
+    .map((sid) => {
+      const subT = t.subSpaces?.find((s) => s.id === sid);
+      if (!subT) return null;
+      return {
+        instanceId: uid(),
+        templateId: subT.id,
+        name: subT.name,
+        L: subT.L,
+        B: subT.B,
+        description: subT.description,
+      };
+    })
+    .filter((x): x is SubSpaceInstance => x !== null);
+
   return {
     instanceId: uid(),
     templateId: t.id,
     name: t.name,
     category: t.category,
-    L, B,
+    L,
+    B,
     floor: floor ?? 0,
     description: t.description,
     icon: t.icon,
