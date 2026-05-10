@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  CATEGORY_META,
-  LOCATION_RATES,
   UNIT_SYSTEMS,
   calcSpaceArea,
   fmt,
@@ -10,7 +8,6 @@ import {
   fmtDim,
   getFloorLabel,
   type SpaceInstance,
-  type StateKey,
   type UnitKey,
 } from "./areadata";
 
@@ -32,17 +29,18 @@ type Props = {
   costPerSqft: number;
   totals: Totals;
   floorGroups: Map<number, SpaceInstance[]>;
-  stateKey: StateKey;
-  regionKey: string;
+  locationLabel: string;
   disabled?: boolean;
 };
 
 function safeFileName(name: string) {
-  return (name || "space-requirement")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "") || "space-requirement";
+  return (
+    (name || "space-requirement")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || "space-requirement"
+  );
 }
 
 function stripEmoji(value: string) {
@@ -63,15 +61,18 @@ export default function SpaceRequirementPdfButton({
   costPerSqft,
   totals,
   floorGroups,
-  stateKey,
-  regionKey,
+  locationLabel,
   disabled = false,
 }: Props) {
   async function downloadPdf() {
     if (disabled || spaces.length === 0) return;
 
     const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
 
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -86,8 +87,6 @@ export default function SpaceRequirementPdfButton({
     const green: [number, number, number] = [4, 120, 87];
     const aLabel = UNIT_SYSTEMS[unit].areaLabel;
     const dLabel = UNIT_SYSTEMS[unit].dimLabel;
-    const stateLabel = LOCATION_RATES[stateKey]?.label ?? "";
-    const regionLabel = Object.entries(LOCATION_RATES[stateKey]?.regions ?? {}).find(([key]) => key === regionKey)?.[1]?.label ?? "";
     const clientDisplayName = clientName.trim() || "Client";
     const generatedDate = new Date().toLocaleDateString("en-IN", {
       day: "2-digit",
@@ -95,7 +94,11 @@ export default function SpaceRequirementPdfButton({
       year: "numeric",
     });
 
-    const setText = (size: number, color: [number, number, number] = dark, style: "normal" | "bold" = "normal") => {
+    const setText = (
+      size: number,
+      color: [number, number, number] = dark,
+      style: "normal" | "bold" = "normal",
+    ) => {
       doc.setFont("helvetica", style);
       doc.setFontSize(size);
       doc.setTextColor(...color);
@@ -126,11 +129,16 @@ export default function SpaceRequirementPdfButton({
         doc.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14);
         setText(8, muted);
         doc.text("www.modelflick.com", margin, pageHeight - 8);
-        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 8, { align: "right" });
+        doc.text(
+          `Page ${i} of ${pageCount}`,
+          pageWidth - margin,
+          pageHeight - 8,
+          { align: "right" },
+        );
       }
     };
 
-    // Cover header - printer-friendly, no heavy dark background
+    // ── Cover header ─────────────────────────────────────────
     doc.setFillColor(255, 255, 255);
     doc.rect(0, 0, pageWidth, 42, "F");
     doc.setDrawColor(...line);
@@ -142,14 +150,20 @@ export default function SpaceRequirementPdfButton({
     doc.text("SPACE REQUIREMENT", margin + 3, 17.5);
 
     setText(20, dark, "bold");
-    doc.text(projectName || "Untitled Project", margin, 30, { maxWidth: usableWidth - 56 });
+    doc.text(projectName || "Untitled Project", margin, 30, {
+      maxWidth: usableWidth - 56,
+    });
 
     setText(8, muted);
-    doc.text(`Generated: ${generatedDate}`, pageWidth - margin, 17, { align: "right" });
-    doc.text("Preliminary area statement", pageWidth - margin, 22, { align: "right" });
+    doc.text(`Generated: ${generatedDate}`, pageWidth - margin, 17, {
+      align: "right",
+    });
+    doc.text("Preliminary area statement", pageWidth - margin, 22, {
+      align: "right",
+    });
     y = 48;
 
-    // Project meta card
+    // ── Project meta card ────────────────────────────────────
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(...line);
     doc.roundedRect(margin, y, usableWidth, 34, 3, 3, "FD");
@@ -163,21 +177,32 @@ export default function SpaceRequirementPdfButton({
     doc.text("ALLOWANCES", rightX, y + 23);
 
     setText(11, dark, "bold");
-    doc.text(`Client: ${clientDisplayName}`, leftX, y + 14, { maxWidth: usableWidth / 2 - 8 });
+    doc.text(`Client: ${clientDisplayName}`, leftX, y + 14, {
+      maxWidth: usableWidth / 2 - 8,
+    });
     setText(10, dark);
-    doc.text([stateLabel, regionLabel].filter(Boolean).join(" - ") || "Not specified", rightX, y + 14, { maxWidth: usableWidth / 2 - 8 });
+    doc.text(
+      locationLabel || "Not specified",
+      rightX,
+      y + 14,
+      { maxWidth: usableWidth / 2 - 8 },
+    );
     doc.text(`Rs. ${costPerSqft.toLocaleString("en-IN")}/sqft`, leftX, y + 29);
     doc.text(`Wall ${wall}%  |  Circulation ${circ}%`, rightX, y + 29);
     y += 46;
 
-    // Summary cards
+    // ── Summary cards ────────────────────────────────────────
     const cardGap = 4;
     const cardW = (usableWidth - cardGap * 3) / 4;
     const cards: Array<{ label: string; value: string; strong?: boolean }> = [
       { label: "Net Carpet", value: `${fmt(totals.net, unit)} ${aLabel}` },
       { label: `Wall Area`, value: `+ ${fmt(totals.wallA, unit)} ${aLabel}` },
       { label: `Circulation`, value: `+ ${fmt(totals.circA, unit)} ${aLabel}` },
-      { label: "Gross Built-up", value: `${fmt(totals.gross, unit)} ${aLabel}`, strong: true },
+      {
+        label: "Gross Built-up",
+        value: `${fmt(totals.gross, unit)} ${aLabel}`,
+        strong: true,
+      },
     ];
 
     cards.forEach((card, index) => {
@@ -197,7 +222,7 @@ export default function SpaceRequirementPdfButton({
     });
     y += 34;
 
-    // Cost band
+    // ── Cost band ────────────────────────────────────────────
     doc.setFillColor(236, 253, 245);
     doc.setDrawColor(167, 243, 208);
     doc.roundedRect(margin, y, usableWidth, 22, 3, 3, "FD");
@@ -206,10 +231,19 @@ export default function SpaceRequirementPdfButton({
     setText(17, green, "bold");
     doc.text(cleanRupee(fmtCost(totals.cost)), margin + 5, y + 17);
     setText(8, green);
-    doc.text(`Based on gross built-up area @ Rs. ${costPerSqft.toLocaleString("en-IN")}/sqft`, pageWidth - margin - 5, y + 14, { align: "right" });
+    doc.text(
+      `Based on gross built-up area @ Rs. ${costPerSqft.toLocaleString("en-IN")}/sqft`,
+      pageWidth - margin - 5,
+      y + 14,
+      { align: "right" },
+    );
     y += 34;
 
+    // ── Area breakdown by type ───────────────────────────────
     addSectionTitle("Area Breakdown by Type");
+
+    // Dynamically import CATEGORY_META for the breakdown section
+    const { CATEGORY_META } = await import("./areadata");
 
     Object.entries(CATEGORY_META).forEach(([cat, meta]) => {
       const catSpaces = spaces.filter((s) => s.category === cat);
@@ -223,15 +257,24 @@ export default function SpaceRequirementPdfButton({
       setText(8.5, dark, "bold");
       doc.text(meta.label, margin + 3, y + 1);
       setText(8.5, dark, "bold");
-      doc.text(`${fmt(catArea, unit)} ${aLabel}`, pageWidth - margin - 3, y + 1, { align: "right" });
+      doc.text(
+        `${fmt(catArea, unit)} ${aLabel}`,
+        pageWidth - margin - 3,
+        y + 1,
+        { align: "right" },
+      );
       y += 10;
     });
     y += 4;
 
+    // ── Detailed space requirement ───────────────────────────
     addSectionTitle("Detailed Space Requirement");
 
     Array.from(floorGroups.entries()).forEach(([floor, floorSpaces]) => {
-      const floorArea = floorSpaces.reduce((sum, s) => sum + calcSpaceArea(s), 0);
+      const floorArea = floorSpaces.reduce(
+        (sum, s) => sum + calcSpaceArea(s),
+        0,
+      );
       ensurePage(24);
 
       doc.setFillColor(249, 250, 251);
@@ -239,7 +282,12 @@ export default function SpaceRequirementPdfButton({
       doc.roundedRect(margin, y, usableWidth, 10, 2, 2, "FD");
       setText(9, dark, "bold");
       doc.text(getFloorLabel(floor), margin + 4, y + 6.5);
-      doc.text(`${fmt(floorArea, unit)} ${aLabel}`, pageWidth - margin - 4, y + 6.5, { align: "right" });
+      doc.text(
+        `${fmt(floorArea, unit)} ${aLabel}`,
+        pageWidth - margin - 4,
+        y + 6.5,
+        { align: "right" },
+      );
       y += 15;
 
       setText(7.5, muted, "bold");
@@ -257,14 +305,20 @@ export default function SpaceRequirementPdfButton({
         const totalArea = calcSpaceArea(space);
         const hasSubSpaces = space.subSpaces.length > 0;
         const spaceName = stripEmoji(space.name) || space.name;
-        const descriptionLines = doc.splitTextToSize(space.description || "-", 38).slice(0, 4);
+        const descriptionLines = doc
+          .splitTextToSize(space.description || "-", 38)
+          .slice(0, 4);
         const rowHeight = Math.max(10, descriptionLines.length * 4 + 4);
         ensurePage(rowHeight + 8);
 
         setText(8.7, dark, "bold");
         doc.text(spaceName, margin, y, { maxWidth: 66 });
         setText(8, dark);
-        doc.text(`${fmtDim(space.L, unit)} x ${fmtDim(space.B, unit)}`, margin + 72, y);
+        doc.text(
+          `${fmtDim(space.L, unit)} x ${fmtDim(space.B, unit)}`,
+          margin + 72,
+          y,
+        );
         doc.text(fmt(mainArea, unit), margin + 104, y);
         doc.text(hasSubSpaces ? "-" : fmt(totalArea, unit), margin + 130, y);
         setText(7.5, muted);
@@ -272,13 +326,21 @@ export default function SpaceRequirementPdfButton({
         y += rowHeight;
 
         space.subSpaces.forEach((sub) => {
-          const subDescription = doc.splitTextToSize(sub.description || "-", 38).slice(0, 2);
+          const subDescription = doc
+            .splitTextToSize(sub.description || "-", 38)
+            .slice(0, 2);
           const subHeight = Math.max(7, subDescription.length * 4 + 2);
           ensurePage(subHeight + 5);
 
           setText(7.7, muted);
-          doc.text(`- ${stripEmoji(sub.name)}`, margin + 4, y, { maxWidth: 64 });
-          doc.text(`${fmtDim(sub.L, unit)} x ${fmtDim(sub.B, unit)}`, margin + 72, y);
+          doc.text(`- ${stripEmoji(sub.name)}`, margin + 4, y, {
+            maxWidth: 64,
+          });
+          doc.text(
+            `${fmtDim(sub.L, unit)} x ${fmtDim(sub.B, unit)}`,
+            margin + 72,
+            y,
+          );
           doc.text(fmt(sub.L * sub.B, unit), margin + 104, y);
           doc.text("-", margin + 130, y);
           doc.text(subDescription, margin + 153, y);
@@ -289,10 +351,23 @@ export default function SpaceRequirementPdfButton({
           ensurePage(8);
           doc.setFillColor(255, 251, 235);
           doc.setDrawColor(253, 230, 138);
-          doc.roundedRect(margin + 96, y - 4.5, usableWidth - 96, 7, 1.5, 1.5, "FD");
+          doc.roundedRect(
+            margin + 96,
+            y - 4.5,
+            usableWidth - 96,
+            7,
+            1.5,
+            1.5,
+            "FD",
+          );
           setText(7.7, accent, "bold");
           doc.text(`Total ${spaceName}`, margin + 104, y);
-          doc.text(`${fmt(totalArea, unit)} ${aLabel}`, pageWidth - margin - 3, y, { align: "right" });
+          doc.text(
+            `${fmt(totalArea, unit)} ${aLabel}`,
+            pageWidth - margin - 3,
+            y,
+            { align: "right" },
+          );
           y += 8;
         }
 
@@ -303,6 +378,7 @@ export default function SpaceRequirementPdfButton({
       y += 5;
     });
 
+    // ── Disclaimer note ──────────────────────────────────────
     ensurePage(25);
     doc.setFillColor(249, 250, 251);
     doc.setDrawColor(...line);
@@ -325,7 +401,11 @@ export default function SpaceRequirementPdfButton({
     <button
       onClick={downloadPdf}
       disabled={disabled}
-      title={disabled ? "Add at least one space to generate a PDF" : "Download PDF report"}
+      title={
+        disabled
+          ? "Add at least one space to generate a PDF"
+          : "Download PDF report"
+      }
       style={{
         fontSize: 13,
         padding: "8px 14px",
