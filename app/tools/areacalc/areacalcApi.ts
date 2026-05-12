@@ -3,6 +3,21 @@
 const HOST = process.env.NEXT_PUBLIC_HOST;
 const BASE = `${HOST}/api/areacalc`;
 
+// ── Auth Helpers ──────────────────────────────────────────────
+
+function getToken(): string {
+  if (typeof window === "undefined") return "";
+
+  return localStorage.getItem("access") ?? "";
+}
+
+function authHeaders() {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${getToken()}`,
+  };
+}
+
 // ── API Response Types (match Django serializers) ─────────────
 
 export interface ApiCountry {
@@ -100,33 +115,161 @@ export interface ApiProjectTemplate {
   spaces: ApiProjectSpace[];
 }
 
+export interface ApiMyRole {
+  authenticated: boolean;
+  role: "anonymous" | "user" | "customer" | "member" | "admin";
+  can_save_custom_templates: boolean;
+}
+
+export interface ApiCustomProjectTemplate {
+  id: number;
+  owner: string;
+  label: string;
+  description: string;
+  icon: string;
+
+  data: {
+    projectName?: string;
+    clientName?: string;
+    unit?: string;
+    wall?: number;
+    circ?: number;
+    spaces?: unknown[];
+  };
+
+  source_project_template: number | null;
+
+  is_active: boolean;
+
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Fetch Helpers ─────────────────────────────────────────────
 
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`API error ${res.status}: ${url}`);
+  const res = await fetch(url, {
+    headers: authHeaders(),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+
+    throw new Error(
+      `GET failed (${res.status}) ${url}\n${text}`,
+    );
+  }
+
   return res.json();
 }
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+
+    throw new Error(
+      `POST failed (${res.status}) ${url}\n${text}`,
+    );
+  }
+
+  return res.json();
+}
+
+async function patch<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+
+    throw new Error(
+      `PATCH failed (${res.status}) ${url}\n${text}`,
+    );
+  }
+
+  return res.json();
+}
+
+// ── API Calls ─────────────────────────────────────────────────
 
 export const fetchCountries = () =>
   get<ApiCountry[]>(`${BASE}/geography/countries/`);
 
 export const fetchStates = (countryId: number) =>
-  get<ApiState[]>(`${BASE}/geography/states/?country=${countryId}`);
+  get<ApiState[]>(
+    `${BASE}/geography/states/?country=${countryId}`,
+  );
 
 export const fetchPlaces = (stateId: number) =>
-  get<ApiPlace[]>(`${BASE}/geography/places/?state=${stateId}`);
+  get<ApiPlace[]>(
+    `${BASE}/geography/places/?state=${stateId}`,
+  );
 
-export const fetchRateLookup = (placeId: number, category?: string) =>
+export const fetchRateLookup = (
+  placeId: number,
+  category?: string,
+) =>
   get<ApiRateLookup>(
-    `${BASE}/rates/lookup/?place_id=${placeId}${category ? `&category=${category}` : ""}`,
+    `${BASE}/rates/lookup/?place_id=${placeId}${
+      category ? `&category=${category}` : ""
+    }`,
   );
 
 export const fetchSpaceTemplates = () =>
-  get<ApiSpaceTemplate[]>(`${BASE}/templates/spaces/`);
+  get<ApiSpaceTemplate[]>(
+    `${BASE}/templates/spaces/`,
+  );
 
 export const fetchProjectTemplates = () =>
-  get<ApiProjectTemplate[]>(`${BASE}/templates/projects/`);
+  get<ApiProjectTemplate[]>(
+    `${BASE}/templates/projects/`,
+  );
+
+export const fetchMyRole = () =>
+  get<ApiMyRole>(
+    `${BASE}/me/role/`,
+  );
+
+export const fetchCustomProjectTemplates = () =>
+  get<ApiCustomProjectTemplate[]>(
+    `${BASE}/templates/custom-projects/`,
+  );
+
+export const saveCustomProjectTemplate = (payload: {
+  label: string;
+  description?: string;
+  icon?: string;
+  data: unknown;
+  source_project_template?: number | null;
+}) =>
+  post<ApiCustomProjectTemplate>(
+    `${BASE}/templates/custom-projects/`,
+    payload,
+  );
+
+export const updateCustomProjectTemplate = (
+  id: number,
+  payload: Partial<{
+    label: string;
+    description: string;
+    icon: string;
+    data: unknown;
+    is_active: boolean;
+  }>,
+) =>
+  patch<ApiCustomProjectTemplate>(
+    `${BASE}/templates/custom-projects/${id}/`,
+    payload,
+  );
 
 // ── Transformers: API → Frontend Types ────────────────────────
 
@@ -137,39 +280,56 @@ import type {
   CategoryKey,
 } from "./areadata";
 
-export function toSpaceTemplate(api: ApiSpaceTemplate): SpaceTemplate {
+export function toSpaceTemplate(
+  api: ApiSpaceTemplate,
+): SpaceTemplate {
   return {
     id: api.template_id,
     name: api.name,
     category: api.category as CategoryKey,
+
     L: parseFloat(api.default_l),
     B: parseFloat(api.default_b),
+
     icon: api.icon || "📐",
     description: api.description,
+
     subSpaces: api.sub_spaces.map(
       (s): SubSpaceTemplate => ({
         id: s.sub_id,
         name: s.name,
+
         L: parseFloat(s.default_l),
         B: parseFloat(s.default_b),
+
         description: s.description,
       }),
     ),
   };
 }
 
-export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
+export function toProjectTemplate(
+  api: ApiProjectTemplate,
+): ProjectTemplate {
   return {
     id: api.template_id,
+
     label: api.label,
     description: api.description,
+
     icon: api.icon || "🏗️",
+
     spaces: api.spaces.map((s) => ({
       templateId: s.space_template_id,
+
       floor: s.floor,
+
       L: parseFloat(s.effective_l),
       B: parseFloat(s.effective_b),
-      subIds: s.sub_ids.map((sub) => sub.sub_id),
+
+      subIds: s.sub_ids.map(
+        (sub) => sub.sub_id,
+      ),
     })),
   };
 }
