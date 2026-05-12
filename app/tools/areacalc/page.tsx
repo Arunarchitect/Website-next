@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import SpaceRequirementPdfButton from "./SpaceRequirementPdfButton";
+import SpaceRequirementCsvButton from "./SpaceRequirementCsvButton";
 import {
   UNIT_SYSTEMS,
   CATEGORY_META,
@@ -2396,6 +2397,17 @@ export default function App() {
               costPerSqft={costPerSqft}
               totals={totals}
               floorGroups={floorGroups}
+              locationLabel={locationLabel}
+              disabled={spaces.length === 0}
+            />
+            <SpaceRequirementCsvButton
+              projectName={projectName}
+              clientName={clientName}
+              spaces={spaces}
+              unit={unit}
+              wall={wall}
+              circ={circ}
+              totals={totals}
               locationLabel={locationLabel}
               disabled={spaces.length === 0}
             />
