@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import SpaceRequirementPdfButton from "./SpaceRequirementPdfButton";
-import SpaceRequirementCsvButton from "./SpaceRequirementCsvButton";
+import SpaceRequirementCsvButton, { type ImportPayload } from "./SpaceRequirementCsvButton";
 import {
   UNIT_SYSTEMS,
   CATEGORY_META,
@@ -654,6 +654,27 @@ function RateStatusBadge({ source, label }: { source: string; label: string }) {
   );
 }
 
+// ─── ImportBanner ─────────────────────────────────────────────
+function ImportBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "10px 14px", borderRadius: 10,
+      background: "#f0fdf4", border: "1px solid #86efac",
+      marginBottom: 12, flexWrap: "wrap",
+    }}>
+      <span style={{ fontSize: 18 }}>📂</span>
+      <span style={{ fontSize: 13, color: "#166534", fontWeight: 600 }}>
+        Project imported from CSV — review spaces below, then save or export as needed.
+      </span>
+      <button onClick={onDismiss}
+        style={{ marginLeft: "auto", fontSize: 11, color: "#166534", background: "none", border: "none", cursor: "pointer" }}>
+        Dismiss ✕
+      </button>
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────
 export default function App() {
   // Spaces state
@@ -691,13 +712,16 @@ export default function App() {
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
 
+  // CSV import banner
+  const [showImportBanner, setShowImportBanner] = useState(false);
+
   // Saved custom templates / role
   const [myRole, setMyRole] = useState<ApiMyRole | null>(null);
   const [customTemplates, setCustomTemplates] = useState<ApiCustomProjectTemplate[]>([]);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateSaveMsg, setTemplateSaveMsg] = useState("");
 
-  // ── NEW: tracks which custom template is currently "active" (loaded or last saved)
+  // tracks which custom template is currently "active" (loaded or last saved)
   const [activeCustomTemplateId, setActiveCustomTemplateId] = useState<number | null>(null);
 
   // Derived
@@ -791,7 +815,8 @@ export default function App() {
       .filter((x): x is SpaceInstance => x !== null);
     setSpaces(newSpaces);
     setProjectName(tpl.label);
-    setActiveCustomTemplateId(null); // not a custom template — next Save will POST
+    setActiveCustomTemplateId(null);
+    setShowImportBanner(false);
     setShowTemplatePanel(false);
   }
 
@@ -811,9 +836,24 @@ export default function App() {
     setWall(data.wall ?? 10);
     setCirc(data.circ ?? 15);
     setSpaces(data.spaces || []);
-    setActiveCustomTemplateId(tpl.id); // track → Save will PATCH this ID
+    setActiveCustomTemplateId(tpl.id);
+    setShowImportBanner(false);
     setShowTemplatePanel(false);
   }
+
+  // ── CSV Import handler ─────────────────────────────────────
+  const handleCsvImport = useCallback((payload: ImportPayload) => {
+    setProjectName(payload.projectName);
+    setClientName(payload.clientName);
+    setUnit(payload.unit);
+    setWall(payload.wall);
+    setCirc(payload.circ);
+    setSpaces(payload.spaces);
+    // CSV import: not tied to any saved template — next Save will POST
+    setActiveCustomTemplateId(null);
+    setShowImportBanner(true);
+    setTemplateSaveMsg("");
+  }, []);
 
   // ── Save: PATCH if activeCustomTemplateId exists, else POST ──
   async function handleSaveTemplate() {
@@ -849,9 +889,10 @@ export default function App() {
         // POST — first-time save
         const saved = await saveCustomProjectTemplate(payload);
         setCustomTemplates((prev) => [saved, ...prev]);
-        setActiveCustomTemplateId(saved.id); // future Saves will PATCH this
+        setActiveCustomTemplateId(saved.id);
         setTemplateSaveMsg("Template saved.");
       }
+      setShowImportBanner(false);
     } catch (err) {
       console.error(err);
       setTemplateSaveMsg("Could not save template. Check login and role permission.");
@@ -884,8 +925,9 @@ export default function App() {
       });
 
       setCustomTemplates((prev) => [saved, ...prev]);
-      setActiveCustomTemplateId(saved.id); // switch to the new copy
+      setActiveCustomTemplateId(saved.id);
       setTemplateSaveMsg("Saved as new template.");
+      setShowImportBanner(false);
     } catch (err) {
       console.error(err);
       setTemplateSaveMsg("Could not save. Check login and role permission.");
@@ -1048,7 +1090,7 @@ export default function App() {
               ✏️ Custom Space
             </button>
 
-            {/* ── Save button: PATCH if active template, else POST ── */}
+            {/* Save button: PATCH if active template, else POST */}
             <button
               onClick={handleSaveTemplate}
               disabled={savingTemplate || spaces.length === 0}
@@ -1073,8 +1115,8 @@ export default function App() {
               💾 {savingTemplate ? "Saving…" : activeCustomTemplateId ? "Save" : "Save Template"}
             </button>
 
-            {/* ── Save As button: only shown when an active template is tracked ── */}
-            {activeCustomTemplateId !== null && (
+            {/* Save As: shown when an active template is tracked OR after CSV import (for paid users) */}
+            {(activeCustomTemplateId !== null || showImportBanner) && myRole?.can_save_custom_templates && (
               <button
                 onClick={handleSaveAsTemplate}
                 disabled={savingTemplate || spaces.length === 0}
@@ -1084,10 +1126,10 @@ export default function App() {
                   padding: "8px 14px",
                   borderRadius: 8,
                   border: "1px solid #6366f1",
-                  background: myRole?.can_save_custom_templates ? "#eef2ff" : "#f3f4f6",
-                  cursor: myRole?.can_save_custom_templates && spaces.length > 0 ? "pointer" : "not-allowed",
+                  background: "#eef2ff",
+                  cursor: spaces.length > 0 ? "pointer" : "not-allowed",
                   fontWeight: 600,
-                  color: myRole?.can_save_custom_templates ? "#4338ca" : "#9ca3af",
+                  color: "#4338ca",
                 }}
               >
                 📋 Save As
@@ -1105,11 +1147,18 @@ export default function App() {
               wall={wall} circ={circ} costPerSqft={costPerSqft} totals={totals}
               floorGroups={floorGroups} locationLabel={locationLabel} disabled={spaces.length === 0}
             />
+
+            {/* CSV Export + Import (always available) */}
             <SpaceRequirementCsvButton
               projectName={projectName} clientName={clientName} spaces={spaces} unit={unit}
-              wall={wall} circ={circ} totals={totals} locationLabel={locationLabel} disabled={spaces.length === 0}
+              wall={wall} circ={circ} totals={totals} locationLabel={locationLabel}
+              disabled={spaces.length === 0}
+              onImport={handleCsvImport}
             />
           </div>
+
+          {/* Import banner */}
+          {showImportBanner && <ImportBanner onDismiss={() => setShowImportBanner(false)} />}
 
           {/* Templates strip */}
           {showTemplatePanel && (
@@ -1186,7 +1235,7 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderRadius: 16, border: "2px dashed #d1d5db", background: "#fff", padding: "60px 24px", textAlign: "center" }}>
               <span style={{ fontSize: 48, marginBottom: 12 }}>🏗️</span>
               <p style={{ fontSize: 18, fontWeight: 700, color: "#9ca3af", margin: "0 0 6px" }}>No spaces yet</p>
-              <p style={{ fontSize: 14, color: "#d1d5db", margin: 0 }}>Use &ldquo;Add Space&rdquo;, &ldquo;Templates&rdquo; or &ldquo;Custom Space&rdquo; above</p>
+              <p style={{ fontSize: 14, color: "#d1d5db", margin: 0 }}>Use &ldquo;Add Space&rdquo;, &ldquo;Templates&rdquo;, &ldquo;Custom Space&rdquo; or &ldquo;Import CSV&rdquo; above</p>
             </div>
           ) : activeFloor === "all" ? (
             Array.from(floorGroups.entries()).map(([floor, fs]) => (
