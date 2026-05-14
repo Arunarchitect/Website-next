@@ -1,18 +1,16 @@
 /* eslint-disable @next/next/no-img-element */
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  AUTHORS,
-  CATEGORIES,
-  LANGUAGES,
+  apiFetchPosts,
+  apiFetchAuthors,
+  apiFetchCategories,
   formatDate,
   getCoverImage,
-  getFeaturedPosts,
   getTranslation,
-  searchPosts,
+  LANGUAGES,
   type Author,
   type AuthorRole,
   type BlogPost,
@@ -21,13 +19,41 @@ import {
 
 type Theme = "dark" | "light";
 
-function isLanguageCode(value: string | null): value is LanguageCode {
-  return value === "en" || value === "ml" || value === "hi" || value === "ta";
+function isLanguageCode(v: string | null): v is LanguageCode {
+  return v === "en" || v === "ml" || v === "hi" || v === "ta";
 }
+
+function getSafeTranslation(post: BlogPost, language: LanguageCode) {
+  return (
+    getTranslation(post, language) ??
+    getTranslation(post, "en") ??
+    Object.values(post.translations ?? {})[0]
+  );
+}
+
+function getPostTitle(post: BlogPost, language: LanguageCode) {
+  return getSafeTranslation(post, language)?.title ?? post.slug;
+}
+
+function getPostSubtitle(post: BlogPost, language: LanguageCode) {
+  return getSafeTranslation(post, language)?.subtitle ?? "";
+}
+
+function getPostExcerpt(post: BlogPost, language: LanguageCode) {
+  const t = getSafeTranslation(post, language);
+  return t?.excerpt ?? t?.subtitle ?? "";
+}
+
+function hasReadableContent(post: BlogPost, language: LanguageCode) {
+  return Boolean(getSafeTranslation(post, language));
+}
+
+// ---------------------------------------------------------------------------
+// Shared UI atoms
+// ---------------------------------------------------------------------------
 
 function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
   const isDark = theme === "dark";
-
   return (
     <button
       onClick={onToggle}
@@ -61,72 +87,61 @@ function AuthorPip({ author }: { author: Author }) {
   );
 }
 
-const ROLE_STYLES_DARK: Record<AuthorRole, string> = {
-  Eminent: "bg-amber-900/40 text-amber-300 border border-amber-700/40",
+const ROLE_DARK: Record<AuthorRole, string> = {
+  Eminent:   "bg-amber-900/40 text-amber-300 border border-amber-700/40",
   Editorial: "bg-sky-900/40 text-sky-300 border border-sky-700/40",
-  Guest: "bg-emerald-900/40 text-emerald-300 border border-emerald-700/40",
-  Staff: "bg-stone-800 text-stone-400 border border-stone-700",
+  Guest:     "bg-emerald-900/40 text-emerald-300 border border-emerald-700/40",
+  Staff:     "bg-stone-800 text-stone-400 border border-stone-700",
 };
-
-const ROLE_STYLES_LIGHT: Record<AuthorRole, string> = {
-  Eminent: "bg-amber-100 text-amber-800 border border-amber-300",
+const ROLE_LIGHT: Record<AuthorRole, string> = {
+  Eminent:   "bg-amber-100 text-amber-800 border border-amber-300",
   Editorial: "bg-sky-100 text-sky-800 border border-sky-300",
-  Guest: "bg-emerald-100 text-emerald-800 border border-emerald-300",
-  Staff: "bg-stone-100 text-stone-600 border border-stone-300",
+  Guest:     "bg-emerald-100 text-emerald-800 border border-emerald-300",
+  Staff:     "bg-stone-100 text-stone-600 border border-stone-300",
 };
 
 function RoleBadge({ role, theme }: { role: AuthorRole; theme: Theme }) {
-  const styles = theme === "dark" ? ROLE_STYLES_DARK : ROLE_STYLES_LIGHT;
-
+  const s = theme === "dark" ? ROLE_DARK : ROLE_LIGHT;
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${styles[role]}`}>
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${s[role]}`}>
       {role}
     </span>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Language tool
+// ---------------------------------------------------------------------------
+
 function LanguageTool({
-  language,
-  onLanguageChange,
-  onTranslate,
-  theme,
+  language, onLanguageChange, onTranslate, theme,
 }: {
   language: LanguageCode;
-  onLanguageChange: (language: LanguageCode) => void;
+  onLanguageChange: (l: LanguageCode) => void;
   onTranslate: () => void;
   theme: Theme;
 }) {
   const isDark = theme === "dark";
-  const otherLanguages = LANGUAGES.filter((item) => item.code !== "en");
+  const others = LANGUAGES.filter((l) => l.code !== "en");
 
   return (
-    <div className={`rounded-xl border p-4 ${
-      isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"
-    }`}>
-      <p className={`mb-2 text-xs font-semibold uppercase tracking-widest ${
-        isDark ? "text-stone-500" : "text-stone-400"
-      }`}>
+    <div className={`rounded-xl border p-4 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}>
+      <p className={`mb-2 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
         Language
       </p>
-
       <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
         <select
           value={language}
-          onChange={(event) => onLanguageChange(event.target.value as LanguageCode)}
+          onChange={(e) => onLanguageChange(e.target.value as LanguageCode)}
           className={`rounded-lg border px-3 py-2 text-sm outline-none ${
-            isDark
-              ? "border-stone-800 bg-stone-900 text-stone-300"
-              : "border-stone-300 bg-white text-stone-700"
+            isDark ? "border-stone-800 bg-stone-900 text-stone-300" : "border-stone-300 bg-white text-stone-700"
           }`}
         >
           <option value="en">English</option>
-          {otherLanguages.map((item) => (
-            <option key={item.code} value={item.code}>
-              {item.nativeLabel}
-            </option>
+          {others.map((l) => (
+            <option key={l.code} value={l.code}>{l.nativeLabel}</option>
           ))}
         </select>
-
         <button
           onClick={onTranslate}
           className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-amber-50 hover:bg-amber-500"
@@ -138,47 +153,38 @@ function LanguageTool({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Cards
+// ---------------------------------------------------------------------------
+
 function FeaturedCard({
-  post,
-  index,
-  theme,
-  language,
-  onClick,
+  post, index, theme, language, onClick,
 }: {
-  post: BlogPost;
-  index: number;
-  theme: Theme;
-  language: LanguageCode;
-  onClick: () => void;
+  post: BlogPost; index: number; theme: Theme; language: LanguageCode; onClick: () => void;
 }) {
   const isWide = index === 0;
   const isDark = theme === "dark";
-  const coverImage = getCoverImage(post);
-  const translation = getTranslation(post, language);
+  const cover = getCoverImage(post);
+  const title = getPostTitle(post, language);
+  const subtitle = getPostSubtitle(post, language);
 
   return (
     <article
       onClick={onClick}
       className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border transition-all duration-200 ${
         isWide ? "md:col-span-2" : ""
-      } ${
-        isDark
-          ? "border-stone-800 bg-stone-950 hover:border-stone-600"
-          : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
-      }`}
+      } ${isDark ? "border-stone-800 bg-stone-950 hover:border-stone-600" : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"}`}
     >
-      {coverImage && (
+      {cover && (
         <div className="relative h-60 overflow-hidden">
           <img
-            src={coverImage.src}
-            alt={coverImage.alt[language] ?? coverImage.alt.en}
+            src={cover.src}
+            alt={cover.alt[language] ?? cover.alt.en}
             className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
           />
         </div>
       )}
-
       <div className="h-1 w-full shrink-0" style={{ background: post.coverAccent }} />
-
       <div className="flex flex-1 flex-col gap-4 p-6">
         <div className="flex items-center justify-between">
           <span className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
@@ -188,28 +194,21 @@ function FeaturedCard({
             {post.readingTimeMinutes} min read
           </span>
         </div>
-
         <h2
-          className={`font-bold leading-tight transition-colors ${
-            isWide ? "text-2xl md:text-3xl" : "text-xl"
-          } ${isDark ? "text-stone-100 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"}`}
+          className={`font-bold leading-tight transition-colors ${isWide ? "text-2xl md:text-3xl" : "text-xl"} ${
+            isDark ? "text-stone-100 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"
+          }`}
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
-          {translation.title}
+          {title}
         </h2>
-
-        <p className={`text-sm leading-relaxed ${isDark ? "text-stone-400" : "text-stone-500"}`}>
-          {translation.subtitle}
-        </p>
-
+        <p className={`text-sm leading-relaxed ${isDark ? "text-stone-400" : "text-stone-500"}`}>{subtitle}</p>
         <div className="mt-auto flex items-center gap-2">
           <div className="flex -space-x-2">
-            {post.authors.map((author) => (
-              <AuthorPip key={author.id} author={author} />
-            ))}
+            {post.authors.map((a) => <AuthorPip key={a.id} author={a} />)}
           </div>
           <span className={`text-xs ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-            {post.authors.map((author) => author.name).join(" & ")}
+            {post.authors.map((a) => a.name).join(" & ")}
           </span>
           <span className={`ml-auto text-xs ${isDark ? "text-stone-700" : "text-stone-400"}`}>
             {formatDate(post.publishedAt)}
@@ -221,39 +220,30 @@ function FeaturedCard({
 }
 
 function PostCard({
-  post,
-  theme,
-  language,
-  onClick,
+  post, theme, language, onClick,
 }: {
-  post: BlogPost;
-  theme: Theme;
-  language: LanguageCode;
-  onClick: () => void;
+  post: BlogPost; theme: Theme; language: LanguageCode; onClick: () => void;
 }) {
   const isDark = theme === "dark";
-  const coverImage = getCoverImage(post);
-  const translation = getTranslation(post, language);
+  const cover = getCoverImage(post);
+  const title = getPostTitle(post, language);
+  const excerpt = getPostExcerpt(post, language);
 
   return (
     <article
       onClick={onClick}
       className={`group flex cursor-pointer flex-col overflow-hidden rounded-xl border transition-all duration-200 ${
-        isDark
-          ? "border-stone-800 bg-stone-950 hover:border-stone-600"
-          : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
+        isDark ? "border-stone-800 bg-stone-950 hover:border-stone-600" : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
       }`}
     >
-      {coverImage && (
+      {cover && (
         <img
-          src={coverImage.src}
-          alt={coverImage.alt[language] ?? coverImage.alt.en}
+          src={cover.src}
+          alt={cover.alt[language] ?? cover.alt.en}
           className="h-44 w-full object-cover transition duration-500 group-hover:scale-105"
         />
       )}
-
       <div className="h-[3px] w-full" style={{ background: post.coverAccent }} />
-
       <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-center justify-between">
           <span className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>
@@ -263,54 +253,48 @@ function PostCard({
             {post.readingTimeMinutes} min
           </span>
         </div>
-
         <h3
           className={`text-base font-bold leading-snug transition-colors ${
             isDark ? "text-stone-200 group-hover:text-amber-300" : "text-stone-900 group-hover:text-amber-700"
           }`}
           style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
         >
-          {translation.title}
+          {title}
         </h3>
-
         <p className={`line-clamp-2 text-xs leading-relaxed ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-          {translation.excerpt}
+          {excerpt}
         </p>
       </div>
     </article>
   );
 }
 
-function AuthorsSidebar({ theme }: { theme: Theme }) {
+function AuthorsSidebar({ theme, authors }: { theme: Theme; authors: Record<string, Author> }) {
   const isDark = theme === "dark";
-
   return (
-    <aside className={`rounded-xl border p-5 ${
-      isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"
-    }`}>
+    <aside className={`rounded-xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}>
       <h3 className={`mb-4 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
         Contributors
       </h3>
-
-      {Object.values(AUTHORS).map((author) => (
+      {Object.values(authors).map((author) => (
         <div key={author.id} className="border-t border-stone-800/40 py-3 first:border-t-0">
           <div className="mb-1 flex items-center gap-2">
             <AuthorPip author={author} />
             <div>
-              <p className={`text-xs font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}>
-                {author.name}
-              </p>
+              <p className={`text-xs font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}>{author.name}</p>
               <RoleBadge role={author.role} theme={theme} />
             </div>
           </div>
-          <p className={`ml-9 text-[11px] leading-snug ${isDark ? "text-stone-600" : "text-stone-500"}`}>
-            {author.bio}
-          </p>
+          <p className={`ml-9 text-[11px] leading-snug ${isDark ? "text-stone-600" : "text-stone-500"}`}>{author.bio}</p>
         </div>
       ))}
     </aside>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function ModelBlogPage() {
   const router = useRouter();
@@ -319,83 +303,102 @@ export default function ModelBlogPage() {
   const langParam = searchParams.get("lang");
   const initialLanguage: LanguageCode = isLanguageCode(langParam) ? langParam : "en";
 
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme]                   = useState<Theme>("dark");
   const [selectedCategory, setSelectedCategory] = useState("All");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [showSidebar, setShowSidebar] = useState(false);
-  const [language, setLanguage] = useState<LanguageCode>(initialLanguage);
+  const [searchTerm, setSearchTerm]         = useState("");
+  const [showSidebar, setShowSidebar]       = useState(false);
+  const [language, setLanguage]             = useState<LanguageCode>(initialLanguage);
+
+  // API data
+  const [posts, setPosts]         = useState<BlogPost[]>([]);
+  const [categories, setCategories] = useState<string[]>(["All"]);
+  const [authors, setAuthors]     = useState<Record<string, Author>>({});
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
 
   useEffect(() => {
     const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
     setTheme(prefersLight ? "light" : "dark");
   }, []);
 
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([apiFetchPosts(), apiFetchCategories(), apiFetchAuthors()])
+      .then(([p, c, a]) => { setPosts(p); setCategories(c); setAuthors(a); })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
   const isDark = theme === "dark";
 
-  const featured = useMemo(() => getFeaturedPosts(language), [language]);
+  const results = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
 
-  const results = useMemo(
-    () => searchPosts(searchTerm, selectedCategory, language),
-    [searchTerm, selectedCategory, language],
-  );
+    return posts
+      .filter((post) => hasReadableContent(post, language))
+      .filter((post) => selectedCategory === "All" || post.category === selectedCategory)
+      .filter((post) => {
+        if (!q) return true;
 
-  const nonFeatured = useMemo(
-    () => results.filter((post) => !post.featured || searchTerm || selectedCategory !== "All"),
-    [results, searchTerm, selectedCategory],
-  );
+        const title = getPostTitle(post, language);
+        const subtitle = getPostSubtitle(post, language);
+        const excerpt = getPostExcerpt(post, language);
+        const authorNames = post.authors.map((a) => a.name).join(" ");
+
+        return `${title} ${subtitle} ${excerpt} ${post.category} ${authorNames}`
+          .toLowerCase()
+          .includes(q);
+      });
+  }, [posts, searchTerm, selectedCategory, language]);
 
   const showFeatured = !searchTerm && selectedCategory === "All";
 
-  const applyLanguage = () => {
-    router.replace(`/modelblog/blog?lang=${language}`, { scroll: false });
-  };
+  const featured = useMemo(
+    () => (showFeatured ? results.filter((post) => post.featured).slice(0, 3) : []),
+    [results, showFeatured],
+  );
 
-  const openPost = (slug: string) => {
-    router.push(`/modelblog/blog/${slug}?lang=${language}`);
-  };
+  const nonFeatured = useMemo(() => {
+    if (!showFeatured) return results;
+
+    const featuredIds = new Set(featured.map((post) => post.id));
+    const latest = results.filter((post) => !featuredIds.has(post.id));
+
+    // Important: if every post is marked featured, still show posts below.
+    return latest.length > 0 ? latest : results;
+  }, [results, featured, showFeatured]);
+
+  const openPost = (slug: string) => router.push(`/modelblog/blog/${slug}?lang=${language}`);
+  const applyLanguage = () =>
+    router.replace(`/modelblog/blog?lang=${language}`, { scroll: false });
 
   return (
     <div
-      className={`min-h-screen transition-colors duration-300 ${
-        isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"
-      }`}
+      className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"}`}
       style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
-        .line-clamp-2 {
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
       `}</style>
 
-      <header className={`sticky top-0 z-30 border-b backdrop-blur ${
-        isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"
-      }`}>
+      {/* Header */}
+      <header className={`sticky top-0 z-30 border-b backdrop-blur ${isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"}`}>
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div>
-            <span
-              className={`text-xl font-bold tracking-tight ${isDark ? "text-stone-100" : "text-stone-900"}`}
-              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-            >
+            <span className={`text-xl font-bold tracking-tight ${isDark ? "text-stone-100" : "text-stone-900"}`}
+              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
               Model<span className="text-amber-500">Blog</span>
             </span>
-            <span className={`ml-3 hidden text-xs uppercase tracking-widest sm:inline ${
-              isDark ? "text-stone-600" : "text-stone-400"
-            }`}>
+            <span className={`ml-3 hidden text-xs uppercase tracking-widest sm:inline ${isDark ? "text-stone-600" : "text-stone-400"}`}>
               Architecture · BIM · Visualisation
             </span>
           </div>
-
           <div className="flex items-center gap-3">
             <ThemeToggle theme={theme} onToggle={() => setTheme(isDark ? "light" : "dark")} />
             <button
-              onClick={() => setShowSidebar((value) => !value)}
-              className={`rounded-lg border px-3 py-1.5 text-xs ${
-                isDark ? "border-stone-800 text-stone-500 hover:text-stone-200" : "border-stone-300 text-stone-500 hover:text-stone-800"
-              }`}
+              onClick={() => setShowSidebar((v) => !v)}
+              className={`rounded-lg border px-3 py-1.5 text-xs ${isDark ? "border-stone-800 text-stone-500 hover:text-stone-200" : "border-stone-300 text-stone-500 hover:text-stone-800"}`}
             >
               Contributors
             </button>
@@ -404,105 +407,94 @@ export default function ModelBlogPage() {
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <div className={`mb-8 rounded-lg border px-4 py-3 text-xs ${
-          isDark ? "border-amber-900/50 bg-amber-950/30 text-amber-400/80" : "border-amber-300 bg-amber-50 text-amber-700"
-        }`}>
+        {/* Language notice */}
+        <div className={`mb-8 rounded-lg border px-4 py-3 text-xs ${isDark ? "border-amber-900/50 bg-amber-950/30 text-amber-400/80" : "border-amber-300 bg-amber-50 text-amber-700"}`}>
           English is shown by default. Select another language and use Translate to view available translated posts.
         </div>
 
         <div className="mb-6">
-          <LanguageTool
-            language={language}
-            onLanguageChange={setLanguage}
-            onTranslate={applyLanguage}
-            theme={theme}
-          />
+          <LanguageTool language={language} onLanguageChange={setLanguage} onTranslate={applyLanguage} theme={theme} />
         </div>
 
+        {/* Search + categories */}
         <div className="mb-8 flex flex-col gap-3 sm:flex-row">
           <input
             type="text"
             value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
+            onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search articles, authors, topics…"
             className={`w-full rounded-xl border px-4 py-2.5 text-sm placeholder-stone-500 focus:outline-none ${
-              isDark
-                ? "border-stone-800 bg-stone-900 text-stone-200 focus:border-amber-700"
-                : "border-stone-300 bg-white text-stone-800 focus:border-amber-500"
+              isDark ? "border-stone-800 bg-stone-900 text-stone-200 focus:border-amber-700" : "border-stone-300 bg-white text-stone-800 focus:border-amber-500"
             }`}
           />
-
           <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((category) => (
+            {categories.map((cat) => (
               <button
-                key={category}
-                onClick={() => setSelectedCategory(category)}
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
                 className={`rounded-xl px-3 py-2 text-xs font-medium ${
-                  selectedCategory === category
+                  selectedCategory === cat
                     ? "bg-amber-600 text-amber-100"
-                    : isDark
-                      ? "bg-stone-900 text-stone-500 hover:text-stone-200"
-                      : "bg-white text-stone-500 shadow-sm hover:text-stone-900"
+                    : isDark ? "bg-stone-900 text-stone-500 hover:text-stone-200" : "bg-white text-stone-500 shadow-sm hover:text-stone-900"
                 }`}
               >
-                {category}
+                {cat}
               </button>
             ))}
           </div>
         </div>
 
-        <div className={`grid gap-8 ${showSidebar ? "lg:grid-cols-[1fr_300px]" : ""}`}>
-          <main>
-            {showFeatured && (
-              <section className="mb-10">
-                <h2 className={`mb-4 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
-                  Featured
-                </h2>
+        {/* Error */}
+        {error && (
+          <div className="mb-6 rounded-xl border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-400">
+            Failed to load posts: {error}
+          </div>
+        )}
 
-                <div className="grid gap-5 md:grid-cols-3">
-                  {featured.map((post, index) => (
-                    <FeaturedCard
-                      key={post.id}
-                      post={post}
-                      index={index}
-                      theme={theme}
-                      language={language}
-                      onClick={() => openPost(post.slug)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section>
-              <h2 className={`mb-4 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
-                {searchTerm || selectedCategory !== "All" ? "Results" : "Latest Articles"}
-              </h2>
-
-              {nonFeatured.length === 0 ? (
-                <div className={`rounded-xl border p-8 text-center text-sm ${
-                  isDark ? "border-stone-800 bg-stone-950 text-stone-500" : "border-stone-200 bg-white text-stone-500"
-                }`}>
-                  No articles found in this language.
-                </div>
-              ) : (
-                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-                  {nonFeatured.map((post) => (
-                    <PostCard
-                      key={post.id}
-                      post={post}
-                      theme={theme}
-                      language={language}
-                      onClick={() => openPost(post.slug)}
-                    />
-                  ))}
-                </div>
+        {/* Loading skeleton */}
+        {loading ? (
+          <div className="grid gap-5 md:grid-cols-3">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className={`h-64 animate-pulse rounded-2xl ${isDark ? "bg-stone-900" : "bg-stone-200"}`} />
+            ))}
+          </div>
+        ) : (
+          <div className={`grid gap-8 ${showSidebar ? "lg:grid-cols-[1fr_300px]" : ""}`}>
+            <main>
+              {showFeatured && featured.length > 0 && (
+                <section className="mb-10">
+                  <h2 className={`mb-4 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+                    Featured
+                  </h2>
+                  <div className="grid gap-5 md:grid-cols-3">
+                    {featured.map((post, i) => (
+                      <FeaturedCard key={post.id} post={post} index={i} theme={theme} language={language} onClick={() => openPost(post.slug)} />
+                    ))}
+                  </div>
+                </section>
               )}
-            </section>
-          </main>
 
-          {showSidebar && <AuthorsSidebar theme={theme} />}
-        </div>
+              <section>
+                <h2 className={`mb-4 text-xs font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+                  {searchTerm || selectedCategory !== "All" ? "Results" : "Latest Articles"}
+                </h2>
+                {nonFeatured.length === 0 ? (
+                  <div className={`rounded-xl border p-8 text-center text-sm ${isDark ? "border-stone-800 bg-stone-950 text-stone-500" : "border-stone-200 bg-white text-stone-500"}`}>
+                    No articles found. Check API response, published status, category filter, or translations.
+                  </div>
+                ) : (
+                  <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                    {nonFeatured.map((post) => (
+                      <PostCard key={post.id} post={post} theme={theme} language={language} onClick={() => openPost(post.slug)} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            </main>
+
+            {showSidebar && <AuthorsSidebar theme={theme} authors={authors} />}
+          </div>
+        )}
       </div>
     </div>
   );
