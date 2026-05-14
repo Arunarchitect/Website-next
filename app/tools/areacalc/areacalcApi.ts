@@ -7,7 +7,6 @@ const BASE = `${HOST}/api/areacalc`;
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
-
   return localStorage.getItem("access") ?? "";
 }
 
@@ -127,7 +126,6 @@ export interface ApiCustomProjectTemplate {
   label: string;
   description: string;
   icon: string;
-
   data: {
     projectName?: string;
     clientName?: string;
@@ -136,30 +134,63 @@ export interface ApiCustomProjectTemplate {
     circ?: number;
     spaces?: unknown[];
   };
-
   source_project_template: number | null;
-
   is_active: boolean;
-
   created_at: string;
   updated_at: string;
+}
+
+// ── Admin write payload types ─────────────────────────────────
+
+export interface SubSpaceWritePayload {
+  id?: number;
+  sub_id: string;
+  name: string;
+  default_l: number;
+  default_b: number;
+  description?: string;
+  sort_order?: number;
+}
+
+export interface SpaceTemplateWritePayload {
+  template_id: string;
+  name: string;
+  category: string;
+  default_l: number;
+  default_b: number;
+  icon?: string;
+  description?: string;
+  sort_order?: number;
+  sub_spaces?: SubSpaceWritePayload[];
+}
+
+export interface ProjectSpaceWritePayload {
+  id?: number;
+  space_template: number;
+  floor: number;
+  override_l?: number | null;
+  override_b?: number | null;
+  sort_order?: number;
+  sub_ids?: number[];
+}
+
+export interface ProjectTemplateWritePayload {
+  template_id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  sort_order?: number;
+  spaces?: ProjectSpaceWritePayload[];
 }
 
 // ── Fetch Helpers ─────────────────────────────────────────────
 
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url, {
-    headers: authHeaders(),
-  });
-
+  const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) {
     const text = await res.text();
-
-    throw new Error(
-      `GET failed (${res.status}) ${url}\n${text}`,
-    );
+    throw new Error(`GET failed (${res.status}) ${url}\n${text}`);
   }
-
   return res.json();
 }
 
@@ -169,15 +200,23 @@ async function post<T>(url: string, body: unknown): Promise<T> {
     headers: authHeaders(),
     body: JSON.stringify(body),
   });
-
   if (!res.ok) {
     const text = await res.text();
-
-    throw new Error(
-      `POST failed (${res.status}) ${url}\n${text}`,
-    );
+    throw new Error(`POST failed (${res.status}) ${url}\n${text}`);
   }
+  return res.json();
+}
 
+async function put<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`PUT failed (${res.status}) ${url}\n${text}`);
+  }
   return res.json();
 }
 
@@ -187,62 +226,56 @@ async function patch<T>(url: string, body: unknown): Promise<T> {
     headers: authHeaders(),
     body: JSON.stringify(body),
   });
-
   if (!res.ok) {
     const text = await res.text();
-
-    throw new Error(
-      `PATCH failed (${res.status}) ${url}\n${text}`,
-    );
+    throw new Error(`PATCH failed (${res.status}) ${url}\n${text}`);
   }
-
   return res.json();
 }
 
-// ── API Calls ─────────────────────────────────────────────────
+async function del(url: string): Promise<void> {
+  const res = await fetch(url, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`DELETE failed (${res.status}) ${url}\n${text}`);
+  }
+}
+
+// ── Geography ─────────────────────────────────────────────────
 
 export const fetchCountries = () =>
   get<ApiCountry[]>(`${BASE}/geography/countries/`);
 
 export const fetchStates = (countryId: number) =>
-  get<ApiState[]>(
-    `${BASE}/geography/states/?country=${countryId}`,
-  );
+  get<ApiState[]>(`${BASE}/geography/states/?country=${countryId}`);
 
 export const fetchPlaces = (stateId: number) =>
-  get<ApiPlace[]>(
-    `${BASE}/geography/places/?state=${stateId}`,
+  get<ApiPlace[]>(`${BASE}/geography/places/?state=${stateId}`);
+
+// ── Rate lookup ───────────────────────────────────────────────
+
+export const fetchRateLookup = (placeId: number, category?: string) =>
+  get<ApiRateLookup>(
+    `${BASE}/rates/lookup/?place_id=${placeId}${category ? `&category=${category}` : ""}`,
   );
 
-export const fetchRateLookup = (
-  placeId: number,
-  category?: string,
-) =>
-  get<ApiRateLookup>(
-    `${BASE}/rates/lookup/?place_id=${placeId}${
-      category ? `&category=${category}` : ""
-    }`,
-  );
+// ── Templates (read) ──────────────────────────────────────────
 
 export const fetchSpaceTemplates = () =>
-  get<ApiSpaceTemplate[]>(
-    `${BASE}/templates/spaces/`,
-  );
+  get<ApiSpaceTemplate[]>(`${BASE}/templates/spaces/`);
 
 export const fetchProjectTemplates = () =>
-  get<ApiProjectTemplate[]>(
-    `${BASE}/templates/projects/`,
-  );
+  get<ApiProjectTemplate[]>(`${BASE}/templates/projects/`);
+
+// ── User / role ───────────────────────────────────────────────
 
 export const fetchMyRole = () =>
-  get<ApiMyRole>(
-    `${BASE}/me/role/`,
-  );
+  get<ApiMyRole>(`${BASE}/me/role/`);
+
+// ── Custom project templates ──────────────────────────────────
 
 export const fetchCustomProjectTemplates = () =>
-  get<ApiCustomProjectTemplate[]>(
-    `${BASE}/templates/custom-projects/`,
-  );
+  get<ApiCustomProjectTemplate[]>(`${BASE}/templates/custom-projects/`);
 
 export const saveCustomProjectTemplate = (payload: {
   label: string;
@@ -250,11 +283,7 @@ export const saveCustomProjectTemplate = (payload: {
   icon?: string;
   data: unknown;
   source_project_template?: number | null;
-}) =>
-  post<ApiCustomProjectTemplate>(
-    `${BASE}/templates/custom-projects/`,
-    payload,
-  );
+}) => post<ApiCustomProjectTemplate>(`${BASE}/templates/custom-projects/`, payload);
 
 export const updateCustomProjectTemplate = (
   id: number,
@@ -265,13 +294,31 @@ export const updateCustomProjectTemplate = (
     data: unknown;
     is_active: boolean;
   }>,
-) =>
-  patch<ApiCustomProjectTemplate>(
-    `${BASE}/templates/custom-projects/${id}/`,
-    payload,
-  );
+) => patch<ApiCustomProjectTemplate>(`${BASE}/templates/custom-projects/${id}/`, payload);
 
-// ── Transformers: API → Frontend Types ────────────────────────
+// ── Admin: Space Templates (write) ───────────────────────────
+
+export const createSpaceTemplate = (payload: SpaceTemplateWritePayload) =>
+  post<ApiSpaceTemplate>(`${BASE}/templates/spaces/`, payload);
+
+export const updateSpaceTemplate = (id: number, payload: SpaceTemplateWritePayload) =>
+  put<ApiSpaceTemplate>(`${BASE}/templates/spaces/${id}/`, payload);
+
+export const deleteSpaceTemplate = (id: number) =>
+  del(`${BASE}/templates/spaces/${id}/`);
+
+// ── Admin: Project Templates (write) ─────────────────────────
+
+export const createProjectTemplate = (payload: ProjectTemplateWritePayload) =>
+  post<ApiProjectTemplate>(`${BASE}/templates/projects/`, payload);
+
+export const updateProjectTemplate = (id: number, payload: ProjectTemplateWritePayload) =>
+  put<ApiProjectTemplate>(`${BASE}/templates/projects/${id}/`, payload);
+
+export const deleteProjectTemplate = (id: number) =>
+  del(`${BASE}/templates/projects/${id}/`);
+
+// ── Transformers: API → Frontend Types ───────────────────────
 
 import type {
   SpaceTemplate,
@@ -280,56 +327,39 @@ import type {
   CategoryKey,
 } from "./areadata";
 
-export function toSpaceTemplate(
-  api: ApiSpaceTemplate,
-): SpaceTemplate {
+export function toSpaceTemplate(api: ApiSpaceTemplate): SpaceTemplate {
   return {
     id: api.template_id,
     name: api.name,
     category: api.category as CategoryKey,
-
     L: parseFloat(api.default_l),
     B: parseFloat(api.default_b),
-
     icon: api.icon || "📐",
     description: api.description,
-
     subSpaces: api.sub_spaces.map(
       (s): SubSpaceTemplate => ({
         id: s.sub_id,
         name: s.name,
-
         L: parseFloat(s.default_l),
         B: parseFloat(s.default_b),
-
         description: s.description,
       }),
     ),
   };
 }
 
-export function toProjectTemplate(
-  api: ApiProjectTemplate,
-): ProjectTemplate {
+export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
   return {
     id: api.template_id,
-
     label: api.label,
     description: api.description,
-
     icon: api.icon || "🏗️",
-
     spaces: api.spaces.map((s) => ({
       templateId: s.space_template_id,
-
       floor: s.floor,
-
       L: parseFloat(s.effective_l),
       B: parseFloat(s.effective_b),
-
-      subIds: s.sub_ids.map(
-        (sub) => sub.sub_id,
-      ),
+      subIds: s.sub_ids.map((sub) => sub.sub_id),
     })),
   };
 }

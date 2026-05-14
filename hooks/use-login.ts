@@ -1,13 +1,14 @@
-// /hooks/use-login.ts
+"use client";
+
 import { useState, ChangeEvent, FormEvent } from "react";
 import { useLoginMutation } from "@/redux/features/authApiSlice";
 import { toast } from "react-toastify";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { setAuth } from "@/redux/features/authSlice";
 import { useAppDispatch } from "@/redux/hooks";
 import { OrganisationMembership } from "@/redux/features/membershipApiSlice";
 
-const BASE_URL = process.env.NEXT_PUBLIC_HOST; // ← match your actual env var name
+const BASE_URL = process.env.NEXT_PUBLIC_HOST;
 
 async function fetchIsAdmin(accessToken: string): Promise<boolean> {
   try {
@@ -24,6 +25,7 @@ async function fetchIsAdmin(accessToken: string): Promise<boolean> {
 
 export default function useLogin() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [login, { isLoading }] = useLoginMutation();
   const dispatch = useAppDispatch();
 
@@ -50,8 +52,17 @@ export default function useLogin() {
           pauseOnHover: true,
         });
 
-        const isAdmin = await fetchIsAdmin(data.access);
-        const destination = isAdmin ? "/new/dash/dashadmin" : "/new/dash/dashnormal";
+        // If a ?next= param exists, go there — otherwise fall back to dashboard
+        const next = searchParams.get("next");
+        let destination: string;
+
+        if (next) {
+          // Basic safety check: only allow relative paths (no open redirect)
+          destination = next.startsWith("/") ? next : "/";
+        } else {
+          const isAdmin = await fetchIsAdmin(data.access);
+          destination = isAdmin ? "/new/dash/dashadmin" : "/new/dash/dashnormal";
+        }
 
         setTimeout(() => {
           router.push(destination);

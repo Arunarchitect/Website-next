@@ -8,25 +8,32 @@ export const metadata: Metadata = {
   description: "Modelflick login page",
 };
 
-export default function Page() {
+interface PageProps {
+  searchParams: Promise<{ next?: string }>;
+}
+
+export default async function Page({ searchParams }: PageProps) {
+  const { next } = await searchParams;
+
   return (
     <div className="flex min-h-full flex-1 flex-col justify-center px-6 py-12 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-sm">
         <Image
           src="/logo.svg"
           alt="Modelflick"
-          width={80} // <- Add width
-          height={80} // <- Add height
+          width={80}
+          height={80}
           className="mx-auto h-20 w-auto"
-          priority // optional: load early
+          priority
         />
         <h2 className="mt-10 text-center text-2xl/9 font-bold tracking-tight text-gray-700 dark:text-gray-300">
           Sign in to your Account
         </h2>
       </div>
 
-      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm ">
-        <LoginForm />
+      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm">
+        {/* Pass the next destination into the form */}
+        <LoginForm next={next} />
 
         <p className="mt-10 text-center text-sm/6 text-gray-500">
           Don&apos;t have an Account?{" "}

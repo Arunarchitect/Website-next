@@ -3,8 +3,15 @@
 import { useLogin } from "@/hooks";
 import { Form } from "@/components/forms";
 
-export default function LoginForm() {
+type LoginFormProps = {
+  next?: string;
+};
+
+export default function LoginForm({ next }: LoginFormProps) {
   const { email, password, isLoading, onChange, onSubmit } = useLogin();
+
+  const safeNext = next && next.startsWith("/") ? next : "/";
+
   const config = [
     {
       labelText: "Email",
@@ -24,7 +31,15 @@ export default function LoginForm() {
       },
       required: true,
     },
+    {
+      labelText: "Next",
+      labelId: "next",
+      type: "hidden",
+      value: safeNext,
+      required: false,
+    },
   ];
+
   return (
     <Form
       config={config}
