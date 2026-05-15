@@ -254,10 +254,39 @@ export const fetchPlaces = (stateId: number) =>
 
 // ── Rate lookup ───────────────────────────────────────────────
 
-export const fetchRateLookup = (placeId: number, category?: string) =>
-  get<ApiRateLookup>(
-    `${BASE}/rates/lookup/?place_id=${placeId}${category ? `&category=${category}` : ""}`,
-  );
+export const fetchRateLookup = (placeId: number, category?: string, finishLevel?: string) => {
+  const params = new URLSearchParams({ place_id: String(placeId) });
+  if (category) params.set("category", category);
+  if (finishLevel && finishLevel !== "unknown") params.set("finish_level", finishLevel);
+  return get<ApiRateLookup>(`${BASE}/rates/lookup/?${params}`);
+};
+
+
+// REPLACE fetchCountryAverageRate with:
+export async function fetchAreaRate(
+  options: {
+    countryId: number;
+    stateId?: number | null;
+    placeId?: number | null;
+    category?: string;
+    finishLevel?: string;
+  }
+): Promise<number | null> {
+  const { countryId, stateId, placeId, category, finishLevel } = options;
+  const params = new URLSearchParams({ country: String(countryId) });
+  if (stateId) params.set("state", String(stateId));
+  if (placeId) params.set("place", String(placeId));
+  if (category) params.set("category", category);
+  if (finishLevel && finishLevel !== "unknown") params.set("finish_level", finishLevel);
+  try {
+    const data = await get<{ average_rate: number | null; scope: string }>(
+      `${BASE}/rates/average/?${params}`,
+    );
+    return data.average_rate;
+  } catch {
+    return null;
+  }
+}
 
 // ── Templates (read) ──────────────────────────────────────────
 
