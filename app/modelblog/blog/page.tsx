@@ -26,7 +26,34 @@ function isLanguageCode(v: string | null): v is LanguageCode {
 }
 
 // ---------------------------------------------------------------------------
-// Post field helpers — all return empty string rather than undefined
+// Admin check helper — probes admin/authors/ with BOTH session cookie AND
+// JWT Bearer token so that areacalc member/admin role is detected correctly.
+// ---------------------------------------------------------------------------
+
+const BLOG_API = `${(process.env.NEXT_PUBLIC_HOST ?? "").replace(/\/$/, "")}/api/modelblog`;
+
+function getStoredToken(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("access") ?? "";
+}
+
+async function checkIsAdmin(): Promise<boolean> {
+  try {
+    const token = getStoredToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`${BLOG_API}/admin/authors/`, {
+      credentials: "include", // also send session cookie for Django staff
+      headers,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Post field helpers
 // ---------------------------------------------------------------------------
 
 function getSafeTranslation(post: BlogPost, language: LanguageCode) {
@@ -181,6 +208,45 @@ function LanguageTool({
 }
 
 // ---------------------------------------------------------------------------
+// Edit overlay button — shown on card hover when admin/member is logged in
+// ---------------------------------------------------------------------------
+
+function EditButton({
+  onClick,
+  isDark,
+}: {
+  onClick: (e: React.MouseEvent) => void;
+  isDark: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title="Edit post"
+      className={`absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-200 shadow-lg backdrop-blur-sm ${
+        isDark
+          ? "border-amber-600/60 bg-stone-950/80 text-amber-400 hover:bg-amber-600 hover:text-amber-50"
+          : "border-amber-500/60 bg-white/90 text-amber-600 hover:bg-amber-500 hover:text-white"
+      }`}
+    >
+      <svg
+        className="h-3 w-3"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2.5}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.862 4.487"
+        />
+      </svg>
+      Edit
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cards
 // ---------------------------------------------------------------------------
 
@@ -189,7 +255,9 @@ type FeaturedCardProps = {
   index: number;
   theme: Theme;
   language: LanguageCode;
+  isAdmin: boolean;
   onClick: () => void;
+  onEdit: () => void;
 };
 
 function FeaturedCard({
@@ -197,7 +265,9 @@ function FeaturedCard({
   index,
   theme,
   language,
+  isAdmin,
   onClick,
+  onEdit,
 }: FeaturedCardProps) {
   const isWide = index === 0;
   const isDark = theme === "dark";
@@ -216,6 +286,16 @@ function FeaturedCard({
           : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
       }`}
     >
+      {isAdmin && (
+        <EditButton
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          isDark={isDark}
+        />
+      )}
+
       {cover && (
         <div className="relative h-60 overflow-hidden">
           <img
@@ -287,10 +367,12 @@ type PostCardProps = {
   post: BlogPost;
   theme: Theme;
   language: LanguageCode;
+  isAdmin: boolean;
   onClick: () => void;
+  onEdit: () => void;
 };
 
-function PostCard({ post, theme, language, onClick }: PostCardProps) {
+function PostCard({ post, theme, language, isAdmin, onClick, onEdit }: PostCardProps) {
   const isDark = theme === "dark";
   const cover = getCoverImage(post);
   const title = getPostTitle(post, language);
@@ -299,12 +381,22 @@ function PostCard({ post, theme, language, onClick }: PostCardProps) {
   return (
     <article
       onClick={onClick}
-      className={`group flex cursor-pointer flex-col overflow-hidden rounded-xl border transition-all duration-200 ${
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border transition-all duration-200 ${
         isDark
           ? "border-stone-800 bg-stone-950 hover:border-stone-600"
           : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
       }`}
     >
+      {isAdmin && (
+        <EditButton
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          isDark={isDark}
+        />
+      )}
+
       {cover && (
         <img
           src={cover.src}
@@ -425,6 +517,9 @@ export default function ModelBlogPage() {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [showSidebar, setShowSidebar] = useState<boolean>(false);
   const [language, setLanguage] = useState<LanguageCode>(initialLang);
+  // isAdmin here means "has editor access" — true for Django staff AND
+  // areacalc member/admin role users who hold a valid JWT.
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [categories, setCategories] = useState<string[]>(["All"]);
@@ -440,6 +535,11 @@ export default function ModelBlogPage() {
     if (window.matchMedia("(prefers-color-scheme: light)").matches) {
       setTheme("light");
     }
+  }, []);
+
+  // Check editor status — runs after hydration so localStorage is available
+  useEffect(() => {
+    checkIsAdmin().then(setIsAdmin);
   }, []);
 
   useEffect(() => {
@@ -505,6 +605,14 @@ export default function ModelBlogPage() {
     router.push(`/modelblog/blog/${slug}?lang=${language}`);
   }
 
+  function editPost(slug: string) {
+    router.push(`/modelblog/blog/edit/${slug}`);
+  }
+
+  function newPost() {
+    router.push("/modelblog/blog/edit/new");
+  }
+
   function applyLanguage() {
     router.replace(`/modelblog/blog?lang=${language}`, { scroll: false });
   }
@@ -558,6 +666,29 @@ export default function ModelBlogPage() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {/* Editor controls — visible to staff AND member/admin role users */}
+            {isAdmin && (
+              <button
+                onClick={newPost}
+                className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 transition-colors"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 4.5v15m7.5-7.5h-15"
+                  />
+                </svg>
+                New Post
+              </button>
+            )}
+
             <ThemeToggle
               theme={theme}
               onToggle={() => setTheme(isDark ? "light" : "dark")}
@@ -577,6 +708,56 @@ export default function ModelBlogPage() {
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        {/* Admin / editor banner */}
+        {isAdmin && (
+          <div
+            className={`mb-6 flex items-center justify-between rounded-xl border px-5 py-3 ${
+              isDark
+                ? "border-amber-800/50 bg-amber-950/30"
+                : "border-amber-300 bg-amber-50"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-amber-500 text-lg">🛡</span>
+              <div>
+                <p
+                  className={`text-sm font-semibold ${
+                    isDark ? "text-amber-300" : "text-amber-800"
+                  }`}
+                >
+                  Editor Mode
+                </p>
+                <p
+                  className={`text-xs ${
+                    isDark ? "text-amber-500/70" : "text-amber-600"
+                  }`}
+                >
+                  Hover over any post card to reveal the Edit button.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={newPost}
+              className="hidden sm:flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 transition-colors"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4.5v15m7.5-7.5h-15"
+                />
+              </svg>
+              New Post
+            </button>
+          </div>
+        )}
+
         {/* Language notice */}
         <div
           className={`mb-8 rounded-lg border px-4 py-3 text-xs ${
@@ -672,7 +853,9 @@ export default function ModelBlogPage() {
                         index={i}
                         theme={theme}
                         language={language}
+                        isAdmin={isAdmin}
                         onClick={() => openPost(post.slug)}
+                        onEdit={() => editPost(post.slug)}
                       />
                     ))}
                   </div>
@@ -707,7 +890,9 @@ export default function ModelBlogPage() {
                         post={post}
                         theme={theme}
                         language={language}
+                        isAdmin={isAdmin}
                         onClick={() => openPost(post.slug)}
+                        onEdit={() => editPost(post.slug)}
                       />
                     ))}
                   </div>

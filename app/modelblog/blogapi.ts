@@ -1,4 +1,4 @@
-// blogapi.ts
+//modelblog/blogapi.ts
 
 export type LanguageCode = "en" | "ml" | "hi" | "ta";
 

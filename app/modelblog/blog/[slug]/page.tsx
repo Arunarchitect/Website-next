@@ -1,3 +1,5 @@
+// app/modelblog/blog/[slug]/page.tsx
+
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
