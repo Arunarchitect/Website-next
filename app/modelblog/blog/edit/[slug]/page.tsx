@@ -94,16 +94,47 @@ async function apiDeleteImage(postId: number, imageKey: string): Promise<void> {
   }
 }
 
+async function apiUpdateImage(
+  postId: number,
+  imageKey: string,
+  patch: {
+    alt?: Partial<Record<string, string>>;
+    caption?: Partial<Record<string, string>>;
+    reference?: Partial<Record<string, string>>;
+    src?: string;
+  },
+): Promise<BlogImage> {
+  const res = await fetch(
+    `${BLOG_API}/admin/update-image/${postId}/${imageKey}/`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(patch),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Update failed (${res.status}): ${text}`);
+  }
+  return res.json() as Promise<BlogImage>;
+}
+
 // ---------------------------------------------------------------------------
 // Draft shapes
 // ---------------------------------------------------------------------------
+
+interface DraftInlineRef {
+  marker: number;
+  sourceLabel: string;
+  url: string;
+}
 
 interface DraftParagraph {
   _id: string;
   order: number;
   type: "text" | "pullquote" | "callout";
   text: string;
-  inlineRefs: { marker: number; sourceLabel: string; url: string }[];
+  inlineRefs: DraftInlineRef[];
 }
 
 interface DraftSubheading {
@@ -146,11 +177,11 @@ interface DraftPost {
 }
 
 // ---------------------------------------------------------------------------
-// Managed image (client-side shape used by ImageManager & ImagePicker)
+// Managed image
 // ---------------------------------------------------------------------------
 
 interface ManagedImage {
-  id: string; // = image_key
+  id: string;
   src: string;
   orientation: "landscape" | "portrait";
   alt: Partial<Record<LanguageCode, string>> & { en: string };
@@ -206,7 +237,8 @@ function postToDraft(post: BlogPost): DraftPost {
     };
   }
   return {
-    slug: post.slug, category: post.category, tags: post.tags ?? [],
+    slug: post.slug, category: post.category,
+    tags: Array.isArray(post.tags) ? post.tags : [],
     reading_time_minutes: post.readingTimeMinutes, published_at: post.publishedAt,
     featured: post.featured, cover_accent: post.coverAccent,
     cover_image_key: post.coverImageId ?? "",
@@ -244,19 +276,47 @@ function draftToPayload(draft: DraftPost) {
 }
 
 // ---------------------------------------------------------------------------
+// Reference syntax helpers
+// ---------------------------------------------------------------------------
+
+function parseRefSpans(raw: string): Array<{ marker: number; text: string; start: number; end: number }> {
+  const result: Array<{ marker: number; text: string; start: number; end: number }> = [];
+  const RE = /\[ref:(\d+)\]([\s\S]*?)\[\/ref\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(raw)) !== null) {
+    result.push({ marker: parseInt(m[1], 10), text: m[2], start: m.index, end: m.index + m[0].length });
+  }
+  return result;
+}
+
+function stripRefSyntax(raw: string): string {
+  return raw.replace(/\[ref:\d+\]([\s\S]*?)\[\/ref\]/g, "$1");
+}
+
+function usedMarkersInText(text: string): number[] {
+  const spans = parseRefSpans(text);
+  return [...new Set(spans.map((s) => s.marker))].sort((a, b) => a - b);
+}
+
+// ---------------------------------------------------------------------------
 // Theme toggle
 // ---------------------------------------------------------------------------
 
 function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
   const isDark = theme === "dark";
   return (
-    <button onClick={onToggle} aria-label="Toggle theme"
+    <button
+      onClick={onToggle}
+      aria-label="Toggle theme"
       className={`relative h-7 w-14 rounded-full border transition-colors duration-500 ${
         isDark ? "border-stone-700 bg-stone-900" : "border-sky-300 bg-sky-100"
-      }`}>
-      <span className={`absolute top-0.5 flex h-6 w-6 items-center justify-center rounded-full border text-sm shadow-md transition-all duration-500 ${
-        isDark ? "translate-x-7 border-stone-600 bg-stone-800" : "translate-x-0.5 border-amber-300 bg-amber-400"
-      }`}>
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 flex h-6 w-6 items-center justify-center rounded-full border text-sm shadow-md transition-all duration-500 ${
+          isDark ? "translate-x-7 border-stone-600 bg-stone-800" : "translate-x-0.5 border-amber-300 bg-amber-400"
+        }`}
+      >
         {isDark ? "🌙" : "☀️"}
       </span>
     </button>
@@ -269,54 +329,69 @@ function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }
 
 function Label({ children, isDark }: { children: React.ReactNode; isDark: boolean }) {
   return (
-    <label className={`mb-1 block text-[11px] font-semibold uppercase tracking-widest ${
-      isDark ? "text-stone-500" : "text-stone-400"
-    }`}>{children}</label>
+    <label className={`mb-1 block text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+      {children}
+    </label>
   );
 }
 
-function Input({ value, onChange, placeholder, isDark, className = "" }: {
+function Input({
+  value, onChange, placeholder, isDark, className = "",
+}: {
   value: string; onChange: (v: string) => void;
   placeholder?: string; isDark: boolean; className?: string;
 }) {
+  const inputClass = isDark
+    ? "border-stone-800 bg-stone-900 text-stone-200 placeholder-stone-600 focus:border-amber-700"
+    : "border-stone-300 bg-white text-stone-800 placeholder-stone-400 focus:border-amber-500";
   return (
-    <input value={value} onChange={(e) => onChange(e.target.value)}
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition ${
-        isDark
-          ? "border-stone-800 bg-stone-900 text-stone-200 placeholder-stone-600 focus:border-amber-700"
-          : "border-stone-300 bg-white text-stone-800 placeholder-stone-400 focus:border-amber-500"
-      } ${className}`}
+      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition ${inputClass} ${className}`}
     />
   );
 }
 
-function Textarea({ value, onChange, placeholder, rows = 3, isDark, className = "" }: {
+function Textarea({
+  value, onChange, placeholder, rows = 3, isDark, className = "",
+}: {
   value: string; onChange: (v: string) => void;
   placeholder?: string; rows?: number; isDark: boolean; className?: string;
 }) {
+  const textareaClass = isDark
+    ? "border-stone-800 bg-stone-900 text-stone-200 placeholder-stone-600 focus:border-amber-700"
+    : "border-stone-300 bg-white text-stone-800 placeholder-stone-400 focus:border-amber-500";
   return (
-    <textarea value={value} onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder} rows={rows}
-      className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y ${
-        isDark
-          ? "border-stone-800 bg-stone-900 text-stone-200 placeholder-stone-600 focus:border-amber-700"
-          : "border-stone-300 bg-white text-stone-800 placeholder-stone-400 focus:border-amber-500"
-      } ${className}`}
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y ${textareaClass} ${className}`}
     />
   );
 }
 
-function Select({ value, onChange, options, isDark }: {
+function Select({
+  value, onChange, options, isDark,
+}: {
   value: string; onChange: (v: string) => void;
   options: { value: string; label: string }[]; isDark: boolean;
 }) {
+  const selectClass = isDark
+    ? "border-stone-800 bg-stone-900 text-stone-300"
+    : "border-stone-300 bg-white text-stone-700";
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}
-      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
-        isDark ? "border-stone-800 bg-stone-900 text-stone-300" : "border-stone-300 bg-white text-stone-700"
-      }`}>
-      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${selectClass}`}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
     </select>
   );
 }
@@ -324,18 +399,17 @@ function Select({ value, onChange, options, isDark }: {
 function Card({ children, isDark, className = "" }: {
   children: React.ReactNode; isDark: boolean; className?: string;
 }) {
+  const cardClass = isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm";
   return (
-    <div className={`rounded-xl border p-5 ${
-      isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"
-    } ${className}`}>
-      {children}
-    </div>
+    <div className={`rounded-xl border p-5 ${cardClass} ${className}`}>{children}</div>
   );
 }
 
-function Btn({ onClick, children, variant = "ghost", isDark, className = "", disabled = false }: {
+function Btn({
+  onClick, children, variant = "ghost", isDark, className = "", disabled = false,
+}: {
   onClick?: () => void; children: React.ReactNode;
-  variant?: "primary" | "danger" | "ghost" | "outline";
+  variant?: "primary" | "danger" | "ghost" | "outline" | "amber";
   isDark: boolean; className?: string; disabled?: boolean;
 }) {
   const base = "rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40";
@@ -346,6 +420,9 @@ function Btn({ onClick, children, variant = "ghost", isDark, className = "", dis
     outline: isDark
       ? "border border-stone-700 text-stone-400 hover:text-stone-100 hover:border-stone-500"
       : "border border-stone-300 text-stone-600 hover:text-stone-900 hover:border-stone-400",
+    amber: isDark
+      ? "border border-amber-700/60 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40"
+      : "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100",
   };
   return (
     <button onClick={onClick} disabled={disabled} className={`${base} ${styles[variant]} ${className}`}>
@@ -355,40 +432,193 @@ function Btn({ onClick, children, variant = "ghost", isDark, className = "", dis
 }
 
 // ---------------------------------------------------------------------------
-// ★ ImagePicker — visual thumbnail grid with multi-select
-//   Replaces the old "Image IDs (comma-separated)" text input everywhere
+// RefAwareField — compact ref toolbar + textarea for headings, captions, etc.
+// Use this wherever plain text fields should support [ref:N]...[/ref] syntax.
+// ---------------------------------------------------------------------------
+
+function RefAwareField({
+  value,
+  onChange,
+  placeholder,
+  rows = 2,
+  isDark,
+  sources,
+  className = "",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+  isDark: boolean;
+  sources: Source[];
+  className?: string;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [selectedMarker, setSelectedMarker] = useState(1);
+
+  const textareaClass = isDark
+    ? "border-stone-800 bg-stone-900 text-stone-200 placeholder-stone-600 focus:border-amber-700"
+    : "border-stone-300 bg-white text-stone-800 placeholder-stone-400 focus:border-amber-500";
+
+  function insertRef() {
+    const ta = taRef.current;
+    if (!ta) return;
+    const { selectionStart: ss, selectionEnd: se } = ta;
+    if (ss === se) { alert("Select some text in the field first, then click Wrap."); return; }
+    const wrapped = `[ref:${selectedMarker}]${value.slice(ss, se)}[/ref]`;
+    const newText = value.slice(0, ss) + wrapped + value.slice(se);
+    onChange(newText);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(ss + wrapped.length, ss + wrapped.length);
+    });
+  }
+
+  const numOptions = Math.max(sources.length, 5);
+
+  // Preview: does the current value contain any ref syntax?
+  const hasRefs = /\[ref:\d+\]/.test(value);
+
+  return (
+    <div className="space-y-1.5">
+      {/* Compact ref toolbar */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>
+          Ref:
+        </span>
+        <select
+          value={selectedMarker}
+          onChange={(e) => setSelectedMarker(parseInt(e.target.value, 10))}
+          className={`rounded border px-1.5 py-0.5 text-xs font-mono outline-none ${
+            isDark ? "border-stone-700 bg-stone-900 text-amber-300" : "border-stone-300 bg-white text-amber-700"
+          }`}
+        >
+          {Array.from({ length: numOptions }, (_, i) => (
+            <option key={i + 1} value={i + 1}>
+              {sources[i] ? `[${i + 1}] ${sources[i].label}` : `[${i + 1}]`}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={insertRef}
+          title="Select text in the field below, then click to wrap as a reference"
+          className={`flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold transition-colors ${
+            isDark
+              ? "border border-amber-700/60 bg-amber-950/30 text-amber-300 hover:bg-amber-900/50"
+              : "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+          }`}
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+          </svg>
+          Wrap [{selectedMarker}]
+        </button>
+        {hasRefs && (
+          <span className={`text-[10px] ${isDark ? "text-amber-600" : "text-amber-700"}`}>
+            {parseRefSpans(value).length} ref{parseRefSpans(value).length !== 1 ? "s" : ""} in field
+          </span>
+        )}
+      </div>
+      {/* Monospace textarea so the [ref:N]...[/ref] markup is easy to read/edit */}
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y font-mono ${textareaClass} ${className}`}
+      />
+      {/* Live plain-text preview when refs are present */}
+      {hasRefs && (
+        <p className={`text-xs italic ${isDark ? "text-stone-600" : "text-stone-400"}`}>
+          Preview: {stripRefSyntax(value)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tags editor
+// ---------------------------------------------------------------------------
+
+function TagsEditor({
+  tags, onChange, isDark,
+}: {
+  tags: string[]; onChange: (tags: string[]) => void; isDark: boolean;
+}) {
+  const [inputValue, setInputValue] = useState("");
+
+  function addTag(raw: string) {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const newTags = trimmed.split(",").map((t) => t.trim()).filter((t) => t && !tags.includes(t));
+    if (newTags.length > 0) onChange([...tags, ...newTags]);
+    setInputValue("");
+  }
+
+  function removeTag(tag: string) { onChange(tags.filter((t) => t !== tag)); }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(inputValue); }
+    else if (e.key === "Backspace" && inputValue === "" && tags.length > 0) removeTag(tags[tags.length - 1]);
+  }
+
+  const wrapperClass = isDark
+    ? "border-stone-800 bg-stone-900 focus-within:border-amber-700"
+    : "border-stone-300 bg-white focus-within:border-amber-500";
+  const tagClass = isDark
+    ? "bg-amber-900/40 text-amber-300 border border-amber-700/40"
+    : "bg-amber-100 text-amber-800 border border-amber-300";
+  const tagBtnClass = isDark ? "hover:text-red-400 text-amber-500" : "hover:text-red-500 text-amber-600";
+  const inputClass  = isDark ? "text-stone-200 placeholder-stone-600" : "text-stone-800 placeholder-stone-400";
+
+  return (
+    <div className={`flex min-h-[40px] flex-wrap items-center gap-1.5 rounded-lg border px-3 py-2 transition focus-within:border-amber-500 ${wrapperClass}`}>
+      {tags.map((tag) => (
+        <span key={tag} className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${tagClass}`}>
+          {tag}
+          <button type="button" onClick={() => removeTag(tag)} className={`ml-0.5 rounded-full p-0.5 transition-colors ${tagBtnClass}`}>
+            <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
+      ))}
+      <input
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => addTag(inputValue)}
+        placeholder={tags.length === 0 ? "Type tag, press Enter or comma…" : "Add more…"}
+        className={`min-w-[120px] flex-1 bg-transparent text-sm outline-none ${inputClass}`}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ImagePicker
 // ---------------------------------------------------------------------------
 
 function ImagePicker({
-  selectedIds,
-  availableImages,
-  onChange,
-  isDark,
+  selectedIds, availableImages, onChange, isDark,
 }: {
-  selectedIds: string[];
-  availableImages: ManagedImage[];
-  onChange: (ids: string[]) => void;
-  isDark: boolean;
+  selectedIds: string[]; availableImages: ManagedImage[];
+  onChange: (ids: string[]) => void; isDark: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
   function toggle(id: string) {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter((x) => x !== id));
-    } else {
-      onChange([...selectedIds, id]);
-    }
-  }
-
-  function remove(id: string) {
-    onChange(selectedIds.filter((x) => x !== id));
+    if (selectedIds.includes(id)) onChange(selectedIds.filter((x) => x !== id));
+    else onChange([...selectedIds, id]);
   }
 
   const selectedImgs = selectedIds
     .map((id) => availableImages.find((img) => img.id === id))
     .filter((x): x is ManagedImage => !!x);
-
-  const unselected = availableImages.filter((img) => !selectedIds.includes(img.id));
 
   if (availableImages.length === 0) {
     return (
@@ -398,146 +628,285 @@ function ImagePicker({
     );
   }
 
+  const toggleBtnClass = isDark
+    ? "border-stone-700 bg-stone-900 text-stone-400 hover:border-stone-500 hover:text-stone-200"
+    : "border-stone-300 bg-white text-stone-500 hover:border-stone-400 hover:text-stone-700";
+  const panelClass = isDark ? "border-stone-700 bg-stone-900/70" : "border-stone-200 bg-stone-50";
+
   return (
     <div className="space-y-2">
-      {/* Selected images strip */}
-      {selectedImgs.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {selectedImgs.map((img) => (
-            <div
-              key={img.id}
-              className={`group relative flex items-center gap-2 rounded-lg border pl-1.5 pr-2 py-1 text-xs font-medium transition-colors ${
-                isDark
-                  ? "border-amber-700/60 bg-amber-950/30 text-amber-300"
-                  : "border-amber-400/70 bg-amber-50 text-amber-800"
-              }`}
-            >
-              {img.src && (
-                <img
-                  src={img.src}
-                  alt={img.alt.en}
-                  className="h-7 w-10 rounded object-cover shrink-0"
-                />
-              )}
-              <span className="max-w-[100px] truncate font-mono text-[10px]">{img.id}</span>
-              <button
-                onClick={() => remove(img.id)}
-                className={`ml-0.5 rounded p-0.5 transition-colors ${
-                  isDark ? "hover:text-red-400 text-stone-500" : "hover:text-red-500 text-stone-400"
-                }`}
-                title="Remove"
-              >
-                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Toggle picker button */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-          isDark
-            ? "border-stone-700 bg-stone-900 text-stone-400 hover:border-stone-500 hover:text-stone-200"
-            : "border-stone-300 bg-white text-stone-500 hover:border-stone-400 hover:text-stone-700"
-        }`}
+        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${toggleBtnClass}`}
       >
         <span className="flex items-center gap-2">
           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round"
               d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 3h18M3 3v18" />
           </svg>
-          {selectedIds.length === 0
-            ? "Attach images…"
-            : `${selectedIds.length} image${selectedIds.length > 1 ? "s" : ""} selected — click to change`}
+          {selectedIds.length === 0 ? "Attach images…" : `${selectedIds.length} image${selectedIds.length > 1 ? "s" : ""} attached`}
         </span>
         <span className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
 
-      {/* Picker panel */}
       {open && (
-        <div className={`rounded-xl border p-3 ${
-          isDark ? "border-stone-700 bg-stone-900/70" : "border-stone-200 bg-stone-50"
-        }`}>
-          {availableImages.length === 0 ? (
-            <p className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-              No images available.
-            </p>
-          ) : (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
-              {availableImages.map((img) => {
-                const isSelected = selectedIds.includes(img.id);
-                return (
-                  <button
-                    key={img.id}
-                    onClick={() => toggle(img.id)}
-                    title={img.id}
-                    className={`group relative overflow-hidden rounded-lg border-2 transition-all duration-150 focus:outline-none ${
-                      isSelected
-                        ? isDark
-                          ? "border-amber-500 ring-1 ring-amber-500/40"
-                          : "border-amber-500 ring-1 ring-amber-400/40"
-                        : isDark
-                          ? "border-stone-700 hover:border-stone-500"
-                          : "border-stone-200 hover:border-stone-400"
-                    }`}
-                  >
-                    {/* Thumbnail */}
-                    {img.src ? (
-                      <img
-                        src={img.src}
-                        alt={img.alt.en}
-                        className={`w-full object-cover ${
-                          img.orientation === "portrait" ? "aspect-[3/4]" : "aspect-video"
-                        }`}
-                      />
-                    ) : (
-                      <div className={`flex aspect-video w-full items-center justify-center ${
-                        isDark ? "bg-stone-800" : "bg-stone-100"
-                      }`}>
-                        <svg className={`h-5 w-5 ${isDark ? "text-stone-600" : "text-stone-400"}`}
-                          fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                            d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
-                        </svg>
-                      </div>
-                    )}
+        <div className={`rounded-xl border p-3 ${panelClass}`}>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+            <button
+              onClick={() => { onChange([]); setOpen(false); }}
+              title="Remove all images"
+              className={`group relative overflow-hidden rounded-lg border-2 transition-all duration-150 focus:outline-none ${
+                selectedIds.length === 0
+                  ? isDark ? "border-amber-500 ring-1 ring-amber-500/40" : "border-amber-500 ring-1 ring-amber-400/40"
+                  : isDark ? "border-stone-700 hover:border-stone-500" : "border-stone-200 hover:border-stone-400"
+              }`}
+            >
+              <div className={`flex aspect-video w-full flex-col items-center justify-center gap-1 ${isDark ? "bg-stone-800" : "bg-stone-100"}`}>
+                <svg className={`h-5 w-5 ${isDark ? "text-stone-500" : "text-stone-400"}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <div className={`px-1.5 py-1 ${isDark ? "bg-stone-900" : "bg-white"}`}>
+                <p className="truncate font-mono text-[9px] text-stone-500">none</p>
+              </div>
+            </button>
 
-                    {/* Selected checkmark overlay */}
-                    {isSelected && (
-                      <div className="absolute inset-0 flex items-start justify-end bg-amber-500/20 p-1">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 shadow">
-                          <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24"
-                            stroke="currentColor" strokeWidth={3}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                          </svg>
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Key label */}
-                    <div className={`px-1.5 py-1 ${isDark ? "bg-stone-900" : "bg-white"}`}>
-                      <p className={`truncate font-mono text-[9px] ${
-                        isDark ? "text-stone-500" : "text-stone-500"
-                      }`}>
-                        {img.id}
-                      </p>
+            {availableImages.map((img) => {
+              const isSelected = selectedIds.includes(img.id);
+              const tileClass = isSelected
+                ? isDark ? "border-amber-500 ring-1 ring-amber-500/40" : "border-amber-500 ring-1 ring-amber-400/40"
+                : isDark ? "border-stone-700 hover:border-stone-500" : "border-stone-200 hover:border-stone-400";
+              return (
+                <button
+                  key={img.id}
+                  onClick={() => toggle(img.id)}
+                  title={isSelected ? `Remove ${img.id}` : img.id}
+                  className={`group relative overflow-hidden rounded-lg border-2 transition-all duration-150 focus:outline-none ${tileClass}`}
+                >
+                  {img.src ? (
+                    <img src={img.src} alt={img.alt.en}
+                      className={`w-full object-cover ${img.orientation === "portrait" ? "aspect-[3/4]" : "aspect-video"}`} />
+                  ) : (
+                    <div className={`flex aspect-video w-full items-center justify-center ${isDark ? "bg-stone-800" : "bg-stone-100"}`}>
+                      <svg className={`h-5 w-5 ${isDark ? "text-stone-600" : "text-stone-400"}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                          d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
+                      </svg>
                     </div>
-                  </button>
-                );
-              })}
+                  )}
+                  {isSelected ? (
+                    <div className="absolute inset-0 flex items-start justify-end bg-amber-500/20 p-1">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 shadow">
+                        <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover:opacity-100 group-hover:bg-black/10">
+                      <svg className="h-5 w-5 text-white drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                    </div>
+                  )}
+                  <div className={`px-1.5 py-1 ${isDark ? "bg-stone-900" : "bg-white"}`}>
+                    <p className="truncate font-mono text-[9px] text-stone-500">{img.id}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex justify-end">
+            <Btn onClick={() => setOpen(false)} variant="outline" isDark={isDark}>Done</Btn>
+          </div>
+        </div>
+      )}
+
+      {!open && selectedImgs.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {selectedImgs.map((img) => {
+            const chipClass = isDark
+              ? "border-amber-700/60 bg-amber-950/30 text-amber-300"
+              : "border-amber-400/70 bg-amber-50 text-amber-800";
+            const chipBtnClass = isDark ? "hover:text-red-400 text-stone-500" : "hover:text-red-500 text-stone-400";
+            return (
+              <div key={img.id} className={`group relative flex items-center gap-2 rounded-lg border pl-1.5 pr-2 py-1 text-xs font-medium ${chipClass}`}>
+                {img.src && <img src={img.src} alt={img.alt.en} className="h-7 w-10 rounded object-cover shrink-0" />}
+                <span className="max-w-[100px] truncate font-mono text-[10px]">{img.id}</span>
+                <button onClick={() => toggle(img.id)} className={`ml-0.5 rounded p-0.5 transition-colors ${chipBtnClass}`} title={`Remove ${img.id}`}>
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RefChip
+// ---------------------------------------------------------------------------
+
+function RefChip({
+  marker, text, isDark, onRemove,
+}: {
+  marker: number; text: string; isDark: boolean; onRemove: () => void;
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold ${isDark ? "bg-amber-500/15 text-amber-300" : "bg-amber-100 text-amber-800"}`}>
+      <span className={`font-mono text-[10px] font-bold ${isDark ? "text-amber-400" : "text-amber-600"}`}>[{marker}]</span>
+      {text}
+      <button onClick={onRemove} className={`ml-0.5 rounded p-0.5 transition-colors ${isDark ? "hover:text-red-400 text-amber-600" : "hover:text-red-500 text-amber-500"}`} title="Remove this reference span">
+        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RefAwareParagraphEditor (full version for paragraph body text)
+// ---------------------------------------------------------------------------
+
+function RefAwareParagraphEditor({
+  para, onChange, sources, isDark,
+}: {
+  para: DraftParagraph;
+  onChange: (p: DraftParagraph) => void;
+  sources: Source[];
+  isDark: boolean;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [showRefPanel, setShowRefPanel] = useState(false);
+  const [selectedMarker, setSelectedMarker] = useState<number>(1);
+
+  const textareaClass = isDark
+    ? "border-stone-800 bg-stone-900 text-stone-200 placeholder-stone-600 focus:border-amber-700"
+    : "border-stone-300 bg-white text-stone-800 placeholder-stone-400 focus:border-amber-500";
+
+  const spans = parseRefSpans(para.text);
+
+  function syncInlineRefs(text: string, existingRefs: DraftInlineRef[]): DraftInlineRef[] {
+    const used = usedMarkersInText(text);
+    const existing = new Map(existingRefs.map((r) => [r.marker, r]));
+    return used.map((m) => existing.has(m) ? existing.get(m)! : { marker: m, sourceLabel: "", url: "" });
+  }
+
+  function handleTextChange(newText: string) {
+    onChange({ ...para, text: newText, inlineRefs: syncInlineRefs(newText, para.inlineRefs) });
+  }
+
+  function insertRefAroundSelection() {
+    const ta = taRef.current;
+    if (!ta) return;
+    const { selectionStart: ss, selectionEnd: se } = ta;
+    if (ss === se) { alert("Select some text first, then click [ref]."); return; }
+    const selected = para.text.slice(ss, se);
+    const wrapped = `[ref:${selectedMarker}]${selected}[/ref]`;
+    const newText = para.text.slice(0, ss) + wrapped + para.text.slice(se);
+    handleTextChange(newText);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const newPos = ss + wrapped.length;
+      ta.setSelectionRange(newPos, newPos);
+    });
+  }
+
+  function removeRefSpan(span: { marker: number; text: string; start: number; end: number }) {
+    const newText = para.text.slice(0, span.start) + span.text + para.text.slice(span.end);
+    handleTextChange(newText);
+  }
+
+  function updateInlineRef(marker: number, patch: Partial<DraftInlineRef>) {
+    const refs = para.inlineRefs.map((r) => r.marker === marker ? { ...r, ...patch } : r);
+    onChange({ ...para, inlineRefs: refs });
+  }
+
+  const markerOptions = Array.from({ length: Math.max(sources.length, 10) }, (_, i) => ({
+    value: String(i + 1),
+    label: sources[i] ? `[${i + 1}] ${sources[i].label}` : `[${i + 1}]`,
+  }));
+
+  const panelBg = isDark ? "border-amber-900/50 bg-amber-950/15" : "border-amber-200 bg-amber-50/60";
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>Ref:</span>
+        <select
+          value={selectedMarker}
+          onChange={(e) => setSelectedMarker(parseInt(e.target.value, 10))}
+          className={`rounded border px-2 py-1 text-xs font-mono outline-none ${isDark ? "border-stone-700 bg-stone-900 text-amber-300" : "border-stone-300 bg-white text-amber-700"}`}
+        >
+          {markerOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <button
+          onClick={insertRefAroundSelection}
+          title="Select text in the textarea below, then click to wrap it with this reference marker"
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+            isDark
+              ? "border-amber-700/60 bg-amber-950/30 text-amber-300 hover:bg-amber-900/50"
+              : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+          }`}
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+          </svg>
+          Wrap selection as [{selectedMarker}]
+        </button>
+        {spans.length > 0 && (
+          <button
+            onClick={() => setShowRefPanel((v) => !v)}
+            className={`text-[10px] font-medium underline decoration-dashed ${isDark ? "text-stone-500 hover:text-stone-300" : "text-stone-400 hover:text-stone-600"}`}
+          >
+            {showRefPanel ? "hide" : "show"} {spans.length} ref{spans.length !== 1 ? "s" : ""}
+          </button>
+        )}
+      </div>
+
+      <textarea
+        ref={taRef}
+        value={para.text}
+        onChange={(e) => handleTextChange(e.target.value)}
+        placeholder="Paragraph text… select a phrase then click Wrap selection to add a reference"
+        rows={para.type === "text" ? 4 : 2}
+        className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y font-mono ${textareaClass}`}
+      />
+
+      {showRefPanel && spans.length > 0 && (
+        <div className={`rounded-lg border p-3 space-y-3 ${panelBg}`}>
+          <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-amber-600" : "text-amber-700"}`}>
+            Referenced spans in this paragraph
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {spans.map((span, i) => (
+              <RefChip key={i} marker={span.marker} text={span.text} isDark={isDark} onRemove={() => removeRefSpan(span)} />
+            ))}
+          </div>
+          {para.inlineRefs.length > 0 && (
+            <div className="space-y-2 border-t pt-2" style={{ borderColor: isDark ? "#451a03" : "#fde68a" }}>
+              <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-amber-700" : "text-amber-600"}`}>
+                Reference metadata (tooltip / link)
+              </p>
+              {para.inlineRefs.map((ref) => (
+                <div key={ref.marker} className="grid gap-2 sm:grid-cols-[80px_1fr_1fr]">
+                  <div className={`flex items-center justify-center rounded font-mono text-xs font-bold ${isDark ? "bg-amber-950/40 text-amber-400" : "bg-amber-100 text-amber-700"}`}>
+                    [{ref.marker}]
+                  </div>
+                  <Input value={ref.sourceLabel} onChange={(v) => updateInlineRef(ref.marker, { sourceLabel: v })} placeholder={sources[ref.marker - 1]?.label ?? "Source label for tooltip"} isDark={isDark} />
+                  <Input value={ref.url} onChange={(v) => updateInlineRef(ref.marker, { url: v })} placeholder={sources[ref.marker - 1]?.url ?? "https://… (optional)"} isDark={isDark} />
+                </div>
+              ))}
             </div>
           )}
-
-          {/* Close button */}
-          <div className="mt-3 flex justify-end">
-            <Btn onClick={() => setOpen(false)} variant="outline" isDark={isDark}>
-              Done
-            </Btn>
-          </div>
         </div>
       )}
     </div>
@@ -548,22 +917,23 @@ function ImagePicker({
 // Paragraph editor
 // ---------------------------------------------------------------------------
 
-function ParagraphEditor({ para, onChange, onDelete, onMoveUp, onMoveDown, isDark, isFirst, isLast }: {
+function ParagraphEditor({
+  para, onChange, onDelete, onMoveUp, onMoveDown, isDark, isFirst, isLast, sources,
+}: {
   para: DraftParagraph; onChange: (p: DraftParagraph) => void;
   onDelete: () => void; onMoveUp: () => void; onMoveDown: () => void;
   isDark: boolean; isFirst: boolean; isLast: boolean;
+  sources: Source[];
 }) {
+  const wrapClass = isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50";
   return (
-    <div className={`rounded-lg border p-3 ${
-      isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50"
-    }`}>
+    <div className={`rounded-lg border p-3 ${wrapClass}`}>
       <div className="mb-2 flex items-center gap-2">
-        <Select value={para.type} onChange={(v) => onChange({ ...para, type: v as DraftParagraph["type"] })}
-          options={[
-            { value: "text",      label: "Text"       },
-            { value: "pullquote", label: "Pull Quote" },
-            { value: "callout",   label: "Callout"    },
-          ]} isDark={isDark}
+        <Select
+          value={para.type}
+          onChange={(v) => onChange({ ...para, type: v as DraftParagraph["type"] })}
+          options={[{ value: "text", label: "Text" }, { value: "pullquote", label: "Pull Quote" }, { value: "callout", label: "Callout" }]}
+          isDark={isDark}
         />
         <div className="flex items-center gap-1 ml-auto shrink-0">
           <Btn onClick={onMoveUp}   variant="ghost"  isDark={isDark} disabled={isFirst}>↑</Btn>
@@ -571,37 +941,39 @@ function ParagraphEditor({ para, onChange, onDelete, onMoveUp, onMoveDown, isDar
           <Btn onClick={onDelete}   variant="danger" isDark={isDark}>✕</Btn>
         </div>
       </div>
-      <Textarea value={para.text} onChange={(v) => onChange({ ...para, text: v })}
-        placeholder="Paragraph text…" rows={para.type === "text" ? 4 : 2} isDark={isDark}
-      />
+      <RefAwareParagraphEditor para={para} onChange={onChange} sources={sources} isDark={isDark} />
     </div>
   );
 }
 
-function ParagraphListEditor({ paragraphs, onChange, isDark }: {
-  paragraphs: DraftParagraph[]; onChange: (ps: DraftParagraph[]) => void; isDark: boolean;
+function ParagraphListEditor({
+  paragraphs, onChange, isDark, sources,
+}: {
+  paragraphs: DraftParagraph[]; onChange: (ps: DraftParagraph[]) => void;
+  isDark: boolean; sources: Source[];
 }) {
   function update(i: number, p: DraftParagraph) { const n = [...paragraphs]; n[i] = p; onChange(n); }
   function remove(i: number) { onChange(paragraphs.filter((_, idx) => idx !== i)); }
   function moveUp(i: number) {
     if (i === 0) return;
-    const n = [...paragraphs]; [n[i-1], n[i]] = [n[i], n[i-1]]; onChange(n);
+    const n = [...paragraphs]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; onChange(n);
   }
   function moveDown(i: number) {
     if (i === paragraphs.length - 1) return;
-    const n = [...paragraphs]; [n[i], n[i+1]] = [n[i+1], n[i]]; onChange(n);
+    const n = [...paragraphs]; [n[i], n[i + 1]] = [n[i + 1], n[i]]; onChange(n);
   }
   return (
     <div className="space-y-2">
       {paragraphs.map((p, i) => (
-        <ParagraphEditor key={p._id} para={p}
+        <ParagraphEditor
+          key={p._id} para={p}
           onChange={(u) => update(i, u)} onDelete={() => remove(i)}
           onMoveUp={() => moveUp(i)} onMoveDown={() => moveDown(i)}
           isDark={isDark} isFirst={i === 0} isLast={i === paragraphs.length - 1}
+          sources={sources}
         />
       ))}
-      <Btn onClick={() => onChange([...paragraphs, emptyParagraph()])}
-        variant="outline" isDark={isDark} className="w-full">
+      <Btn onClick={() => onChange([...paragraphs, emptyParagraph()])} variant="outline" isDark={isDark} className="w-full">
         + Add Paragraph
       </Btn>
     </div>
@@ -609,65 +981,60 @@ function ParagraphListEditor({ paragraphs, onChange, isDark }: {
 }
 
 // ---------------------------------------------------------------------------
-// Subheading editor  (now receives availableImages)
+// Subheading editor — title now uses RefAwareField
 // ---------------------------------------------------------------------------
 
-function SubheadingEditor({ sub, onChange, onDelete, isDark, availableImages }: {
+function SubheadingEditor({
+  sub, onChange, onDelete, isDark, availableImages, sources,
+}: {
   sub: DraftSubheading; onChange: (s: DraftSubheading) => void;
   onDelete: () => void; isDark: boolean; availableImages: ManagedImage[];
+  sources: Source[];
 }) {
   const [open, setOpen] = useState(true);
-
+  const wrapClass = isDark ? "border-stone-700 bg-stone-900" : "border-stone-300 bg-stone-50";
   return (
-    <div className={`rounded-xl border ${
-      isDark ? "border-stone-700 bg-stone-900" : "border-stone-300 bg-stone-50"
-    }`}>
-      <div className="flex cursor-pointer items-center justify-between px-4 py-3"
-        onClick={() => setOpen((v) => !v)}>
+    <div className={`rounded-xl border ${wrapClass}`}>
+      <div className="flex cursor-pointer items-center justify-between px-4 py-3" onClick={() => setOpen((v) => !v)}>
         <span className={`text-sm font-semibold ${isDark ? "text-stone-300" : "text-stone-700"}`}>
-          {sub.title || <span className={isDark ? "text-stone-600" : "text-stone-400"}>Untitled subheading</span>}
+          {sub.title
+            ? <span>{stripRefSyntax(sub.title)}</span>
+            : <span className={isDark ? "text-stone-600" : "text-stone-400"}>Untitled subheading</span>}
         </span>
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <Btn onClick={onDelete} variant="danger" isDark={isDark}>Delete</Btn>
-          <span className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-            {open ? "▲" : "▼"}
-          </span>
+          <span className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>{open ? "▲" : "▼"}</span>
         </div>
       </div>
-
       {open && (
-        <div className="space-y-4 border-t px-4 py-4"
-          style={{ borderColor: isDark ? "#292524" : "#e7e5e4" }}>
+        <div className="space-y-4 border-t px-4 py-4" style={{ borderColor: isDark ? "#292524" : "#e7e5e4" }}>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label isDark={isDark}>Subheading Key (slug)</Label>
-              <Input value={sub.id} onChange={(v) => onChange({ ...sub, id: v })}
-                placeholder="e.g. bim-workflow" isDark={isDark} />
+              <Input value={sub.id} onChange={(v) => onChange({ ...sub, id: v })} placeholder="e.g. bim-workflow" isDark={isDark} />
             </div>
             <div>
               <Label isDark={isDark}>Title</Label>
-              <Input value={sub.title} onChange={(v) => onChange({ ...sub, title: v })}
-                placeholder="Subheading title" isDark={isDark} />
-            </div>
-          </div>
-
-          {/* ★ Visual image picker */}
-          <div>
-            <Label isDark={isDark}>Images</Label>
-            <div className="mt-1">
-              <ImagePicker
-                selectedIds={sub.imageIds}
-                availableImages={availableImages}
-                onChange={(ids) => onChange({ ...sub, imageIds: ids })}
+              {/* RefAwareField so headings can carry [ref:N] spans */}
+              <RefAwareField
+                value={sub.title}
+                onChange={(v) => onChange({ ...sub, title: v })}
+                placeholder="Subheading title"
+                rows={1}
                 isDark={isDark}
+                sources={sources}
               />
             </div>
           </div>
-
+          <div>
+            <Label isDark={isDark}>Images</Label>
+            <div className="mt-1">
+              <ImagePicker selectedIds={sub.imageIds} availableImages={availableImages} onChange={(ids) => onChange({ ...sub, imageIds: ids })} isDark={isDark} />
+            </div>
+          </div>
           <div>
             <Label isDark={isDark}>Paragraphs</Label>
-            <ParagraphListEditor paragraphs={sub.paragraphs}
-              onChange={(ps) => onChange({ ...sub, paragraphs: ps })} isDark={isDark} />
+            <ParagraphListEditor paragraphs={sub.paragraphs} onChange={(ps) => onChange({ ...sub, paragraphs: ps })} isDark={isDark} sources={sources} />
           </div>
         </div>
       )}
@@ -676,99 +1043,84 @@ function SubheadingEditor({ sub, onChange, onDelete, isDark, availableImages }: 
 }
 
 // ---------------------------------------------------------------------------
-// Section editor  (now receives availableImages)
+// Section editor — title now uses RefAwareField
 // ---------------------------------------------------------------------------
 
-function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown,
-  isDark, isFirst, isLast, availableImages }: {
+function SectionEditor({
+  section, onChange, onDelete, onMoveUp, onMoveDown, isDark, isFirst, isLast, availableImages, sources,
+}: {
   section: DraftSection; onChange: (s: DraftSection) => void;
   onDelete: () => void; onMoveUp: () => void; onMoveDown: () => void;
   isDark: boolean; isFirst: boolean; isLast: boolean; availableImages: ManagedImage[];
+  sources: Source[];
 }) {
   const [open, setOpen] = useState(true);
-
+  const wrapClass = isDark ? "border-stone-700 bg-stone-900/40" : "border-stone-300 bg-white";
   return (
-    <div className={`rounded-2xl border ${
-      isDark ? "border-stone-700 bg-stone-900/40" : "border-stone-300 bg-white"
-    }`}>
-      {/* Header */}
-      <div className="flex cursor-pointer items-center justify-between px-5 py-4"
-        onClick={() => setOpen((v) => !v)}>
+    <div className={`rounded-2xl border ${wrapClass}`}>
+      <div className="flex cursor-pointer items-center justify-between px-5 py-4" onClick={() => setOpen((v) => !v)}>
         <div className="flex items-center gap-3">
-          <span className={`text-[10px] font-bold uppercase tracking-widest ${
-            isDark ? "text-stone-600" : "text-stone-400"
-          }`}>Section</span>
-          <span className={`text-base font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}
-            style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-            {section.title || <span className={isDark ? "text-stone-600" : "text-stone-400"}>Untitled section</span>}
+          <span className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>Section</span>
+          <span className={`text-base font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`} style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+            {section.title
+              ? stripRefSyntax(section.title)
+              : <span className={isDark ? "text-stone-600" : "text-stone-400"}>Untitled section</span>}
           </span>
         </div>
         <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           <Btn onClick={onMoveUp}   variant="ghost"  isDark={isDark} disabled={isFirst}>↑</Btn>
           <Btn onClick={onMoveDown} variant="ghost"  isDark={isDark} disabled={isLast}>↓</Btn>
           <Btn onClick={onDelete}   variant="danger" isDark={isDark}>Delete</Btn>
-          <span className={`ml-1 text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-            {open ? "▲" : "▼"}
-          </span>
+          <span className={`ml-1 text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>{open ? "▲" : "▼"}</span>
         </div>
       </div>
-
       {open && (
-        <div className="space-y-5 border-t px-5 py-5"
-          style={{ borderColor: isDark ? "#292524" : "#e7e5e4" }}>
+        <div className="space-y-5 border-t px-5 py-5" style={{ borderColor: isDark ? "#292524" : "#e7e5e4" }}>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label isDark={isDark}>Section Key (slug)</Label>
-              <Input value={section.id} onChange={(v) => onChange({ ...section, id: v })}
-                placeholder="e.g. introduction" isDark={isDark} />
+              <Input value={section.id} onChange={(v) => onChange({ ...section, id: v })} placeholder="e.g. introduction" isDark={isDark} />
             </div>
             <div>
               <Label isDark={isDark}>Section Title</Label>
-              <Input value={section.title} onChange={(v) => onChange({ ...section, title: v })}
-                placeholder="Section title" isDark={isDark} />
-            </div>
-          </div>
-
-          {/* ★ Visual image picker */}
-          <div>
-            <Label isDark={isDark}>Images</Label>
-            <div className="mt-1">
-              <ImagePicker
-                selectedIds={section.imageIds}
-                availableImages={availableImages}
-                onChange={(ids) => onChange({ ...section, imageIds: ids })}
+              {/* RefAwareField so section headings can carry [ref:N] spans */}
+              <RefAwareField
+                value={section.title}
+                onChange={(v) => onChange({ ...section, title: v })}
+                placeholder="Section title"
+                rows={1}
                 isDark={isDark}
+                sources={sources}
               />
             </div>
           </div>
-
+          <div>
+            <Label isDark={isDark}>Images</Label>
+            <div className="mt-1">
+              <ImagePicker selectedIds={section.imageIds} availableImages={availableImages} onChange={(ids) => onChange({ ...section, imageIds: ids })} isDark={isDark} />
+            </div>
+          </div>
           <div>
             <Label isDark={isDark}>Paragraphs</Label>
-            <ParagraphListEditor paragraphs={section.paragraphs}
-              onChange={(ps) => onChange({ ...section, paragraphs: ps })} isDark={isDark} />
+            <ParagraphListEditor paragraphs={section.paragraphs} onChange={(ps) => onChange({ ...section, paragraphs: ps })} isDark={isDark} sources={sources} />
           </div>
-
-          {/* Subheadings */}
           <div>
             <Label isDark={isDark}>Subheadings</Label>
             <div className="space-y-3">
               {section.subheadings.map((sub, i) => (
-                <SubheadingEditor key={sub._id} sub={sub}
+                <SubheadingEditor
+                  key={sub._id} sub={sub}
                   availableImages={availableImages}
+                  sources={sources}
                   onChange={(updated) => {
                     const next = [...section.subheadings]; next[i] = updated;
                     onChange({ ...section, subheadings: next });
                   }}
-                  onDelete={() => onChange({
-                    ...section,
-                    subheadings: section.subheadings.filter((_, idx) => idx !== i),
-                  })}
+                  onDelete={() => onChange({ ...section, subheadings: section.subheadings.filter((_, idx) => idx !== i) })}
                   isDark={isDark}
                 />
               ))}
-              <Btn onClick={() => onChange({
-                ...section, subheadings: [...section.subheadings, emptySubheading()],
-              })} variant="outline" isDark={isDark} className="w-full">
+              <Btn onClick={() => onChange({ ...section, subheadings: [...section.subheadings, emptySubheading()] })} variant="outline" isDark={isDark} className="w-full">
                 + Add Subheading
               </Btn>
             </div>
@@ -780,12 +1132,14 @@ function SectionEditor({ section, onChange, onDelete, onMoveUp, onMoveDown,
 }
 
 // ---------------------------------------------------------------------------
-// Translation editor  (now receives availableImages)
+// Translation editor — subtitle now uses RefAwareField; excerpt too
 // ---------------------------------------------------------------------------
 
-function TranslationEditor({ translation, onChange, isDark, availableImages }: {
+function TranslationEditor({
+  translation, onChange, isDark, availableImages, sources,
+}: {
   translation: DraftTranslation; onChange: (t: DraftTranslation) => void;
-  isDark: boolean; availableImages: ManagedImage[];
+  isDark: boolean; availableImages: ManagedImage[]; sources: Source[];
 }) {
   function updateSection(i: number, s: typeof translation.sections[number]) {
     const next = [...translation.sections]; next[i] = s;
@@ -796,51 +1150,60 @@ function TranslationEditor({ translation, onChange, isDark, availableImages }: {
   }
   function moveSectionUp(i: number) {
     if (i === 0) return;
-    const next = [...translation.sections]; [next[i-1], next[i]] = [next[i], next[i-1]];
+    const next = [...translation.sections]; [next[i - 1], next[i]] = [next[i], next[i - 1]];
     onChange({ ...translation, sections: next });
   }
   function moveSectionDown(i: number) {
     if (i === translation.sections.length - 1) return;
-    const next = [...translation.sections]; [next[i], next[i+1]] = [next[i+1], next[i]];
+    const next = [...translation.sections]; [next[i], next[i + 1]] = [next[i + 1], next[i]];
     onChange({ ...translation, sections: next });
   }
-
   return (
     <div className="space-y-6">
       <div className="grid gap-4">
         <div>
           <Label isDark={isDark}>Title</Label>
-          <Input value={translation.title}
-            onChange={(v) => onChange({ ...translation, title: v })}
-            placeholder="Article title" isDark={isDark} />
+          {/* Article title — plain Input; refs in H1 are unusual */}
+          <Input value={translation.title} onChange={(v) => onChange({ ...translation, title: v })} placeholder="Article title" isDark={isDark} />
         </div>
         <div>
           <Label isDark={isDark}>Subtitle</Label>
-          <Input value={translation.subtitle}
+          {/* Subtitle supports [ref:N]...[/ref] */}
+          <RefAwareField
+            value={translation.subtitle}
             onChange={(v) => onChange({ ...translation, subtitle: v })}
-            placeholder="Short subtitle shown in the header" isDark={isDark} />
+            placeholder="Short subtitle shown in the header"
+            rows={2}
+            isDark={isDark}
+            sources={sources}
+          />
         </div>
         <div>
           <Label isDark={isDark}>Excerpt</Label>
-          <Textarea value={translation.excerpt}
+          {/* Excerpt supports refs too (shown on cards) */}
+          <RefAwareField
+            value={translation.excerpt}
             onChange={(v) => onChange({ ...translation, excerpt: v })}
-            placeholder="Short excerpt shown on cards" rows={2} isDark={isDark} />
+            placeholder="Short excerpt shown on cards"
+            rows={3}
+            isDark={isDark}
+            sources={sources}
+          />
         </div>
       </div>
-
       <div>
         <div className="mb-3 flex items-center justify-between">
           <Label isDark={isDark}>Sections</Label>
-          <Btn onClick={() => onChange({
-            ...translation, sections: [...translation.sections, emptySection()],
-          })} variant="primary" isDark={isDark}>
+          <Btn onClick={() => onChange({ ...translation, sections: [...translation.sections, emptySection()] })} variant="primary" isDark={isDark}>
             + Add Section
           </Btn>
         </div>
         <div className="space-y-4">
           {translation.sections.map((s, i) => (
-            <SectionEditor key={s._id} section={s}
+            <SectionEditor
+              key={s._id} section={s}
               availableImages={availableImages}
+              sources={sources}
               onChange={(u) => updateSection(i, u)}
               onDelete={() => removeSection(i)}
               onMoveUp={() => moveSectionUp(i)}
@@ -859,49 +1222,50 @@ function TranslationEditor({ translation, onChange, isDark, availableImages }: {
 // Sources editor
 // ---------------------------------------------------------------------------
 
-function SourcesEditor({ sources, onChange, isDark }: {
+function SourcesEditor({
+  sources, onChange, isDark,
+}: {
   sources: Source[]; onChange: (s: Source[]) => void; isDark: boolean;
 }) {
   function update(i: number, s: Source) { const n = [...sources]; n[i] = s; onChange(n); }
   function remove(i: number) { onChange(sources.filter((_, idx) => idx !== i)); }
-
+  const itemClass = isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50";
   return (
     <div className="space-y-3">
+      {sources.length > 0 && (
+        <div className={`rounded-lg border px-4 py-3 text-xs ${isDark ? "border-amber-900/40 bg-amber-950/10 text-amber-600" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+          <span className="font-semibold">Tip:</span> In paragraphs, section titles, subheading titles, subtitle, excerpt, and image captions/references, select text and use the{" "}
+          <span className="font-mono font-bold">[ref:N]</span> toolbar to wrap it as a reference.
+          Source [1] = first entry below, [2] = second, etc.
+        </div>
+      )}
       {sources.map((s, i) => (
-        <div key={i} className={`rounded-lg border p-3 ${
-          isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50"
-        }`}>
+        <div key={i} className={`rounded-lg border p-3 ${itemClass}`}>
           <div className="mb-2 flex items-center justify-between">
-            <span className={`font-mono text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>[{i+1}]</span>
+            <span className={`font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}>[{i + 1}]</span>
             <Btn onClick={() => remove(i)} variant="danger" isDark={isDark}>Remove</Btn>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
               <Label isDark={isDark}>Label</Label>
-              <Input value={s.label} onChange={(v) => update(i, { ...s, label: v })}
-                placeholder="Source label" isDark={isDark} />
+              <Input value={s.label} onChange={(v) => update(i, { ...s, label: v })} placeholder="Source label" isDark={isDark} />
             </div>
             <div>
               <Label isDark={isDark}>URL</Label>
-              <Input value={s.url} onChange={(v) => update(i, { ...s, url: v })}
-                placeholder="https://..." isDark={isDark} />
+              <Input value={s.url} onChange={(v) => update(i, { ...s, url: v })} placeholder="https://..." isDark={isDark} />
             </div>
             <div>
               <Label isDark={isDark}>Publisher</Label>
-              <Input value={s.publisher} onChange={(v) => update(i, { ...s, publisher: v })}
-                placeholder="Publisher name" isDark={isDark} />
+              <Input value={s.publisher} onChange={(v) => update(i, { ...s, publisher: v })} placeholder="Publisher name" isDark={isDark} />
             </div>
             <div>
               <Label isDark={isDark}>Year</Label>
-              <Input value={s.year?.toString() ?? ""}
-                onChange={(v) => update(i, { ...s, year: v ? parseInt(v) : undefined })}
-                placeholder="2024" isDark={isDark} />
+              <Input value={s.year?.toString() ?? ""} onChange={(v) => update(i, { ...s, year: v ? parseInt(v) : undefined })} placeholder="2024" isDark={isDark} />
             </div>
           </div>
         </div>
       ))}
-      <Btn onClick={() => onChange([...sources, { label: "", url: "", publisher: "", year: undefined }])}
-        variant="outline" isDark={isDark} className="w-full">
+      <Btn onClick={() => onChange([...sources, { label: "", url: "", publisher: "", year: undefined }])} variant="outline" isDark={isDark} className="w-full">
         + Add Source
       </Btn>
     </div>
@@ -912,7 +1276,9 @@ function SourcesEditor({ sources, onChange, isDark }: {
 // Author picker
 // ---------------------------------------------------------------------------
 
-function AuthorPicker({ selectedKeys, onChange, isDark }: {
+function AuthorPicker({
+  selectedKeys, onChange, isDark,
+}: {
   selectedKeys: string[]; onChange: (keys: string[]) => void; isDark: boolean;
 }) {
   const [authors, setAuthors] = useState<Author[]>([]);
@@ -938,54 +1304,151 @@ function AuthorPicker({ selectedKeys, onChange, isDark }: {
     <div className="space-y-2">
       {authors.map((a) => {
         const checked = selectedKeys.includes(a.id);
+        const labelClass = checked
+          ? isDark ? "border-amber-700/60 bg-amber-950/30" : "border-amber-400 bg-amber-50"
+          : isDark ? "border-stone-800 bg-stone-900/40 hover:border-stone-700" : "border-stone-200 bg-white hover:border-stone-300";
         return (
-          <label key={a.id} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
-            checked
-              ? isDark ? "border-amber-700/60 bg-amber-950/30" : "border-amber-400 bg-amber-50"
-              : isDark ? "border-stone-800 bg-stone-900/40 hover:border-stone-700" : "border-stone-200 bg-white hover:border-stone-300"
-          }`}>
-            <input type="checkbox" checked={checked} onChange={() => toggle(a.id)}
-              className="h-4 w-4 accent-amber-500 shrink-0" />
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-              style={{ backgroundColor: a.avatarColor }}>
+          <label key={a.id} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${labelClass}`}>
+            <input type="checkbox" checked={checked} onChange={() => toggle(a.id)} className="h-4 w-4 accent-amber-500 shrink-0" />
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: a.avatarColor }}>
               {a.avatarInitials}
             </span>
             <div className="min-w-0 flex-1">
-              <p className={`text-sm font-semibold leading-tight ${isDark ? "text-stone-200" : "text-stone-800"}`}>
-                {a.name}
-              </p>
-              <p className={`text-xs leading-tight truncate ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-                {a.role} · {a.title}
-              </p>
+              <p className={`text-sm font-semibold leading-tight ${isDark ? "text-stone-200" : "text-stone-800"}`}>{a.name}</p>
+              <p className={`text-xs leading-tight truncate ${isDark ? "text-stone-500" : "text-stone-500"}`}>{a.role} · {a.title}</p>
             </div>
           </label>
         );
       })}
       {authors.length === 0 && (
-        <p className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-          No authors found. Add them in Django admin first.
-        </p>
+        <p className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>No authors found. Add them in Django admin first.</p>
       )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Image manager — upload / delete / set cover
+// Image edit drawer — caption & reference now use RefAwareField
 // ---------------------------------------------------------------------------
 
-function ImageManager({ postId, existingImages, coverImageKey, onCoverChange, onImagesChange, isDark }: {
-  postId: number | null; existingImages: ManagedImage[];
-  coverImageKey: string; onCoverChange: (key: string) => void;
-  onImagesChange: (imgs: ManagedImage[]) => void; isDark: boolean;
+function ImageEditDrawer({
+  img, postId, sources, onSaved, onClose, isDark,
+}: {
+  img: ManagedImage;
+  postId: number;
+  /** Post-level sources so the ref toolbar can show source labels */
+  sources: Source[];
+  onSaved: (updated: ManagedImage) => void;
+  onClose: () => void;
+  isDark: boolean;
+}) {
+  const [altEn,       setAltEn]       = useState(img.alt.en ?? "");
+  const [captionEn,   setCaptionEn]   = useState("");
+  const [referenceEn, setReferenceEn] = useState("");
+  const [srcUrl,      setSrcUrl]      = useState(img.src ?? "");
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true); setErr(null);
+    try {
+      const updated = await apiUpdateImage(postId, img.id, {
+        alt:       { en: altEn },
+        caption:   { en: captionEn },
+        reference: { en: referenceEn },
+        src:       srcUrl || undefined,
+      });
+      onSaved({
+        id:          updated.id,
+        src:         updated.src,
+        orientation: updated.orientation,
+        alt:         updated.alt as ManagedImage["alt"],
+      });
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally { setSaving(false); }
+  }
+
+  const drawerClass = isDark ? "border-amber-800/50 bg-amber-950/20" : "border-amber-300 bg-amber-50";
+  const headingClass = isDark ? "text-amber-400" : "text-amber-700";
+  const closeBtnClass = isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-700";
+
+  return (
+    <div className={`rounded-xl border p-4 space-y-3 ${drawerClass}`}>
+      <div className="flex items-center justify-between">
+        <p className={`text-xs font-semibold uppercase tracking-widest ${headingClass}`}>Edit: {img.id}</p>
+        <button onClick={onClose} className={`text-xs ${closeBtnClass}`}>✕ Close</button>
+      </div>
+      <div className="grid gap-3">
+        <div>
+          <Label isDark={isDark}>Alt Text (English)</Label>
+          {/* Alt text is plain — no refs needed here */}
+          <Input value={altEn} onChange={setAltEn} placeholder="Describe the image…" isDark={isDark} />
+        </div>
+        <div>
+          <Label isDark={isDark}>Caption (English)</Label>
+          {/* Caption supports [ref:N]...[/ref] syntax */}
+          <RefAwareField
+            value={captionEn}
+            onChange={setCaptionEn}
+            placeholder="Caption shown below image…"
+            rows={2}
+            isDark={isDark}
+            sources={sources}
+          />
+        </div>
+        <div>
+          <Label isDark={isDark}>Reference / Credit (English)</Label>
+          {/* Credit line supports [ref:N]...[/ref] syntax */}
+          <RefAwareField
+            value={referenceEn}
+            onChange={setReferenceEn}
+            placeholder="e.g. © Photographer Name [ref:1]Source[/ref]"
+            rows={1}
+            isDark={isDark}
+            sources={sources}
+          />
+        </div>
+        <div>
+          <Label isDark={isDark}>External Src URL (leave blank if uploaded)</Label>
+          <Input value={srcUrl} onChange={setSrcUrl} placeholder="https://…" isDark={isDark} />
+        </div>
+      </div>
+      {err && <p className="text-xs text-red-400">{err}</p>}
+      <div className="flex justify-end gap-2">
+        <Btn onClick={onClose} variant="ghost" isDark={isDark}>Cancel</Btn>
+        <Btn onClick={handleSave} variant="primary" isDark={isDark} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Image manager — now accepts sources and threads them to ImageEditDrawer
+// ---------------------------------------------------------------------------
+
+function ImageManager({
+  postId, existingImages, coverImageKey, sources, onCoverChange, onImagesChange, isDark,
+}: {
+  postId: number | null;
+  existingImages: ManagedImage[];
+  coverImageKey: string;
+  /** Post-level sources — forwarded to ImageEditDrawer for the ref toolbar */
+  sources: Source[];
+  onCoverChange: (key: string) => void;
+  onImagesChange: (imgs: ManagedImage[]) => void;
+  isDark: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadErr, setUploadErr] = useState<string | null>(null);
-  const [newKey, setNewKey] = useState("");
+  const [uploading,      setUploading]      = useState(false);
+  const [uploadErr,      setUploadErr]      = useState<string | null>(null);
+  const [newKey,         setNewKey]         = useState("");
   const [newOrientation, setNewOrientation] = useState<"landscape" | "portrait">("landscape");
-  const [deletingKey, setDeletingKey] = useState<string | null>(null);
-  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [deletingKey,    setDeletingKey]    = useState<string | null>(null);
+  const [deleteErr,      setDeleteErr]      = useState<string | null>(null);
+  const [editingKey,     setEditingKey]     = useState<string | null>(null);
 
   async function handleUpload(file: File) {
     if (!postId) { setUploadErr("Save the post first before uploading images."); return; }
@@ -1013,35 +1476,44 @@ function ImageManager({ postId, existingImages, coverImageKey, onCoverChange, on
     try {
       await apiDeleteImage(postId, img.id);
       if (coverImageKey === img.id) onCoverChange("");
+      if (editingKey === img.id) setEditingKey(null);
       onImagesChange(existingImages.filter((i) => i.id !== img.id));
     } catch (e: unknown) {
       setDeleteErr(e instanceof Error ? e.message : "Delete failed");
     } finally { setDeletingKey(null); }
   }
 
+  function handleSaved(updated: ManagedImage) {
+    onImagesChange(existingImages.map((i) => i.id === updated.id ? updated : i));
+    setEditingKey(null);
+  }
+
+  const uploadZoneClass = isDark ? "border-stone-700 bg-stone-900/40" : "border-stone-300 bg-stone-50";
+  const deleteErrClass  = isDark ? "border-red-800 bg-red-950/30 text-red-400" : "border-red-300 bg-red-50 text-red-600";
+
   return (
     <div className="space-y-4">
-      {/* Upload */}
-      <div className={`rounded-xl border-2 border-dashed p-4 ${
-        isDark ? "border-stone-700 bg-stone-900/40" : "border-stone-300 bg-stone-50"
-      }`}>
+      <div className={`rounded-xl border-2 border-dashed p-4 ${uploadZoneClass}`}>
         <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_160px_auto]">
           <div>
             <Label isDark={isDark}>Image Key (slug)</Label>
-            <Input value={newKey} onChange={setNewKey}
-              placeholder="e.g. hero-image (auto from filename)" isDark={isDark} />
+            <Input value={newKey} onChange={setNewKey} placeholder="e.g. hero-image (auto from filename)" isDark={isDark} />
           </div>
           <div>
             <Label isDark={isDark}>Orientation</Label>
-            <Select value={newOrientation}
+            <Select
+              value={newOrientation}
               onChange={(v) => setNewOrientation(v as "landscape" | "portrait")}
               options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]}
               isDark={isDark}
             />
           </div>
           <div className="flex items-end">
-            <button onClick={() => fileRef.current?.click()} disabled={uploading}
-              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 disabled:opacity-50 whitespace-nowrap">
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 disabled:opacity-50 whitespace-nowrap"
+            >
               {uploading ? "Uploading…" : "Upload Image"}
             </button>
           </div>
@@ -1057,73 +1529,103 @@ function ImageManager({ postId, existingImages, coverImageKey, onCoverChange, on
       </div>
 
       {deleteErr && (
-        <div className={`rounded-lg border px-3 py-2 text-xs ${
-          isDark ? "border-red-800 bg-red-950/30 text-red-400" : "border-red-300 bg-red-50 text-red-600"
-        }`}>
-          Delete failed: {deleteErr}
-        </div>
+        <div className={`rounded-lg border px-3 py-2 text-xs ${deleteErrClass}`}>Delete failed: {deleteErr}</div>
       )}
 
-      {/* Image grid */}
       {existingImages.length === 0 ? (
-        <p className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-          No images yet. Upload one above.
-        </p>
+        <p className={`text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>No images yet. Upload one above.</p>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {existingImages.map((img) => {
-            const isCover = coverImageKey === img.id;
-            const isDeleting = deletingKey === img.id;
-            return (
-              <div key={img.id} className={`overflow-hidden rounded-xl border transition-colors ${
-                isCover
-                  ? isDark ? "border-amber-600 bg-amber-950/20" : "border-amber-500 bg-amber-50"
-                  : isDark ? "border-stone-800 bg-stone-900/40" : "border-stone-200 bg-white"
-              } ${isDeleting ? "opacity-50 pointer-events-none" : ""}`}>
-                {img.src && (
-                  <img src={img.src} alt={img.alt.en}
-                    className={`w-full object-cover ${img.orientation === "portrait" ? "aspect-[4/5]" : "aspect-video"}`}
-                  />
-                )}
-                <div className="p-2.5 space-y-2">
-                  <div className="flex items-start justify-between gap-1">
-                    <div className="min-w-0">
-                      <p className={`truncate font-mono text-xs font-semibold ${isDark ? "text-stone-300" : "text-stone-700"}`}>
-                        {img.id}
-                      </p>
-                      <p className={`text-[10px] ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-                        {img.orientation}
-                      </p>
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {existingImages.map((img) => {
+              const isCover    = coverImageKey === img.id;
+              const isDeleting = deletingKey === img.id;
+              const isEditing  = editingKey === img.id;
+
+              const cardClass = isCover
+                ? isDark ? "border-amber-600 bg-amber-950/20" : "border-amber-500 bg-amber-50"
+                : isEditing
+                  ? isDark ? "border-sky-600 bg-sky-950/20" : "border-sky-400 bg-sky-50"
+                  : isDark ? "border-stone-800 bg-stone-900/40" : "border-stone-200 bg-white";
+
+              const editBtnClass = isEditing
+                ? "bg-sky-600 text-white"
+                : isDark ? "text-stone-600 hover:bg-sky-900/50 hover:text-sky-400" : "text-stone-400 hover:bg-sky-50 hover:text-sky-600";
+              const deleteBtnClass  = isDark ? "text-stone-600 hover:bg-red-900/50 hover:text-red-400" : "text-stone-400 hover:bg-red-50 hover:text-red-500";
+              const coverBtnClass   = isCover
+                ? "bg-amber-600 text-amber-50"
+                : isDark ? "bg-stone-800 text-stone-400 hover:bg-stone-700 hover:text-stone-200" : "bg-stone-100 text-stone-500 hover:bg-stone-200 hover:text-stone-700";
+
+              return (
+                <div
+                  key={img.id}
+                  className={`overflow-hidden rounded-xl border transition-colors ${cardClass} ${isDeleting ? "opacity-50 pointer-events-none" : ""}`}
+                >
+                  {img.src && (
+                    <img src={img.src} alt={img.alt.en}
+                      className={`w-full object-cover ${img.orientation === "portrait" ? "aspect-[4/5]" : "aspect-video"}`} />
+                  )}
+                  <div className="p-2.5 space-y-2">
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="min-w-0">
+                        <p className={`truncate font-mono text-xs font-semibold ${isDark ? "text-stone-300" : "text-stone-700"}`}>{img.id}</p>
+                        <p className={`text-[10px] ${isDark ? "text-stone-600" : "text-stone-400"}`}>{img.orientation}</p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <button
+                          onClick={() => setEditingKey(isEditing ? null : img.id)}
+                          title="Edit image metadata"
+                          className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${editBtnClass}`}
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round"
+                              d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(img)}
+                          disabled={isDeleting}
+                          title="Delete image"
+                          className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${deleteBtnClass}`}
+                        >
+                          {isDeleting ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
+                          ) : (
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round"
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                    <button onClick={() => handleDelete(img)} disabled={isDeleting} title="Delete image"
-                      className={`shrink-0 flex items-center justify-center rounded-md p-1.5 transition-colors ${
-                        isDark ? "text-stone-600 hover:bg-red-900/50 hover:text-red-400"
-                               : "text-stone-400 hover:bg-red-50 hover:text-red-500"
-                      }`}>
-                      {isDeleting ? (
-                        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
-                      ) : (
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      )}
+                    <button
+                      onClick={() => onCoverChange(isCover ? "" : img.id)}
+                      className={`w-full rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${coverBtnClass}`}
+                    >
+                      {isCover ? "✓ Cover" : "Set as Cover"}
                     </button>
                   </div>
-                  <button onClick={() => onCoverChange(isCover ? "" : img.id)}
-                    className={`w-full rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
-                      isCover
-                        ? "bg-amber-600 text-amber-50"
-                        : isDark
-                          ? "bg-stone-800 text-stone-400 hover:bg-stone-700 hover:text-stone-200"
-                          : "bg-stone-100 text-stone-500 hover:bg-stone-200 hover:text-stone-700"
-                    }`}>
-                    {isCover ? "✓ Cover" : "Set as Cover"}
-                  </button>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+
+          {/* ImageEditDrawer — sources threaded through for the ref toolbar */}
+          {editingKey && postId && (() => {
+            const img = existingImages.find((i) => i.id === editingKey);
+            return img ? (
+              <ImageEditDrawer
+                key={editingKey}
+                img={img}
+                postId={postId}
+                sources={sources}
+                onSaved={handleSaved}
+                onClose={() => setEditingKey(null)}
+                isDark={isDark}
+              />
+            ) : null;
+          })()}
         </div>
       )}
     </div>
@@ -1139,18 +1641,18 @@ export default function BlogEditPage({ params }: PageProps) {
   const isNew = slug === "new";
   const router = useRouter();
 
-  const [theme, setTheme]         = useState<Theme>("dark");
-  const [draft, setDraft]         = useState<DraftPost>(emptyDraft());
-  const [activeLang, setActiveLang] = useState<LanguageCode>("en");
-  const [languages, setLanguages] = useState<LanguageOption[]>(LANGUAGE_FALLBACK);
-  const [loading, setLoading]     = useState(!isNew);
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState<"meta" | "content" | "images" | "sources">("meta");
-  const [postId, setPostId]       = useState<number | null>(null);
-  const [managedImages, setManagedImages] = useState<ManagedImage[]>([]);
+  const [theme,          setTheme]          = useState<Theme>("dark");
+  const [draft,          setDraft]          = useState<DraftPost>(emptyDraft());
+  const [activeLang,     setActiveLang]     = useState<LanguageCode>("en");
+  const [languages,      setLanguages]      = useState<LanguageOption[]>(LANGUAGE_FALLBACK);
+  const [loading,        setLoading]        = useState(!isNew);
+  const [saving,         setSaving]         = useState(false);
+  const [error,          setError]          = useState<string | null>(null);
+  const [saveError,      setSaveError]      = useState<string | null>(null);
+  const [saveSuccess,    setSaveSuccess]    = useState(false);
+  const [activeTab,      setActiveTab]      = useState<"meta" | "content" | "images" | "sources">("meta");
+  const [postId,         setPostId]         = useState<number | null>(null);
+  const [managedImages,  setManagedImages]  = useState<ManagedImage[]>([]);
 
   useEffect(() => {
     if (window.matchMedia("(prefers-color-scheme: light)").matches) setTheme("light");
@@ -1192,6 +1694,29 @@ export default function BlogEditPage({ params }: PageProps) {
     const next = { ...draft.translations }; delete next[lang];
     setDraft((d) => ({ ...d, translations: next }));
     if (activeLang === lang) setActiveLang("en");
+  }
+
+  function handleImagesChange(imgs: ManagedImage[]) {
+    const existingIds = new Set(imgs.map((i) => i.id));
+    setDraft((d) => {
+      const cleanedTranslations: typeof d.translations = {};
+      for (const [lang, t] of Object.entries(d.translations) as [LanguageCode, DraftTranslation][]) {
+        cleanedTranslations[lang] = {
+          ...t,
+          sections: t.sections.map((s) => ({
+            ...s,
+            imageIds: s.imageIds.filter((id) => existingIds.has(id)),
+            subheadings: s.subheadings.map((sub) => ({
+              ...sub,
+              imageIds: sub.imageIds.filter((id) => existingIds.has(id)),
+            })),
+          })),
+        };
+      }
+      const newCoverKey = existingIds.has(d.cover_image_key) ? d.cover_image_key : "";
+      return { ...d, cover_image_key: newCoverKey, translations: cleanedTranslations };
+    });
+    setManagedImages(imgs);
   }
 
   const handleSave = useCallback(async () => {
@@ -1237,36 +1762,38 @@ export default function BlogEditPage({ params }: PageProps) {
 
   if (error) {
     return (
-      <div className={`flex min-h-screen flex-col items-center justify-center gap-4 px-4 ${
-        isDark ? "bg-stone-950 text-stone-400" : "bg-stone-50 text-stone-500"
-      }`}>
+      <div className={`flex min-h-screen flex-col items-center justify-center gap-4 px-4 ${isDark ? "bg-stone-950 text-stone-400" : "bg-stone-50 text-stone-500"}`}>
         <p className="text-xl font-bold text-red-400">Failed to load post</p>
         <p className="max-w-md text-sm text-red-300">{error}</p>
-        <button onClick={() => router.back()}
-          className="rounded-lg bg-stone-800 px-4 py-2 text-sm text-stone-200 hover:bg-stone-700">
+        <button onClick={() => router.back()} className="rounded-lg bg-stone-800 px-4 py-2 text-sm text-stone-200 hover:bg-stone-700">
           ← Go Back
         </button>
       </div>
     );
   }
 
-  const activeLangs = Object.keys(draft.translations) as LanguageCode[];
+  const activeLangs  = Object.keys(draft.translations) as LanguageCode[];
   const addableLangs = LANGUAGE_FALLBACK.filter((l) => !activeLangs.includes(l.code));
 
+  const headerClass     = isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90";
+  const successBarClass = isDark ? "border-emerald-800 bg-emerald-950/40 text-emerald-400" : "border-emerald-300 bg-emerald-50 text-emerald-700";
+  const errorBarClass   = isDark ? "border-red-800 bg-red-950/40 text-red-400" : "border-red-300 bg-red-50 text-red-700";
+
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${
-      isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"
-    }`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div
+      className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"}`}
+      style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
+    >
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');`}</style>
 
-      {/* ── Sticky header ── */}
-      <header className={`sticky top-0 z-30 border-b backdrop-blur ${
-        isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"
-      }`}>
+      {/* Header */}
+      <header className={`sticky top-0 z-30 border-b backdrop-blur ${headerClass}`}>
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <button onClick={() => router.push("/modelblog/blog")}
-              className={`text-sm ${isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-800"}`}>
+            <button
+              onClick={() => router.push("/modelblog/blog")}
+              className={`text-sm ${isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-800"}`}
+            >
               ← Blog
             </button>
             <span className={`text-xs ${isDark ? "text-stone-700" : "text-stone-300"}`}>/</span>
@@ -1277,31 +1804,34 @@ export default function BlogEditPage({ params }: PageProps) {
           <div className="flex items-center gap-3">
             <ThemeToggle theme={theme} onToggle={() => setTheme(isDark ? "light" : "dark")} />
             {!isNew && (
-              <button onClick={() => router.push(`/modelblog/blog/${draft.slug}`)}
-                className={`text-xs ${isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-800"}`}>
+              <button
+                onClick={() => router.push(`/modelblog/blog/${draft.slug}`)}
+                className={`text-xs ${isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-800"}`}
+              >
                 Preview →
               </button>
             )}
-            <button onClick={handleSave} disabled={saving}
-              className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 disabled:opacity-50 transition-colors">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+            >
               {saving ? (
-                <><span className="h-3.5 w-3.5 animate-spin rounded-full border border-amber-200 border-t-transparent" />Saving…</>
+                <>
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border border-amber-200 border-t-transparent" />
+                  Saving…
+                </>
               ) : isNew ? "Create Post" : "Save Changes"}
             </button>
           </div>
         </div>
       </header>
 
-      {/* ── Save feedback ── */}
       {saveSuccess && (
-        <div className={`border-b px-4 py-2.5 text-sm font-medium ${
-          isDark ? "border-emerald-800 bg-emerald-950/40 text-emerald-400" : "border-emerald-300 bg-emerald-50 text-emerald-700"
-        }`}>✓ Saved successfully</div>
+        <div className={`border-b px-4 py-2.5 text-sm font-medium ${successBarClass}`}>✓ Saved successfully</div>
       )}
       {saveError && (
-        <div className={`border-b px-4 py-2.5 ${
-          isDark ? "border-red-800 bg-red-950/40 text-red-400" : "border-red-300 bg-red-50 text-red-700"
-        }`}>
+        <div className={`border-b px-4 py-2.5 ${errorBarClass}`}>
           <p className="mb-1 text-sm font-semibold">Save failed</p>
           <pre className="whitespace-pre-wrap text-xs">{saveError}</pre>
         </div>
@@ -1310,62 +1840,54 @@ export default function BlogEditPage({ params }: PageProps) {
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Tab bar */}
         <div className="mb-6 flex gap-1 flex-wrap">
-          {(["meta", "content", "images", "sources"] as const).map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors ${
-                activeTab === tab ? "bg-amber-600 text-amber-50"
-                  : isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-500 hover:text-stone-800"
-              }`}>
-              {tab}
-            </button>
-          ))}
+          {(["meta", "content", "images", "sources"] as const).map((tab) => {
+            const tabClass = activeTab === tab
+              ? "bg-amber-600 text-amber-50"
+              : isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-500 hover:text-stone-800";
+            return (
+              <button key={tab} onClick={() => setActiveTab(tab)} className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors ${tabClass}`}>
+                {tab}
+              </button>
+            );
+          })}
         </div>
 
-        {/* ── META tab ── */}
+        {/* META tab */}
         {activeTab === "meta" && (
           <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
             <div className="space-y-5">
               <Card isDark={isDark}>
                 <Label isDark={isDark}>Post Slug</Label>
-                <Input value={draft.slug} onChange={(v) => setDraft((d) => ({ ...d, slug: v }))}
-                  placeholder="my-post-slug" isDark={isDark} />
+                <Input value={draft.slug} onChange={(v) => setDraft((d) => ({ ...d, slug: v }))} placeholder="my-post-slug" isDark={isDark} />
               </Card>
 
               <Card isDark={isDark}>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <Label isDark={isDark}>Category</Label>
-                    <Input value={draft.category}
-                      onChange={(v) => setDraft((d) => ({ ...d, category: v }))}
-                      placeholder="e.g. BIM & Software" isDark={isDark} />
+                    <Input value={draft.category} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} placeholder="e.g. BIM & Software" isDark={isDark} />
                   </div>
                   <div>
                     <Label isDark={isDark}>Reading Time (min)</Label>
-                    <Input value={draft.reading_time_minutes.toString()}
-                      onChange={(v) => setDraft((d) => ({ ...d, reading_time_minutes: parseInt(v) || 0 }))}
-                      placeholder="5" isDark={isDark} />
+                    <Input value={draft.reading_time_minutes.toString()} onChange={(v) => setDraft((d) => ({ ...d, reading_time_minutes: parseInt(v) || 0 }))} placeholder="5" isDark={isDark} />
                   </div>
                   <div>
                     <Label isDark={isDark}>Published Date</Label>
-                    <Input value={draft.published_at}
-                      onChange={(v) => setDraft((d) => ({ ...d, published_at: v }))}
-                      placeholder="YYYY-MM-DD" isDark={isDark} />
+                    <Input value={draft.published_at} onChange={(v) => setDraft((d) => ({ ...d, published_at: v }))} placeholder="YYYY-MM-DD" isDark={isDark} />
                   </div>
                   <div>
-                    <Label isDark={isDark}>Tags (comma-separated)</Label>
-                    <Input value={draft.tags.join(", ")}
-                      onChange={(v) => setDraft((d) => ({
-                        ...d, tags: v.split(",").map((s) => s.trim()).filter(Boolean),
-                      }))}
-                      placeholder="IFC, BIM, Bonsai" isDark={isDark} />
+                    <Label isDark={isDark}>Tags</Label>
+                    <TagsEditor tags={draft.tags} onChange={(tags) => setDraft((d) => ({ ...d, tags }))} isDark={isDark} />
+                    <p className={`mt-1 text-[10px] ${isDark ? "text-stone-600" : "text-stone-400"}`}>
+                      Press Enter or comma to add · Backspace removes last tag
+                    </p>
                   </div>
                 </div>
                 <div className="mt-4 flex items-center gap-3">
                   <input type="checkbox" id="featured" checked={draft.featured}
                     onChange={(e) => setDraft((d) => ({ ...d, featured: e.target.checked }))}
                     className="h-4 w-4 accent-amber-500" />
-                  <label htmlFor="featured"
-                    className={`text-sm ${isDark ? "text-stone-400" : "text-stone-600"}`}>
+                  <label htmlFor="featured" className={`text-sm ${isDark ? "text-stone-400" : "text-stone-600"}`}>
                     Featured post
                   </label>
                 </div>
@@ -1374,9 +1896,7 @@ export default function BlogEditPage({ params }: PageProps) {
               <Card isDark={isDark}>
                 <Label isDark={isDark}>Authors</Label>
                 <div className="mt-3">
-                  <AuthorPicker selectedKeys={draft.author_keys}
-                    onChange={(keys) => setDraft((d) => ({ ...d, author_keys: keys }))}
-                    isDark={isDark} />
+                  <AuthorPicker selectedKeys={draft.author_keys} onChange={(keys) => setDraft((d) => ({ ...d, author_keys: keys }))} isDark={isDark} />
                 </div>
               </Card>
             </div>
@@ -1384,9 +1904,7 @@ export default function BlogEditPage({ params }: PageProps) {
             <div className="space-y-5">
               <Card isDark={isDark}>
                 <Label isDark={isDark}>Cover Accent (CSS gradient/color)</Label>
-                <Input value={draft.cover_accent}
-                  onChange={(v) => setDraft((d) => ({ ...d, cover_accent: v }))}
-                  placeholder="linear-gradient(90deg,#f59e0b,#d97706)" isDark={isDark} />
+                <Input value={draft.cover_accent} onChange={(v) => setDraft((d) => ({ ...d, cover_accent: v }))} placeholder="linear-gradient(90deg,#f59e0b,#d97706)" isDark={isDark} />
                 {draft.cover_accent && (
                   <div className="mt-2 h-4 w-full rounded" style={{ background: draft.cover_accent }} />
                 )}
@@ -1398,33 +1916,27 @@ export default function BlogEditPage({ params }: PageProps) {
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     {managedImages.map((img) => {
                       const isCover = draft.cover_image_key === img.id;
+                      const coverTileClass = isCover
+                        ? isDark ? "border-amber-500 ring-1 ring-amber-500/40" : "border-amber-500"
+                        : isDark ? "border-stone-700 hover:border-stone-500" : "border-stone-200 hover:border-stone-400";
                       return (
-                        <button key={img.id} onClick={() => setDraft((d) => ({
-                          ...d, cover_image_key: isCover ? "" : img.id,
-                        }))}
-                          className={`relative overflow-hidden rounded-lg border-2 transition-all ${
-                            isCover
-                              ? isDark ? "border-amber-500 ring-1 ring-amber-500/40" : "border-amber-500"
-                              : isDark ? "border-stone-700 hover:border-stone-500" : "border-stone-200 hover:border-stone-400"
-                          }`}>
-                          {img.src && (
-                            <img src={img.src} alt={img.alt.en}
-                              className="aspect-video w-full object-cover" />
-                          )}
+                        <button
+                          key={img.id}
+                          onClick={() => setDraft((d) => ({ ...d, cover_image_key: isCover ? "" : img.id }))}
+                          className={`relative overflow-hidden rounded-lg border-2 transition-all ${coverTileClass}`}
+                        >
+                          {img.src && <img src={img.src} alt={img.alt.en} className="aspect-video w-full object-cover" />}
                           {isCover && (
                             <div className="absolute inset-0 flex items-start justify-end bg-amber-500/20 p-1">
                               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 shadow">
-                                <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24"
-                                  stroke="currentColor" strokeWidth={3}>
+                                <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                 </svg>
                               </span>
                             </div>
                           )}
                           <div className={`px-1.5 py-1 ${isDark ? "bg-stone-900" : "bg-white"}`}>
-                            <p className={`truncate font-mono text-[9px] ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-                              {img.id}
-                            </p>
+                            <p className="truncate font-mono text-[9px] text-stone-500">{img.id}</p>
                           </div>
                         </button>
                       );
@@ -1440,23 +1952,22 @@ export default function BlogEditPage({ params }: PageProps) {
               <Card isDark={isDark}>
                 <Label isDark={isDark}>Translation Languages</Label>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {activeLangs.map((lang) => (
-                    <div key={lang} className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                      isDark ? "bg-stone-800 text-stone-300" : "bg-stone-100 text-stone-700"
-                    }`}>
-                      {LANGUAGE_FALLBACK.find((l) => l.code === lang)?.nativeLabel ?? lang}
-                      {lang !== "en" && (
-                        <button onClick={() => removeLanguageTab(lang)}
-                          className="ml-0.5 text-red-400 hover:text-red-300">×</button>
-                      )}
-                    </div>
-                  ))}
+                  {activeLangs.map((lang) => {
+                    const langPillClass = isDark ? "bg-stone-800 text-stone-300" : "bg-stone-100 text-stone-700";
+                    return (
+                      <div key={lang} className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${langPillClass}`}>
+                        {LANGUAGE_FALLBACK.find((l) => l.code === lang)?.nativeLabel ?? lang}
+                        {lang !== "en" && (
+                          <button onClick={() => removeLanguageTab(lang)} className="ml-0.5 text-red-400 hover:text-red-300">×</button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 {addableLangs.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {addableLangs.map((l) => (
-                      <Btn key={l.code} onClick={() => addLanguageTab(l.code)}
-                        variant="outline" isDark={isDark}>
+                      <Btn key={l.code} onClick={() => addLanguageTab(l.code)} variant="outline" isDark={isDark}>
                         + {l.nativeLabel}
                       </Btn>
                     ))}
@@ -1467,51 +1978,58 @@ export default function BlogEditPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* ── CONTENT tab ── */}
+        {/* CONTENT tab */}
         {activeTab === "content" && (
           <div className="space-y-6">
-            {/* Hint when no images uploaded */}
             {managedImages.length === 0 && (
-              <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-xs ${
-                isDark ? "border-stone-800 bg-stone-900/40 text-stone-500" : "border-stone-200 bg-stone-50 text-stone-500"
-              }`}>
+              <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-xs ${isDark ? "border-stone-800 bg-stone-900/40 text-stone-500" : "border-stone-200 bg-stone-50 text-stone-500"}`}>
                 <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                 </svg>
-                No images uploaded yet. Go to the <button className="text-amber-500 underline ml-1"
-                  onClick={() => setActiveTab("images")}>Images tab</button> to upload some, then attach them to sections here.
+                No images uploaded yet. Go to the{" "}
+                <button className="text-amber-500 underline ml-1" onClick={() => setActiveTab("images")}>Images tab</button>{" "}
+                to upload some.
               </div>
             )}
 
-            {/* Language tabs */}
-            <div className="flex flex-wrap gap-1">
-              {activeLangs.map((lang) => (
-                <button key={lang} onClick={() => setActiveLang(lang)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    activeLang === lang ? "bg-amber-600 text-amber-50"
-                      : isDark ? "bg-stone-900 text-stone-400 hover:text-stone-100"
-                               : "bg-white text-stone-500 shadow-sm hover:text-stone-900"
-                  }`}>
-                  {LANGUAGE_FALLBACK.find((l) => l.code === lang)?.nativeLabel ?? lang}
-                </button>
-              ))}
+            <div className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-xs ${isDark ? "border-amber-900/40 bg-amber-950/10 text-amber-600" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+              <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+              </svg>
+              <span>
+                <span className="font-semibold">Inline references</span> work in paragraph text, section &amp; subheading titles, subtitle, excerpt, and image captions/references.
+                Select text, pick a marker, click <span className="font-mono font-bold">Wrap [N]</span>.
+                Add your sources in the <button className="underline" onClick={() => setActiveTab("sources")}>Sources tab</button> first.
+              </span>
             </div>
 
+            <div className="flex flex-wrap gap-1">
+              {activeLangs.map((lang) => {
+                const langTabClass = activeLang === lang
+                  ? "bg-amber-600 text-amber-50"
+                  : isDark ? "bg-stone-900 text-stone-400 hover:text-stone-100" : "bg-white text-stone-500 shadow-sm hover:text-stone-900";
+                return (
+                  <button key={lang} onClick={() => setActiveLang(lang)} className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${langTabClass}`}>
+                    {LANGUAGE_FALLBACK.find((l) => l.code === lang)?.nativeLabel ?? lang}
+                  </button>
+                );
+              })}
+            </div>
             {activeTrans ? (
               <TranslationEditor
                 translation={activeTrans}
                 onChange={setActiveTrans}
                 isDark={isDark}
-                availableImages={managedImages}   // ← pass images down
+                availableImages={managedImages}
+                sources={draft.sources}
               />
             ) : (
               <Card isDark={isDark}>
                 <p className={`text-sm ${isDark ? "text-stone-500" : "text-stone-400"}`}>
                   No translation for this language yet. Go to the{" "}
-                  <button className="text-amber-500 underline" onClick={() => setActiveTab("meta")}>
-                    Meta tab
-                  </button>{" "}
+                  <button className="text-amber-500 underline" onClick={() => setActiveTab("meta")}>Meta tab</button>{" "}
                   to add it.
                 </p>
               </Card>
@@ -1519,52 +2037,27 @@ export default function BlogEditPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* ── IMAGES tab ── */}
+        {/* IMAGES tab — sources passed so captions/references can use ref toolbar */}
         {activeTab === "images" && (
           <Card isDark={isDark}>
-            <div className="mb-4 flex items-center justify-between">
-              <Label isDark={isDark}>Post Images</Label>
-              {!postId && (
-                <span className={`text-xs ${isDark ? "text-amber-600" : "text-amber-700"}`}>
-                  Save post first to enable uploads
-                </span>
-              )}
-            </div>
             <ImageManager
               postId={postId}
               existingImages={managedImages}
               coverImageKey={draft.cover_image_key}
+              sources={draft.sources}
               onCoverChange={(key) => setDraft((d) => ({ ...d, cover_image_key: key }))}
-              onImagesChange={setManagedImages}
+              onImagesChange={handleImagesChange}
               isDark={isDark}
             />
           </Card>
         )}
 
-        {/* ── SOURCES tab ── */}
+        {/* SOURCES tab */}
         {activeTab === "sources" && (
           <Card isDark={isDark}>
-            <Label isDark={isDark}>References &amp; Sources</Label>
-            <div className="mt-3">
-              <SourcesEditor sources={draft.sources}
-                onChange={(s) => setDraft((d) => ({ ...d, sources: s }))} isDark={isDark} />
-            </div>
+            <SourcesEditor sources={draft.sources} onChange={(sources) => setDraft((d) => ({ ...d, sources }))} isDark={isDark} />
           </Card>
         )}
-
-        {/* Bottom save bar */}
-        <div className={`mt-10 flex items-center justify-end gap-3 border-t pt-6 ${
-          isDark ? "border-stone-800" : "border-stone-200"
-        }`}>
-          <button onClick={() => router.back()}
-            className={`text-sm ${isDark ? "text-stone-500 hover:text-stone-200" : "text-stone-400 hover:text-stone-800"}`}>
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-2 rounded-lg bg-amber-600 px-6 py-2.5 text-sm font-semibold text-amber-50 hover:bg-amber-500 disabled:opacity-50 transition-colors">
-            {saving ? "Saving…" : isNew ? "Create Post" : "Save Changes"}
-          </button>
-        </div>
       </div>
     </div>
   );
