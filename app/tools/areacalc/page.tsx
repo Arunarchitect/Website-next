@@ -51,7 +51,7 @@ import {
 
 // ── Finish level options ───────────────────────────────────────
 const FINISH_LEVELS = [
-  { value: "unknown", label: "Any" },
+  { value: "unknown",  label: "Any" },
   { value: "basic",    label: "Basic",    icon: "🪨" },
   { value: "standard", label: "Standard", icon: "🧱" },
   { value: "premium",  label: "Premium",  icon: "✨" },
@@ -79,10 +79,10 @@ function Spinner({ size = 14, color = "#9ca3af" }: { size?: number; color?: stri
 // ── RateStatusBadge ────────────────────────────────────────────
 function RateStatusBadge({ source }: { source: string }) {
   const MAP: Record<string, { label: string; bg: string; color: string; border: string }> = {
-    survey:                { label: "Local Survey",     bg: "#ecfdf5", color: "#047857", border: "#a7f3d0" },
-    survey_all_categories: { label: "Area Survey",      bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
-    country_average:       { label: "Country Average",  bg: "#f5f3ff", color: "#6d28d9", border: "#ddd6fe" },
-    fallback:              { label: "Estimated",        bg: "#fffbeb", color: "#b45309", border: "#fcd34d" },
+    survey:                { label: "Local Survey",    bg: "#ecfdf5", color: "#047857", border: "#a7f3d0" },
+    survey_all_categories: { label: "Area Survey",     bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" },
+    country_average:       { label: "Country Average", bg: "#f5f3ff", color: "#6d28d9", border: "#ddd6fe" },
+    fallback:              { label: "Estimated",       bg: "#fffbeb", color: "#b45309", border: "#fcd34d" },
   };
   const s = MAP[source] ?? { label: source, bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" };
   return (
@@ -137,15 +137,9 @@ function LocationGate({ onOpen }: { onOpen: () => void }) {
       }}
     >
       <div style={{
-        width: 64,
-        height: 64,
-        borderRadius: 16,
-        background: "#fef3c7",
-        border: "2px solid #fcd34d",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 28,
+        width: 64, height: 64, borderRadius: 16,
+        background: "#fef3c7", border: "2px solid #fcd34d",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28,
       }}>
         📍
       </div>
@@ -161,15 +155,9 @@ function LocationGate({ onOpen }: { onOpen: () => void }) {
       <button
         type="button"
         style={{
-          marginTop: 4,
-          padding: "10px 28px",
-          borderRadius: 10,
-          border: "none",
-          background: "#f59e0b",
-          color: "#fff",
-          fontWeight: 700,
-          fontSize: 14,
-          cursor: "pointer",
+          marginTop: 4, padding: "10px 28px", borderRadius: 10,
+          border: "none", background: "#f59e0b", color: "#fff",
+          fontWeight: 700, fontSize: 14, cursor: "pointer",
           boxShadow: "0 4px 12px #f59e0b44",
         }}
       >
@@ -181,11 +169,7 @@ function LocationGate({ onOpen }: { onOpen: () => void }) {
 
 // ── LockedActionButton ─────────────────────────────────────────
 function LockedActionButton({
-  label,
-  locked,
-  onUnlock,
-  onClick,
-  style: extraStyle,
+  label, locked, onUnlock, onClick, style: extraStyle,
 }: {
   label: string;
   locked: boolean;
@@ -200,17 +184,10 @@ function LockedActionButton({
         onClick={onUnlock}
         title="Select a location first"
         style={{
-          fontSize: 13,
-          padding: "8px 14px",
-          borderRadius: 8,
-          border: "1px solid #fcd34d",
-          background: "#fffbeb",
-          cursor: "pointer",
-          fontWeight: 600,
-          color: "#b45309",
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
+          fontSize: 13, padding: "8px 14px", borderRadius: 8,
+          border: "1px solid #fcd34d", background: "#fffbeb",
+          cursor: "pointer", fontWeight: 600, color: "#b45309",
+          display: "flex", alignItems: "center", gap: 5,
           ...extraStyle,
         }}
       >
@@ -223,14 +200,9 @@ function LockedActionButton({
       type="button"
       onClick={onClick}
       style={{
-        fontSize: 13,
-        padding: "8px 14px",
-        borderRadius: 8,
-        border: "1px solid #e5e7eb",
-        background: "#fff",
-        cursor: "pointer",
-        fontWeight: 600,
-        color: "#374151",
+        fontSize: 13, padding: "8px 14px", borderRadius: 8,
+        border: "1px solid #e5e7eb", background: "#fff",
+        cursor: "pointer", fontWeight: 600, color: "#374151",
         transition: "all 0.15s",
         ...extraStyle,
       }}
@@ -250,16 +222,8 @@ function LockedActionButton({
 
 // ── SelectField ────────────────────────────────────────────────
 function SelectField({
-  label,
-  required,
-  value,
-  onChange,
-  disabled,
-  loading,
-  children,
-  placeholder,
-  warning,
-  minWidth = 160,
+  label, required, value, onChange, disabled, loading, children,
+  placeholder, warning, minWidth = 160,
 }: {
   label: string;
   required?: boolean;
@@ -275,13 +239,9 @@ function SelectField({
   return (
     <div>
       <label style={{
-        fontSize: 11,
-        fontWeight: 700,
-        color: "#6b7280",
-        display: "block",
-        marginBottom: 5,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
+        fontSize: 11, fontWeight: 700, color: "#6b7280",
+        display: "block", marginBottom: 5,
+        textTransform: "uppercase", letterSpacing: 0.5,
       }}>
         {label}
         {required && <span style={{ color: "#ef4444", marginLeft: 2 }}>*</span>}
@@ -292,32 +252,19 @@ function SelectField({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled || loading}
           style={{
-            fontSize: 13,
-            padding: "7px 32px 7px 10px",
-            borderRadius: 8,
-            border: warning
-              ? "2px solid #f59e0b"
-              : "1px solid #e5e7eb",
+            fontSize: 13, padding: "7px 32px 7px 10px", borderRadius: 8,
+            border: warning ? "2px solid #f59e0b" : "1px solid #e5e7eb",
             background: loading ? "#f9fafb" : "#fff",
-            minWidth,
-            opacity: loading ? 0.7 : 1,
+            minWidth, opacity: loading ? 0.7 : 1,
             appearance: "none",
             cursor: disabled || loading ? "not-allowed" : "pointer",
-            transition: "all 0.15s",
-            outline: "none",
-            color: "#374151",
+            transition: "all 0.15s", outline: "none", color: "#374151",
           }}
         >
           <option value="">{loading ? "Loading…" : placeholder}</option>
           {children}
         </select>
-        <span style={{
-          position: "absolute",
-          right: 10,
-          pointerEvents: "none",
-          display: "flex",
-          alignItems: "center",
-        }}>
+        <span style={{ position: "absolute", right: 10, pointerEvents: "none", display: "flex", alignItems: "center" }}>
           {loading
             ? <Spinner size={12} color="#9ca3af" />
             : <span style={{ color: "#9ca3af", fontSize: 10 }}>▼</span>
@@ -332,11 +279,7 @@ function SelectField({
 }
 
 // ── DimAreaInput ───────────────────────────────────────────────
-function DimAreaInput({
-  space,
-  onUpdate,
-  unit,
-}: {
+function DimAreaInput({ space, onUpdate, unit }: {
   space: SpaceInstance;
   onUpdate: (s: SpaceInstance) => void;
   unit: UnitKey;
@@ -381,14 +324,9 @@ function DimAreaInput({
   }
 
   const inputStyle = (err?: boolean): React.CSSProperties => ({
-    fontSize: 13,
-    padding: "6px 9px",
-    borderRadius: 7,
+    fontSize: 13, padding: "6px 9px", borderRadius: 7,
     border: err ? "1.5px solid #ef4444" : "1px solid #e5e7eb",
-    outline: "none",
-    background: "#fff",
-    color: "#111827",
-    transition: "border-color 0.15s",
+    outline: "none", background: "#fff", color: "#111827", transition: "border-color 0.15s",
   });
 
   return (
@@ -398,8 +336,7 @@ function DimAreaInput({
           Length ({uLabel})
         </label>
         <input
-          type="number" min={0.01}
-          step={unit === "sqm" ? 0.1 : 0.5}
+          type="number" min={0.01} step={unit === "sqm" ? 0.1 : 0.5}
           value={space.L <= 0 ? "" : displayL}
           onChange={(e) => handleL(e.target.value)}
           style={{ ...inputStyle(), width: 85 }}
@@ -410,8 +347,7 @@ function DimAreaInput({
           Breadth ({uLabel})
         </label>
         <input
-          type="number" min={0.01}
-          step={unit === "sqm" ? 0.1 : 0.5}
+          type="number" min={0.01} step={unit === "sqm" ? 0.1 : 0.5}
           value={space.B <= 0 ? "" : displayB}
           onChange={(e) => handleB(e.target.value)}
           style={{ ...inputStyle(), width: 85 }}
@@ -423,26 +359,18 @@ function DimAreaInput({
         </label>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <input
-            type="number" min={0.01}
-            step={unit === "sqm" ? 0.1 : 1}
+            type="number" min={0.01} step={unit === "sqm" ? 0.1 : 1}
             value={areaDraft}
             onChange={(e) => { setAreaDraft(e.target.value); setAreaError(""); }}
             onKeyDown={(e) => { if (e.key === "Enter") confirmArea(); }}
             style={{ ...inputStyle(!!areaError), width: 108, fontFamily: "monospace" }}
           />
           <button
-            type="button"
-            onClick={confirmArea}
+            type="button" onClick={confirmArea}
             style={{
-              height: 31,
-              minWidth: 34,
-              borderRadius: 7,
-              border: "1px solid #16a34a",
-              background: "#dcfce7",
-              color: "#166534",
-              cursor: "pointer",
-              fontWeight: 800,
-              fontSize: 14,
+              height: 31, minWidth: 34, borderRadius: 7,
+              border: "1px solid #16a34a", background: "#dcfce7",
+              color: "#166534", cursor: "pointer", fontWeight: 800, fontSize: 14,
             }}
           >
             ✓
@@ -456,9 +384,7 @@ function DimAreaInput({
 }
 
 // ── SubSpaceRow ────────────────────────────────────────────────
-function SubSpaceRow({
-  sub, onUpdate, onRemove, unit,
-}: {
+function SubSpaceRow({ sub, onUpdate, onRemove, unit }: {
   sub: SubSpaceInstance;
   onUpdate: (s: SubSpaceInstance) => void;
   onRemove: () => void;
@@ -491,16 +417,9 @@ function SubSpaceRow({
 
   return (
     <div style={{
-      marginLeft: 16,
-      marginTop: 6,
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 8,
-      alignItems: "center",
-      background: "#f9fafb",
-      border: "1px solid #e5e7eb",
-      borderRadius: 8,
-      padding: "8px 12px",
+      marginLeft: 16, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8,
+      alignItems: "center", background: "#f9fafb", border: "1px solid #e5e7eb",
+      borderRadius: 8, padding: "8px 12px",
     }}>
       <span style={{ fontSize: 12, color: "#9ca3af" }}>↳</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: "#374151", minWidth: 100 }}>{sub.name}</span>
@@ -542,20 +461,18 @@ function SubSpaceRow({
         />
         <span style={{ fontSize: 10, color: "#9ca3af" }}>{aLabel}</span>
         <button
-          type="button"
-          onClick={confirmArea}
+          type="button" onClick={confirmArea}
           style={{
             fontSize: 12, color: "#166534", background: "#dcfce7",
-            border: "1px solid #16a34a", cursor: "pointer", padding: "3px 8px",
-            borderRadius: 5, fontWeight: 800,
+            border: "1px solid #16a34a", cursor: "pointer",
+            padding: "3px 8px", borderRadius: 5, fontWeight: 800,
           }}
         >
           ✓
         </button>
       </div>
       <input
-        type="text"
-        value={sub.description}
+        type="text" value={sub.description}
         onChange={(e) => onUpdate({ ...sub, description: e.target.value })}
         placeholder="Description…"
         style={{
@@ -575,9 +492,7 @@ function SubSpaceRow({
 }
 
 // ── SpaceCard ──────────────────────────────────────────────────
-function SpaceCard({
-  space, onUpdate, onRemove, unit, spaceTemplates,
-}: {
+function SpaceCard({ space, onUpdate, onRemove, unit, spaceTemplates }: {
   space: SpaceInstance;
   onUpdate: (s: SpaceInstance) => void;
   onRemove: () => void;
@@ -618,9 +533,7 @@ function SpaceCard({
         L: 8, B: 6, description: "",
       }],
     });
-    setCustomSubName("");
-    setAddingCustomSub(false);
-    setAddSubOpen(false);
+    setCustomSubName(""); setAddingCustomSub(false); setAddSubOpen(false);
   }
 
   function updateSub(id: string, updated: SubSpaceInstance) {
@@ -632,21 +545,11 @@ function SpaceCard({
 
   return (
     <div style={{
-      borderRadius: 12,
-      border: `1.5px solid ${meta.border}`,
-      background: meta.bg,
-      marginBottom: 8,
-      overflow: "hidden",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-      transition: "box-shadow 0.15s",
+      borderRadius: 12, border: `1.5px solid ${meta.border}`,
+      background: meta.bg, marginBottom: 8, overflow: "hidden",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.04)", transition: "box-shadow 0.15s",
     }}>
-      <div style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: 8,
-        padding: "10px 14px",
-      }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "10px 14px" }}>
         <button
           onClick={() => setExpanded(!expanded)}
           style={{
@@ -659,9 +562,7 @@ function SpaceCard({
           ▾
         </button>
         <span style={{ fontSize: 20 }}>{space.icon}</span>
-        <span style={{ fontWeight: 700, fontSize: 14, color: "#111827", minWidth: 90 }}>
-          {space.name}
-        </span>
+        <span style={{ fontWeight: 700, fontSize: 14, color: "#111827", minWidth: 90 }}>{space.name}</span>
         {space.isCustom && (
           <span style={{
             fontSize: 9, padding: "2px 7px", borderRadius: 20,
@@ -677,7 +578,6 @@ function SpaceCard({
         }}>
           {meta.label}
         </span>
-
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
           <select
             value={space.floor}
@@ -689,7 +589,6 @@ function SpaceCard({
           >
             {FLOORS.map((f) => <option key={f} value={f}>{getFloorLabel(f)}</option>)}
           </select>
-
           <div style={{
             display: "flex", alignItems: "center", gap: 6,
             background: "#fff", border: "1px solid #e5e7eb",
@@ -700,7 +599,6 @@ function SpaceCard({
               {mainArea} {aLabel}
             </span>
           </div>
-
           {hasSubs && (
             <div style={{
               display: "flex", alignItems: "center", gap: 6,
@@ -713,7 +611,6 @@ function SpaceCard({
               </span>
             </div>
           )}
-
           <button
             onClick={onRemove}
             style={{
@@ -740,11 +637,9 @@ function SpaceCard({
             style={{
               width: "100%", marginTop: 10, fontSize: 12, padding: "7px 9px",
               borderRadius: 7, border: "1px solid #e5e7eb", color: "#374151",
-              boxSizing: "border-box", resize: "vertical", fontFamily: "inherit",
-              background: "#fff",
+              boxSizing: "border-box", resize: "vertical", fontFamily: "inherit", background: "#fff",
             }}
           />
-
           {space.subSpaces.map((sub) => (
             <SubSpaceRow
               key={sub.instanceId} sub={sub} unit={unit}
@@ -752,7 +647,6 @@ function SpaceCard({
               onRemove={() => removeSub(sub.instanceId)}
             />
           ))}
-
           <div style={{ marginTop: 10, marginLeft: 16 }}>
             {addSubOpen ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
@@ -760,8 +654,7 @@ function SpaceCard({
                   .filter((s) => !space.subSpaces.find((ss) => ss.templateId === s.id))
                   .map((s) => (
                     <button
-                      key={s.id}
-                      onClick={() => addSubFromTemplate(s.id)}
+                      key={s.id} onClick={() => addSubFromTemplate(s.id)}
                       style={{
                         fontSize: 11, padding: "4px 10px", borderRadius: 20,
                         border: "1px solid #d1d5db", background: "#fff",
@@ -865,13 +758,13 @@ function CustomSpaceModal({ onAdd, onClose }: { onAdd: (s: SpaceInstance) => voi
       zIndex: 200, padding: 16, backdropFilter: "blur(2px)",
     }}>
       <div style={{
-        background: "#fff", borderRadius: 18, padding: 28, width: "100%", maxWidth: 440,
+        background: "#fff", borderRadius: 18, padding: 28,
+        width: "100%", maxWidth: 440,
         boxShadow: "0 24px 64px rgba(0,0,0,0.18)", maxHeight: "90vh", overflowY: "auto",
       }}>
         <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 800, color: "#111827" }}>
           ✏️ Custom Space
         </h3>
-
         {([
           { label: "Space Name *", content: (
             <input
@@ -910,7 +803,6 @@ function CustomSpaceModal({ onAdd, onClose }: { onAdd: (s: SpaceInstance) => voi
             {content}
           </div>
         ))}
-
         <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
           {([
             { label: "Length (ft)", val: L, set: setL },
@@ -931,17 +823,16 @@ function CustomSpaceModal({ onAdd, onClose }: { onAdd: (s: SpaceInstance) => voi
             </div>
           ))}
         </div>
-
         <label style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 8 }}>
           Icon
         </label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
           {icons.map((ic) => (
             <button
-              key={ic}
-              onClick={() => setIcon(ic)}
+              key={ic} onClick={() => setIcon(ic)}
               style={{
-                fontSize: 20, background: icon === ic ? "#fef3c7" : "#f9fafb",
+                fontSize: 20,
+                background: icon === ic ? "#fef3c7" : "#f9fafb",
                 border: icon === ic ? "2px solid #f59e0b" : "1px solid #e5e7eb",
                 borderRadius: 8, width: 40, height: 40, cursor: "pointer",
               }}
@@ -950,11 +841,9 @@ function CustomSpaceModal({ onAdd, onClose }: { onAdd: (s: SpaceInstance) => voi
             </button>
           ))}
         </div>
-
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={handleAdd}
-            disabled={!name.trim()}
+            onClick={handleAdd} disabled={!name.trim()}
             style={{
               flex: 1, padding: "11px", borderRadius: 9, border: "none",
               background: name.trim() ? "#1d4ed8" : "#e5e7eb",
@@ -1013,8 +902,7 @@ function PalettePanel({
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
         {[{ key: "all", label: "All", color: "#374151", bg: "#374151" }, ...Object.entries(CATEGORY_META).map(([k, v]) => ({ key: k, label: v.label.split(" ")[0], color: v.color, bg: v.color }))].map(({ key, label, bg }) => (
           <button
-            key={key}
-            onClick={() => setActiveCategory(key)}
+            key={key} onClick={() => setActiveCategory(key)}
             style={{
               fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 20,
               border: "1px solid",
@@ -1034,9 +922,7 @@ function PalettePanel({
         )}
         {filteredTemplates.map((t) => (
           <button
-            key={t.id}
-            onClick={() => addSpace(t.id)}
-            title={t.description}
+            key={t.id} onClick={() => addSpace(t.id)} title={t.description}
             style={{
               display: "flex", alignItems: "center", gap: 9, width: "100%",
               padding: "8px 10px", borderRadius: 8, border: "1px solid #f3f4f6",
@@ -1086,28 +972,18 @@ function PalettePanel({
 }
 
 // ── TotalAreaEditor ────────────────────────────────────────────
-// Displays Total Area (Net + Wall + Circ = Gross) with an editable field.
-// Pressing "Apply" scales all spaces proportionally.
-function TotalAreaEditor({
-  grossSqft,
-  spaces,
-  onScaleSpaces,
-  unit,
-}: {
+function TotalAreaEditor({ grossSqft, spaces, onScaleSpaces, unit }: {
   grossSqft: number;
   spaces: SpaceInstance[];
   onScaleSpaces: (scaledSpaces: SpaceInstance[]) => void;
   unit: UnitKey;
 }) {
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
-
-  // Draft holds the user-typed value in display units
   const grossInDisplayUnit = unit === "sqm" ? grossSqft / 10.7639104167 : grossSqft;
   const [draft, setDraft] = useState(String(Math.round(grossInDisplayUnit * 100) / 100));
   const [error, setError] = useState("");
   const [dirty, setDirty] = useState(false);
 
-  // Sync draft when gross changes externally (spaces edited individually)
   useEffect(() => {
     if (!dirty) {
       setDraft(String(Math.round(grossInDisplayUnit * 100) / 100));
@@ -1115,27 +991,15 @@ function TotalAreaEditor({
   }, [grossInDisplayUnit, dirty]);
 
   function handleChange(val: string) {
-    setDraft(val);
-    setError("");
-    setDirty(true);
+    setDraft(val); setError(""); setDirty(true);
   }
 
   function handleApply() {
     const targetDisplay = parseFloat(draft);
-    if (!Number.isFinite(targetDisplay) || targetDisplay <= 0) {
-      setError("Enter a valid area > 0");
-      return;
-    }
-    if (grossInDisplayUnit <= 0 || spaces.length === 0) {
-      setError("No spaces to scale");
-      return;
-    }
+    if (!Number.isFinite(targetDisplay) || targetDisplay <= 0) { setError("Enter a valid area > 0"); return; }
+    if (grossInDisplayUnit <= 0 || spaces.length === 0) { setError("No spaces to scale"); return; }
     const ratio = targetDisplay / grossInDisplayUnit;
-    if (Math.abs(ratio - 1) < 0.0001) {
-      setDirty(false);
-      return; // nothing changed
-    }
-    // Scale each space: area scales by ratio, so L and B scale by sqrt(ratio)
+    if (Math.abs(ratio - 1) < 0.0001) { setDirty(false); return; }
     const linearScale = Math.sqrt(ratio);
     const scaled = spaces.map((s): SpaceInstance => ({
       ...s,
@@ -1148,88 +1012,54 @@ function TotalAreaEditor({
       })),
     }));
     onScaleSpaces(scaled);
-    setDirty(false);
-    setError("");
+    setDirty(false); setError("");
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") handleApply();
     if (e.key === "Escape") {
       setDraft(String(Math.round(grossInDisplayUnit * 100) / 100));
-      setDirty(false);
-      setError("");
+      setDirty(false); setError("");
     }
   }
 
   return (
     <div style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      padding: "8px 14px",
+      display: "flex", alignItems: "center", gap: 8, padding: "8px 14px",
       background: dirty ? "#fffbeb" : "#f9fafb",
       border: `1.5px solid ${dirty ? "#fcd34d" : "#e5e7eb"}`,
-      borderRadius: 10,
-      transition: "all 0.2s",
-      flexWrap: "wrap",
+      borderRadius: 10, transition: "all 0.2s", flexWrap: "wrap",
     }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-        <label style={{
-          fontSize: 10, fontWeight: 800, color: "#6b7280",
-          textTransform: "uppercase", letterSpacing: 0.5,
-        }}>
+        <label style={{ fontSize: 10, fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
           Total Area (Gross)
         </label>
         <span style={{ fontSize: 9, color: "#9ca3af" }}>
           Net + Wall + Circulation — edit &amp; Apply to scale all spaces
         </span>
       </div>
-
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
         <input
-          type="number"
-          min={1}
-          step={unit === "sqm" ? 1 : 10}
+          type="number" min={1} step={unit === "sqm" ? 1 : 10}
           value={draft}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           style={{
-            fontSize: 15,
-            fontFamily: "monospace",
-            fontWeight: 700,
-            padding: "6px 10px",
-            borderRadius: 8,
-            border: error
-              ? "1.5px solid #ef4444"
-              : dirty
-              ? "1.5px solid #f59e0b"
-              : "1px solid #e5e7eb",
-            background: "#fff",
-            color: "#111827",
-            width: 130,
-            outline: "none",
-            transition: "border-color 0.15s",
+            fontSize: 15, fontFamily: "monospace", fontWeight: 700,
+            padding: "6px 10px", borderRadius: 8,
+            border: error ? "1.5px solid #ef4444" : dirty ? "1.5px solid #f59e0b" : "1px solid #e5e7eb",
+            background: "#fff", color: "#111827", width: 130, outline: "none", transition: "border-color 0.15s",
           }}
         />
         <span style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600 }}>{aLabel}</span>
-
         {dirty && (
           <>
             <button
-              type="button"
-              onClick={handleApply}
+              type="button" onClick={handleApply}
               style={{
-                padding: "6px 16px",
-                borderRadius: 8,
-                border: "none",
-                background: "#f59e0b",
-                color: "#fff",
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: "pointer",
-                boxShadow: "0 2px 8px #f59e0b44",
-                transition: "all 0.15s",
-                whiteSpace: "nowrap",
+                padding: "6px 16px", borderRadius: 8, border: "none",
+                background: "#f59e0b", color: "#fff", fontWeight: 700, fontSize: 13,
+                cursor: "pointer", boxShadow: "0 2px 8px #f59e0b44", transition: "all 0.15s", whiteSpace: "nowrap",
               }}
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#d97706")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#f59e0b")}
@@ -1238,20 +1068,10 @@ function TotalAreaEditor({
             </button>
             <button
               type="button"
-              onClick={() => {
-                setDraft(String(Math.round(grossInDisplayUnit * 100) / 100));
-                setDirty(false);
-                setError("");
-              }}
+              onClick={() => { setDraft(String(Math.round(grossInDisplayUnit * 100) / 100)); setDirty(false); setError(""); }}
               style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #e5e7eb",
-                background: "#fff",
-                color: "#6b7280",
-                fontWeight: 600,
-                fontSize: 12,
-                cursor: "pointer",
+                padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb",
+                background: "#fff", color: "#6b7280", fontWeight: 600, fontSize: 12, cursor: "pointer",
               }}
             >
               Reset
@@ -1259,7 +1079,6 @@ function TotalAreaEditor({
           </>
         )}
       </div>
-
       {error && (
         <p style={{ width: "100%", fontSize: 11, color: "#ef4444", margin: "2px 0 0", fontWeight: 600 }}>
           ⚠ {error}
@@ -1270,9 +1089,7 @@ function TotalAreaEditor({
 }
 
 // ── SummaryCard ────────────────────────────────────────────────
-function SummaryCard({
-  totals, unit, wall, circ, costPerSqft, spaces, floorGroups, locationLabel, onScaleSpaces,
-}: {
+function SummaryCard({ totals, unit, wall, circ, costPerSqft, spaces, floorGroups, locationLabel, onScaleSpaces }: {
   totals: { net: number; wallA: number; circA: number; gross: number; cost: number };
   unit: UnitKey;
   wall: number;
@@ -1296,23 +1113,10 @@ function SummaryCard({
       }}>
         Area Summary
       </h2>
-
-      {/* Total Area Editor */}
       <div style={{ marginBottom: 18 }}>
-        <TotalAreaEditor
-          grossSqft={totals.gross}
-          spaces={spaces}
-          onScaleSpaces={onScaleSpaces}
-          unit={unit}
-        />
+        <TotalAreaEditor grossSqft={totals.gross} spaces={spaces} onScaleSpaces={onScaleSpaces} unit={unit} />
       </div>
-
-      {/* 4 area metrics */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-        gap: 10, marginBottom: 18,
-      }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 18 }}>
         {[
           { label: "Net Carpet Area", val: fmt(totals.net, unit), sub: aLabel, color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
           { label: `Wall Thickness (${wall}%)`, val: `+${fmt(totals.wallA, unit)}`, sub: aLabel, color: "#6b7280", bg: "#f9fafb", border: "#e5e7eb" },
@@ -1320,29 +1124,21 @@ function SummaryCard({
           { label: "Gross Built-up Area", val: fmt(totals.gross, unit), sub: aLabel, color: "#d97706", bg: "#fffbeb", border: "#fcd34d" },
         ].map((item) => (
           <div key={item.label} style={{
-            borderRadius: 12, border: `1px solid ${item.border}`,
-            background: item.bg, padding: "14px 16px",
+            borderRadius: 12, border: `1px solid ${item.border}`, background: item.bg, padding: "14px 16px",
           }}>
-            <p style={{
-              fontSize: 10, fontWeight: 700, color: "#9ca3af",
-              textTransform: "uppercase", margin: "0 0 6px", letterSpacing: 0.5,
-            }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", margin: "0 0 6px", letterSpacing: 0.5 }}>
               {item.label}
             </p>
-            <p style={{
-              fontFamily: "monospace", fontWeight: 800, fontSize: 22,
-              color: item.color, margin: "0 0 2px",
-            }}>
+            <p style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 22, color: item.color, margin: "0 0 2px" }}>
               {item.val}
             </p>
             <p style={{ fontSize: 11, color: "#9ca3af", margin: 0 }}>{item.sub}</p>
           </div>
         ))}
       </div>
-
-      {/* Cost highlight */}
       <div style={{
-        borderRadius: 14, background: "linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)",
+        borderRadius: 14,
+        background: "linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)",
         border: "1px solid #a7f3d0", padding: 20,
         display: "flex", flexWrap: "wrap", alignItems: "center", gap: 20, marginBottom: 18,
       }}>
@@ -1360,7 +1156,6 @@ function SummaryCard({
             {locationLabel || "No location selected"} · Finishing costs extra
           </p>
         </div>
-
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 8 }}>
           {Array.from(floorGroups.entries()).map(([floor, fs]) => {
             const fa = fs.reduce((a, s) => a + calcSpaceArea(s), 0);
@@ -1372,10 +1167,7 @@ function SummaryCard({
                 <p style={{ fontSize: 10, color: "#6b7280", fontWeight: 700, margin: "0 0 2px" }}>
                   {getFloorLabel(floor)}
                 </p>
-                <p style={{
-                  fontFamily: "monospace", fontWeight: 700, fontSize: 14,
-                  color: "#374151", margin: 0,
-                }}>
+                <p style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14, color: "#374151", margin: 0 }}>
                   {fmt(fa, unit)} {aLabel}
                 </p>
               </div>
@@ -1383,13 +1175,8 @@ function SummaryCard({
           })}
         </div>
       </div>
-
-      {/* Category breakdown */}
       <div>
-        <p style={{
-          fontSize: 10, fontWeight: 800, color: "#9ca3af",
-          textTransform: "uppercase", margin: "0 0 10px", letterSpacing: 0.6,
-        }}>
+        <p style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", margin: "0 0 10px", letterSpacing: 0.6 }}>
           Breakdown by Type
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1400,19 +1187,12 @@ function SummaryCard({
             const pct = totals.net > 0 ? Math.round((catArea / totals.net) * 100) : 0;
             return (
               <div key={cat} style={{
-                borderRadius: 10, border: `1px solid ${meta.border}`,
-                background: meta.bg, padding: "10px 14px",
+                borderRadius: 10, border: `1px solid ${meta.border}`, background: meta.bg, padding: "10px 14px",
               }}>
-                <p style={{
-                  fontSize: 9, fontWeight: 800, textTransform: "uppercase",
-                  color: meta.badge, margin: "0 0 4px", letterSpacing: 0.5,
-                }}>
+                <p style={{ fontSize: 9, fontWeight: 800, textTransform: "uppercase", color: meta.badge, margin: "0 0 4px", letterSpacing: 0.5 }}>
                   {meta.label}
                 </p>
-                <p style={{
-                  fontFamily: "monospace", fontWeight: 700, fontSize: 15,
-                  color: "#374151", margin: 0,
-                }}>
+                <p style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, color: "#374151", margin: 0 }}>
                   {fmt(catArea, unit)} {aLabel}{" "}
                   <span style={{ fontSize: 11, fontWeight: 400, color: "#9ca3af" }}>({pct}%)</span>
                 </p>
@@ -1439,10 +1219,7 @@ function ImportBanner({ onDismiss }: { onDismiss: () => void }) {
       </span>
       <button
         onClick={onDismiss}
-        style={{
-          marginLeft: "auto", fontSize: 11, color: "#166534",
-          background: "none", border: "none", cursor: "pointer",
-        }}
+        style={{ marginLeft: "auto", fontSize: 11, color: "#166534", background: "none", border: "none", cursor: "pointer" }}
       >
         Dismiss ✕
       </button>
@@ -1453,16 +1230,19 @@ function ImportBanner({ onDismiss }: { onDismiss: () => void }) {
 // ── FinishLevelPicker ──────────────────────────────────────────
 function FinishLevelPicker({
   value,
+  pendingValue,
   onChange,
   dataMap,
   loading,
 }: {
   value: string;
+  pendingValue: string | null;
   onChange: (v: string) => void;
   dataMap: Record<string, boolean | null>;
   loading: boolean;
 }) {
   const levels = FINISH_LEVELS.filter((fl) => fl.value !== "unknown");
+  const isFetching = pendingValue !== null;
 
   return (
     <div>
@@ -1484,15 +1264,18 @@ function FinishLevelPicker({
         {/* "Any" pill */}
         <button
           type="button"
-          onClick={() => onChange("unknown")}
+          onClick={() => !isFetching && onChange("unknown")}
+          disabled={isFetching}
           style={{
             padding: "6px 14px",
             borderRadius: 20,
-            border: value === "unknown" ? "2px solid #374151" : "1px solid #e5e7eb",
-            background: value === "unknown" ? "#374151" : "#f9fafb",
-            color: value === "unknown" ? "#fff" : "#9ca3af",
+            border: value === "unknown" && !isFetching ? "2px solid #374151" : "1px solid #e5e7eb",
+            background: value === "unknown" && !isFetching ? "#374151" : "#f9fafb",
+            color: value === "unknown" && !isFetching ? "#fff" : "#9ca3af",
             fontWeight: value === "unknown" ? 700 : 400,
-            fontSize: 12, cursor: "pointer",
+            fontSize: 12,
+            cursor: isFetching ? "not-allowed" : "pointer",
+            opacity: isFetching ? 0.5 : 1,
             transition: "all 0.15s",
           }}
         >
@@ -1500,18 +1283,21 @@ function FinishLevelPicker({
         </button>
 
         {levels.map((fl) => {
-          const hasData  = dataMap[fl.value] === true;
-          const noData   = dataMap[fl.value] === false;
-          const checking = dataMap[fl.value] == null && loading;
-          const isSelected = value === fl.value;
+          const hasData   = dataMap[fl.value] === true;
+          const noData    = dataMap[fl.value] === false;
+          const isSelected  = value === fl.value && !isFetching;
+          const isPending   = pendingValue === fl.value;
+          const isDisabled  = isFetching && !isPending;
 
           let borderColor = "#e5e7eb";
-          let bgColor = "#f9fafb";
-          let textColor = "#d1d5db";
-          let fw: number = 400;
-          let opacity = 1;
+          let bgColor     = "#f9fafb";
+          let textColor   = "#d1d5db";
+          let fw: number  = 400;
+          let opacity     = 1;
 
-          if (isSelected) {
+          if (isPending) {
+            borderColor = "#f59e0b"; bgColor = "#fffbeb"; textColor = "#92400e"; fw = 700; opacity = 0.85;
+          } else if (isSelected) {
             borderColor = "#f59e0b"; bgColor = "#fffbeb"; textColor = "#92400e"; fw = 700;
           } else if (hasData) {
             borderColor = "#a7f3d0"; bgColor = "#f0fdf4"; textColor = "#166534"; fw = 600;
@@ -1519,21 +1305,27 @@ function FinishLevelPicker({
             opacity = 0.4;
           }
 
+          if (isDisabled) opacity = Math.min(opacity, 0.45);
+
           return (
             <button
               key={fl.value}
               type="button"
-              onClick={() => onChange(isSelected ? "unknown" : fl.value)}
-              title={noData ? "No local survey data for this finish level" : hasData ? "Local survey data available" : ""}
+              onClick={() => {
+                if (isDisabled || isPending) return;
+                // toggle off → "unknown", otherwise select this level
+                onChange(fl.value === value ? "unknown" : fl.value);
+              }}
+              disabled={isDisabled || isPending}
               style={{
                 padding: "6px 14px",
                 borderRadius: 20,
-                border: isSelected ? `2px solid ${borderColor}` : `1px solid ${borderColor}`,
+                border: isSelected || isPending ? `2px solid ${borderColor}` : `1px solid ${borderColor}`,
                 background: bgColor,
                 color: textColor,
                 fontWeight: fw,
                 fontSize: 12,
-                cursor: "pointer",
+                cursor: isDisabled || isPending ? "not-allowed" : "pointer",
                 opacity,
                 display: "flex",
                 alignItems: "center",
@@ -1541,15 +1333,17 @@ function FinishLevelPicker({
                 transition: "all 0.15s",
               }}
             >
-              {!isSelected && hasData && (
+              {isPending ? (
+                <Spinner size={11} color="#b45309" />
+              ) : isSelected ? (
+                <span style={{ fontSize: 11 }}>✓</span>
+              ) : hasData ? (
                 <span style={{
                   width: 6, height: 6, borderRadius: "50%",
-                  background: "#16a34a", flexShrink: 0,
+                  background: "#16a34a", flexShrink: 0, display: "inline-block",
                 }} />
-              )}
-              {isSelected && <span style={{ fontSize: 11 }}>✓</span>}
-              {checking && <Spinner size={10} color="#9ca3af" />}
-              {(fl as { icon?: string }).icon && !checking && (
+              ) : null}
+              {!isPending && (fl as { icon?: string }).icon && (
                 <span style={{ fontSize: 12 }}>{(fl as { icon?: string }).icon}</span>
               )}
               {fl.label}
@@ -1565,7 +1359,7 @@ function FinishLevelPicker({
             : "Green = local data · Faded = no data at this location"}
         </p>
       )}
-      {value === "unknown" && (
+      {value === "unknown" && !isFetching && (
         <p style={{ fontSize: 10, color: "#b45309", margin: "4px 0 0" }}>
           Select a finish level for a more accurate rate estimate
         </p>
@@ -1590,8 +1384,9 @@ export default function App() {
   const [placeId, setPlaceId]         = useState<number | null>(null);
 
   // Finish level
-  const [finishLevel, setFinishLevel] = useState<string>("unknown");
-  const [finishLevelData, setFinishLevelData] = useState<Record<string, boolean | null>>({});
+  const [finishLevel, setFinishLevel]           = useState<string>("unknown");
+  const [pendingFinishLevel, setPendingFinishLevel] = useState<string | null>(null);
+  const [finishLevelData, setFinishLevelData]   = useState<Record<string, boolean | null>>({});
   const [loadingFinishLevels, setLoadingFinishLevels] = useState(false);
 
   // Templates
@@ -1600,30 +1395,30 @@ export default function App() {
   const [loadingTemplates, setLoadingTemplates] = useState(true);
 
   // Rate
-  const [apiRate, setApiRate]                 = useState<number | null>(null);
-  const [rateStatus, setRateStatus]           = useState<ApiRateStatus | null>(null);
-  const [countryAvgRate, setCountryAvgRate]   = useState<number | null>(null);
+  const [apiRate, setApiRate]               = useState<number | null>(null);
+  const [rateStatus, setRateStatus]         = useState<ApiRateStatus | null>(null);
+  const [countryAvgRate, setCountryAvgRate] = useState<number | null>(null);
   const [loadingCountryRate, setLoadingCountryRate] = useState(false);
-  const [customRate, setCustomRate]           = useState<number | null>(null);
+  const [customRate, setCustomRate]         = useState<number | null>(null);
 
-  // Geography loading states
+  // Geography loading
   const [loadingStates, setLoadingStates] = useState(false);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
 
   // UI
-  const [activeCategory, setActiveCategory]     = useState("all");
-  const [searchQ, setSearchQ]                   = useState("");
-  const [activeFloor, setActiveFloor]           = useState<number | "all">("all");
-  const [projectName, setProjectName]           = useState("Untitled Project");
-  const [clientName, setClientName]             = useState("");
-  const [settingsOpen, setSettingsOpen]         = useState(false);
-  const [paletteOpen, setPaletteOpen]           = useState(false);
-  const [showCustomModal, setShowCustomModal]   = useState(false);
+  const [activeCategory, setActiveCategory]       = useState("all");
+  const [searchQ, setSearchQ]                     = useState("");
+  const [activeFloor, setActiveFloor]             = useState<number | "all">("all");
+  const [projectName, setProjectName]             = useState("Untitled Project");
+  const [clientName, setClientName]               = useState("");
+  const [settingsOpen, setSettingsOpen]           = useState(false);
+  const [paletteOpen, setPaletteOpen]             = useState(false);
+  const [showCustomModal, setShowCustomModal]     = useState(false);
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
-  const [showImportBanner, setShowImportBanner] = useState(false);
+  const [showImportBanner, setShowImportBanner]   = useState(false);
 
   // Custom templates / role
-  const [myRole, setMyRole]               = useState<ApiMyRole | null>(null);
+  const [myRole, setMyRole]                   = useState<ApiMyRole | null>(null);
   const [customTemplates, setCustomTemplates] = useState<ApiCustomProjectTemplate[]>([]);
   const [savingTemplate, setSavingTemplate]   = useState(false);
   const [templateSaveMsg, setTemplateSaveMsg] = useState("");
@@ -1693,14 +1488,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [countryId]);
 
-  // ── Country average when finish level changes (no place) ──
-  useEffect(() => {
-    if (countryId == null || placeId != null) return;
-    fetchAreaRate({ countryId, stateId: stateId ?? undefined, category: rateCategory, finishLevel })
-      .then(setCountryAvgRate)
-      .catch(() => setCountryAvgRate(null));
-  }, [finishLevel, countryId, stateId, placeId, rateCategory]);
-
   // ── Places when state changes ─────────────────────────────
   useEffect(() => {
     if (stateId == null) { setPlacesList([]); setPlaceId(null); return; }
@@ -1711,14 +1498,14 @@ export default function App() {
       .finally(() => setLoadingPlaces(false));
   }, [stateId]);
 
-  // ── Rate when place / category / finish level changes ─────
+  // ── Rate when place / category changes (NOT finish level — handled by handleFinishLevelChange) ──
   useEffect(() => {
     if (placeId == null) { setApiRate(null); setRateStatus(null); return; }
     setCustomRate(null);
     fetchRateLookup(placeId, rateCategory, finishLevel !== "unknown" ? finishLevel : undefined)
       .then((data) => { setApiRate(data.effective_rate); setRateStatus(data.rate_status); })
       .catch(console.error);
-  }, [placeId, rateCategory, finishLevel]);
+  }, [placeId, rateCategory]); // ← finishLevel intentionally excluded here
 
   // ── Finish level data availability ────────────────────────
   useEffect(() => {
@@ -1740,6 +1527,37 @@ export default function App() {
       .catch(() => setFinishLevelData({}))
       .finally(() => setLoadingFinishLevels(false));
   }, [countryId, stateId, placeId]);
+
+  // ── Handle finish level change: fetch first, confirm after ─
+  const handleFinishLevelChange = useCallback(async (newLevel: string) => {
+    if (newLevel === finishLevel) return;
+    setPendingFinishLevel(newLevel);
+    try {
+      if (placeId != null) {
+        const data = await fetchRateLookup(
+          placeId,
+          rateCategory,
+          newLevel !== "unknown" ? newLevel : undefined,
+        );
+        setApiRate(data.effective_rate);
+        setRateStatus(data.rate_status);
+      } else if (countryId != null) {
+        const avg = await fetchAreaRate({
+          countryId,
+          stateId: stateId ?? undefined,
+          category: rateCategory,
+          finishLevel: newLevel,
+        });
+        setCountryAvgRate(avg);
+      }
+      setFinishLevel(newLevel); // ← confirmed only after fetch succeeds
+    } catch (err) {
+      console.error(err);
+      setFinishLevel(newLevel); // still update on error so UI doesn't freeze
+    } finally {
+      setPendingFinishLevel(null);
+    }
+  }, [finishLevel, placeId, countryId, stateId, rateCategory]);
 
   // ── Derived ────────────────────────────────────────────────
   const filteredTemplates = useMemo(
@@ -1764,11 +1582,7 @@ export default function App() {
   const addCustomSpace = useCallback((space: SpaceInstance) => setSpaces((prev) => [...prev, space]), []);
   const updateSpace    = useCallback((id: string, updated: SpaceInstance) => setSpaces((prev) => prev.map((s) => s.instanceId === id ? updated : s)), []);
   const removeSpace    = useCallback((id: string) => setSpaces((prev) => prev.filter((s) => s.instanceId !== id)), []);
-
-  // ── Scale all spaces (used by TotalAreaEditor) ─────────────
-  const scaleAllSpaces = useCallback((scaled: SpaceInstance[]) => {
-    setSpaces(scaled);
-  }, []);
+  const scaleAllSpaces = useCallback((scaled: SpaceInstance[]) => setSpaces(scaled), []);
 
   function loadTemplate(tpl: ProjectTemplate) {
     const newSpaces = tpl.spaces
@@ -1872,7 +1686,6 @@ export default function App() {
 
   return (
     <>
-      {/* Global spin keyframe */}
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         * { box-sizing: border-box; }
@@ -1958,7 +1771,7 @@ export default function App() {
 
             {/* Right side */}
             <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14 }}>
-              {/* Gross + Cost summary pills */}
+              {/* Gross + Cost pills */}
               <div style={{
                 display: "flex", gap: 10, background: "#f9fafb",
                 border: "1px solid #e5e7eb", borderRadius: 10, padding: "6px 14px",
@@ -2063,7 +1876,8 @@ export default function App() {
                 {/* Finish level picker */}
                 <FinishLevelPicker
                   value={finishLevel}
-                  onChange={setFinishLevel}
+                  pendingValue={pendingFinishLevel}
+                  onChange={handleFinishLevelChange}
                   dataMap={finishLevelData}
                   loading={loadingFinishLevels}
                 />
@@ -2149,10 +1963,7 @@ export default function App() {
                 </div>
 
                 {/* Rate summary */}
-                <div style={{
-                  borderLeft: "3px solid #fcd34d", paddingLeft: 16, alignSelf: "center",
-                  minWidth: 180,
-                }}>
+                <div style={{ borderLeft: "3px solid #fcd34d", paddingLeft: 16, alignSelf: "center", minWidth: 180 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 4 }}>
                     <strong style={{ fontSize: 20, fontFamily: "monospace", color: "#92400e" }}>
                       ₹{costPerSqft.toLocaleString("en-IN")}
@@ -2166,12 +1977,18 @@ export default function App() {
                         Custom
                       </span>
                     )}
+                    {pendingFinishLevel && (
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <Spinner size={11} color="#b45309" />
+                        <span style={{ fontSize: 10, color: "#b45309" }}>updating…</span>
+                      </span>
+                    )}
                   </div>
                   <p style={{ fontSize: 11, color: "#b45309", margin: "0 0 6px" }}>
                     {locationLabel || (countryId ? "Choose city for local rate" : "No location selected")}
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {rateStatus && placeId && <RateStatusBadge source={rateStatus.source} />}
+                    {rateStatus && placeId && !pendingFinishLevel && <RateStatusBadge source={rateStatus.source} />}
                     {!placeId && countryId && !loadingCountryRate && countryAvgRate && (
                       <RateStatusBadge source="country_average" />
                     )}
@@ -2315,14 +2132,12 @@ export default function App() {
                 ) : (
                   projectTemplates.map((tpl) => (
                     <button
-                      key={tpl.id}
-                      onClick={() => loadTemplate(tpl)}
+                      key={tpl.id} onClick={() => loadTemplate(tpl)}
                       style={{
                         display: "flex", flexDirection: "column", alignItems: "flex-start",
                         gap: 4, padding: "14px 18px", borderRadius: 12,
                         border: "1.5px solid #e5e7eb", background: "#f9fafb",
-                        cursor: "pointer", minWidth: 180, textAlign: "left",
-                        transition: "all 0.15s",
+                        cursor: "pointer", minWidth: 180, textAlign: "left", transition: "all 0.15s",
                       }}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLButtonElement).style.background = "#f0f9ff";
@@ -2350,8 +2165,7 @@ export default function App() {
                     </p>
                     {customTemplates.map((tpl) => (
                       <button
-                        key={tpl.id}
-                        onClick={() => loadCustomTemplate(tpl)}
+                        key={tpl.id} onClick={() => loadCustomTemplate(tpl)}
                         style={{
                           display: "flex", flexDirection: "column", alignItems: "flex-start",
                           gap: 4, padding: "14px 18px", borderRadius: 12,
@@ -2378,8 +2192,7 @@ export default function App() {
                 <button
                   onClick={() => setActiveFloor("all")}
                   style={{
-                    flexShrink: 0, padding: "6px 14px", borderRadius: 8,
-                    border: "none",
+                    flexShrink: 0, padding: "6px 14px", borderRadius: 8, border: "none",
                     background: activeFloor === "all" ? "#374151" : "#fff",
                     color: activeFloor === "all" ? "#fff" : "#6b7280",
                     fontWeight: 700, fontSize: 12, cursor: "pointer",
@@ -2391,8 +2204,7 @@ export default function App() {
                 </button>
                 {usedFloors.map((f) => (
                   <button
-                    key={f}
-                    onClick={() => setActiveFloor(f)}
+                    key={f} onClick={() => setActiveFloor(f)}
                     style={{
                       flexShrink: 0, padding: "6px 14px", borderRadius: 8, border: "none",
                       background: activeFloor === f ? "#f59e0b" : "#fff",
@@ -2408,13 +2220,11 @@ export default function App() {
                 ))}
                 {FLOORS.filter((f) => !usedFloors.includes(f)).map((f) => (
                   <button
-                    key={f}
-                    onClick={() => setActiveFloor(f)}
+                    key={f} onClick={() => setActiveFloor(f)}
                     style={{
                       flexShrink: 0, padding: "6px 14px", borderRadius: 8,
                       border: "1px dashed #d1d5db", background: "transparent",
-                      color: "#d1d5db", fontSize: 12, cursor: "pointer",
-                      transition: "all 0.15s",
+                      color: "#d1d5db", fontSize: 12, cursor: "pointer", transition: "all 0.15s",
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#9ca3af"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#d1d5db"; }}
@@ -2439,7 +2249,7 @@ export default function App() {
                   No spaces yet
                 </p>
                 <p style={{ fontSize: 13, color: "#d1d5db", margin: 0 }}>
-                  Use  `&quot;Add Space `&quot;,  `&quot;Templates `&quot;,  `&quot;Custom Space `&quot; or  `&quot;Import CSV `&quot; above
+                  Use &quot;Add Space&quot;, &quot;Templates&quot;, &quot;Custom Space&quot; or &quot;Import CSV&quot; above
                 </p>
               </div>
             ) : activeFloor === "all" ? (

@@ -1,8 +1,6 @@
 // app/modelblog/blog/[slug]/page.tsx
 /* eslint-disable @typescript-eslint/no-unused-vars */
-
 "use client";
-
 /* eslint-disable @next/next/no-img-element */
 
 import { use, useEffect, useMemo, useState } from "react";
@@ -21,7 +19,7 @@ import {
   type Author,
   type AuthorRole,
   type BlogImage,
-  type BlogParagraph,
+  type ContentBlock,
   type BlogPost,
   type BlogSection,
   type BlogTranslation,
@@ -41,9 +39,34 @@ function isLanguageCode(v: string | null): v is LanguageCode {
 }
 
 // ---------------------------------------------------------------------------
+// Admin check helpers — identical pattern to blog list page
+// ---------------------------------------------------------------------------
+
+const BLOG_API = `${(process.env.NEXT_PUBLIC_HOST ?? "").replace(/\/$/, "")}/api/modelblog`;
+
+function getStoredToken(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("access") ?? "";
+}
+
+async function checkIsAdmin(): Promise<boolean> {
+  try {
+    const token = getStoredToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`${BLOG_API}/admin/authors/`, {
+      credentials: "include",
+      headers,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Inline-reference text parser
 // ---------------------------------------------------------------------------
-// Text may contain spans like: [ref:1]some highlighted phrase[/ref]
 
 type TextSegment =
   | { kind: "plain"; text: string }
@@ -67,15 +90,9 @@ function parseRefText(raw: string): TextSegment[] {
   return segments;
 }
 
-/** Strip all [ref:N]...[/ref] wrappers, returning plain text (used in sidebar). */
 function stripRefSyntax(raw: string): string {
   return raw.replace(/\[ref:\d+\]([\s\S]*?)\[\/ref\]/g, "$1");
 }
-
-// ---------------------------------------------------------------------------
-// renderRichText — applies ref parsing to any arbitrary string field
-// (headings, subtitles, captions, etc.)
-// ---------------------------------------------------------------------------
 
 function renderRichText(
   raw: string,
@@ -86,9 +103,7 @@ function renderRichText(
   if (segments.length === 1 && segments[0].kind === "plain") return <>{raw}</>;
 
   const markerToLabel: Record<number, string> = {};
-  sources?.forEach((s, i) => {
-    markerToLabel[i + 1] = s.label;
-  });
+  sources?.forEach((s, i) => { markerToLabel[i + 1] = s.label; });
 
   return (
     <>
@@ -98,9 +113,9 @@ function renderRichText(
         ) : (
           <RefSpan
             key={i}
-            marker={seg.marker}
-            text={seg.text}
-            sourceLabel={markerToLabel[seg.marker]}
+            marker={(seg as { kind: "ref"; marker: number; text: string }).marker}
+            text={(seg as { kind: "ref"; marker: number; text: string }).text}
+            sourceLabel={markerToLabel[(seg as { kind: "ref"; marker: number; text: string }).marker]}
             theme={theme}
           />
         ),
@@ -200,15 +215,45 @@ function ReadingProgress({ theme }: { theme: Theme }) {
 }
 
 // ---------------------------------------------------------------------------
+// Floating edit button — only rendered for editors
+// ---------------------------------------------------------------------------
+
+function FloatingEditButton({ slug, theme }: { slug: string; theme: Theme }) {
+  const isDark = theme === "dark";
+  return (
+    <a
+      href={`/modelblog/blog/edit/${slug}`}
+      title="Edit this post"
+      className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-semibold shadow-xl backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95 ${
+        isDark
+          ? "border-amber-600/60 bg-stone-950/90 text-amber-400 hover:bg-amber-600 hover:text-amber-50 hover:border-amber-500"
+          : "border-amber-500/60 bg-white/90 text-amber-600 hover:bg-amber-500 hover:text-white hover:border-amber-500"
+      }`}
+    >
+      <svg
+        className="h-4 w-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2.5}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"
+        />
+      </svg>
+      Edit Post
+    </a>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Language switcher
 // ---------------------------------------------------------------------------
 
 function LanguageSwitcher({
-  post,
-  language,
-  languages,
-  theme,
-  onLanguageChange,
+  post, language, languages, theme, onLanguageChange,
 }: {
   post: BlogPost;
   language: LanguageCode;
@@ -217,7 +262,6 @@ function LanguageSwitcher({
   onLanguageChange: (l: LanguageCode) => void;
 }) {
   const isDark = theme === "dark";
-
   const available = getAvailableLanguages(post).map((l) => {
     const meta = languages.find((x) => x.code === l.code);
     return meta ?? l;
@@ -252,14 +296,11 @@ function LanguageSwitcher({
 }
 
 // ---------------------------------------------------------------------------
-// Inline reference span — highlighted word/phrase with superscript
+// Inline reference span
 // ---------------------------------------------------------------------------
 
 function RefSpan({
-  marker,
-  text,
-  sourceLabel,
-  theme,
+  marker, text, sourceLabel, theme,
 }: {
   marker: number;
   text: string;
@@ -287,14 +328,11 @@ function RefSpan({
 }
 
 // ---------------------------------------------------------------------------
-// Images — caption/reference now support [ref:N]...[/ref] syntax
+// Article image
 // ---------------------------------------------------------------------------
 
 function ArticleImage({
-  image,
-  theme,
-  language,
-  sources,
+  image, theme, language, sources,
 }: {
   image: BlogImage;
   theme: Theme;
@@ -303,7 +341,6 @@ function ArticleImage({
 }) {
   const isDark = theme === "dark";
   const isPortrait = image.orientation === "portrait";
-
   const captionText   = image.caption[language]   ?? image.caption.en   ?? "";
   const referenceText = image.reference[language] ?? image.reference.en ?? "";
 
@@ -318,9 +355,7 @@ function ArticleImage({
       </div>
       <figcaption className={`mt-3 border-l-2 border-amber-600 pl-3 text-sm leading-6 ${isDark ? "text-stone-400" : "text-stone-600"}`}>
         {captionText && (
-          <span className="block">
-            {renderRichText(captionText, theme, sources)}
-          </span>
+          <span className="block">{renderRichText(captionText, theme, sources)}</span>
         )}
         {referenceText && (
           <span className={`block text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
@@ -332,103 +367,96 @@ function ArticleImage({
   );
 }
 
-function ArticleImages({
-  post,
-  imageIds,
-  theme,
-  language,
-  sources,
-}: {
-  post: BlogPost;
-  imageIds?: string[];
-  theme: Theme;
-  language: LanguageCode;
-  sources?: Source[];
-}) {
-  if (!imageIds?.length) return null;
-  return (
-    <>
-      {imageIds.map((id) => {
-        const img = getImageById(post, id);
-        return img ? (
-          <ArticleImage key={id} image={img} theme={theme} language={language} sources={sources} />
-        ) : null;
-      })}
-    </>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Paragraph renderer — parses [ref:N]...[/ref] spans
+// Paragraph block renderer — handles paragraph / pullquote / callout
 // ---------------------------------------------------------------------------
 
 function ParagraphBlock({
-  paragraph,
-  theme,
-  sources,
+  block, theme, sources,
 }: {
-  paragraph: BlogParagraph;
+  block: ContentBlock;
   theme: Theme;
   sources: Source[];
 }) {
   const isDark = theme === "dark";
+  const text = block.text ?? "";
+  const inlineRefs = block.inlineRefs ?? [];
 
   const markerToSource = useMemo(() => {
     const map: Record<number, string> = {};
-    paragraph.inlineRefs?.forEach((ref) => {
-      map[ref.marker] = ref.sourceLabel;
-    });
+    inlineRefs.forEach((ref) => { map[ref.marker] = ref.sourceLabel; });
     return map;
-  }, [paragraph.inlineRefs]);
+  }, [inlineRefs]);
 
   function renderSegments(raw: string) {
     return parseRefText(raw).map((seg, i) => {
       if (seg.kind === "plain") return <span key={i}>{seg.text}</span>;
+      const refSeg = seg as { kind: "ref"; marker: number; text: string };
       return (
         <RefSpan
           key={i}
-          marker={seg.marker}
-          text={seg.text}
-          sourceLabel={markerToSource[seg.marker]}
+          marker={refSeg.marker}
+          text={refSeg.text}
+          sourceLabel={markerToSource[refSeg.marker]}
           theme={theme}
         />
       );
     });
   }
 
-  if (paragraph.type === "pullquote") {
+  if (block.type === "pullquote") {
     return (
       <blockquote className={`my-8 border-l-4 border-amber-500 pl-6 text-xl font-medium italic leading-relaxed ${isDark ? "text-stone-300" : "text-stone-700"}`}>
-        {renderSegments(paragraph.text)}
+        {renderSegments(text)}
       </blockquote>
     );
   }
 
-  if (paragraph.type === "callout") {
+  if (block.type === "callout") {
     return (
       <div className={`my-8 rounded-xl border p-5 text-sm leading-7 ${isDark ? "border-amber-900/50 bg-amber-950/20 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-        {renderSegments(paragraph.text)}
+        {renderSegments(text)}
       </div>
     );
   }
 
   return (
     <p className={`mt-5 text-[1.0625rem] leading-8 ${isDark ? "text-stone-400" : "text-stone-700"}`}>
-      {renderSegments(paragraph.text)}
+      {renderSegments(text)}
     </p>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Article body — section + subheading titles now render rich text
+// ContentBlockRenderer — dispatches to image or paragraph
+// ---------------------------------------------------------------------------
+
+function ContentBlockRenderer({
+  block, post, theme, language, sources,
+}: {
+  block: ContentBlock;
+  post: BlogPost;
+  theme: Theme;
+  language: LanguageCode;
+  sources: Source[];
+}) {
+  if (block.type === "image") {
+    if (!block.imageId) return null;
+    const img = getImageById(post, block.imageId);
+    return img ? (
+      <ArticleImage image={img} theme={theme} language={language} sources={sources} />
+    ) : null;
+  }
+
+  return <ParagraphBlock block={block} theme={theme} sources={sources} />;
+}
+
+// ---------------------------------------------------------------------------
+// Article body — sections iterate blocks[]
 // ---------------------------------------------------------------------------
 
 function SectionBlock({
-  section,
-  post,
-  theme,
-  language,
-  sources,
+  section, post, theme, language, sources,
 }: {
   section: BlogSection;
   post: BlogPost;
@@ -446,17 +474,16 @@ function SectionBlock({
         {renderRichText(section.title, theme, sources)}
       </h2>
 
-      {section.paragraphs.map((p, i) => (
-        <ParagraphBlock key={i} paragraph={p} theme={theme} sources={sources} />
+      {section.blocks.map((block, i) => (
+        <ContentBlockRenderer
+          key={i}
+          block={block}
+          post={post}
+          theme={theme}
+          language={language}
+          sources={sources}
+        />
       ))}
-
-      <ArticleImages
-        post={post}
-        imageIds={section.imageIds}
-        theme={theme}
-        language={language}
-        sources={sources}
-      />
 
       {section.subheadings?.map((sub) => (
         <section key={sub.id} id={sub.id} className="scroll-mt-24">
@@ -465,16 +492,16 @@ function SectionBlock({
           >
             {renderRichText(sub.title, theme, sources)}
           </h3>
-          {sub.paragraphs.map((p, i) => (
-            <ParagraphBlock key={i} paragraph={p} theme={theme} sources={sources} />
+          {sub.blocks.map((block, i) => (
+            <ContentBlockRenderer
+              key={i}
+              block={block}
+              post={post}
+              theme={theme}
+              language={language}
+              sources={sources}
+            />
           ))}
-          <ArticleImages
-            post={post}
-            imageIds={sub.imageIds}
-            theme={theme}
-            language={language}
-            sources={sources}
-          />
         </section>
       ))}
     </section>
@@ -482,10 +509,7 @@ function SectionBlock({
 }
 
 function ArticleBody({
-  post,
-  translation,
-  theme,
-  language,
+  post, translation, theme, language,
 }: {
   post: BlogPost;
   translation: BlogTranslation;
@@ -510,12 +534,11 @@ function ArticleBody({
 }
 
 // ---------------------------------------------------------------------------
-// Table of contents — with active-section highlighting + subheading scroll
+// Table of contents
 // ---------------------------------------------------------------------------
 
 function HeadingSidebar({
-  translation,
-  theme,
+  translation, theme,
 }: {
   translation: BlogTranslation;
   theme: Theme;
@@ -523,20 +546,15 @@ function HeadingSidebar({
   const isDark = theme === "dark";
   const [activeId, setActiveId] = useState<string>("");
 
-  // Build a flat ordered list of all anchor IDs for scroll tracking
   useEffect(() => {
     const ids: string[] = [];
     translation.sections.forEach((s) => {
       if (s.id) ids.push(s.id);
-      (s.subheadings ?? []).forEach((sub) => {
-        if (sub.id) ids.push(sub.id);
-      });
+      (s.subheadings ?? []).forEach((sub) => { if (sub.id) ids.push(sub.id); });
     });
     ids.push("references");
 
     function onScroll() {
-      // Header is ~52px; add a small buffer so the section activates slightly
-      // before it reaches the very top.
       const scrollY = window.scrollY + 80;
       let current = ids[0] ?? "";
       for (const id of ids) {
@@ -547,7 +565,7 @@ function HeadingSidebar({
     }
 
     window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll(); // set initial active on mount
+    onScroll();
     return () => window.removeEventListener("scroll", onScroll);
   }, [translation]);
 
@@ -584,7 +602,6 @@ function HeadingSidebar({
         {translation.sections.map((section) => (
           <div key={section.id}>
             <a href={`#${section.id}`} className={sectionLinkClass(section.id)}>
-              {/* Strip markup in sidebar for clean display */}
               {stripRefSyntax(section.title)}
             </a>
             {section.subheadings && section.subheadings.length > 0 && (
@@ -611,9 +628,7 @@ function HeadingSidebar({
 // ---------------------------------------------------------------------------
 
 function SourcesList({
-  post,
-  translation,
-  theme,
+  post, translation, theme,
 }: {
   post: BlogPost;
   translation: BlogTranslation;
@@ -621,7 +636,6 @@ function SourcesList({
 }) {
   const isDark = theme === "dark";
   const sources = translation.sources ?? post.sources ?? [];
-
   if (sources.length === 0) return null;
 
   return (
@@ -654,8 +668,7 @@ function SourcesList({
             >
               {source.label}
               <span className={`ml-2 ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-                — {source.publisher}
-                {source.year ? `, ${source.year}` : ""}
+                — {source.publisher}{source.year ? `, ${source.year}` : ""}
               </span>
             </a>
           </li>
@@ -729,9 +742,7 @@ function BottomAdStrip({ ads, theme }: { ads: AdUnit[]; theme: Theme }) {
         Sponsored
       </p>
       <div className="grid gap-4 md:grid-cols-3">
-        {ads.map((ad) => (
-          <AdCard key={ad.id} ad={ad} theme={theme} />
-        ))}
+        {ads.map((ad) => <AdCard key={ad.id} ad={ad} theme={theme} />)}
       </div>
     </section>
   );
@@ -756,22 +767,25 @@ export default function BlogDetailPage({ params }: PageProps) {
   const [languages, setLanguages] = useState<LanguageOption[]>([
     { code: "en", label: "English", nativeLabel: "English" },
   ]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [loading, setLoading]     = useState<boolean>(true);
+  const [error, setError]         = useState<string | null>(null);
+  const [isAdmin, setIsAdmin]     = useState<boolean>(false);
 
+  // Detect system colour preference once on mount
   useEffect(() => {
     if (window.matchMedia("(prefers-color-scheme: light)").matches) setTheme("light");
+  }, []);
+
+  // Check editor access — same probe used on the blog list page
+  useEffect(() => {
+    checkIsAdmin().then(setIsAdmin);
   }, []);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     Promise.all([apiFetchPostDetail(slug), apiFetchAds(), apiFetchLanguages()])
-      .then(([p, ads, langs]) => {
-        setPost(p);
-        setAllAds(ads);
-        setLanguages(langs);
-      })
+      .then(([p, ads, langs]) => { setPost(p); setAllAds(ads); setLanguages(langs); })
       .catch((e: unknown) => { setError(e instanceof Error ? e.message : "Unknown error"); })
       .finally(() => setLoading(false));
   }, [slug]);
@@ -782,7 +796,6 @@ export default function BlogDetailPage({ params }: PageProps) {
   }, [language, post]);
 
   const isDark = theme === "dark";
-
   const ads       = useMemo(() => (post ? getAdsForPost(post, allAds) : []), [post, allAds]);
   const bottomAds = useMemo(() => allAds.slice(0, 3), [allAds]);
 
@@ -832,7 +845,7 @@ export default function BlogDetailPage({ params }: PageProps) {
     );
   }
 
-  const coverImage = getCoverImage(post);
+  const coverImage  = getCoverImage(post);
   const postSources = translation.sources ?? post.sources ?? [];
 
   return (
@@ -842,17 +855,18 @@ export default function BlogDetailPage({ params }: PageProps) {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
-        li:target {
-          animation: ref-flash 1.8s ease-out;
-        }
+        li:target { animation: ref-flash 1.8s ease-out; }
         @keyframes ref-flash {
           0%   { background-color: rgba(245,158,11,0.25); }
           100% { background-color: transparent; }
         }
       `}</style>
+
       <ReadingProgress theme={theme} />
 
-      {/* Header */}
+      {/* Floating edit button — only visible to editors */}
+      {isAdmin && <FloatingEditButton slug={slug} theme={theme} />}
+
       <header className={`sticky top-0 z-30 border-b backdrop-blur ${isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"}`}>
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <button
@@ -870,49 +884,29 @@ export default function BlogDetailPage({ params }: PageProps) {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="xl:grid xl:grid-cols-[240px_minmax(0,760px)_280px] xl:gap-8 xl:items-start">
 
-          {/* Left sidebar */}
           <aside className="hidden xl:block self-start sticky top-[52px] max-h-[calc(100vh-64px)] overflow-y-auto space-y-4 pb-4">
-            <LanguageSwitcher
-              post={post}
-              language={language}
-              languages={languages}
-              theme={theme}
-              onLanguageChange={applyLanguage}
-            />
+            <LanguageSwitcher post={post} language={language} languages={languages} theme={theme} onLanguageChange={applyLanguage} />
             <HeadingSidebar translation={translation} theme={theme} />
           </aside>
 
-          {/* Main article */}
           <article className="min-w-0">
             <p className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
               {post.category}
             </p>
-
             <h1
               className={`mb-4 text-3xl font-bold leading-tight sm:text-4xl md:text-5xl ${isDark ? "text-stone-50" : "text-stone-900"}`}
               style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
             >
-              {/* Title rarely needs refs, but support it anyway */}
               {renderRichText(translation.title, theme, postSources)}
             </h1>
-
-            {/* Subtitle — supports [ref:N]...[/ref] */}
             <p className={`mb-8 text-lg leading-relaxed ${isDark ? "text-stone-400" : "text-stone-600"}`}>
               {renderRichText(translation.subtitle, theme, postSources)}
             </p>
 
-            {/* Mobile language switcher */}
             <div className="mb-8 xl:hidden">
-              <LanguageSwitcher
-                post={post}
-                language={language}
-                languages={languages}
-                theme={theme}
-                onLanguageChange={applyLanguage}
-              />
+              <LanguageSwitcher post={post} language={language} languages={languages} theme={theme} onLanguageChange={applyLanguage} />
             </div>
 
-            {/* Byline */}
             <div className={`mb-10 flex flex-wrap items-center gap-4 border-y py-4 ${isDark ? "border-stone-800" : "border-stone-200"}`}>
               <div className="flex items-center gap-2">
                 <div className="flex -space-x-2">
@@ -926,39 +920,22 @@ export default function BlogDetailPage({ params }: PageProps) {
               <span className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}>{post.readingTimeMinutes} min read</span>
             </div>
 
-            {/* Cover image — sources passed for caption/reference refs */}
             {coverImage && (
-              <ArticleImage
-                image={coverImage}
-                theme={theme}
-                language={language}
-                sources={postSources}
-              />
+              <ArticleImage image={coverImage} theme={theme} language={language} sources={postSources} />
             )}
 
-            <ArticleBody
-              post={post}
-              translation={translation}
-              theme={theme}
-              language={language}
-            />
-
+            <ArticleBody post={post} translation={translation} theme={theme} language={language} />
             <SourcesList post={post} translation={translation} theme={theme} />
 
             <section className="mt-10 space-y-3">
-              {post.authors.map((a) => (
-                <AuthorBioCard key={a.id} author={a} theme={theme} />
-              ))}
+              {post.authors.map((a) => <AuthorBioCard key={a.id} author={a} theme={theme} />)}
             </section>
 
             <BottomAdStrip ads={bottomAds} theme={theme} />
           </article>
 
-          {/* Right sidebar */}
           <aside className="hidden xl:block self-start sticky top-[52px] max-h-[calc(100vh-64px)] overflow-y-auto space-y-4 pb-4">
-            {ads.map((ad) => (
-              <AdCard key={ad.id} ad={ad} theme={theme} />
-            ))}
+            {ads.map((ad) => <AdCard key={ad.id} ad={ad} theme={theme} />)}
           </aside>
 
         </div>

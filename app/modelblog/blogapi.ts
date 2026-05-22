@@ -1,4 +1,4 @@
-//modelblog/blogapi.ts
+// modelblog/blogapi.ts
 
 export type LanguageCode = "en" | "ml" | "hi" | "ta";
 
@@ -8,7 +8,6 @@ export interface LanguageOption {
   nativeLabel: string;
 }
 
-// Compile-time fallback only — runtime language list comes from apiFetchLanguages()
 export const LANGUAGE_FALLBACK: LanguageOption[] = [
   { code: "en", label: "English",   nativeLabel: "English" },
   { code: "ml", label: "Malayalam", nativeLabel: "മലയാളം" },
@@ -50,25 +49,30 @@ export interface InlineRef {
   url: string;
 }
 
-export interface BlogParagraph {
+// ---------------------------------------------------------------------------
+// ContentBlock — unified block replacing BlogParagraph + imageIds
+// ---------------------------------------------------------------------------
+
+export type BlockType = "paragraph" | "pullquote" | "callout" | "image";
+
+export interface ContentBlock {
   order: number;
-  type: "text" | "pullquote" | "callout";
-  text: string;
-  inlineRefs: InlineRef[];
+  type: BlockType;
+  text?: string;
+  inlineRefs?: InlineRef[];
+  imageId?: string;
 }
 
 export interface BlogSubheading {
   id: string;
   title: string;
-  paragraphs: BlogParagraph[];
-  imageIds?: string[];
+  blocks: ContentBlock[];
 }
 
 export interface BlogSection {
   id: string;
   title: string;
-  paragraphs: BlogParagraph[];
-  imageIds?: string[];
+  blocks: ContentBlock[];
   subheadings?: BlogSubheading[];
 }
 
@@ -93,7 +97,6 @@ export interface BlogPost {
   coverImageId: string;
   authors: Author[];
   images: BlogImage[];
-  // All translation keys are optional — guard at every usage site
   translations: Partial<Record<LanguageCode, BlogTranslation>>;
   sources: Source[];
 }
@@ -117,7 +120,7 @@ const BLOG_API = `${(
 ).replace(/\/$/, "")}/api/modelblog`;
 
 // ---------------------------------------------------------------------------
-// Fetch helpers — all throw on non-ok responses
+// Fetch helpers
 // ---------------------------------------------------------------------------
 
 export async function apiFetchLanguages(): Promise<LanguageOption[]> {
@@ -164,11 +167,6 @@ export async function apiFetchCategories(): Promise<string[]> {
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Returns the translation for the requested language, falling back to English,
- * then to whichever translation exists first.
- * Returns undefined only when the post has no translations at all.
- */
 export function getTranslation(
   post: BlogPost,
   language: LanguageCode,
@@ -180,7 +178,6 @@ export function getTranslation(
   );
 }
 
-/** Languages for which this post actually has a translation, English first. */
 export function getAvailableLanguages(post: BlogPost): LanguageOption[] {
   const codes = Object.keys(post.translations) as LanguageCode[];
   const sorted: LanguageCode[] = [
