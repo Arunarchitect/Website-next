@@ -380,13 +380,14 @@ function ParagraphBlock({
 }) {
   const isDark = theme === "dark";
   const text = block.text ?? "";
-  const inlineRefs = block.inlineRefs ?? [];
 
+  // Fix: moved inlineRefs inside useMemo to avoid stale dependency warning
   const markerToSource = useMemo(() => {
+    const inlineRefs = block.inlineRefs ?? [];
     const map: Record<number, string> = {};
     inlineRefs.forEach((ref) => { map[ref.marker] = ref.sourceLabel; });
     return map;
-  }, [inlineRefs]);
+  }, [block.inlineRefs]);
 
   function renderSegments(raw: string) {
     return parseRefText(raw).map((seg, i) => {

@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   apiFetchPosts,
   apiFetchAuthors,
@@ -185,10 +186,8 @@ function LanguageTool({
 // ---------------------------------------------------------------------------
 // Cards — use the "block link" pattern:
 //   • <article> is the positioned container (group)
-//   • a full-card <a> (z-0) provides the clickable/right-click surface
-//   • the Edit <a> (z-10) sits above it so it gets its own click target
-// This avoids the invalid nested-<a> problem while giving both links full
-// browser behaviour (middle-click, right-click → open in new tab, etc.)
+//   • a full-card <Link> (z-0) provides the clickable/right-click surface
+//   • the Edit <Link> (z-10) sits above it so it gets its own click target
 // ---------------------------------------------------------------------------
 
 type FeaturedCardProps = {
@@ -217,7 +216,7 @@ function FeaturedCard({ post, index, theme, language, isAdmin }: FeaturedCardPro
       }`}
     >
       {/* Full-card link — z-0, covers everything */}
-      <a
+      <Link
         href={`/modelblog/blog/${post.slug}?lang=${language}`}
         aria-label={title}
         className="absolute inset-0 z-0"
@@ -225,7 +224,7 @@ function FeaturedCard({ post, index, theme, language, isAdmin }: FeaturedCardPro
 
       {/* Edit link — z-10, floats above the card link */}
       {isAdmin && (
-        <a
+        <Link
           href={`/modelblog/blog/edit/${post.slug}`}
           title="Edit post"
           className={`absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-200 shadow-lg backdrop-blur-sm ${
@@ -239,7 +238,7 @@ function FeaturedCard({ post, index, theme, language, isAdmin }: FeaturedCardPro
               d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.862 4.487" />
           </svg>
           Edit
-        </a>
+        </Link>
       )}
 
       {cover && (
@@ -312,7 +311,7 @@ function PostCard({ post, theme, language, isAdmin }: PostCardProps) {
       }`}
     >
       {/* Full-card link — z-0 */}
-      <a
+      <Link
         href={`/modelblog/blog/${post.slug}?lang=${language}`}
         aria-label={title}
         className="absolute inset-0 z-0"
@@ -320,7 +319,7 @@ function PostCard({ post, theme, language, isAdmin }: PostCardProps) {
 
       {/* Edit link — z-10 */}
       {isAdmin && (
-        <a
+        <Link
           href={`/modelblog/blog/edit/${post.slug}`}
           title="Edit post"
           className={`absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-200 shadow-lg backdrop-blur-sm ${
@@ -334,7 +333,7 @@ function PostCard({ post, theme, language, isAdmin }: PostCardProps) {
               d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.862 4.487" />
           </svg>
           Edit
-        </a>
+        </Link>
       )}
 
       {cover && (
@@ -506,16 +505,15 @@ export default function ModelBlogPage() {
           </div>
           <div className="flex items-center gap-3">
             {isAdmin && (
-              <a
+              <Link
                 href="/modelblog/blog/edit/new"
                 className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 transition-colors"
-                style={{ textDecoration: "none" }}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
                 New Post
-              </a>
+              </Link>
             )}
             <ThemeToggle theme={theme} onToggle={() => setTheme(isDark ? "light" : "dark")} />
             <button
@@ -542,16 +540,15 @@ export default function ModelBlogPage() {
                 </p>
               </div>
             </div>
-            <a
+            <Link
               href="/modelblog/blog/edit/new"
               className="hidden sm:flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-amber-50 hover:bg-amber-500 transition-colors"
-              style={{ textDecoration: "none" }}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
               New Post
-            </a>
+            </Link>
           </div>
         )}
 
