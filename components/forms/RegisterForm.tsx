@@ -2,7 +2,6 @@
 
 import { useRegister } from "@/hooks";
 import { Form } from "@/components/forms";
-import { useState } from "react";
 
 export default function RegisterForm() {
   const {
@@ -11,27 +10,11 @@ export default function RegisterForm() {
     email,
     password,
     re_password,
+    promo_code,
     isLoading,
     onChange,
     onSubmit,
   } = useRegister();
-
-  const [promoCode, setPromoCode] = useState("");
-  const [isPromoValid, setIsPromoValid] = useState(false);
-  const HARDCODED_PROMO = "arunarchitect";
-
-  const handlePromoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setPromoCode(value);
-    setIsPromoValid(value === HARDCODED_PROMO);
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); // Prevent default first
-    if (isPromoValid) {
-      onSubmit(e);
-    }
-  };
 
   const config = [
     {
@@ -73,9 +56,8 @@ export default function RegisterForm() {
       labelText: "Promo Code",
       labelId: "promo_code",
       type: "text",
-      value: promoCode,
+      value: promo_code,
       required: true,
-      onChange: handlePromoChange, // Use the custom handler
     },
   ];
 
@@ -84,9 +66,9 @@ export default function RegisterForm() {
       config={config}
       isLoading={isLoading}
       btnText="Sign Up"
-      onChange={onChange} // Default handler for other inputs
-      onSubmit={handleSubmit}
-      btnDisabled={!isPromoValid} // Disable if promo code is invalid
+      onChange={onChange}
+      onSubmit={onSubmit}
+      btnDisabled={!promo_code.trim()}
     />
   );
 }

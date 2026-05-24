@@ -13,34 +13,66 @@ export default function useRegister() {
     email: "",
     password: "",
     re_password: "",
+    promo_code: "",
   });
 
-  const { first_name, last_name, email, password, re_password } = formData;
+  const {
+    first_name,
+    last_name,
+    email,
+    password,
+    re_password,
+    promo_code,
+  } = formData;
 
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = event.target;
-    setFormData({ ...formData, [name]: value });
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault();
+    event.preventDefault();
 
-    register({ first_name, last_name, email, password, re_password })
+    register({
+      first_name,
+      last_name,
+      email,
+      password,
+      re_password,
+      promo_code,
+    })
       .unwrap()
       .then(() => {
         toast.success("Please check email");
         router.push("/auth/login");
       })
-      .catch(() => {
-        toast.error("Failed to register");
+      .catch((error) => {
+        const promoError = error?.data?.promo_code?.[0];
+        const emailError = error?.data?.email?.[0];
+        const passwordError = error?.data?.password?.[0];
+        const nonFieldError = error?.data?.non_field_errors?.[0];
+
+        toast.error(
+          promoError ||
+            emailError ||
+            passwordError ||
+            nonFieldError ||
+            "Failed to register"
+        );
       });
   };
+
   return {
     first_name,
     last_name,
     email,
     password,
     re_password,
+    promo_code,
     isLoading,
     onChange,
     onSubmit,
