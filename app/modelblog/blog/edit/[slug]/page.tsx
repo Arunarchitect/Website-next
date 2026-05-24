@@ -1351,7 +1351,7 @@ function ImageEditDrawer({
 }
 
 // ---------------------------------------------------------------------------
-// ImageManager
+// ImageManager  — with Replace support
 // ---------------------------------------------------------------------------
 
 function ImageManager({
@@ -1363,13 +1363,18 @@ function ImageManager({
   onImagesChange: (imgs: ManagedImage[]) => void;
   isDark: boolean;
 }) {
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef     = useRef<HTMLInputElement>(null);
+  // One hidden <input type="file"> per existing image, keyed by image id
+  const replaceRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
   const [uploading,      setUploading]      = useState(false);
   const [uploadErr,      setUploadErr]      = useState<string | null>(null);
   const [newKey,         setNewKey]         = useState("");
   const [newOrientation, setNewOrientation] = useState<"landscape" | "portrait">("landscape");
   const [deletingKey,    setDeletingKey]    = useState<string | null>(null);
+  const [replacingKey,   setReplacingKey]   = useState<string | null>(null);
   const [deleteErr,      setDeleteErr]      = useState<string | null>(null);
+  const [replaceErr,     setReplaceErr]     = useState<string | null>(null);
   const [editingKey,     setEditingKey]     = useState<string | null>(null);
 
   async function handleUpload(file: File) {
@@ -1389,6 +1394,22 @@ function ImageManager({
     } catch (e: unknown) {
       setUploadErr(e instanceof Error ? e.message : "Upload failed");
     } finally { setUploading(false); }
+  }
+
+  // Replace an existing image's file in-place (same key, same orientation)
+  async function handleReplace(img: ManagedImage, file: File) {
+    if (!postId) return;
+    setReplacingKey(img.id); setReplaceErr(null);
+    try {
+      const uploaded = await apiUploadImage(postId, img.id, img.orientation, file);
+      const updated: ManagedImage = {
+        id: uploaded.id, src: uploaded.src, orientation: uploaded.orientation,
+        alt: uploaded.alt as ManagedImage["alt"],
+      };
+      onImagesChange(existingImages.map((i) => i.id === updated.id ? updated : i));
+    } catch (e: unknown) {
+      setReplaceErr(e instanceof Error ? e.message : "Replace failed");
+    } finally { setReplacingKey(null); }
   }
 
   async function handleDelete(img: ManagedImage) {
@@ -1414,6 +1435,7 @@ function ImageManager({
 
   return (
     <div className="space-y-4">
+      {/* ── Upload new image ── */}
       <div className={`rounded-xl border-2 border-dashed p-4 ${uploadZoneClass}`}>
         <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_160px_auto]">
           <div>
@@ -1439,8 +1461,13 @@ function ImageManager({
             </button>
           </div>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }} />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }}
+        />
         {!postId && (
           <p className={`text-xs ${isDark ? "text-amber-600" : "text-amber-700"}`}>
             ⚠ Save the post once before uploading images.
@@ -1449,9 +1476,15 @@ function ImageManager({
         {uploadErr && <p className="text-xs text-red-400 mt-1">{uploadErr}</p>}
       </div>
 
+      {/* ── Error banners ── */}
       {deleteErr && (
         <div className={`rounded-lg border px-3 py-2 text-xs ${isDark ? "border-red-800 bg-red-950/30 text-red-400" : "border-red-300 bg-red-50 text-red-600"}`}>
           Delete failed: {deleteErr}
+        </div>
+      )}
+      {replaceErr && (
+        <div className={`rounded-lg border px-3 py-2 text-xs ${isDark ? "border-orange-800 bg-orange-950/30 text-orange-400" : "border-orange-300 bg-orange-50 text-orange-600"}`}>
+          Replace failed: {replaceErr}
         </div>
       )}
 
@@ -1461,9 +1494,10 @@ function ImageManager({
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {existingImages.map((img) => {
-              const isCover    = coverImageKey === img.id;
-              const isDeleting = deletingKey === img.id;
-              const isEditing  = editingKey === img.id;
+              const isCover     = coverImageKey === img.id;
+              const isDeleting  = deletingKey === img.id;
+              const isReplacing = replacingKey === img.id;
+              const isEditing   = editingKey === img.id;
 
               const cardClass = isCover
                 ? isDark ? "border-amber-600 bg-amber-950/20" : "border-amber-500 bg-amber-50"
@@ -1474,12 +1508,44 @@ function ImageManager({
               return (
                 <div
                   key={img.id}
-                  className={`overflow-hidden rounded-xl border transition-colors ${cardClass} ${isDeleting ? "opacity-50 pointer-events-none" : ""}`}
+                  className={`overflow-hidden rounded-xl border transition-colors ${cardClass} ${
+                    isDeleting || isReplacing ? "opacity-50 pointer-events-none" : ""
+                  }`}
                 >
-                  {img.src && (
-                    <img src={img.src} alt={img.alt.en}
-                      className={`w-full object-cover ${img.orientation === "portrait" ? "aspect-[4/5]" : "aspect-video"}`} />
-                  )}
+                  {/* Hidden replace file input — one per image card */}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    ref={(el) => { replaceRefs.current[img.id] = el; }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleReplace(img, f);
+                      e.target.value = "";
+                    }}
+                  />
+
+                  {/* Thumbnail */}
+                  <div className="relative">
+                    {img.src ? (
+                      <img
+                        src={img.src}
+                        alt={img.alt.en}
+                        className={`w-full object-cover ${img.orientation === "portrait" ? "aspect-[4/5]" : "aspect-video"}`}
+                      />
+                    ) : (
+                      <div className={`flex w-full items-center justify-center text-xs ${img.orientation === "portrait" ? "aspect-[4/5]" : "aspect-video"} ${isDark ? "bg-stone-800 text-stone-600" : "bg-stone-100 text-stone-400"}`}>
+                        No image
+                      </div>
+                    )}
+                    {/* Replacing spinner overlay */}
+                    {isReplacing && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-t-xl">
+                        <span className="h-6 w-6 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+                      </div>
+                    )}
+                  </div>
+
                   <div className="p-2.5 space-y-2">
                     <div className="flex items-start justify-between gap-1">
                       <div className="min-w-0">
@@ -1487,7 +1553,31 @@ function ImageManager({
                         <p className={`text-[10px] ${isDark ? "text-stone-600" : "text-stone-400"}`}>{img.orientation}</p>
                       </div>
                       <div className="flex shrink-0 gap-1">
+
+                        {/* Replace button */}
                         <button
+                          title="Replace image file"
+                          onClick={() => replaceRefs.current[img.id]?.click()}
+                          disabled={isReplacing}
+                          className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${
+                            isDark
+                              ? "text-stone-600 hover:bg-amber-900/50 hover:text-amber-400"
+                              : "text-stone-400 hover:bg-amber-50 hover:text-amber-600"
+                          }`}
+                        >
+                          {isReplacing ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
+                          ) : (
+                            /* swap arrows icon */
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16 3h5v5M4 20l16-16M8 21H3v-5" />
+                            </svg>
+                          )}
+                        </button>
+
+                        {/* Edit metadata button */}
+                        <button
+                          title="Edit metadata"
                           onClick={() => setEditingKey(isEditing ? null : img.id)}
                           className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${
                             isEditing
@@ -1499,7 +1589,10 @@ function ImageManager({
                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                           </svg>
                         </button>
+
+                        {/* Delete button */}
                         <button
+                          title="Delete image"
                           onClick={() => handleDelete(img)}
                           disabled={isDeleting}
                           className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${
@@ -1516,6 +1609,8 @@ function ImageManager({
                         </button>
                       </div>
                     </div>
+
+                    {/* Cover toggle */}
                     <button
                       onClick={() => onCoverChange(isCover ? "" : img.id)}
                       className={`w-full rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
@@ -1532,6 +1627,7 @@ function ImageManager({
             })}
           </div>
 
+          {/* Edit metadata drawer */}
           {editingKey && postId && (() => {
             const img = existingImages.find((i) => i.id === editingKey);
             return img ? (
