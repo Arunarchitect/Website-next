@@ -251,7 +251,7 @@ function FeaturedCard({ post, index, theme, language, isAdmin }: FeaturedCardPro
         </div>
       )}
       <div className="h-1 w-full shrink-0" style={{ background: post.coverAccent }} />
-      <div className="relative z-[1] flex flex-1 flex-col gap-4 p-6">
+      <div className="flex flex-1 flex-col gap-4 p-6">
         <div className="flex items-center justify-between">
           <span className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
             {post.category}
@@ -344,7 +344,7 @@ function PostCard({ post, theme, language, isAdmin }: PostCardProps) {
         />
       )}
       <div className="h-[3px] w-full" style={{ background: post.coverAccent }} />
-      <div className="relative z-[1] flex flex-1 flex-col gap-3 p-5">
+      <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-center justify-between">
           <span className={`text-[10px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>
             {post.category}

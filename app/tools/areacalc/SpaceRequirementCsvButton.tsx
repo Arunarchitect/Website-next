@@ -37,10 +37,12 @@ type Props = {
   totals: Totals;
   locationLabel: string;
   disabled?: boolean;
+  importOnly?: boolean;
   // Import callback — called when user uploads a valid CSV
   onImport?: (payload: ImportPayload) => void;
 };
 
+// In ImportPayload type (SpaceRequirementCsvButton.tsx):
 export type ImportPayload = {
   projectName: string;
   clientName: string;
@@ -48,6 +50,9 @@ export type ImportPayload = {
   wall: number;
   circ: number;
   spaces: SpaceInstance[];
+  countryId?: number | null;   // ← add
+  stateId?: number | null;     // ← add
+  placeId?: number | null;     // ← add
 };
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -494,6 +499,7 @@ export default function SpaceRequirementCsvButton({
   totals,
   locationLabel,
   disabled = false,
+  importOnly = false,
   onImport,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -547,27 +553,29 @@ export default function SpaceRequirementCsvButton({
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
       {/* Export */}
-      <button
-        onClick={downloadCsv}
-        disabled={exportDisabled}
-        title={
-          exportDisabled
-            ? "Add at least one space to export CSV"
-            : "Download editable CSV (can be re-imported)"
-        }
-        style={{
-          fontSize: 13,
-          padding: "8px 14px",
-          borderRadius: 8,
-          border: "1px solid #bfdbfe",
-          background: exportDisabled ? "#f3f4f6" : "#eff6ff",
-          cursor: exportDisabled ? "not-allowed" : "pointer",
-          fontWeight: 700,
-          color: exportDisabled ? "#9ca3af" : "#1d4ed8",
-        }}
-      >
-        📊 Export CSV
-      </button>
+      {!importOnly && (
+        <button
+          onClick={downloadCsv}
+          disabled={exportDisabled}
+          title={
+            exportDisabled
+              ? "Add at least one space to export CSV"
+              : "Download editable CSV (can be re-imported)"
+          }
+          style={{
+            fontSize: 13,
+            padding: "8px 14px",
+            borderRadius: 8,
+            border: "1px solid #bfdbfe",
+            background: exportDisabled ? "#f3f4f6" : "#eff6ff",
+            cursor: exportDisabled ? "not-allowed" : "pointer",
+            fontWeight: 700,
+            color: exportDisabled ? "#9ca3af" : "#1d4ed8",
+          }}
+        >
+          📊 Export CSV
+        </button>
+      )}
 
       {/* Import */}
       {onImport && (

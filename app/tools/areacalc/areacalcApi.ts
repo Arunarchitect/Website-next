@@ -17,7 +17,7 @@ function authHeaders() {
   };
 }
 
-// ── API Response Types (match Django serializers) ─────────────
+// ── API Response Types ────────────────────────────────────────
 
 export interface ApiCountry {
   id: number;
@@ -50,6 +50,22 @@ export interface ApiPlace {
   rate_status: ApiRateStatus;
 }
 
+// ← NEW: one entry in the per-building-type breakdown
+export interface ApiSurveyFinishBreakdown {
+  finish_level: string;
+  finish_label: string;
+  avg_rate: number;
+  sample_count: number;
+}
+
+export interface ApiSurveyCategoryBreakdown {
+  category: string;
+  category_label: string;
+  avg_rate: number;
+  sample_count: number;
+  finish_breakdown: ApiSurveyFinishBreakdown[];
+}
+
 export interface ApiRateLookup {
   place_id: number;
   category: string | null;
@@ -58,6 +74,8 @@ export interface ApiRateLookup {
   country_name: string;
   effective_rate: number | null;
   rate_status: ApiRateStatus;
+  // ← NEW: all building types that have approved survey data for this place
+  survey_breakdown: ApiSurveyCategoryBreakdown[];
 }
 
 export interface ApiSubSpace {
@@ -132,6 +150,10 @@ export interface ApiCustomProjectTemplate {
     unit?: string;
     wall?: number;
     circ?: number;
+    // ← NEW: location fields stored in template data
+    countryId?: number | null;
+    stateId?: number | null;
+    placeId?: number | null;
     spaces?: unknown[];
   };
   source_project_template: number | null;
@@ -254,30 +276,34 @@ export const fetchPlaces = (stateId: number) =>
 
 // ── Rate lookup ───────────────────────────────────────────────
 
-export const fetchRateLookup = (placeId: number, category?: string, finishLevel?: string) => {
+export const fetchRateLookup = (
+  placeId: number,
+  category?: string,
+  finishLevel?: string,
+  occupancyType?: string,
+) => {
   const params = new URLSearchParams({ place_id: String(placeId) });
   if (category) params.set("category", category);
   if (finishLevel && finishLevel !== "unknown") params.set("finish_level", finishLevel);
+  if (occupancyType && occupancyType !== "unknown") params.set("occupancy_type", occupancyType);
   return get<ApiRateLookup>(`${BASE}/rates/lookup/?${params}`);
 };
 
-
-// REPLACE fetchCountryAverageRate with:
-export async function fetchAreaRate(
-  options: {
-    countryId: number;
-    stateId?: number | null;
-    placeId?: number | null;
-    category?: string;
-    finishLevel?: string;
-  }
-): Promise<number | null> {
-  const { countryId, stateId, placeId, category, finishLevel } = options;
+export async function fetchAreaRate(options: {
+  countryId: number;
+  stateId?: number | null;
+  placeId?: number | null;
+  category?: string;
+  finishLevel?: string;
+  occupancyType?: string;
+}): Promise<number | null> {
+  const { countryId, stateId, placeId, category, finishLevel, occupancyType } = options;
   const params = new URLSearchParams({ country: String(countryId) });
-  if (stateId) params.set("state", String(stateId));
-  if (placeId) params.set("place", String(placeId));
+  if (stateId)  params.set("state",  String(stateId));
+  if (placeId)  params.set("place",  String(placeId));
   if (category) params.set("category", category);
-  if (finishLevel && finishLevel !== "unknown") params.set("finish_level", finishLevel);
+  if (finishLevel   && finishLevel   !== "unknown") params.set("finish_level",   finishLevel);
+  if (occupancyType && occupancyType !== "unknown") params.set("occupancy_type", occupancyType);
   try {
     const data = await get<{ average_rate: number | null; scope: string }>(
       `${BASE}/rates/average/?${params}`,
@@ -325,7 +351,7 @@ export const updateCustomProjectTemplate = (
   }>,
 ) => patch<ApiCustomProjectTemplate>(`${BASE}/templates/custom-projects/${id}/`, payload);
 
-// ── Admin: Space Templates (write) ───────────────────────────
+// ── Admin: Space Templates ────────────────────────────────────
 
 export const createSpaceTemplate = (payload: SpaceTemplateWritePayload) =>
   post<ApiSpaceTemplate>(`${BASE}/templates/spaces/`, payload);
@@ -336,7 +362,7 @@ export const updateSpaceTemplate = (id: number, payload: SpaceTemplateWritePaylo
 export const deleteSpaceTemplate = (id: number) =>
   del(`${BASE}/templates/spaces/${id}/`);
 
-// ── Admin: Project Templates (write) ─────────────────────────
+// ── Admin: Project Templates ──────────────────────────────────
 
 export const createProjectTemplate = (payload: ProjectTemplateWritePayload) =>
   post<ApiProjectTemplate>(`${BASE}/templates/projects/`, payload);
