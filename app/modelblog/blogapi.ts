@@ -27,11 +27,30 @@ export interface Author {
   bio: string;
 }
 
+export type SourceType = "website" | "book" | "journal" | "report" | "video" | "newspaper" | "other";
+export type CitationStatus = "apa_mla" | "apa_only" | "mla_only" | "basic";
+
 export interface Source {
   label: string;
+  title?: string;
   url: string;
   publisher: string;
-  year?: number;
+  year?: number | null;
+  order?: number;
+  source_type?: SourceType;
+  authors?: string[];
+  publication_date?: string | null;
+  accessed_date?: string | null;
+  website_name?: string;
+  journal?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  doi?: string;
+  isbn?: string;
+  isApaCompatible?: boolean;
+  isMlaCompatible?: boolean;
+  citationStatus?: CitationStatus;
 }
 
 export interface BlogImage {

@@ -625,8 +625,133 @@ function HeadingSidebar({
 }
 
 // ---------------------------------------------------------------------------
-// Sources list
+// Sources list — APA / MLA toggle with clickable links
 // ---------------------------------------------------------------------------
+
+type ReferenceStyle = "apa" | "mla";
+
+function compactDate(value?: string | null, fallbackYear?: number | null): string {
+  if (value) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    }
+    return value;
+  }
+  return fallbackYear ? String(fallbackYear) : "n.d.";
+}
+
+function yearOnly(value?: string | null, fallbackYear?: number | null): string {
+  if (value) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return String(d.getFullYear());
+  }
+  return fallbackYear ? String(fallbackYear) : "n.d.";
+}
+
+function formatAuthorNameAPA(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return name.trim();
+  const last = parts[parts.length - 1];
+  const initials = parts.slice(0, -1).map((p) => `${p[0]?.toUpperCase()}.`).join(" ");
+  return `${last}, ${initials}`;
+}
+
+function formatAuthorNameMLA(name: string, index: number): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1 || index > 0) return name.trim();
+  const last = parts[parts.length - 1];
+  const first = parts.slice(0, -1).join(" ");
+  return `${last}, ${first}`;
+}
+
+function formatAuthorsAPA(authors?: string[]): string {
+  if (!authors || authors.length === 0) return "";
+  if (authors.length === 1) return formatAuthorNameAPA(authors[0]);
+  if (authors.length === 2) return `${formatAuthorNameAPA(authors[0])}, & ${formatAuthorNameAPA(authors[1])}`;
+  return `${authors.slice(0, -1).map(formatAuthorNameAPA).join(", ")}, & ${formatAuthorNameAPA(authors[authors.length - 1])}`;
+}
+
+function formatAuthorsMLA(authors?: string[]): string {
+  if (!authors || authors.length === 0) return "";
+  if (authors.length === 1) return `${formatAuthorNameMLA(authors[0], 0)}.`;
+  if (authors.length === 2) return `${formatAuthorNameMLA(authors[0], 0)}, and ${authors[1]}.`;
+  return `${formatAuthorNameMLA(authors[0], 0)}, et al.`;
+}
+
+function cleanSentence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function formatSourceAPA(source: Source): string {
+  const title = source.title || source.label || "Untitled source";
+  const authors = formatAuthorsAPA(source.authors);
+  const date = yearOnly(source.publication_date, source.year ?? null);
+  const container = source.journal || source.website_name || source.publisher || "";
+  const parts: string[] = [];
+
+  if (authors) parts.push(`${authors} (${date}).`);
+  else parts.push(`(${date}).`);
+
+  parts.push(cleanSentence(title));
+
+  if (source.source_type === "journal") {
+    const journalBits = [container, source.volume, source.issue ? `(${source.issue})` : ""].filter(Boolean).join(", ");
+    if (journalBits) parts.push(cleanSentence(journalBits));
+    if (source.pages) parts.push(cleanSentence(source.pages));
+  } else if (container) {
+    parts.push(cleanSentence(container));
+  }
+
+  if (source.doi) parts.push(source.doi.startsWith("http") ? source.doi : `https://doi.org/${source.doi}`);
+  else if (source.url) parts.push(source.url);
+
+  return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function formatSourceMLA(source: Source): string {
+  const title = source.title || source.label || "Untitled source";
+  const authors = formatAuthorsMLA(source.authors);
+  const container = source.journal || source.website_name || source.publisher || "";
+  const date = compactDate(source.publication_date, source.year ?? null);
+  const parts: string[] = [];
+
+  if (authors) parts.push(authors);
+  parts.push(`"${title}."`);
+  if (container) parts.push(cleanSentence(container));
+  if (source.publisher && source.publisher !== container) parts.push(cleanSentence(source.publisher));
+  if (date !== "n.d.") parts.push(cleanSentence(date));
+  if (source.pages) parts.push(`pp. ${source.pages}.`);
+  if (source.url) parts.push(source.url);
+  if (source.accessed_date) parts.push(`Accessed ${compactDate(source.accessed_date)}.`);
+
+  return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function formatSourceBasic(source: Source): string {
+  const title = source.title || source.label || "Untitled source";
+  const meta = [source.publisher || source.website_name, source.year ? String(source.year) : ""]
+    .filter(Boolean)
+    .join(", ");
+  return meta ? `${title}. ${meta}.` : `${title}.`;
+}
+
+function sourceSupportsStyle(source: Source, style: ReferenceStyle): boolean {
+  if (style === "apa") return Boolean(source.isApaCompatible);
+  return Boolean(source.isMlaCompatible);
+}
+
+function formattedSource(source: Source, style: ReferenceStyle): string {
+  if (style === "apa" && sourceSupportsStyle(source, "apa")) return formatSourceAPA(source);
+  if (style === "mla" && sourceSupportsStyle(source, "mla")) return formatSourceMLA(source);
+  return formatSourceBasic(source);
+}
 
 function SourcesList({
   post, translation, theme,
@@ -637,43 +762,96 @@ function SourcesList({
 }) {
   const isDark = theme === "dark";
   const sources = translation.sources ?? post.sources ?? [];
+  const [referenceStyle, setReferenceStyle] = useState<ReferenceStyle>("apa");
+
   if (sources.length === 0) return null;
+
+  const activeButtonClass = "bg-amber-600 text-amber-50 border-amber-600";
+  const inactiveButtonClass = isDark
+    ? "border-stone-700 bg-stone-900 text-stone-400 hover:border-stone-500 hover:text-stone-100"
+    : "border-stone-300 bg-white text-stone-600 hover:border-stone-500 hover:text-stone-900";
 
   return (
     <section
       id="references"
       className={`mt-12 border-t pt-6 ${isDark ? "border-stone-800" : "border-stone-200"}`}
     >
-      <p className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
-        References &amp; Sources
-      </p>
-      <ul className="space-y-2">
-        {sources.map((source, i) => (
-          <li
-            key={source.label}
-            id={`ref-${i + 1}`}
-            className={`flex items-baseline gap-3 scroll-mt-24 rounded-lg px-3 py-2 transition-colors ${
-              isDark
-                ? "hover:bg-amber-950/20 target:bg-amber-950/40"
-                : "hover:bg-amber-50 target:bg-amber-100"
-            }`}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+          References &amp; Sources
+        </p>
+
+        <div className="flex rounded-full p-1 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setReferenceStyle("apa")}
+            className={`rounded-full border px-3 py-1.5 transition-colors ${referenceStyle === "apa" ? activeButtonClass : inactiveButtonClass}`}
           >
-            <span className={`shrink-0 font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}>
-              [{i + 1}]
-            </span>
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`text-sm leading-snug ${isDark ? "text-stone-400 hover:text-amber-400" : "text-stone-600 hover:text-amber-700"}`}
+            APA
+          </button>
+          <button
+            type="button"
+            onClick={() => setReferenceStyle("mla")}
+            className={`ml-2 rounded-full border px-3 py-1.5 transition-colors ${referenceStyle === "mla" ? activeButtonClass : inactiveButtonClass}`}
+          >
+            MLA
+          </button>
+        </div>
+      </div>
+
+      <ul className="space-y-2">
+        {sources.map((source, i) => {
+          const compatible = sourceSupportsStyle(source, referenceStyle);
+          const citationText = formattedSource(source, referenceStyle);
+          const statusText = compatible ? referenceStyle.toUpperCase() : "Basic fallback";
+
+          return (
+            <li
+              key={`${source.label}-${i}`}
+              id={`ref-${i + 1}`}
+              className={`scroll-mt-24 rounded-lg px-3 py-3 transition-colors ${
+                isDark
+                  ? "hover:bg-amber-950/20 target:bg-amber-950/40"
+                  : "hover:bg-amber-50 target:bg-amber-100"
+              }`}
             >
-              {source.label}
-              <span className={`ml-2 ${isDark ? "text-stone-600" : "text-stone-400"}`}>
-                — {source.publisher}{source.year ? `, ${source.year}` : ""}
-              </span>
-            </a>
-          </li>
-        ))}
+              <div className="flex items-start gap-3">
+                <span className={`mt-1 shrink-0 font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}>
+                  [{i + 1}]
+                </span>
+
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                      compatible
+                        ? isDark ? "border-emerald-700/60 text-emerald-300" : "border-emerald-300 text-emerald-700"
+                        : isDark ? "border-stone-700 text-stone-500" : "border-stone-300 text-stone-500"
+                    }`}>
+                      {statusText}
+                    </span>
+                  </div>
+
+                  <p className={`text-sm leading-7 ${isDark ? "text-stone-400" : "text-stone-700"}`}>
+                    {citationText}
+                  </p>
+
+                  {source.url && (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`mt-1 inline-flex max-w-full items-center gap-1 break-all text-xs font-medium underline decoration-dashed underline-offset-4 ${
+                        isDark ? "text-amber-400 hover:text-amber-300" : "text-amber-700 hover:text-amber-800"
+                      }`}
+                    >
+                      Open source link ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

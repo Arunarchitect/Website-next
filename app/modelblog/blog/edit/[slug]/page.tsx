@@ -1187,6 +1187,53 @@ function TranslationEditor({
   );
 }
 
+
+const SOURCE_TYPE_OPTIONS = [
+  { value: "website", label: "Website" },
+  { value: "book", label: "Book" },
+  { value: "journal", label: "Journal Article" },
+  { value: "report", label: "Report" },
+  { value: "video", label: "Video" },
+  { value: "newspaper", label: "Newspaper" },
+  { value: "other", label: "Other" },
+];
+
+function emptySource(): Source {
+  return {
+    label: "",
+    url: "",
+    publisher: "",
+    year: undefined,
+    source_type: "website",
+    authors: [],
+    publication_date: null,
+    accessed_date: null,
+    website_name: "",
+    journal: "",
+    volume: "",
+    issue: "",
+    pages: "",
+    doi: "",
+    isbn: "",
+  };
+}
+
+function authorsToInput(authors?: string[]): string {
+  return Array.isArray(authors) ? authors.join(", ") : "";
+}
+
+function inputToAuthors(value: string): string[] {
+  return value.split(",").map((v) => v.trim()).filter(Boolean);
+}
+
+function sourceBadgeText(source: Source): string {
+  const status = source.citationStatus ?? "basic";
+  if (status === "apa_mla") return "APA + MLA";
+  if (status === "apa_only") return "APA";
+  if (status === "mla_only") return "MLA";
+  return "Basic";
+}
+
 // ---------------------------------------------------------------------------
 // SourcesEditor
 // ---------------------------------------------------------------------------
@@ -1196,33 +1243,114 @@ function SourcesEditor({
 }: {
   sources: Source[]; onChange: (s: Source[]) => void; isDark: boolean;
 }) {
-  function update(i: number, s: Source) { const n = [...sources]; n[i] = s; onChange(n); }
+  function update(i: number, patch: Partial<Source>) {
+    const n = [...sources];
+    n[i] = { ...n[i], ...patch };
+    onChange(n);
+  }
+
   function remove(i: number) { onChange(sources.filter((_, idx) => idx !== i)); }
+
   const itemClass = isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50";
+  const helpClass = isDark ? "text-stone-600" : "text-stone-400";
+
   return (
     <div className="space-y-3">
       {sources.length > 0 && (
         <div className={`rounded-lg border px-4 py-3 text-xs ${isDark ? "border-amber-900/40 bg-amber-950/10 text-amber-600" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
           <span className="font-semibold">Tip:</span> Source [1] = first entry below, [2] = second, etc.
-          In paragraphs, headings, subtitle, excerpt, and image captions, select text and use the{" "}
-          <span className="font-mono font-bold">Wrap [N]</span> toolbar.
+          The backend will mark each source as APA, MLA, APA + MLA, or Basic based on available fields.
         </div>
       )}
+
       {sources.map((s, i) => (
         <div key={i} className={`rounded-lg border p-3 ${itemClass}`}>
-          <div className="mb-2 flex items-center justify-between">
-            <span className={`font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}>[{i + 1}]</span>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className={`font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}>[{i + 1}]</span>
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                (s.citationStatus ?? "basic") === "basic"
+                  ? isDark ? "border-stone-700 text-stone-500" : "border-stone-300 text-stone-500"
+                  : isDark ? "border-emerald-700/60 text-emerald-300" : "border-emerald-300 text-emerald-700"
+              }`}>
+                {sourceBadgeText(s)}
+              </span>
+            </div>
             <Btn onClick={() => remove(i)} variant="danger" isDark={isDark}>Remove</Btn>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div><Label isDark={isDark}>Label</Label><Input value={s.label} onChange={(v) => update(i, { ...s, label: v })} placeholder="Source label" isDark={isDark} /></div>
-            <div><Label isDark={isDark}>URL</Label><Input value={s.url} onChange={(v) => update(i, { ...s, url: v })} placeholder="https://..." isDark={isDark} /></div>
-            <div><Label isDark={isDark}>Publisher</Label><Input value={s.publisher} onChange={(v) => update(i, { ...s, publisher: v })} placeholder="Publisher name" isDark={isDark} /></div>
-            <div><Label isDark={isDark}>Year</Label><Input value={s.year?.toString() ?? ""} onChange={(v) => update(i, { ...s, year: v ? parseInt(v) : undefined })} placeholder="2024" isDark={isDark} /></div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label isDark={isDark}>Title / Label</Label>
+              <Input value={s.label} onChange={(v) => update(i, { label: v })} placeholder="Source title" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Source Type</Label>
+              <Select value={s.source_type ?? "website"} onChange={(v) => update(i, { source_type: v as Source["source_type"] })} options={SOURCE_TYPE_OPTIONS} isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>URL</Label>
+              <Input value={s.url ?? ""} onChange={(v) => update(i, { url: v })} placeholder="https://..." isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Publisher</Label>
+              <Input value={s.publisher ?? ""} onChange={(v) => update(i, { publisher: v })} placeholder="Publisher / organisation" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Website Name</Label>
+              <Input value={s.website_name ?? ""} onChange={(v) => update(i, { website_name: v })} placeholder="Website name" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Authors</Label>
+              <Input value={authorsToInput(s.authors)} onChange={(v) => update(i, { authors: inputToAuthors(v) })} placeholder="John Doe, Jane Smith" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Publication Date</Label>
+              <Input value={s.publication_date ?? ""} onChange={(v) => update(i, { publication_date: v || null })} placeholder="YYYY-MM-DD" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Accessed Date</Label>
+              <Input value={s.accessed_date ?? ""} onChange={(v) => update(i, { accessed_date: v || null })} placeholder="YYYY-MM-DD" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Year</Label>
+              <Input value={s.year?.toString() ?? ""} onChange={(v) => update(i, { year: v ? parseInt(v, 10) : undefined })} placeholder="2024" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Journal</Label>
+              <Input value={s.journal ?? ""} onChange={(v) => update(i, { journal: v })} placeholder="Journal name" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Volume</Label>
+              <Input value={s.volume ?? ""} onChange={(v) => update(i, { volume: v })} placeholder="Vol." isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Issue</Label>
+              <Input value={s.issue ?? ""} onChange={(v) => update(i, { issue: v })} placeholder="Issue" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>Pages</Label>
+              <Input value={s.pages ?? ""} onChange={(v) => update(i, { pages: v })} placeholder="24-31" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>DOI</Label>
+              <Input value={s.doi ?? ""} onChange={(v) => update(i, { doi: v })} placeholder="10.xxxx/xxxxx" isDark={isDark} />
+            </div>
+            <div>
+              <Label isDark={isDark}>ISBN</Label>
+              <Input value={s.isbn ?? ""} onChange={(v) => update(i, { isbn: v })} placeholder="Book ISBN" isDark={isDark} />
+            </div>
           </div>
+
+          {(s.citationStatus ?? "basic") === "basic" && (
+            <p className={`mt-3 text-xs italic ${helpClass}`}>
+              This source will still display as a basic reference. Add author, website/publisher, and date fields to enable APA/MLA compatibility.
+            </p>
+          )}
         </div>
       ))}
-      <Btn onClick={() => onChange([...sources, { label: "", url: "", publisher: "", year: undefined }])} variant="outline" isDark={isDark} className="w-full">
+
+      <Btn onClick={() => onChange([...sources, emptySource()])} variant="outline" isDark={isDark} className="w-full">
         + Add Source
       </Btn>
     </div>
