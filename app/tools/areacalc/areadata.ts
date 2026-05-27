@@ -42,6 +42,7 @@ export interface SubSpaceTemplate {
 
 export interface SpaceTemplate {
   id: string;
+  dbId?: number;          // numeric DB pk — populated by toSpaceTemplate(); needed for admin writes
   name: string;
   category: CategoryKey;
   L: number;

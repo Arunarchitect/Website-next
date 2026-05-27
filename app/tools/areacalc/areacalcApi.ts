@@ -50,7 +50,6 @@ export interface ApiPlace {
   rate_status: ApiRateStatus;
 }
 
-// ← NEW: one entry in the per-building-type breakdown
 export interface ApiSurveyFinishBreakdown {
   finish_level: string;
   finish_label: string;
@@ -74,7 +73,6 @@ export interface ApiRateLookup {
   country_name: string;
   effective_rate: number | null;
   rate_status: ApiRateStatus;
-  // ← NEW: all building types that have approved survey data for this place
   survey_breakdown: ApiSurveyCategoryBreakdown[];
 }
 
@@ -119,7 +117,7 @@ export interface ApiProjectSpace {
   effective_l: string;
   effective_b: string;
   sort_order: number;
-  sub_ids: ApiSubId[];
+  sub_ids: ApiSubId[] | null | undefined;
 }
 
 export interface ApiProjectTemplate {
@@ -129,7 +127,7 @@ export interface ApiProjectTemplate {
   description: string;
   icon: string;
   sort_order: number;
-  spaces: ApiProjectSpace[];
+  spaces: ApiProjectSpace[] | null | undefined;
 }
 
 export interface ApiMyRole {
@@ -150,7 +148,6 @@ export interface ApiCustomProjectTemplate {
     unit?: string;
     wall?: number;
     circ?: number;
-    // ← NEW: location fields stored in template data
     countryId?: number | null;
     stateId?: number | null;
     placeId?: number | null;
@@ -351,6 +348,11 @@ export const updateCustomProjectTemplate = (
   }>,
 ) => patch<ApiCustomProjectTemplate>(`${BASE}/templates/custom-projects/${id}/`, payload);
 
+// ── General (public) project template — member/admin only ─────
+
+export const saveGeneralProjectTemplate = (payload: ProjectTemplateWritePayload) =>
+  post<ApiProjectTemplate>(`${BASE}/templates/projects/`, payload);
+
 // ── Admin: Space Templates ────────────────────────────────────
 
 export const createSpaceTemplate = (payload: SpaceTemplateWritePayload) =>
@@ -385,13 +387,14 @@ import type {
 export function toSpaceTemplate(api: ApiSpaceTemplate): SpaceTemplate {
   return {
     id: api.template_id,
+    dbId: api.id,           // numeric DB pk — used by saveGeneralProjectTemplate
     name: api.name,
     category: api.category as CategoryKey,
     L: parseFloat(api.default_l),
     B: parseFloat(api.default_b),
     icon: api.icon || "📐",
     description: api.description,
-    subSpaces: api.sub_spaces.map(
+    subSpaces: (api.sub_spaces ?? []).map(
       (s): SubSpaceTemplate => ({
         id: s.sub_id,
         name: s.name,
@@ -409,12 +412,13 @@ export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
     label: api.label,
     description: api.description,
     icon: api.icon || "🏗️",
-    spaces: api.spaces.map((s) => ({
+    spaces: (api.spaces ?? []).map((s) => ({
       templateId: s.space_template_id,
       floor: s.floor,
       L: parseFloat(s.effective_l),
       B: parseFloat(s.effective_b),
-      subIds: s.sub_ids.map((sub) => sub.sub_id),
+      // ✅ FIX: s.sub_ids may be null/undefined from the API — guard with ?? []
+      subIds: (s.sub_ids ?? []).map((sub) => sub.sub_id),
     })),
   };
 }

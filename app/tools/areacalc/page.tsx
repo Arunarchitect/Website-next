@@ -42,12 +42,13 @@ import {
   fetchCustomProjectTemplates,
   saveCustomProjectTemplate,
   updateCustomProjectTemplate,
+  saveGeneralProjectTemplate,
   type ApiCountry,
   type ApiState,
   type ApiRateStatus,
   type ApiMyRole,
   type ApiCustomProjectTemplate,
-  type ApiSurveyCategoryBreakdown,   // ← NEW import
+  type ApiProjectTemplate,
 } from "./areacalcApi";
 
 // ─── Constants ────────────────────────────────────────────────
@@ -141,99 +142,6 @@ function RateBadge({ source }: { source: string }) {
   );
 }
 
-// ─── NEW: Survey rate breakdown panel ─────────────────────────
-// Shows what building types have approved survey data for the selected
-// place, along with their rates and sample counts.
-
-function SurveyBreakdownPanel({
-  breakdown,
-  selectedCategory,
-}: {
-  breakdown: ApiSurveyCategoryBreakdown[];
-  selectedCategory: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  if (!breakdown.length) return null;
-
-  return (
-    <div style={{ borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
-      {/* Header row */}
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 8,
-          padding: "9px 12px", background: "#f9fafb", border: "none",
-          cursor: "pointer", textAlign: "left",
-          borderBottom: expanded ? "1px solid #e5e7eb" : "none",
-        }}
-      >
-        <span style={{ fontSize: 11, fontWeight: 800, color: "#374151", textTransform: "uppercase", letterSpacing: 0.4, flex: 1 }}>
-          📊 Survey data available at this location
-        </span>
-        <span style={{ fontSize: 10, color: "#9ca3af" }}>{expanded ? "▲ hide" : "▼ show"}</span>
-      </button>
-
-      {expanded && (
-        <div>
-          {breakdown.map((item) => {
-            const meta = CATEGORY_META[item.category as CategoryKey];
-            const isActive = item.category === selectedCategory;
-            if (!meta) return null;
-            return (
-              <div key={item.category} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                {/* Category row */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "9px 12px",
-                  background: isActive ? `${meta.bg}` : "#fff",
-                  borderLeft: isActive ? `3px solid ${meta.border}` : "3px solid transparent",
-                }}>
-                  <span style={{
-                    fontSize: 11, padding: "2px 7px", borderRadius: 20,
-                    background: meta.badgeBg, color: meta.badge,
-                    fontWeight: 700, border: `1px solid ${meta.border}`,
-                    flexShrink: 0,
-                  }}>
-                    {item.category_label}
-                  </span>
-                  <span style={{ flex: 1, fontSize: 11, color: "#9ca3af" }}>
-                    {item.sample_count} survey sample{item.sample_count !== 1 ? "s" : ""}
-                  </span>
-                  <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 13, color: isActive ? meta.color : "#374151" }}>
-                    ₹{item.avg_rate.toLocaleString("en-IN")}/sqft
-                  </span>
-                  {isActive && (
-                    <span style={{ fontSize: 10, color: meta.color, fontWeight: 700 }}>← used</span>
-                  )}
-                </div>
-                {/* Finish-level sub-breakdown */}
-                {item.finish_breakdown.length > 1 && (
-                  <div style={{
-                    display: "flex", flexWrap: "wrap", gap: 6,
-                    padding: "6px 12px 8px 28px", background: "#fafafa",
-                  }}>
-                    {item.finish_breakdown.map((fb) => (
-                      <span key={fb.finish_level} style={{
-                        fontSize: 10, padding: "3px 8px", borderRadius: 20,
-                        background: "#f3f4f6", color: "#6b7280",
-                        border: "1px solid #e5e7eb",
-                      }}>
-                        {fb.finish_label}: ₹{fb.avg_rate.toLocaleString("en-IN")}
-                        <span style={{ opacity: 0.6 }}> ×{fb.sample_count}</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function BigOption({ selected, onClick, emoji, label, hint, accent = "#f59e0b" }: {
   selected: boolean; onClick: () => void;
   emoji: string; label: string; hint?: string; accent?: string;
@@ -256,6 +164,9 @@ function BigOption({ selected, onClick, emoji, label, hint, accent = "#f59e0b" }
 }
 
 // ─── DimAreaEditor ────────────────────────────────────────────
+// FIX: added L and B to the useEffect dependency array so that
+// external prop changes (e.g. from TotalAreaScaler) are reflected
+// in the displayed draft values.
 
 function DimAreaEditor({ L, B, unit, onUpdate }: {
   L: number; B: number; unit: UnitKey;
@@ -271,8 +182,8 @@ function DimAreaEditor({ L, B, unit, onUpdate }: {
     return String(+a.toFixed(1));
   });
   const [areaError, setAreaError] = useState("");
-  const prevUnit = useRef(unit);
 
+  // Sync drafts whenever L, B, or unit changes from outside
   useEffect(() => {
     const ld = +dimToUnit(L, unit).toFixed(unit === "sqm" ? 2 : 1);
     const bd = +dimToUnit(B, unit).toFixed(unit === "sqm" ? 2 : 1);
@@ -280,9 +191,7 @@ function DimAreaEditor({ L, B, unit, onUpdate }: {
     setBDraft(String(bd));
     setADraft(String(+(ld * bd).toFixed(1)));
     setAreaError("");
-    prevUnit.current = unit;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unit]);
+  }, [unit, L, B]); // ← L and B added here
 
   function commitL(raw: string) {
     const n = parseFloat(raw);
@@ -373,6 +282,130 @@ function DimAreaEditor({ L, B, unit, onUpdate }: {
         {areaError && <p style={{ fontSize: 10, color: "#ef4444", margin: "3px 0 0" }}>{areaError}</p>}
       </div>
       <span style={{ fontSize: 10, color: "#d1d5db", paddingBottom: 4, whiteSpace: "nowrap" }}>Press ✓ or Enter to apply area</span>
+    </div>
+  );
+}
+
+// ─── TotalAreaScaler ──────────────────────────────────────────
+
+function TotalAreaScaler({
+  spaces,
+  unit,
+  currentNet,
+  onScale,
+}: {
+  spaces: SpaceInstance[];
+  unit: UnitKey;
+  currentNet: number;
+  onScale: (scaledSpaces: SpaceInstance[]) => void;
+}) {
+  const aLabel = UNIT_SYSTEMS[unit].areaLabel;
+  const toDisplay = (sqft: number) =>
+    unit === "sqm" ? sqft * 0.0929 : sqft;
+  const fromDisplay = (val: number) =>
+    unit === "sqm" ? val / 0.0929 : val;
+
+  const [draft, setDraft] = useState(() =>
+    String(+toDisplay(currentNet).toFixed(1))
+  );
+  const [error, setError] = useState("");
+  const [applied, setApplied] = useState(false);
+
+  useEffect(() => {
+    setDraft(String(+toDisplay(currentNet).toFixed(1)));
+    setApplied(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unit, currentNet]);
+
+  function applyScale() {
+    const targetDisplay = parseFloat(draft);
+    if (!Number.isFinite(targetDisplay) || targetDisplay <= 0) {
+      setError("Enter a valid area > 0");
+      return;
+    }
+    const targetSqft = fromDisplay(targetDisplay);
+    if (currentNet <= 0) {
+      setError("Add some rooms first.");
+      return;
+    }
+    const ratio = Math.sqrt(targetSqft / currentNet);
+
+    const scaled = spaces.map((s): SpaceInstance => ({
+      ...s,
+      L: +(s.L * ratio).toFixed(2),
+      B: +(s.B * ratio).toFixed(2),
+      subSpaces: s.subSpaces.map((sub): SubSpaceInstance => ({
+        ...sub,
+        L: +(sub.L * ratio).toFixed(2),
+        B: +(sub.B * ratio).toFixed(2),
+      })),
+    }));
+
+    setError("");
+    setApplied(true);
+    onScale(scaled);
+    setTimeout(() => setApplied(false), 2000);
+  }
+
+  if (spaces.length === 0) return null;
+
+  return (
+    <div style={{
+      padding: "12px 14px", borderRadius: 10,
+      background: "linear-gradient(135deg, #fefce8, #fff7ed)",
+      border: "1.5px solid #fcd34d",
+      display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end",
+    }}>
+      <div style={{ flex: "0 0 auto" }}>
+        <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 800, color: "#92400e", textTransform: "uppercase", letterSpacing: .4 }}>
+          🎯 Scale Total Area
+        </p>
+        <p style={{ margin: 0, fontSize: 10, color: "#b45309", lineHeight: 1.4 }}>
+          Set target net carpet area — all rooms resize proportionally
+        </p>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ fontSize: 10, color: "#92400e", display: "block", marginBottom: 3, fontWeight: 700, textTransform: "uppercase", letterSpacing: .4 }}>
+            Target ({aLabel})
+          </label>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input
+              type="number"
+              min={1}
+              step={unit === "sqm" ? 1 : 10}
+              value={draft}
+              onChange={(e) => { setDraft(e.target.value); setError(""); setApplied(false); }}
+              onKeyDown={(e) => e.key === "Enter" && applyScale()}
+              style={{
+                fontSize: 14, padding: "7px 10px", borderRadius: 8, fontFamily: "monospace",
+                border: error ? "2px solid #ef4444" : "2px solid #fcd34d",
+                outline: "none", background: "#fff", fontWeight: 700, color: "#111827",
+                width: 110,
+              }}
+            />
+            <button
+              type="button"
+              onClick={applyScale}
+              style={{
+                padding: "7px 14px", borderRadius: 8, border: "none",
+                background: applied ? "#16a34a" : "#d97706",
+                color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                transition: "background .2s",
+                display: "flex", alignItems: "center", gap: 5,
+              }}
+            >
+              {applied ? "✓ Applied" : "Apply"}
+            </button>
+          </div>
+          {error && <p style={{ margin: "3px 0 0", fontSize: 10, color: "#ef4444" }}>{error}</p>}
+        </div>
+        <div style={{ fontSize: 11, color: "#92400e", lineHeight: 1.5, paddingBottom: 2 }}>
+          Current: <strong style={{ fontFamily: "monospace" }}>
+            {+toDisplay(currentNet).toFixed(1)} {aLabel}
+          </strong>
+        </div>
+      </div>
     </div>
   );
 }
@@ -870,14 +903,12 @@ function StepLocation({
 function StepProjectType({
   finishLevel, setFinishLevel, occupancyType, setOccupancyType,
   wall, setWall, circ, setCirc,
-  surveyBreakdown,   // ← NEW: show what data is available
   onNext, onBack,
 }: {
   finishLevel: string; setFinishLevel: (v: string) => void;
   occupancyType: string; setOccupancyType: (v: string) => void;
   wall: number; setWall: (n: number) => void;
   circ: number; setCirc: (n: number) => void;
-  surveyBreakdown: ApiSurveyCategoryBreakdown[];
   onNext: () => void; onBack: () => void;
 }) {
   return (
@@ -886,11 +917,6 @@ function StepProjectType({
         <h2 style={{ fontSize: 20, fontWeight: 800, color: "#111827", margin: "0 0 6px" }}>🏗️ Tell us about your project</h2>
         <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>These choices help pick the right rate for your project.</p>
       </div>
-
-      {/* Show available survey data to help user pick building type */}
-      {surveyBreakdown.length > 0 && (
-        <SurveyBreakdownPanel breakdown={surveyBreakdown} selectedCategory="" />
-      )}
 
       <div>
         <p style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "0 0 8px" }}>What are you building?</p>
@@ -957,6 +983,236 @@ function StepProjectType({
   );
 }
 
+// ─── Save as General Template Modal ──────────────────────────
+
+function SaveAsGeneralModal({
+  spaces,
+  spaceTemplates,
+  onClose,
+  onSaved,
+}: {
+  spaces: SpaceInstance[];
+  spaceTemplates: SpaceTemplate[];
+  onClose: () => void;
+  onSaved: (tpl: ApiProjectTemplate) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [description, setDescription] = useState("");
+  const [icon, setIcon] = useState("🏗️");
+  const [templateId, setTemplateId] = useState(
+    () => `custom_${Date.now().toString(36)}`
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const ICON_OPTIONS = ["🏗️","🏠","🏢","🏫","🏥","🏨","🏭","🌆","🏛️","🏟️","🏬","🏪","🏰","🛖","🏡"];
+
+  const resolvableSpaces = spaces.filter((s) => {
+    if (s.isCustom) return false;
+    const tpl = spaceTemplates.find((t) => t.id === s.templateId);
+    return !!(tpl as SpaceTemplate & { dbId?: number })?.dbId;
+  });
+
+  async function handleSave() {
+    if (!label.trim()) { setError("Template name is required."); return; }
+    if (resolvableSpaces.length === 0) {
+      setError("No template-backed spaces found. Custom spaces cannot be saved as a general template.");
+      return;
+    }
+
+    const spacesPayload = resolvableSpaces.map((s, idx) => {
+      const tpl = spaceTemplates.find((t) => t.id === s.templateId)!;
+      const dbId = (tpl as SpaceTemplate & { dbId?: number }).dbId!;
+      return {
+        space_template: dbId,
+        floor: s.floor,
+        override_l: s.L !== tpl.L ? s.L : null,
+        override_b: s.B !== tpl.B ? s.B : null,
+        sort_order: idx,
+        sub_ids: [] as number[],
+      };
+    });
+
+    try {
+      setSaving(true);
+      setError("");
+      const saved = await saveGeneralProjectTemplate({
+        template_id: templateId.trim() || `custom_${Date.now().toString(36)}`,
+        label: label.trim(),
+        description: description.trim(),
+        icon,
+        spaces: spacesPayload,
+      });
+      onSaved(saved);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Save failed. Check console for details.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const canSubmit = !saving && label.trim().length > 0 && resolvableSpaces.length > 0;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.55)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 400, padding: 16,
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 18, padding: 28,
+        width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto",
+        boxShadow: "0 24px 64px rgba(0,0,0,.25)",
+      }}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800, color: "#111827" }}>
+          🌐 Save as General Template
+        </h3>
+        <p style={{ margin: "0 0 22px", fontSize: 12, color: "#9ca3af", lineHeight: 1.5 }}>
+          This template will be <strong>visible to all users</strong> in the Templates panel. Requires member / admin role.
+        </p>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
+            Template Name <span style={{ color: "#ef4444" }}>*</span>
+          </label>
+          <input
+            autoFocus
+            value={label}
+            onChange={(e) => { setLabel(e.target.value); setError(""); }}
+            placeholder="e.g. 3-Bedroom Villa, Primary School Block…"
+            style={{
+              width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 9,
+              border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none",
+            }}
+            onFocus={(e) => { e.target.style.borderColor = "#6366f1"; }}
+            onBlur={(e) => { e.target.style.borderColor = "#e5e7eb"; }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
+            Short Description
+          </label>
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Typical 2-floor residence with 3 beds"
+            style={{
+              width: "100%", fontSize: 13, padding: "8px 11px", borderRadius: 9,
+              border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none",
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
+            Template ID{" "}
+            <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400 }}>(unique slug — no spaces)</span>
+          </label>
+          <input
+            value={templateId}
+            onChange={(e) => setTemplateId(e.target.value.replace(/\s+/g, "_").toLowerCase())}
+            placeholder="e.g. villa_3bed_standard"
+            style={{
+              width: "100%", fontSize: 12, padding: "8px 11px", borderRadius: 9,
+              border: "1.5px solid #e5e7eb", boxSizing: "border-box",
+              fontFamily: "monospace", outline: "none",
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>Icon</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {ICON_OPTIONS.map((ic) => (
+              <button
+                key={ic}
+                type="button"
+                onClick={() => setIcon(ic)}
+                style={{
+                  fontSize: 20, width: 40, height: 40, borderRadius: 9, cursor: "pointer",
+                  border: icon === ic ? "2.5px solid #6366f1" : "1.5px solid #e5e7eb",
+                  background: icon === ic ? "#eef2ff" : "#f9fafb",
+                  transition: "all .12s",
+                }}
+              >{ic}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{
+          padding: "12px 14px", borderRadius: 10,
+          background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: 18,
+        }}>
+          <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: .4 }}>
+            Spaces to include ({resolvableSpaces.length} of {spaces.length})
+          </p>
+          {resolvableSpaces.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 12, color: "#ef4444" }}>
+              ⚠️ No template-backed spaces found. Add rooms from the palette first.
+            </p>
+          ) : (
+            resolvableSpaces.map((s) => (
+              <div key={s.instanceId} style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 5 }}>
+                <span style={{ fontSize: 15 }}>{s.icon}</span>
+                <span style={{ fontSize: 12, color: "#374151", flex: 1 }}>{s.name}</span>
+                <span style={{ fontSize: 10, color: "#9ca3af" }}>{getFloorLabel(s.floor)}</span>
+              </div>
+            ))
+          )}
+          {spaces.some((s) => s.isCustom) && (
+            <p style={{ margin: "10px 0 0", fontSize: 11, color: "#b45309", background: "#fffbeb", padding: "6px 9px", borderRadius: 6, lineHeight: 1.5 }}>
+              ⚠️ {spaces.filter((s) => s.isCustom).length} custom space(s) will be skipped — custom rooms have no shared template definition.
+            </p>
+          )}
+        </div>
+
+        {error && (
+          <div style={{
+            padding: "10px 14px", borderRadius: 9, background: "#fef2f2",
+            border: "1px solid #fecaca", marginBottom: 16,
+            fontSize: 12, color: "#b91c1c", lineHeight: 1.5,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!canSubmit}
+            style={{
+              flex: 1, padding: "12px", borderRadius: 10, border: "none",
+              background: canSubmit
+                ? "linear-gradient(135deg, #4f46e5, #7c3aed)"
+                : "#e5e7eb",
+              color: canSubmit ? "#fff" : "#9ca3af",
+              fontWeight: 800, fontSize: 14,
+              cursor: canSubmit ? "pointer" : "not-allowed",
+              boxShadow: canSubmit ? "0 4px 14px #6366f155" : "none",
+              transition: "all .15s",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            }}
+          >
+            {saving ? <><Spin size={14} color="#fff" /> Saving…</> : "🌐 Publish Template"}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: "12px 18px", borderRadius: 10,
+              border: "1.5px solid #e5e7eb", background: "#fff",
+              cursor: "pointer", fontSize: 14, color: "#374151", fontWeight: 600,
+            }}
+          >Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Step 3: Spaces ───────────────────────────────────────────
 
 function StepSpaces({
@@ -965,6 +1221,7 @@ function StepSpaces({
   savingTemplate, templateSaveMsg, onSave, onSaveAs,
   locationLabel, clientName, projectName, wall, circ, costPerSqft,
   totals, floorGroups, onCsvImport, rateStatus,
+  canSaveGeneral, onOpenGeneralModal, generalTemplateSaved,
   onNext, onBack,
 }: {
   spaces: SpaceInstance[]; setSpaces: (s: SpaceInstance[]) => void;
@@ -980,6 +1237,9 @@ function StepSpaces({
   floorGroups: Map<number, SpaceInstance[]>;
   onCsvImport: (p: ImportPayload) => void;
   rateStatus: ApiRateStatus | null;
+  canSaveGeneral: boolean;
+  onOpenGeneralModal: () => void;
+  generalTemplateSaved: string;
   onNext: () => void; onBack: () => void;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1032,9 +1292,29 @@ function StepSpaces({
           💾 {savingTemplate ? "Saving…" : "Save"}
         </button>
         {activeCustomTemplateId !== null && myRole?.can_save_custom_templates && (
-          <button type="button" onClick={onSaveAs} disabled={savingTemplate || spaces.length === 0} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #6366f1", background: "#eef2ff", cursor: spaces.length > 0 ? "pointer" : "not-allowed", fontWeight: 600, color: "#4338ca" }}>📋 As</button>
+          <button type="button" onClick={onSaveAs} disabled={savingTemplate || spaces.length === 0} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #6366f1", background: "#eef2ff", cursor: spaces.length > 0 ? "pointer" : "not-allowed", fontWeight: 600, color: "#4338ca" }}>📋 Save As</button>
         )}
-        {templateSaveMsg && <span style={{ fontSize: 12, alignSelf: "center", color: templateSaveMsg.includes("✓") ? "#166534" : "#9ca3af" }}>{templateSaveMsg}</span>}
+        {canSaveGeneral && (
+          <button
+            type="button"
+            onClick={onOpenGeneralModal}
+            disabled={spaces.length === 0}
+            title="Publish as a general template visible to all users"
+            style={{
+              fontSize: 13, padding: "8px 14px", borderRadius: 8,
+              border: "1.5px solid #6366f1",
+              background: spaces.length > 0 ? "#eef2ff" : "#f9fafb",
+              cursor: spaces.length > 0 ? "pointer" : "not-allowed",
+              fontWeight: 700,
+              color: spaces.length > 0 ? "#4338ca" : "#c7d2fe",
+            }}
+          >🌐 General</button>
+        )}
+        {(templateSaveMsg || generalTemplateSaved) && (
+          <span style={{ fontSize: 12, alignSelf: "center", color: (templateSaveMsg || generalTemplateSaved).includes("✓") ? "#166534" : (generalTemplateSaved ? "#4338ca" : "#9ca3af") }}>
+            {generalTemplateSaved || templateSaveMsg}
+          </span>
+        )}
         <SpaceRequirementPdfButton
           projectName={projectName} clientName={clientName}
           spaces={spaces} unit={unit} wall={wall} circ={circ}
@@ -1063,6 +1343,15 @@ function StepSpaces({
           loadingTemplates={loadingTemplates} activeCustomTemplateId={activeCustomTemplateId}
           onLoad={loadProjectTemplate} onLoadCustom={loadCustomTemplate}
           onClose={() => setTemplatePanelOpen(false)} />
+      )}
+
+      {spaces.length > 0 && (
+        <TotalAreaScaler
+          spaces={spaces}
+          unit={unit}
+          currentNet={totals.net}
+          onScale={setSpaces}
+        />
       )}
 
       {spaces.length > 0 ? (
@@ -1117,8 +1406,7 @@ function StepSummary({
   projectName, clientName, floorGroups, totals, myRole,
   savingTemplate, templateSaveMsg, activeCustomTemplateId,
   onSave, onSaveAs, onCsvImport, onBack, onEdit,
-  surveyBreakdown,         // ← NEW
-  rateCategory,            // ← NEW: which category the effective_rate is based on
+  canSaveGeneral, onOpenGeneralModal, generalTemplateSaved,
 }: {
   spaces: SpaceInstance[]; unit: UnitKey;
   wall: number; circ: number; costPerSqft: number;
@@ -1132,8 +1420,9 @@ function StepSummary({
   onSave: () => void; onSaveAs: () => void;
   onCsvImport: (p: ImportPayload) => void;
   onBack: () => void; onEdit: () => void;
-  surveyBreakdown: ApiSurveyCategoryBreakdown[];
-  rateCategory: string;
+  canSaveGeneral: boolean;
+  onOpenGeneralModal: () => void;
+  generalTemplateSaved: string;
 }) {
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
 
@@ -1148,7 +1437,7 @@ function StepSummary({
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
         <h2 style={{ fontSize: 20, fontWeight: 800, color: "#111827", margin: "0 0 4px" }}>📊 Your Estimate</h2>
-        <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>{locationLabel || "No location"} · {spaces.length} room{spaces.length !== 1 ? "s" : ""}</p>
+        <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>{locationLabel || "No location"} · {spaces.length} room{spaces.length !== 1 ? "s" : ""}{clientName ? ` · ${clientName}` : ""}</p>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
@@ -1168,25 +1457,41 @@ function StepSummary({
         {activeCustomTemplateId !== null && myRole?.can_save_custom_templates && (
           <button type="button" onClick={onSaveAs} disabled={savingTemplate} style={{ fontSize: 13, padding: "7px 12px", borderRadius: 8, border: "1px solid #6366f1", background: "#eef2ff", cursor: "pointer", fontWeight: 600, color: "#4338ca" }}>📋 Save As</button>
         )}
-        {templateSaveMsg && <span style={{ fontSize: 12, alignSelf: "center", color: templateSaveMsg.includes("✓") ? "#166534" : "#9ca3af" }}>{templateSaveMsg}</span>}
+        {canSaveGeneral && (
+          <button
+            type="button"
+            onClick={onOpenGeneralModal}
+            title="Publish as a general template visible to all users"
+            style={{
+              fontSize: 13, padding: "7px 12px", borderRadius: 8,
+              border: "1.5px solid #6366f1",
+              background: "#eef2ff",
+              cursor: "pointer",
+              fontWeight: 700,
+              color: "#4338ca",
+            }}
+          >🌐 General</button>
+        )}
+        {(templateSaveMsg || generalTemplateSaved) && (
+          <span style={{ fontSize: 12, alignSelf: "center", color: (generalTemplateSaved || templateSaveMsg).includes("✓") ? "#166534" : (generalTemplateSaved ? "#4338ca" : "#9ca3af") }}>
+            {generalTemplateSaved || templateSaveMsg}
+          </span>
+        )}
       </div>
 
-      {/* Rate badge + source breakdown */}
       {rateStatus && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", borderRadius: 10, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <RateBadge source={rateStatus.source} />
-            <span style={{ fontSize: 12, color: "#6b7280", flex: 1 }}>{rateStatus.label}</span>
-            <strong style={{ fontSize: 15, color: "#d97706", fontFamily: "monospace" }}>
-              ₹{costPerSqft.toLocaleString("en-IN")}/sqft
-            </strong>
-          </div>
-          {/* ← NEW: show available survey data for this location */}
-          <SurveyBreakdownPanel breakdown={surveyBreakdown} selectedCategory={rateCategory} />
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          padding: "12px 14px", borderRadius: 10, background: "#f9fafb", border: "1px solid #e5e7eb",
+        }}>
+          <RateBadge source={rateStatus.source} />
+          <span style={{ fontSize: 12, color: "#6b7280", flex: 1 }}>{rateStatus.label}</span>
+          <strong style={{ fontSize: 16, color: "#d97706", fontFamily: "monospace", letterSpacing: -0.5 }}>
+            ₹{costPerSqft.toLocaleString("en-IN")}/sqft
+          </strong>
         </div>
       )}
 
-      {/* Area breakdown */}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <p style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .5, margin: "0 0 2px" }}>Area Breakdown</p>
         {rows.map((r) => (
@@ -1205,7 +1510,6 @@ function StepSummary({
         ))}
       </div>
 
-      {/* Cost highlight */}
       <div style={{ borderRadius: 16, padding: "20px 20px", background: "linear-gradient(135deg, #ecfdf5, #f0fdf4)", border: "2px solid #a7f3d0", textAlign: "center" }}>
         <p style={{ fontSize: 11, fontWeight: 800, color: "#059669", textTransform: "uppercase", letterSpacing: .7, margin: "0 0 6px" }}>Estimated Construction Cost</p>
         <p style={{ fontFamily: "monospace", fontWeight: 900, fontSize: 36, color: "#047857", margin: "0 0 6px", letterSpacing: -1 }}>{fmtCost(totals.cost)}</p>
@@ -1213,7 +1517,6 @@ function StepSummary({
         <p style={{ fontSize: 11, color: "#059669", margin: "4px 0 0", opacity: .7 }}>Finishing, MEP &amp; professional fees not included</p>
       </div>
 
-      {/* Floor breakdown */}
       {floorGroups.size > 1 && (
         <div>
           <p style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .5, margin: "0 0 8px" }}>By Floor</p>
@@ -1231,7 +1534,6 @@ function StepSummary({
         </div>
       )}
 
-      {/* Category breakdown */}
       <div>
         <p style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .5, margin: "0 0 8px" }}>By Room Type</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
@@ -1252,7 +1554,6 @@ function StepSummary({
         </div>
       </div>
 
-      {/* Room list */}
       <div>
         <p style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .5, margin: "0 0 8px" }}>Room List</p>
         <div style={{ borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
@@ -1323,11 +1624,10 @@ export default function App() {
   const [loadingStates, setLoadingStates] = useState(false);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
 
-  // ← NEW: when CSV is imported we store the pending state+place IDs here;
-  //   they're applied after their respective lists have loaded (see useEffects below).
-  const [pendingLocation, setPendingLocation] = useState<{
-    stateId: number; placeId: number;
-  } | null>(null);
+  // FIX: Use a ref instead of state for pending location.
+  // A ref is always read at call-time so it is never stale inside useEffect
+  // closures, and it doesn't cause unnecessary re-renders.
+  const pendingLocationRef = useRef<{ stateId: number; placeId: number } | null>(null);
 
   // Project settings
   const [finishLevel,   setFinishLevel]   = useState("unknown");
@@ -1347,11 +1647,10 @@ export default function App() {
   const [spaces, setSpaces] = useState<SpaceInstance[]>([]);
 
   // Rate
-  const [apiRate,           setApiRate]           = useState<number | null>(null);
-  const [rateStatus,        setRateStatus]        = useState<ApiRateStatus | null>(null);
-  const [surveyBreakdown,   setSurveyBreakdown]   = useState<ApiSurveyCategoryBreakdown[]>([]);  // ← NEW
-  const [countryAvgRate,    setCountryAvgRate]    = useState<number | null>(null);
-  const [loadingRate,       setLoadingRate]       = useState(false);
+  const [apiRate,        setApiRate]        = useState<number | null>(null);
+  const [rateStatus,     setRateStatus]     = useState<ApiRateStatus | null>(null);
+  const [countryAvgRate, setCountryAvgRate] = useState<number | null>(null);
+  const [loadingRate,    setLoadingRate]    = useState(false);
 
   // Role + custom templates
   const [myRole,                 setMyRole]                 = useState<ApiMyRole | null>(null);
@@ -1359,6 +1658,10 @@ export default function App() {
   const [savingTemplate,         setSavingTemplate]         = useState(false);
   const [templateSaveMsg,        setTemplateSaveMsg]        = useState("");
   const [activeCustomTemplateId, setActiveCustomTemplateId] = useState<number | null>(null);
+
+  // General template modal
+  const [generalModalOpen,     setGeneralModalOpen]     = useState(false);
+  const [generalTemplateSaved, setGeneralTemplateSaved] = useState("");
 
   // Derived
   const selectedCountry = countries.find((c) => c.id === countryId);
@@ -1369,6 +1672,8 @@ export default function App() {
   const costPerSqft     = apiRate ?? countryAvgRate ?? 2000;
   const totals          = useMemo(() => calcGrossArea(spaces, wall, circ, costPerSqft), [spaces, wall, circ, costPerSqft]);
   const floorGroups     = useMemo(() => groupByFloor(spaces), [spaces]);
+
+  const canSaveGeneral = myRole?.role === "member" || myRole?.role === "admin";
 
   // ── Mount ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1405,10 +1710,9 @@ export default function App() {
     fetchStates(countryId)
       .then((data) => {
         setStatesList(data);
-        // ← If a CSV import set a pending location, apply stateId now that
-        //   the states list is populated; otherwise reset to null.
-        if (pendingLocation) {
-          setStateId(pendingLocation.stateId);
+        // Read ref at call-time — always current, never stale
+        if (pendingLocationRef.current) {
+          setStateId(pendingLocationRef.current.stateId);
         } else {
           setStateId(null);
           setPlaceId(null);
@@ -1430,10 +1734,10 @@ export default function App() {
     fetchPlaces(stateId)
       .then((data) => {
         setPlacesList(data);
-        // ← Apply placeId once the places list is ready, then clear pending.
-        if (pendingLocation) {
-          setPlaceId(pendingLocation.placeId);
-          setPendingLocation(null);
+        // Read ref at call-time — always current, never stale
+        if (pendingLocationRef.current) {
+          setPlaceId(pendingLocationRef.current.placeId);
+          pendingLocationRef.current = null; // consumed
         } else {
           setPlaceId(null);
         }
@@ -1447,7 +1751,6 @@ export default function App() {
     if (!placeId) {
       setApiRate(null);
       setRateStatus(null);
-      setSurveyBreakdown([]);
       return;
     }
     setLoadingRate(true);
@@ -1459,11 +1762,9 @@ export default function App() {
       .then((data) => {
         setApiRate(data.effective_rate);
         setRateStatus(data.rate_status);
-        setSurveyBreakdown(data.survey_breakdown ?? []);  // ← NEW
       })
       .catch(console.error)
       .finally(() => setLoadingRate(false));
-
   }, [placeId, rateCategory, finishLevel, occupancyType]);
 
   // ── Navigation ─────────────────────────────────────────────
@@ -1478,21 +1779,17 @@ export default function App() {
     if (idx > 0) setStep(order[idx - 1]);
   };
 
-  // ── Template save ──────────────────────────────────────────
+  // ── Custom template save ───────────────────────────────────
   async function handleSaveTemplate() {
     if (!myRole?.can_save_custom_templates) { setTemplateSaveMsg("Only paid customers can save."); return; }
     if (spaces.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
     try {
       setSavingTemplate(true); setTemplateSaveMsg("");
-      // ← NEW: include location IDs in saved template data
       const payload = {
         label: projectName || "Untitled",
         description: "User saved",
         icon: "🏠",
-        data: {
-          projectName, clientName, unit, wall, circ, spaces,
-          countryId, stateId, placeId,           // ← save location
-        },
+        data: { projectName, clientName, unit, wall, circ, spaces, countryId, stateId, placeId },
         source_project_template: null as number | null,
       };
       if (activeCustomTemplateId !== null) {
@@ -1527,10 +1824,19 @@ export default function App() {
     finally { setSavingTemplate(false); }
   }
 
-  // ── CSV import — now also restores location ────────────────
-  // ImportPayload (from SpaceRequirementCsvButton) should export these
-  // optional fields: countryId, stateId, placeId.
-  // If present they're applied via the pendingLocation pattern above.
+  // ── General template saved callback ───────────────────────
+  function handleGeneralTemplateSaved(tpl: ApiProjectTemplate) {
+    setProjectTemplates((prev) => [...prev, toProjectTemplate(tpl)]);
+    setGeneralModalOpen(false);
+    setGeneralTemplateSaved(`✓ "${tpl.label}" published.`);
+    setTimeout(() => setGeneralTemplateSaved(""), 5000);
+  }
+
+  // ── CSV import ─────────────────────────────────────────────
+  // FIX: If countryId is already the same as the imported value, the states
+  // useEffect won't re-fire (React bails on same-value state updates).
+  // In that case we set stateId directly — the places useEffect will then
+  // fire and consume pendingLocationRef to set placeId.
   const handleCsvImport = useCallback((
     payload: ImportPayload & {
       countryId?: number | null;
@@ -1547,22 +1853,40 @@ export default function App() {
     setActiveCustomTemplateId(null);
     setTemplateSaveMsg("");
 
-    // ← Restore full location from CSV if provided
-    if (payload.countryId) {
-      if (payload.stateId && payload.placeId) {
-        // Queue state+place to be applied after lists load
-        setPendingLocation({ stateId: payload.stateId, placeId: payload.placeId });
+    if (payload.countryId && payload.stateId && payload.placeId) {
+      // Store destination in a ref so effects always read the latest value
+      pendingLocationRef.current = {
+        stateId: payload.stateId,
+        placeId: payload.placeId,
+      };
+
+      if (countryId === payload.countryId) {
+        // Country hasn't changed → states useEffect won't re-fire.
+        // Drive the cascade manually: set stateId directly, which will
+        // trigger the places useEffect, which will consume pendingLocationRef.
+        setStateId(payload.stateId);
+      } else {
+        // Different country → setting countryId will trigger the states
+        // useEffect, which will read pendingLocationRef and set stateId,
+        // then the places useEffect will set placeId.
+        setCountryId(payload.countryId);
       }
-      // Changing countryId triggers the states useEffect which reads pendingLocation
-      setCountryId(payload.countryId);
     }
 
     setStep("spaces");
-  }, []);
+  // countryId is a dependency because we compare against it inside
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countryId]);
 
   const saveProps = {
     myRole, savingTemplate, templateSaveMsg, activeCustomTemplateId,
     onSave: handleSaveTemplate, onSaveAs: handleSaveAsTemplate,
+  };
+
+  const generalSaveProps = {
+    canSaveGeneral,
+    generalTemplateSaved,
+    onOpenGeneralModal: () => setGeneralModalOpen(true),
   };
 
   return (
@@ -1582,16 +1906,37 @@ export default function App() {
         position: "sticky", top: 0, zIndex: 80,
       }}>
         <div style={{ maxWidth: 680, margin: "0 auto", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 160px", minWidth: 0 }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: "linear-gradient(135deg, #f59e0b, #d97706)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📐</div>
             <div style={{ minWidth: 0 }}>
-              <input value={projectName} onChange={(e) => setProjectName(e.target.value)}
-                style={{ fontSize: 14, fontWeight: 700, color: "#111827", background: "transparent", border: "none", borderBottom: "2px solid transparent", outline: "none", width: "100%", maxWidth: 180, transition: "border-color .15s" }}
+              <input
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="Project name"
+                style={{ fontSize: 14, fontWeight: 700, color: "#111827", background: "transparent", border: "none", borderBottom: "2px solid transparent", outline: "none", width: "100%", maxWidth: 160, transition: "border-color .15s" }}
                 onFocus={(e) => { e.target.style.borderBottomColor = "#f59e0b"; }}
-                onBlur={(e)  => { e.target.style.borderBottomColor = "transparent"; }} />
+                onBlur={(e)  => { e.target.style.borderBottomColor = "transparent"; }}
+              />
               <p style={{ margin: 0, fontSize: 9, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .4 }}>Cost Estimator</p>
             </div>
           </div>
+
+          <div style={{ flex: "1 1 130px", minWidth: 0 }}>
+            <input
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              placeholder="Client name"
+              style={{
+                fontSize: 13, color: "#374151", background: "#f9fafb",
+                border: "1.5px solid #e5e7eb", borderRadius: 8,
+                padding: "5px 10px", outline: "none", width: "100%",
+                transition: "border-color .15s",
+              }}
+              onFocus={(e) => { e.target.style.borderColor = "#f59e0b"; e.target.style.background = "#fff"; }}
+              onBlur={(e)  => { e.target.style.borderColor = "#e5e7eb"; e.target.style.background = "#f9fafb"; }}
+            />
+          </div>
+
           {locationLabel && (
             <span onClick={() => setStep("location")} style={{
               fontSize: 11, color: "#047857", background: "#ecfdf5", padding: "4px 9px",
@@ -1599,6 +1944,7 @@ export default function App() {
               maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0,
             }}>📍 {locationLabel}</span>
           )}
+
           <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 7, padding: 2, flexShrink: 0 }}>
             {(["sqft", "sqm"] as UnitKey[]).map((u) => (
               <button key={u} type="button" onClick={() => setUnit(u)} style={{
@@ -1632,7 +1978,6 @@ export default function App() {
             finishLevel={finishLevel} setFinishLevel={setFinishLevel}
             occupancyType={occupancyType} setOccupancyType={setOccupancyType}
             wall={wall} setWall={setWall} circ={circ} setCirc={setCirc}
-            surveyBreakdown={surveyBreakdown}   // ← NEW
             onNext={() => goNext("project-type")}
             onBack={() => goBack("project-type")} />
         )}
@@ -1648,7 +1993,8 @@ export default function App() {
             totals={totals} floorGroups={floorGroups}
             rateStatus={rateStatus} onCsvImport={handleCsvImport}
             onNext={() => goNext("spaces")} onBack={() => goBack("spaces")}
-            {...saveProps} />
+            {...saveProps}
+            {...generalSaveProps} />
         )}
 
         {step === "summary" && (
@@ -1658,14 +2004,22 @@ export default function App() {
             locationLabel={locationLabel} projectName={projectName} clientName={clientName}
             floorGroups={floorGroups} totals={totals}
             onCsvImport={handleCsvImport}
-            surveyBreakdown={surveyBreakdown}   // ← NEW
-            rateCategory={rateCategory}          // ← NEW
             onBack={() => goBack("summary")} onEdit={() => setStep("spaces")}
-            {...saveProps} />
+            {...saveProps}
+            {...generalSaveProps} />
         )}
       </main>
 
       <StickyBar gross={totals.gross} cost={totals.cost} unit={unit} loading={loadingRate} />
+
+      {generalModalOpen && (
+        <SaveAsGeneralModal
+          spaces={spaces}
+          spaceTemplates={spaceTemplates}
+          onClose={() => setGeneralModalOpen(false)}
+          onSaved={handleGeneralTemplateSaved}
+        />
+      )}
     </>
   );
 }
