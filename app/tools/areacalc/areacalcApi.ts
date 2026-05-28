@@ -17,6 +17,35 @@ function authHeaders() {
   };
 }
 
+export interface ApiFinishLevel {
+  value: string;
+  label: string;
+}
+
+export interface ApiOccupancyType {
+  value: string;
+  label: string;
+}
+
+export interface ApiRateOptions {
+  finish_levels: ApiFinishLevel[];
+  occupancy_types: ApiOccupancyType[];
+}
+
+/**
+ * Fetch finish_level and occupancy_type options that have actual approved
+ * survey data.
+ *
+ * • No placeId  → returns all values present anywhere in the database.
+ * • With placeId → returns only values present for that specific place.
+ *   If the place has no survey data both arrays will be empty; the caller
+ *   should fall back to the no-placeId call in that case.
+ */
+export const fetchRateOptions = (placeId?: number | null) => {
+  const params = placeId ? `?place_id=${placeId}` : "";
+  return get<ApiRateOptions>(`${BASE}/rates/options/${params}`);
+};
+
 // ── API Response Types ────────────────────────────────────────
 
 export interface ApiCountry {
@@ -387,7 +416,7 @@ import type {
 export function toSpaceTemplate(api: ApiSpaceTemplate): SpaceTemplate {
   return {
     id: api.template_id,
-    dbId: api.id,           // numeric DB pk — used by saveGeneralProjectTemplate
+    dbId: api.id,
     name: api.name,
     category: api.category as CategoryKey,
     L: parseFloat(api.default_l),
@@ -417,7 +446,6 @@ export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
       floor: s.floor,
       L: parseFloat(s.effective_l),
       B: parseFloat(s.effective_b),
-      // ✅ FIX: s.sub_ids may be null/undefined from the API — guard with ?? []
       subIds: (s.sub_ids ?? []).map((sub) => sub.sub_id),
     })),
   };

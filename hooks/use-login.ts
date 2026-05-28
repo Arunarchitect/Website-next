@@ -10,18 +10,91 @@ import { OrganisationMembership } from "@/redux/features/membershipApiSlice";
 
 const BASE_URL = process.env.NEXT_PUBLIC_HOST;
 
-async function fetchIsAdmin(accessToken: string): Promise<boolean> {
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type OrgRole = "admin" | "manager" | "member" | "client" | null;
+type AreacalcRole = "admin" | "member" | "customer" | "user" | "anonymous";
+
+interface RoleBundle {
+  orgRole: OrgRole;
+  areacalcRole: AreacalcRole;
+}
+
+// ── Fetchers ──────────────────────────────────────────────────────────────────
+
+async function fetchOrgRole(accessToken: string): Promise<OrgRole> {
   try {
     const res = await fetch(`${BASE_URL}/api/my-memberships/`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const data: OrganisationMembership[] = await res.json();
-    return data.some((m) => m.role === "admin");
+    if (!data.length) return null;
+
+    // If user has multiple memberships, pick the highest-privilege role
+    const PRIORITY: OrgRole[] = ["admin", "manager", "member", "client"];
+    for (const role of PRIORITY) {
+      if (data.some((m) => m.role === role)) return role;
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
+
+async function fetchAreacalcRole(accessToken: string): Promise<AreacalcRole> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/areacalc/me/role/`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return "anonymous";
+    const data = await res.json();
+    return (data.role as AreacalcRole) ?? "anonymous";
+  } catch {
+    return "anonymous";
+  }
+}
+
+// ── Routing table ─────────────────────────────────────────────────────────────
+//
+//  Priority (high → low):
+//  1. Admin/member/manager in BOTH apps        → /mainadmin
+//  2. User/customer in BOTH apps               → /mainuser
+//  3. Org: admin/manager only                  → /new/dash/dashadmin
+//  4. Org: member only                         → /new/dash/dashnormal
+//  5. Org: client only                         → /new/dash/dashclient
+//  6. Areacalc only (any role)                 → /tools/areacalc
+//  7. No role anywhere                         → /new/dash/dashnormal
+
+function resolveDestination({ orgRole, areacalcRole }: RoleBundle): string {
+  const isOrgPrivileged   = orgRole === "admin" || orgRole === "manager" || orgRole === "member";
+  const isOrgLow          = orgRole === "client";
+  const isAreacalcPriv    = areacalcRole === "admin" || areacalcRole === "member";
+  const isAreacalcLow     = areacalcRole === "customer" || areacalcRole === "user";
+  const hasOrgRole        = orgRole !== null;
+  const hasAreacalcRole   = areacalcRole !== "anonymous";
+
+  // ── Cross-app combinations ───────────────────────────────
+  // Both privileged → main admin hub
+  if (isOrgPrivileged && isAreacalcPriv)    return "/main/admin";
+
+  // Both low-privilege → main user hub
+  if (hasOrgRole && isAreacalcLow)          return "/main/user";
+  if (isOrgLow && hasAreacalcRole)          return "/main/user";
+
+  // ── Org-only ─────────────────────────────────────────────
+  if (orgRole === "admin" || orgRole === "manager") return "/new/dash/dashadmin";
+  if (orgRole === "member")                          return "/new/dash/dashnormal";
+  if (orgRole === "client")                          return "/main/client";
+
+  // ── Areacalc-only ─────────────────────────────────────────
+  if (hasAreacalcRole)                               return "/tools/areacalc";
+
+  // ── Fallback ──────────────────────────────────────────────
+  return "/new/dash/dashnormal";
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export default function useLogin() {
   const router = useRouter();
@@ -52,21 +125,22 @@ export default function useLogin() {
           pauseOnHover: true,
         });
 
-        // If a ?next= param exists, go there — otherwise fall back to dashboard
+        // ?next= skips all role checks
         const next = searchParams.get("next");
-        let destination: string;
-
         if (next) {
-          // Basic safety check: only allow relative paths (no open redirect)
-          destination = next.startsWith("/") ? next : "/";
-        } else {
-          const isAdmin = await fetchIsAdmin(data.access);
-          destination = isAdmin ? "/new/dash/dashadmin" : "/new/dash/dashnormal";
+          const destination = next.startsWith("/") ? next : "/";
+          setTimeout(() => router.push(destination), 3000);
+          return;
         }
 
-        setTimeout(() => {
-          router.push(destination);
-        }, 3000);
+        // Fetch both roles in parallel
+        const [orgRole, areacalcRole] = await Promise.all([
+          fetchOrgRole(data.access),
+          fetchAreacalcRole(data.access),
+        ]);
+
+        const destination = resolveDestination({ orgRole, areacalcRole });
+        setTimeout(() => router.push(destination), 3000);
       })
       .catch((error) => {
         const toastOptions = { autoClose: 5000, pauseOnHover: true };

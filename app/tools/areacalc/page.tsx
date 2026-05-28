@@ -43,32 +43,17 @@ import {
   saveCustomProjectTemplate,
   updateCustomProjectTemplate,
   saveGeneralProjectTemplate,
+  fetchRateOptions,
   type ApiCountry,
   type ApiState,
   type ApiRateStatus,
   type ApiMyRole,
   type ApiCustomProjectTemplate,
   type ApiProjectTemplate,
+  type ApiRateOptions,
 } from "./areacalcApi";
 
 // ─── Constants ────────────────────────────────────────────────
-
-const FINISH_LEVELS = [
-  { value: "unknown",  label: "Not sure",  hint: "We'll use the area average",        emoji: "🤷" },
-  { value: "basic",    label: "Basic",     hint: "Plain plaster, simple tiles",       emoji: "🪨" },
-  { value: "standard", label: "Standard",  hint: "Branded tiles, modular kitchen",    emoji: "🧱" },
-  { value: "premium",  label: "Premium",   hint: "Imported materials, false ceiling", emoji: "✨" },
-  { value: "luxury",   label: "Luxury",    hint: "Marble, designer fittings",         emoji: "💎" },
-];
-
-const OCCUPANCY_TYPES = [
-  { value: "unknown",       label: "Not sure",           emoji: "🤷" },
-  { value: "residential",   label: "Home / Villa",        emoji: "🏠" },
-  { value: "commercial",    label: "Shop / Office",       emoji: "🏢" },
-  { value: "institutional", label: "School / Hospital",   emoji: "🏫" },
-  { value: "industrial",    label: "Warehouse / Factory", emoji: "🏭" },
-  { value: "mixed",         label: "Mixed Use",           emoji: "🏙️" },
-];
 
 const WALL_PRESETS = [{ v: 8, l: "Light 8%" }, { v: 10, l: "Normal 10%" }, { v: 15, l: "Heavy 15%" }];
 const CIRC_PRESETS = [{ v: 10, l: "Compact 10%" }, { v: 15, l: "Normal 15%" }, { v: 20, l: "Spacious 20%" }];
@@ -164,9 +149,6 @@ function BigOption({ selected, onClick, emoji, label, hint, accent = "#f59e0b" }
 }
 
 // ─── DimAreaEditor ────────────────────────────────────────────
-// FIX: added L and B to the useEffect dependency array so that
-// external prop changes (e.g. from TotalAreaScaler) are reflected
-// in the displayed draft values.
 
 function DimAreaEditor({ L, B, unit, onUpdate }: {
   L: number; B: number; unit: UnitKey;
@@ -183,7 +165,6 @@ function DimAreaEditor({ L, B, unit, onUpdate }: {
   });
   const [areaError, setAreaError] = useState("");
 
-  // Sync drafts whenever L, B, or unit changes from outside
   useEffect(() => {
     const ld = +dimToUnit(L, unit).toFixed(unit === "sqm" ? 2 : 1);
     const bd = +dimToUnit(B, unit).toFixed(unit === "sqm" ? 2 : 1);
@@ -191,7 +172,7 @@ function DimAreaEditor({ L, B, unit, onUpdate }: {
     setBDraft(String(bd));
     setADraft(String(+(ld * bd).toFixed(1)));
     setAreaError("");
-  }, [unit, L, B]); // ← L and B added here
+  }, [unit, L, B]);
 
   function commitL(raw: string) {
     const n = parseFloat(raw);
@@ -289,25 +270,16 @@ function DimAreaEditor({ L, B, unit, onUpdate }: {
 // ─── TotalAreaScaler ──────────────────────────────────────────
 
 function TotalAreaScaler({
-  spaces,
-  unit,
-  currentNet,
-  onScale,
+  spaces, unit, currentNet, onScale,
 }: {
-  spaces: SpaceInstance[];
-  unit: UnitKey;
-  currentNet: number;
+  spaces: SpaceInstance[]; unit: UnitKey; currentNet: number;
   onScale: (scaledSpaces: SpaceInstance[]) => void;
 }) {
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
-  const toDisplay = (sqft: number) =>
-    unit === "sqm" ? sqft * 0.0929 : sqft;
-  const fromDisplay = (val: number) =>
-    unit === "sqm" ? val / 0.0929 : val;
+  const toDisplay = (sqft: number) => unit === "sqm" ? sqft * 0.0929 : sqft;
+  const fromDisplay = (val: number) => unit === "sqm" ? val / 0.0929 : val;
 
-  const [draft, setDraft] = useState(() =>
-    String(+toDisplay(currentNet).toFixed(1))
-  );
+  const [draft, setDraft] = useState(() => String(+toDisplay(currentNet).toFixed(1)));
   const [error, setError] = useState("");
   const [applied, setApplied] = useState(false);
 
@@ -320,16 +292,11 @@ function TotalAreaScaler({
   function applyScale() {
     const targetDisplay = parseFloat(draft);
     if (!Number.isFinite(targetDisplay) || targetDisplay <= 0) {
-      setError("Enter a valid area > 0");
-      return;
+      setError("Enter a valid area > 0"); return;
     }
     const targetSqft = fromDisplay(targetDisplay);
-    if (currentNet <= 0) {
-      setError("Add some rooms first.");
-      return;
-    }
+    if (currentNet <= 0) { setError("Add some rooms first."); return; }
     const ratio = Math.sqrt(targetSqft / currentNet);
-
     const scaled = spaces.map((s): SpaceInstance => ({
       ...s,
       L: +(s.L * ratio).toFixed(2),
@@ -340,7 +307,6 @@ function TotalAreaScaler({
         B: +(sub.B * ratio).toFixed(2),
       })),
     }));
-
     setError("");
     setApplied(true);
     onScale(scaled);
@@ -371,30 +337,21 @@ function TotalAreaScaler({
           </label>
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <input
-              type="number"
-              min={1}
-              step={unit === "sqm" ? 1 : 10}
-              value={draft}
+              type="number" min={1} step={unit === "sqm" ? 1 : 10} value={draft}
               onChange={(e) => { setDraft(e.target.value); setError(""); setApplied(false); }}
               onKeyDown={(e) => e.key === "Enter" && applyScale()}
               style={{
                 fontSize: 14, padding: "7px 10px", borderRadius: 8, fontFamily: "monospace",
                 border: error ? "2px solid #ef4444" : "2px solid #fcd34d",
-                outline: "none", background: "#fff", fontWeight: 700, color: "#111827",
-                width: 110,
+                outline: "none", background: "#fff", fontWeight: 700, color: "#111827", width: 110,
               }}
             />
-            <button
-              type="button"
-              onClick={applyScale}
-              style={{
-                padding: "7px 14px", borderRadius: 8, border: "none",
-                background: applied ? "#16a34a" : "#d97706",
-                color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer",
-                transition: "background .2s",
-                display: "flex", alignItems: "center", gap: 5,
-              }}
-            >
+            <button type="button" onClick={applyScale} style={{
+              padding: "7px 14px", borderRadius: 8, border: "none",
+              background: applied ? "#16a34a" : "#d97706",
+              color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer",
+              transition: "background .2s", display: "flex", alignItems: "center", gap: 5,
+            }}>
               {applied ? "✓ Applied" : "Apply"}
             </button>
           </div>
@@ -801,8 +758,7 @@ function WizardProgress({ step, onJump }: { step: WizardStep; onJump: (s: Wizard
 
 function StepLocation({
   countries, statesList, placesList, countryId, stateId, placeId,
-  setCountryId, setStateId, setPlaceId, loadingStates, loadingPlaces, onNext,
-  onCsvImport,
+  setCountryId, setStateId, setPlaceId, loadingStates, loadingPlaces, onNext, onCsvImport,
 }: {
   countries: ApiCountry[]; statesList: ApiState[];
   placesList: { id: number; name: string }[];
@@ -899,46 +855,106 @@ function StepLocation({
 }
 
 // ─── Step 2: Project Type ─────────────────────────────────────
+// Options are fetched from the API — no hardcoded fallbacks.
+// loadingOptions: true while global OR place-specific options are loading.
+// placeHasData: shows a note when place-specific options are narrower than global.
 
 function StepProjectType({
-  finishLevel, setFinishLevel, occupancyType, setOccupancyType,
+  finishLevels,
+  occupancyTypes,
+  loadingOptions,
+  placeHasData,
+  finishLevel, setFinishLevel,
+  occupancyType, setOccupancyType,
   wall, setWall, circ, setCirc,
   onNext, onBack,
 }: {
+  finishLevels: { value: string; label: string; emoji: string; hint: string }[];
+  occupancyTypes: { value: string; label: string; emoji: string }[];
+  loadingOptions: boolean;
+  placeHasData: boolean;
   finishLevel: string; setFinishLevel: (v: string) => void;
   occupancyType: string; setOccupancyType: (v: string) => void;
   wall: number; setWall: (n: number) => void;
   circ: number; setCirc: (n: number) => void;
   onNext: () => void; onBack: () => void;
 }) {
+  const SkeletonOptions = ({ count }: { count: number }) => (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} style={{
+          flex: "1 1 120px", height: 80, borderRadius: 12,
+          background: "linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%)",
+          backgroundSize: "200% 100%",
+          animation: "shimmer 1.4s infinite",
+        }} />
+      ))}
+    </div>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <style>{`
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      `}</style>
+
       <div>
         <h2 style={{ fontSize: 20, fontWeight: 800, color: "#111827", margin: "0 0 6px" }}>🏗️ Tell us about your project</h2>
         <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>These choices help pick the right rate for your project.</p>
+        {/* Show a note when showing place-specific surveyed options */}
+        {placeHasData && !loadingOptions && (
+          <p style={{ fontSize: 11, color: "#047857", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 10px", marginTop: 8 }}>
+            📍 Showing only building types &amp; finish levels with local survey data for your city.
+          </p>
+        )}
       </div>
 
+      {/* ── Occupancy / Building type ── */}
       <div>
         <p style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "0 0 8px" }}>What are you building?</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-          {OCCUPANCY_TYPES.map((ot) => (
-            <BigOption key={ot.value} selected={occupancyType === ot.value}
-              onClick={() => setOccupancyType(ot.value)} emoji={ot.emoji} label={ot.label} />
-          ))}
-        </div>
+        {loadingOptions ? (
+          <SkeletonOptions count={4} />
+        ) : occupancyTypes.length === 0 ? (
+          <p style={{ fontSize: 13, color: "#9ca3af", padding: "12px 0" }}>No building types available for this location yet.</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {occupancyTypes.map((ot) => (
+              <BigOption
+                key={ot.value}
+                selected={occupancyType === ot.value}
+                onClick={() => setOccupancyType(ot.value)}
+                emoji={ot.emoji}
+                label={ot.label}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* ── Finish level / Quality ── */}
       <div>
         <p style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "0 0 8px" }}>
           Quality of finish?
           <InfoBox icon="✨" title="Finish Level" body="Basic = plain tiles. Standard = branded tiles, modular kitchen. Premium = imported marble, false ceiling. Luxury = designer finishes." />
         </p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-          {FINISH_LEVELS.map((fl) => (
-            <BigOption key={fl.value} selected={finishLevel === fl.value}
-              onClick={() => setFinishLevel(fl.value)} emoji={fl.emoji} label={fl.label} hint={fl.hint} />
-          ))}
-        </div>
+        {loadingOptions ? (
+          <SkeletonOptions count={4} />
+        ) : finishLevels.length === 0 ? (
+          <p style={{ fontSize: 13, color: "#9ca3af", padding: "12px 0" }}>No finish levels available for this location yet.</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {finishLevels.map((fl) => (
+              <BigOption
+                key={fl.value}
+                selected={finishLevel === fl.value}
+                onClick={() => setFinishLevel(fl.value)}
+                emoji={fl.emoji}
+                label={fl.label}
+                hint={fl.hint}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       <details>
@@ -986,10 +1002,7 @@ function StepProjectType({
 // ─── Save as General Template Modal ──────────────────────────
 
 function SaveAsGeneralModal({
-  spaces,
-  spaceTemplates,
-  onClose,
-  onSaved,
+  spaces, spaceTemplates, onClose, onSaved,
 }: {
   spaces: SpaceInstance[];
   spaceTemplates: SpaceTemplate[];
@@ -999,9 +1012,7 @@ function SaveAsGeneralModal({
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("🏗️");
-  const [templateId, setTemplateId] = useState(
-    () => `custom_${Date.now().toString(36)}`
-  );
+  const [templateId, setTemplateId] = useState(() => `custom_${Date.now().toString(36)}`);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -1034,8 +1045,7 @@ function SaveAsGeneralModal({
     });
 
     try {
-      setSaving(true);
-      setError("");
+      setSaving(true); setError("");
       const saved = await saveGeneralProjectTemplate({
         template_id: templateId.trim() || `custom_${Date.now().toString(36)}`,
         label: label.trim(),
@@ -1055,19 +1065,9 @@ function SaveAsGeneralModal({
   const canSubmit = !saving && label.trim().length > 0 && resolvableSpaces.length > 0;
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.55)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 400, padding: 16,
-    }}>
-      <div style={{
-        background: "#fff", borderRadius: 18, padding: 28,
-        width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto",
-        boxShadow: "0 24px 64px rgba(0,0,0,.25)",
-      }}>
-        <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800, color: "#111827" }}>
-          🌐 Save as General Template
-        </h3>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 18, padding: 28, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,.25)" }}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800, color: "#111827" }}>🌐 Save as General Template</h3>
         <p style={{ margin: "0 0 22px", fontSize: 12, color: "#9ca3af", lineHeight: 1.5 }}>
           This template will be <strong>visible to all users</strong> in the Templates panel. Requires member / admin role.
         </p>
@@ -1076,82 +1076,48 @@ function SaveAsGeneralModal({
           <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
             Template Name <span style={{ color: "#ef4444" }}>*</span>
           </label>
-          <input
-            autoFocus
-            value={label}
-            onChange={(e) => { setLabel(e.target.value); setError(""); }}
+          <input autoFocus value={label} onChange={(e) => { setLabel(e.target.value); setError(""); }}
             placeholder="e.g. 3-Bedroom Villa, Primary School Block…"
-            style={{
-              width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 9,
-              border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none",
-            }}
+            style={{ width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 9, border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none" }}
             onFocus={(e) => { e.target.style.borderColor = "#6366f1"; }}
-            onBlur={(e) => { e.target.style.borderColor = "#e5e7eb"; }}
-          />
+            onBlur={(e) => { e.target.style.borderColor = "#e5e7eb"; }} />
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
-            Short Description
-          </label>
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+          <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>Short Description</label>
+          <input value={description} onChange={(e) => setDescription(e.target.value)}
             placeholder="e.g. Typical 2-floor residence with 3 beds"
-            style={{
-              width: "100%", fontSize: 13, padding: "8px 11px", borderRadius: 9,
-              border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none",
-            }}
-          />
+            style={{ width: "100%", fontSize: 13, padding: "8px 11px", borderRadius: 9, border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none" }} />
         </div>
 
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
-            Template ID{" "}
-            <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400 }}>(unique slug — no spaces)</span>
+            Template ID <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400 }}>(unique slug — no spaces)</span>
           </label>
-          <input
-            value={templateId}
-            onChange={(e) => setTemplateId(e.target.value.replace(/\s+/g, "_").toLowerCase())}
+          <input value={templateId} onChange={(e) => setTemplateId(e.target.value.replace(/\s+/g, "_").toLowerCase())}
             placeholder="e.g. villa_3bed_standard"
-            style={{
-              width: "100%", fontSize: 12, padding: "8px 11px", borderRadius: 9,
-              border: "1.5px solid #e5e7eb", boxSizing: "border-box",
-              fontFamily: "monospace", outline: "none",
-            }}
-          />
+            style={{ width: "100%", fontSize: 12, padding: "8px 11px", borderRadius: 9, border: "1.5px solid #e5e7eb", boxSizing: "border-box", fontFamily: "monospace", outline: "none" }} />
         </div>
 
         <div style={{ marginBottom: 20 }}>
           <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>Icon</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {ICON_OPTIONS.map((ic) => (
-              <button
-                key={ic}
-                type="button"
-                onClick={() => setIcon(ic)}
-                style={{
-                  fontSize: 20, width: 40, height: 40, borderRadius: 9, cursor: "pointer",
-                  border: icon === ic ? "2.5px solid #6366f1" : "1.5px solid #e5e7eb",
-                  background: icon === ic ? "#eef2ff" : "#f9fafb",
-                  transition: "all .12s",
-                }}
-              >{ic}</button>
+              <button key={ic} type="button" onClick={() => setIcon(ic)} style={{
+                fontSize: 20, width: 40, height: 40, borderRadius: 9, cursor: "pointer",
+                border: icon === ic ? "2.5px solid #6366f1" : "1.5px solid #e5e7eb",
+                background: icon === ic ? "#eef2ff" : "#f9fafb", transition: "all .12s",
+              }}>{ic}</button>
             ))}
           </div>
         </div>
 
-        <div style={{
-          padding: "12px 14px", borderRadius: 10,
-          background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: 18,
-        }}>
+        <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: 18 }}>
           <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: .4 }}>
             Spaces to include ({resolvableSpaces.length} of {spaces.length})
           </p>
           {resolvableSpaces.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 12, color: "#ef4444" }}>
-              ⚠️ No template-backed spaces found. Add rooms from the palette first.
-            </p>
+            <p style={{ margin: 0, fontSize: 12, color: "#ef4444" }}>⚠️ No template-backed spaces found. Add rooms from the palette first.</p>
           ) : (
             resolvableSpaces.map((s) => (
               <div key={s.instanceId} style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 5 }}>
@@ -1169,44 +1135,25 @@ function SaveAsGeneralModal({
         </div>
 
         {error && (
-          <div style={{
-            padding: "10px 14px", borderRadius: 9, background: "#fef2f2",
-            border: "1px solid #fecaca", marginBottom: 16,
-            fontSize: 12, color: "#b91c1c", lineHeight: 1.5,
-          }}>
+          <div style={{ padding: "10px 14px", borderRadius: 9, background: "#fef2f2", border: "1px solid #fecaca", marginBottom: 16, fontSize: 12, color: "#b91c1c", lineHeight: 1.5 }}>
             {error}
           </div>
         )}
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!canSubmit}
-            style={{
-              flex: 1, padding: "12px", borderRadius: 10, border: "none",
-              background: canSubmit
-                ? "linear-gradient(135deg, #4f46e5, #7c3aed)"
-                : "#e5e7eb",
-              color: canSubmit ? "#fff" : "#9ca3af",
-              fontWeight: 800, fontSize: 14,
-              cursor: canSubmit ? "pointer" : "not-allowed",
-              boxShadow: canSubmit ? "0 4px 14px #6366f155" : "none",
-              transition: "all .15s",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            }}
-          >
+          <button type="button" onClick={handleSave} disabled={!canSubmit} style={{
+            flex: 1, padding: "12px", borderRadius: 10, border: "none",
+            background: canSubmit ? "linear-gradient(135deg, #4f46e5, #7c3aed)" : "#e5e7eb",
+            color: canSubmit ? "#fff" : "#9ca3af",
+            fontWeight: 800, fontSize: 14,
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            boxShadow: canSubmit ? "0 4px 14px #6366f155" : "none",
+            transition: "all .15s",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}>
             {saving ? <><Spin size={14} color="#fff" /> Saving…</> : "🌐 Publish Template"}
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: "12px 18px", borderRadius: 10,
-              border: "1.5px solid #e5e7eb", background: "#fff",
-              cursor: "pointer", fontSize: 14, color: "#374151", fontWeight: 600,
-            }}
-          >Cancel</button>
+          <button type="button" onClick={onClose} style={{ padding: "12px 18px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", cursor: "pointer", fontSize: 14, color: "#374151", fontWeight: 600 }}>Cancel</button>
         </div>
       </div>
     </div>
@@ -1295,20 +1242,9 @@ function StepSpaces({
           <button type="button" onClick={onSaveAs} disabled={savingTemplate || spaces.length === 0} style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1px solid #6366f1", background: "#eef2ff", cursor: spaces.length > 0 ? "pointer" : "not-allowed", fontWeight: 600, color: "#4338ca" }}>📋 Save As</button>
         )}
         {canSaveGeneral && (
-          <button
-            type="button"
-            onClick={onOpenGeneralModal}
-            disabled={spaces.length === 0}
+          <button type="button" onClick={onOpenGeneralModal} disabled={spaces.length === 0}
             title="Publish as a general template visible to all users"
-            style={{
-              fontSize: 13, padding: "8px 14px", borderRadius: 8,
-              border: "1.5px solid #6366f1",
-              background: spaces.length > 0 ? "#eef2ff" : "#f9fafb",
-              cursor: spaces.length > 0 ? "pointer" : "not-allowed",
-              fontWeight: 700,
-              color: spaces.length > 0 ? "#4338ca" : "#c7d2fe",
-            }}
-          >🌐 General</button>
+            style={{ fontSize: 13, padding: "8px 14px", borderRadius: 8, border: "1.5px solid #6366f1", background: spaces.length > 0 ? "#eef2ff" : "#f9fafb", cursor: spaces.length > 0 ? "pointer" : "not-allowed", fontWeight: 700, color: spaces.length > 0 ? "#4338ca" : "#c7d2fe" }}>🌐 General</button>
         )}
         {(templateSaveMsg || generalTemplateSaved) && (
           <span style={{ fontSize: 12, alignSelf: "center", color: (templateSaveMsg || generalTemplateSaved).includes("✓") ? "#166534" : (generalTemplateSaved ? "#4338ca" : "#9ca3af") }}>
@@ -1346,12 +1282,7 @@ function StepSpaces({
       )}
 
       {spaces.length > 0 && (
-        <TotalAreaScaler
-          spaces={spaces}
-          unit={unit}
-          currentNet={totals.net}
-          onScale={setSpaces}
-        />
+        <TotalAreaScaler spaces={spaces} unit={unit} currentNet={totals.net} onScale={setSpaces} />
       )}
 
       {spaces.length > 0 ? (
@@ -1388,8 +1319,7 @@ function StepSpaces({
 
       {paletteOpen && (
         <PaletteDrawer spaceTemplates={spaceTemplates}
-          onAdd={addFromTemplate}
-          onCustom={() => setCustomModalOpen(true)}
+          onAdd={addFromTemplate} onCustom={() => setCustomModalOpen(true)}
           onClose={() => setPaletteOpen(false)} />
       )}
       {customModalOpen && (
@@ -1458,19 +1388,9 @@ function StepSummary({
           <button type="button" onClick={onSaveAs} disabled={savingTemplate} style={{ fontSize: 13, padding: "7px 12px", borderRadius: 8, border: "1px solid #6366f1", background: "#eef2ff", cursor: "pointer", fontWeight: 600, color: "#4338ca" }}>📋 Save As</button>
         )}
         {canSaveGeneral && (
-          <button
-            type="button"
-            onClick={onOpenGeneralModal}
+          <button type="button" onClick={onOpenGeneralModal}
             title="Publish as a general template visible to all users"
-            style={{
-              fontSize: 13, padding: "7px 12px", borderRadius: 8,
-              border: "1.5px solid #6366f1",
-              background: "#eef2ff",
-              cursor: "pointer",
-              fontWeight: 700,
-              color: "#4338ca",
-            }}
-          >🌐 General</button>
+            style={{ fontSize: 13, padding: "7px 12px", borderRadius: 8, border: "1.5px solid #6366f1", background: "#eef2ff", cursor: "pointer", fontWeight: 700, color: "#4338ca" }}>🌐 General</button>
         )}
         {(templateSaveMsg || generalTemplateSaved) && (
           <span style={{ fontSize: 12, alignSelf: "center", color: (generalTemplateSaved || templateSaveMsg).includes("✓") ? "#166534" : (generalTemplateSaved ? "#4338ca" : "#9ca3af") }}>
@@ -1480,10 +1400,7 @@ function StepSummary({
       </div>
 
       {rateStatus && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
-          padding: "12px 14px", borderRadius: 10, background: "#f9fafb", border: "1px solid #e5e7eb",
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 14px", borderRadius: 10, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
           <RateBadge source={rateStatus.source} />
           <span style={{ fontSize: 12, color: "#6b7280", flex: 1 }}>{rateStatus.label}</span>
           <strong style={{ fontSize: 16, color: "#d97706", fontFamily: "monospace", letterSpacing: -0.5 }}>
@@ -1495,10 +1412,7 @@ function StepSummary({
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <p style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: .5, margin: "0 0 2px" }}>Area Breakdown</p>
         {rows.map((r) => (
-          <div key={r.label} style={{
-            display: "flex", alignItems: "center", gap: 8, padding: "11px 14px", borderRadius: 9,
-            background: r.bg, border: r.bold ? "1.5px solid #fcd34d" : "1px solid #e5e7eb",
-          }}>
+          <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 14px", borderRadius: 9, background: r.bg, border: r.bold ? "1.5px solid #fcd34d" : "1px solid #e5e7eb" }}>
             <span style={{ flex: 1, fontSize: 13, fontWeight: r.bold ? 700 : 400, color: r.color }}>
               {r.label}
               <InfoBox icon="📐" title={r.label.replace(/^[+=] /, "")} body={r.hint} />
@@ -1560,11 +1474,7 @@ function StepSummary({
           {spaces.map((s, i) => {
             const meta = CATEGORY_META[s.category];
             return (
-              <div key={s.instanceId} style={{
-                display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
-                borderBottom: i < spaces.length - 1 ? "1px solid #f3f4f6" : "none",
-                background: i % 2 === 0 ? "#fff" : "#fafafa",
-              }}>
+              <div key={s.instanceId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: i < spaces.length - 1 ? "1px solid #f3f4f6" : "none", background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
                 <span style={{ fontSize: 16 }}>{s.icon}</span>
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "#374151" }}>{s.name}</span>
                 <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 20, background: meta.bg, color: meta.badge, fontWeight: 700, border: `1px solid ${meta.border}` }}>{meta.label}</span>
@@ -1624,14 +1534,11 @@ export default function App() {
   const [loadingStates, setLoadingStates] = useState(false);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
 
-  // FIX: Use a ref instead of state for pending location.
-  // A ref is always read at call-time so it is never stale inside useEffect
-  // closures, and it doesn't cause unnecessary re-renders.
   const pendingLocationRef = useRef<{ stateId: number; placeId: number } | null>(null);
 
-  // Project settings
-  const [finishLevel,   setFinishLevel]   = useState("unknown");
-  const [occupancyType, setOccupancyType] = useState("unknown");
+  // Project settings — empty until API responds
+  const [finishLevel,   setFinishLevel]   = useState("");
+  const [occupancyType, setOccupancyType] = useState("");
   const [wall, setWall] = useState(10);
   const [circ, setCirc] = useState(15);
   const [unit, setUnit] = useState<UnitKey>("sqft");
@@ -1662,6 +1569,87 @@ export default function App() {
   // General template modal
   const [generalModalOpen,     setGeneralModalOpen]     = useState(false);
   const [generalTemplateSaved, setGeneralTemplateSaved] = useState("");
+
+  // ── Rate options ───────────────────────────────────────────
+  // globalRateOptions: all surveyed types across the whole database (no place filter)
+  // placeRateOptions: surveyed types for the selected place specifically
+  // When a place is selected and has data, we show placeRateOptions (narrower).
+  // When no place is selected or place has no data, fall back to globalRateOptions.
+  const [globalRateOptions,   setGlobalRateOptions]   = useState<ApiRateOptions | null>(null);
+  const [placeRateOptions,    setPlaceRateOptions]     = useState<ApiRateOptions | null>(null);
+  const [loadingGlobalOptions, setLoadingGlobalOptions] = useState(true);
+  const [loadingPlaceOptions,  setLoadingPlaceOptions]  = useState(false);
+
+  // Combined loading flag passed to StepProjectType
+  const loadingOptions = loadingGlobalOptions || loadingPlaceOptions;
+
+  // Effective options: use place-specific when available and non-empty, else global
+  const effectiveRateOptions = useMemo(() => {
+    const hasPlaceData =
+      placeRateOptions &&
+      (placeRateOptions.finish_levels.length > 0 || placeRateOptions.occupancy_types.length > 0);
+    return hasPlaceData ? placeRateOptions : globalRateOptions;
+  }, [placeRateOptions, globalRateOptions]);
+
+  // Whether the shown options are place-specific (used for the info badge in Step 2)
+  const placeHasData =
+    !!placeRateOptions &&
+    (placeRateOptions.finish_levels.length > 0 || placeRateOptions.occupancy_types.length > 0);
+
+  // ── Emoji/hint decoration maps — purely client-side display ──
+  const FINISH_LEVEL_META: Record<string, { emoji: string; hint: string }> = {
+    unknown:  { emoji: "🤷", hint: "We'll use the area average" },
+    basic:    { emoji: "🪨", hint: "Plain plaster, simple tiles" },
+    standard: { emoji: "🧱", hint: "Branded tiles, modular kitchen" },
+    premium:  { emoji: "✨", hint: "Imported materials, false ceiling" },
+    luxury:   { emoji: "💎", hint: "Marble, designer fittings" },
+  };
+
+  const OCCUPANCY_TYPE_EMOJI: Record<string, string> = {
+    unknown:       "🤷",
+    residential:   "🏠",
+    commercial:    "🏢",
+    institutional: "🏫",
+    industrial:    "🏭",
+    mixed:         "🏙️",
+  };
+
+  // Derived finish levels — sourced from effectiveRateOptions, decorated client-side
+  const finishLevels = useMemo(() => {
+    if (!effectiveRateOptions) return [];
+    return effectiveRateOptions.finish_levels.map((f) => ({
+      ...f,
+      emoji: FINISH_LEVEL_META[f.value]?.emoji ?? "🏗️",
+      hint:  FINISH_LEVEL_META[f.value]?.hint  ?? "",
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveRateOptions]);
+
+  // Derived occupancy types — sourced from effectiveRateOptions, decorated client-side
+  const occupancyTypes = useMemo(() => {
+    if (!effectiveRateOptions) return [];
+    return effectiveRateOptions.occupancy_types.map((o) => ({
+      ...o,
+      emoji: OCCUPANCY_TYPE_EMOJI[o.value] ?? "🏗️",
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveRateOptions]);
+
+  // Set defaults once effectiveRateOptions changes (global on mount, or place-specific on place select)
+  useEffect(() => {
+    if (!effectiveRateOptions) return;
+    const fls = effectiveRateOptions.finish_levels;
+    const ots = effectiveRateOptions.occupancy_types;
+    // Reset finish level if current value not in new options (or not yet set)
+    if (fls.length > 0 && (!finishLevel || !fls.find((f) => f.value === finishLevel))) {
+      setFinishLevel(fls[0].value);
+    }
+    // Reset occupancy type if current value not in new options (or not yet set)
+    if (ots.length > 0 && (!occupancyType || !ots.find((o) => o.value === occupancyType))) {
+      setOccupancyType(ots[0].value);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveRateOptions]);
 
   // Derived
   const selectedCountry = countries.find((c) => c.id === countryId);
@@ -1701,7 +1689,29 @@ export default function App() {
         }
       })
       .catch(console.error);
+
+    // Fetch global options (no place filter) — shows all surveyed types in DB
+    setLoadingGlobalOptions(true);
+    fetchRateOptions()
+      .then(setGlobalRateOptions)
+      .catch(console.error)
+      .finally(() => setLoadingGlobalOptions(false));
   }, []);
+
+  // ── Place-specific options: re-fetch when place changes ────
+  // This is the core of "Option B": after a place is selected we call
+  // rates/options/?place_id=X and show only what's surveyed for that city.
+  useEffect(() => {
+    if (!placeId) {
+      setPlaceRateOptions(null); // clear → fall back to global
+      return;
+    }
+    setLoadingPlaceOptions(true);
+    fetchRateOptions(placeId)
+      .then(setPlaceRateOptions)
+      .catch(() => setPlaceRateOptions(null)) // on error fall back to global
+      .finally(() => setLoadingPlaceOptions(false));
+  }, [placeId]);
 
   // ── States ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1710,7 +1720,6 @@ export default function App() {
     fetchStates(countryId)
       .then((data) => {
         setStatesList(data);
-        // Read ref at call-time — always current, never stale
         if (pendingLocationRef.current) {
           setStateId(pendingLocationRef.current.stateId);
         } else {
@@ -1721,7 +1730,7 @@ export default function App() {
       .catch(console.error)
       .finally(() => setLoadingStates(false));
 
-    fetchAreaRate({ countryId, category: rateCategory, finishLevel: finishLevel !== "unknown" ? finishLevel : undefined })
+    fetchAreaRate({ countryId, category: rateCategory, finishLevel: finishLevel || undefined })
       .then(setCountryAvgRate)
       .catch(() => setCountryAvgRate(null));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1734,10 +1743,9 @@ export default function App() {
     fetchPlaces(stateId)
       .then((data) => {
         setPlacesList(data);
-        // Read ref at call-time — always current, never stale
         if (pendingLocationRef.current) {
           setPlaceId(pendingLocationRef.current.placeId);
-          pendingLocationRef.current = null; // consumed
+          pendingLocationRef.current = null;
         } else {
           setPlaceId(null);
         }
@@ -1748,16 +1756,12 @@ export default function App() {
 
   // ── Rate lookup ────────────────────────────────────────────
   useEffect(() => {
-    if (!placeId) {
-      setApiRate(null);
-      setRateStatus(null);
-      return;
-    }
+    if (!placeId) { setApiRate(null); setRateStatus(null); return; }
     setLoadingRate(true);
     fetchRateLookup(
       placeId, rateCategory,
-      finishLevel !== "unknown" ? finishLevel : undefined,
-      occupancyType !== "unknown" ? occupancyType : undefined,
+      finishLevel   && finishLevel   !== "unknown" ? finishLevel   : undefined,
+      occupancyType && occupancyType !== "unknown" ? occupancyType : undefined,
     )
       .then((data) => {
         setApiRate(data.effective_rate);
@@ -1824,7 +1828,6 @@ export default function App() {
     finally { setSavingTemplate(false); }
   }
 
-  // ── General template saved callback ───────────────────────
   function handleGeneralTemplateSaved(tpl: ApiProjectTemplate) {
     setProjectTemplates((prev) => [...prev, toProjectTemplate(tpl)]);
     setGeneralModalOpen(false);
@@ -1833,10 +1836,6 @@ export default function App() {
   }
 
   // ── CSV import ─────────────────────────────────────────────
-  // FIX: If countryId is already the same as the imported value, the states
-  // useEffect won't re-fire (React bails on same-value state updates).
-  // In that case we set stateId directly — the places useEffect will then
-  // fire and consume pendingLocationRef to set placeId.
   const handleCsvImport = useCallback((
     payload: ImportPayload & {
       countryId?: number | null;
@@ -1854,27 +1853,18 @@ export default function App() {
     setTemplateSaveMsg("");
 
     if (payload.countryId && payload.stateId && payload.placeId) {
-      // Store destination in a ref so effects always read the latest value
       pendingLocationRef.current = {
         stateId: payload.stateId,
         placeId: payload.placeId,
       };
-
       if (countryId === payload.countryId) {
-        // Country hasn't changed → states useEffect won't re-fire.
-        // Drive the cascade manually: set stateId directly, which will
-        // trigger the places useEffect, which will consume pendingLocationRef.
         setStateId(payload.stateId);
       } else {
-        // Different country → setting countryId will trigger the states
-        // useEffect, which will read pendingLocationRef and set stateId,
-        // then the places useEffect will set placeId.
         setCountryId(payload.countryId);
       }
     }
 
     setStep("spaces");
-  // countryId is a dependency because we compare against it inside
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [countryId]);
 
@@ -1975,6 +1965,10 @@ export default function App() {
 
         {step === "project-type" && (
           <StepProjectType
+            finishLevels={finishLevels}
+            occupancyTypes={occupancyTypes}
+            loadingOptions={loadingOptions}
+            placeHasData={placeHasData}
             finishLevel={finishLevel} setFinishLevel={setFinishLevel}
             occupancyType={occupancyType} setOccupancyType={setOccupancyType}
             wall={wall} setWall={setWall} circ={circ} setCirc={setCirc}
