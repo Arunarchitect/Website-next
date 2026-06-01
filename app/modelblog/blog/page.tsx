@@ -22,6 +22,18 @@ import {
 
 type Theme = "dark" | "light";
 
+const MALAYALAM_FONT = "'Noto Sans Malayalam', 'Manjari', 'AnjaliOldLipi', system-ui, sans-serif";
+const BODY_FONT = "'DM Sans', system-ui, sans-serif";
+const DISPLAY_FONT = "'Playfair Display', Georgia, serif";
+
+function fontForLanguage(language: LanguageCode): string {
+  return language === "ml" ? MALAYALAM_FONT : BODY_FONT;
+}
+
+function headingFontForLanguage(language: LanguageCode): string {
+  return language === "ml" ? MALAYALAM_FONT : DISPLAY_FONT;
+}
+
 function isLanguageCode(v: string | null): v is LanguageCode {
   return v === "en" || v === "ml" || v === "hi" || v === "ta";
 }
@@ -266,7 +278,7 @@ function FeaturedCard({ post, index, theme, language, isAdmin }: FeaturedCardPro
               ? "text-stone-100 group-hover:text-amber-300"
               : "text-stone-900 group-hover:text-amber-700"
           }`}
-          style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+          style={{ fontFamily: headingFontForLanguage(language) }}
         >
           {title}
         </h2>
@@ -359,7 +371,7 @@ function PostCard({ post, theme, language, isAdmin }: PostCardProps) {
               ? "text-stone-200 group-hover:text-amber-300"
               : "text-stone-900 group-hover:text-amber-700"
           }`}
-          style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+          style={{ fontFamily: headingFontForLanguage(language) }}
         >
           {title}
         </h3>
@@ -478,14 +490,13 @@ export default function ModelBlogPage() {
   return (
     <div
       className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"}`}
-      style={{
-        fontFamily: language === "ml"
-          ? "'Noto Sans Malayalam', system-ui, sans-serif"
-          : "'DM Sans', system-ui, sans-serif",
-      }}
+      style={{  fontFamily:
+    language === "ml"
+      ? "'Noto Sans Malayalam', 'Manjari', 'AnjaliOldLipi', system-ui, sans-serif"
+      : "'DM Sans', system-ui, sans-serif", }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=Noto+Sans+Malayalam:wght@300;400;500;600;700&display=swap');
         .line-clamp-2 { display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden; }
       `}</style>
 
@@ -495,7 +506,7 @@ export default function ModelBlogPage() {
           <div>
             <span
               className={`text-xl font-bold tracking-tight ${isDark ? "text-stone-100" : "text-stone-900"}`}
-              style={{ fontFamily: language === "ml" ? "'Noto Sans Malayalam', system-ui, sans-serif" : "'Playfair Display', Georgia, serif" }}
+              style={{ fontFamily: headingFontForLanguage(language) }}
             >
               Model<span className="text-amber-500">Blog</span>
             </span>

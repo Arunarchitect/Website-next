@@ -30,6 +30,18 @@ import {
 
 type Theme = "dark" | "light";
 
+const MALAYALAM_FONT = "'Noto Sans Malayalam', 'Manjari', 'AnjaliOldLipi', system-ui, sans-serif";
+const BODY_FONT = "'DM Sans', system-ui, sans-serif";
+const DISPLAY_FONT = "'Playfair Display', Georgia, serif";
+
+function fontForLanguage(language: LanguageCode): string {
+  return language === "ml" ? MALAYALAM_FONT : BODY_FONT;
+}
+
+function headingFontForLanguage(language: LanguageCode): string {
+  return language === "ml" ? MALAYALAM_FONT : DISPLAY_FONT;
+}
+
 interface PageProps {
   params: Promise<{ slug: string }>;
 }
@@ -81,7 +93,11 @@ function parseRefText(raw: string): TextSegment[] {
     if (match.index > cursor) {
       segments.push({ kind: "plain", text: raw.slice(cursor, match.index) });
     }
-    segments.push({ kind: "ref", marker: parseInt(match[1], 10), text: match[2] });
+    segments.push({
+      kind: "ref",
+      marker: parseInt(match[1], 10),
+      text: match[2],
+    });
     cursor = match.index + match[0].length;
   }
   if (cursor < raw.length) {
@@ -103,7 +119,9 @@ function renderRichText(
   if (segments.length === 1 && segments[0].kind === "plain") return <>{raw}</>;
 
   const markerToLabel: Record<number, string> = {};
-  sources?.forEach((s, i) => { markerToLabel[i + 1] = s.label; });
+  sources?.forEach((s, i) => {
+    markerToLabel[i + 1] = s.label;
+  });
 
   return (
     <>
@@ -113,9 +131,15 @@ function renderRichText(
         ) : (
           <RefSpan
             key={i}
-            marker={(seg as { kind: "ref"; marker: number; text: string }).marker}
+            marker={
+              (seg as { kind: "ref"; marker: number; text: string }).marker
+            }
             text={(seg as { kind: "ref"; marker: number; text: string }).text}
-            sourceLabel={markerToLabel[(seg as { kind: "ref"; marker: number; text: string }).marker]}
+            sourceLabel={
+              markerToLabel[
+                (seg as { kind: "ref"; marker: number; text: string }).marker
+              ]
+            }
             theme={theme}
           />
         ),
@@ -128,7 +152,13 @@ function renderRichText(
 // Shared atoms
 // ---------------------------------------------------------------------------
 
-function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
+function ThemeToggle({
+  theme,
+  onToggle,
+}: {
+  theme: Theme;
+  onToggle: () => void;
+}) {
   const isDark = theme === "dark";
   return (
     <button
@@ -151,7 +181,13 @@ function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }
   );
 }
 
-function AuthorPip({ author, size = "sm" }: { author: Author; size?: "sm" | "lg" }) {
+function AuthorPip({
+  author,
+  size = "sm",
+}: {
+  author: Author;
+  size?: "sm" | "lg";
+}) {
   const dim = size === "lg" ? "h-12 w-12 text-base" : "h-7 w-7 text-xs";
   return (
     <span
@@ -165,22 +201,24 @@ function AuthorPip({ author, size = "sm" }: { author: Author; size?: "sm" | "lg"
 }
 
 const ROLE_DARK: Record<AuthorRole, string> = {
-  Eminent:   "bg-amber-900/40 text-amber-300 border border-amber-700/40",
+  Eminent: "bg-amber-900/40 text-amber-300 border border-amber-700/40",
   Editorial: "bg-sky-900/40 text-sky-300 border border-sky-700/40",
-  Guest:     "bg-emerald-900/40 text-emerald-300 border border-emerald-700/40",
-  Staff:     "bg-stone-800 text-stone-400 border border-stone-700",
+  Guest: "bg-emerald-900/40 text-emerald-300 border border-emerald-700/40",
+  Staff: "bg-stone-800 text-stone-400 border border-stone-700",
 };
 const ROLE_LIGHT: Record<AuthorRole, string> = {
-  Eminent:   "bg-amber-100 text-amber-800 border border-amber-300",
+  Eminent: "bg-amber-100 text-amber-800 border border-amber-300",
   Editorial: "bg-sky-100 text-sky-800 border border-sky-300",
-  Guest:     "bg-emerald-100 text-emerald-800 border border-emerald-300",
-  Staff:     "bg-stone-100 text-stone-600 border border-stone-300",
+  Guest: "bg-emerald-100 text-emerald-800 border border-emerald-300",
+  Staff: "bg-stone-100 text-stone-600 border border-stone-300",
 };
 
 function RoleBadge({ role, theme }: { role: AuthorRole; theme: Theme }) {
   const s = theme === "dark" ? ROLE_DARK : ROLE_LIGHT;
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${s[role]}`}>
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${s[role]}`}
+    >
       {role}
     </span>
   );
@@ -205,7 +243,9 @@ function ReadingProgress({ theme }: { theme: Theme }) {
   }, []);
 
   return (
-    <div className={`fixed left-0 right-0 top-0 z-50 h-[3px] ${theme === "dark" ? "bg-stone-900" : "bg-stone-200"}`}>
+    <div
+      className={`fixed left-0 right-0 top-0 z-50 h-[3px] ${theme === "dark" ? "bg-stone-900" : "bg-stone-200"}`}
+    >
       <div
         className="h-full bg-amber-500 transition-all duration-100"
         style={{ width: `${progress}%` }}
@@ -253,7 +293,11 @@ function FloatingEditButton({ slug, theme }: { slug: string; theme: Theme }) {
 // ---------------------------------------------------------------------------
 
 function LanguageSwitcher({
-  post, language, languages, theme, onLanguageChange,
+  post,
+  language,
+  languages,
+  theme,
+  onLanguageChange,
 }: {
   post: BlogPost;
   language: LanguageCode;
@@ -270,8 +314,12 @@ function LanguageSwitcher({
   if (available.length <= 1) return null;
 
   return (
-    <div className={`rounded-xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}>
-      <p className={`mb-3 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+    <div
+      className={`rounded-xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}
+    >
+      <p
+        className={`mb-3 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}
+      >
         Language
       </p>
       <div className="flex flex-wrap gap-2">
@@ -300,7 +348,10 @@ function LanguageSwitcher({
 // ---------------------------------------------------------------------------
 
 function RefSpan({
-  marker, text, sourceLabel, theme,
+  marker,
+  text,
+  sourceLabel,
+  theme,
 }: {
   marker: number;
   text: string;
@@ -311,7 +362,9 @@ function RefSpan({
   return (
     <a
       href={`#ref-${marker}`}
-      title={sourceLabel ? `[${marker}] ${sourceLabel}` : `Reference [${marker}]`}
+      title={
+        sourceLabel ? `[${marker}] ${sourceLabel}` : `Reference [${marker}]`
+      }
       className={`rounded-sm font-semibold transition-colors ${
         isDark
           ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500/30"
@@ -320,7 +373,9 @@ function RefSpan({
       style={{ textDecoration: "none" }}
     >
       {text}
-      <sup className={`ml-[1px] font-mono text-[10px] font-bold ${isDark ? "text-amber-400" : "text-amber-600"}`}>
+      <sup
+        className={`ml-[1px] font-mono text-[10px] font-bold ${isDark ? "text-amber-400" : "text-amber-600"}`}
+      >
         [{marker}]
       </sup>
     </a>
@@ -332,7 +387,10 @@ function RefSpan({
 // ---------------------------------------------------------------------------
 
 function ArticleImage({
-  image, theme, language, sources,
+  image,
+  theme,
+  language,
+  sources,
 }: {
   image: BlogImage;
   theme: Theme;
@@ -341,24 +399,32 @@ function ArticleImage({
 }) {
   const isDark = theme === "dark";
   const isPortrait = image.orientation === "portrait";
-  const captionText   = image.caption[language]   ?? image.caption.en   ?? "";
+  const captionText = image.caption[language] ?? image.caption.en ?? "";
   const referenceText = image.reference[language] ?? image.reference.en ?? "";
 
   return (
     <figure className={`my-9 ${isPortrait ? "mx-auto max-w-md" : "w-full"}`}>
-      <div className={`overflow-hidden rounded-2xl border ${isDark ? "border-stone-800 bg-stone-900" : "border-stone-200 bg-white shadow-sm"}`}>
+      <div
+        className={`overflow-hidden rounded-2xl border ${isDark ? "border-stone-800 bg-stone-900" : "border-stone-200 bg-white shadow-sm"}`}
+      >
         <img
           src={image.src}
           alt={image.alt[language] ?? image.alt.en}
           className={`w-full object-cover ${isPortrait ? "aspect-[4/5]" : "aspect-[16/9]"}`}
         />
       </div>
-      <figcaption className={`mt-3 border-l-2 border-amber-600 pl-3 text-sm leading-6 ${isDark ? "text-stone-400" : "text-stone-600"}`}>
+      <figcaption
+        className={`mt-3 border-l-2 border-amber-600 pl-3 text-sm leading-6 ${isDark ? "text-stone-400" : "text-stone-600"}`}
+      >
         {captionText && (
-          <span className="block">{renderRichText(captionText, theme, sources)}</span>
+          <span className="block">
+            {renderRichText(captionText, theme, sources)}
+          </span>
         )}
         {referenceText && (
-          <span className={`block text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}>
+          <span
+            className={`block text-xs ${isDark ? "text-stone-600" : "text-stone-400"}`}
+          >
             {renderRichText(referenceText, theme, sources)}
           </span>
         )}
@@ -372,7 +438,9 @@ function ArticleImage({
 // ---------------------------------------------------------------------------
 
 function ParagraphBlock({
-  block, theme, sources,
+  block,
+  theme,
+  sources,
 }: {
   block: ContentBlock;
   theme: Theme;
@@ -385,7 +453,9 @@ function ParagraphBlock({
   const markerToSource = useMemo(() => {
     const inlineRefs = block.inlineRefs ?? [];
     const map: Record<number, string> = {};
-    inlineRefs.forEach((ref) => { map[ref.marker] = ref.sourceLabel; });
+    inlineRefs.forEach((ref) => {
+      map[ref.marker] = ref.sourceLabel;
+    });
     return map;
   }, [block.inlineRefs]);
 
@@ -407,7 +477,9 @@ function ParagraphBlock({
 
   if (block.type === "pullquote") {
     return (
-      <blockquote className={`my-8 border-l-4 border-amber-500 pl-6 text-xl font-medium italic leading-relaxed ${isDark ? "text-stone-300" : "text-stone-700"}`}>
+      <blockquote
+        className={`my-8 border-l-4 border-amber-500 pl-6 text-xl font-medium italic leading-relaxed ${isDark ? "text-stone-300" : "text-stone-700"}`}
+      >
         {renderSegments(text)}
       </blockquote>
     );
@@ -415,14 +487,18 @@ function ParagraphBlock({
 
   if (block.type === "callout") {
     return (
-      <div className={`my-8 rounded-xl border p-5 text-sm leading-7 ${isDark ? "border-amber-900/50 bg-amber-950/20 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+      <div
+        className={`my-8 rounded-xl border p-5 text-sm leading-7 ${isDark ? "border-amber-900/50 bg-amber-950/20 text-amber-200" : "border-amber-200 bg-amber-50 text-amber-900"}`}
+      >
         {renderSegments(text)}
       </div>
     );
   }
 
   return (
-    <p className={`mt-5 text-[1.0625rem] leading-8 ${isDark ? "text-stone-400" : "text-stone-700"}`}>
+    <p
+      className={`mt-5 text-[1.0625rem] leading-8 ${isDark ? "text-stone-400" : "text-stone-700"}`}
+    >
       {renderSegments(text)}
     </p>
   );
@@ -433,7 +509,11 @@ function ParagraphBlock({
 // ---------------------------------------------------------------------------
 
 function ContentBlockRenderer({
-  block, post, theme, language, sources,
+  block,
+  post,
+  theme,
+  language,
+  sources,
 }: {
   block: ContentBlock;
   post: BlogPost;
@@ -445,7 +525,12 @@ function ContentBlockRenderer({
     if (!block.imageId) return null;
     const img = getImageById(post, block.imageId);
     return img ? (
-      <ArticleImage image={img} theme={theme} language={language} sources={sources} />
+      <ArticleImage
+        image={img}
+        theme={theme}
+        language={language}
+        sources={sources}
+      />
     ) : null;
   }
 
@@ -457,7 +542,11 @@ function ContentBlockRenderer({
 // ---------------------------------------------------------------------------
 
 function SectionBlock({
-  section, post, theme, language, sources,
+  section,
+  post,
+  theme,
+  language,
+  sources,
 }: {
   section: BlogSection;
   post: BlogPost;
@@ -470,7 +559,7 @@ function SectionBlock({
     <section id={section.id} className="scroll-mt-24">
       <h2
         className={`mt-12 text-2xl font-bold leading-tight ${isDark ? "text-stone-100" : "text-stone-900"}`}
-        style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+        style={{ fontFamily: headingFontForLanguage(language) }}
       >
         {renderRichText(section.title, theme, sources)}
       </h2>
@@ -510,7 +599,10 @@ function SectionBlock({
 }
 
 function ArticleBody({
-  post, translation, theme, language,
+  post,
+  translation,
+  theme,
+  language,
 }: {
   post: BlogPost;
   translation: BlogTranslation;
@@ -539,7 +631,8 @@ function ArticleBody({
 // ---------------------------------------------------------------------------
 
 function HeadingSidebar({
-  translation, theme,
+  translation,
+  theme,
 }: {
   translation: BlogTranslation;
   theme: Theme;
@@ -551,7 +644,9 @@ function HeadingSidebar({
     const ids: string[] = [];
     translation.sections.forEach((s) => {
       if (s.id) ids.push(s.id);
-      (s.subheadings ?? []).forEach((sub) => { if (sub.id) ids.push(sub.id); });
+      (s.subheadings ?? []).forEach((sub) => {
+        if (sub.id) ids.push(sub.id);
+      });
     });
     ids.push("references");
 
@@ -595,8 +690,12 @@ function HeadingSidebar({
   }
 
   return (
-    <div className={`rounded-xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}>
-      <p className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+    <div
+      className={`rounded-xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}
+    >
+      <p
+        className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}
+      >
         In this article
       </p>
       <nav className="space-y-3">
@@ -606,9 +705,15 @@ function HeadingSidebar({
               {stripRefSyntax(section.title)}
             </a>
             {section.subheadings && section.subheadings.length > 0 && (
-              <div className={`mt-2 space-y-2 border-l pl-3 ${isDark ? "border-stone-800" : "border-stone-200"}`}>
+              <div
+                className={`mt-2 space-y-2 border-l pl-3 ${isDark ? "border-stone-800" : "border-stone-200"}`}
+              >
                 {section.subheadings.map((sub) => (
-                  <a key={sub.id} href={`#${sub.id}`} className={subLinkClass(sub.id)}>
+                  <a
+                    key={sub.id}
+                    href={`#${sub.id}`}
+                    className={subLinkClass(sub.id)}
+                  >
                     {stripRefSyntax(sub.title)}
                   </a>
                 ))}
@@ -630,7 +735,10 @@ function HeadingSidebar({
 
 type ReferenceStyle = "apa" | "mla";
 
-function compactDate(value?: string | null, fallbackYear?: number | null): string {
+function compactDate(
+  value?: string | null,
+  fallbackYear?: number | null,
+): string {
   if (value) {
     const d = new Date(value);
     if (!Number.isNaN(d.getTime())) {
@@ -657,7 +765,10 @@ function formatAuthorNameAPA(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length <= 1) return name.trim();
   const last = parts[parts.length - 1];
-  const initials = parts.slice(0, -1).map((p) => `${p[0]?.toUpperCase()}.`).join(" ");
+  const initials = parts
+    .slice(0, -1)
+    .map((p) => `${p[0]?.toUpperCase()}.`)
+    .join(" ");
   return `${last}, ${initials}`;
 }
 
@@ -672,14 +783,16 @@ function formatAuthorNameMLA(name: string, index: number): string {
 function formatAuthorsAPA(authors?: string[]): string {
   if (!authors || authors.length === 0) return "";
   if (authors.length === 1) return formatAuthorNameAPA(authors[0]);
-  if (authors.length === 2) return `${formatAuthorNameAPA(authors[0])}, & ${formatAuthorNameAPA(authors[1])}`;
+  if (authors.length === 2)
+    return `${formatAuthorNameAPA(authors[0])}, & ${formatAuthorNameAPA(authors[1])}`;
   return `${authors.slice(0, -1).map(formatAuthorNameAPA).join(", ")}, & ${formatAuthorNameAPA(authors[authors.length - 1])}`;
 }
 
 function formatAuthorsMLA(authors?: string[]): string {
   if (!authors || authors.length === 0) return "";
   if (authors.length === 1) return `${formatAuthorNameMLA(authors[0], 0)}.`;
-  if (authors.length === 2) return `${formatAuthorNameMLA(authors[0], 0)}, and ${authors[1]}.`;
+  if (authors.length === 2)
+    return `${formatAuthorNameMLA(authors[0], 0)}, and ${authors[1]}.`;
   return `${formatAuthorNameMLA(authors[0], 0)}, et al.`;
 }
 
@@ -693,7 +806,8 @@ function formatSourceAPA(source: Source): string {
   const title = source.title || source.label || "Untitled source";
   const authors = formatAuthorsAPA(source.authors);
   const date = yearOnly(source.publication_date, source.year ?? null);
-  const container = source.journal || source.website_name || source.publisher || "";
+  const container =
+    source.journal || source.website_name || source.publisher || "";
   const parts: string[] = [];
 
   if (authors) parts.push(`${authors} (${date}).`);
@@ -702,14 +816,25 @@ function formatSourceAPA(source: Source): string {
   parts.push(cleanSentence(title));
 
   if (source.source_type === "journal") {
-    const journalBits = [container, source.volume, source.issue ? `(${source.issue})` : ""].filter(Boolean).join(", ");
+    const journalBits = [
+      container,
+      source.volume,
+      source.issue ? `(${source.issue})` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
     if (journalBits) parts.push(cleanSentence(journalBits));
     if (source.pages) parts.push(cleanSentence(source.pages));
   } else if (container) {
     parts.push(cleanSentence(container));
   }
 
-  if (source.doi) parts.push(source.doi.startsWith("http") ? source.doi : `https://doi.org/${source.doi}`);
+  if (source.doi)
+    parts.push(
+      source.doi.startsWith("http")
+        ? source.doi
+        : `https://doi.org/${source.doi}`,
+    );
   else if (source.url) parts.push(source.url);
 
   return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
@@ -718,25 +843,31 @@ function formatSourceAPA(source: Source): string {
 function formatSourceMLA(source: Source): string {
   const title = source.title || source.label || "Untitled source";
   const authors = formatAuthorsMLA(source.authors);
-  const container = source.journal || source.website_name || source.publisher || "";
+  const container =
+    source.journal || source.website_name || source.publisher || "";
   const date = compactDate(source.publication_date, source.year ?? null);
   const parts: string[] = [];
 
   if (authors) parts.push(authors);
   parts.push(`"${title}."`);
   if (container) parts.push(cleanSentence(container));
-  if (source.publisher && source.publisher !== container) parts.push(cleanSentence(source.publisher));
+  if (source.publisher && source.publisher !== container)
+    parts.push(cleanSentence(source.publisher));
   if (date !== "n.d.") parts.push(cleanSentence(date));
   if (source.pages) parts.push(`pp. ${source.pages}.`);
   if (source.url) parts.push(source.url);
-  if (source.accessed_date) parts.push(`Accessed ${compactDate(source.accessed_date)}.`);
+  if (source.accessed_date)
+    parts.push(`Accessed ${compactDate(source.accessed_date)}.`);
 
   return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
 function formatSourceBasic(source: Source): string {
   const title = source.title || source.label || "Untitled source";
-  const meta = [source.publisher || source.website_name, source.year ? String(source.year) : ""]
+  const meta = [
+    source.publisher || source.website_name,
+    source.year ? String(source.year) : "",
+  ]
     .filter(Boolean)
     .join(", ");
   return meta ? `${title}. ${meta}.` : `${title}.`;
@@ -748,13 +879,17 @@ function sourceSupportsStyle(source: Source, style: ReferenceStyle): boolean {
 }
 
 function formattedSource(source: Source, style: ReferenceStyle): string {
-  if (style === "apa" && sourceSupportsStyle(source, "apa")) return formatSourceAPA(source);
-  if (style === "mla" && sourceSupportsStyle(source, "mla")) return formatSourceMLA(source);
+  if (style === "apa" && sourceSupportsStyle(source, "apa"))
+    return formatSourceAPA(source);
+  if (style === "mla" && sourceSupportsStyle(source, "mla"))
+    return formatSourceMLA(source);
   return formatSourceBasic(source);
 }
 
 function SourcesList({
-  post, translation, theme,
+  post,
+  translation,
+  theme,
 }: {
   post: BlogPost;
   translation: BlogTranslation;
@@ -777,7 +912,9 @@ function SourcesList({
       className={`mt-12 border-t pt-6 ${isDark ? "border-stone-800" : "border-stone-200"}`}
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+        <p
+          className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}
+        >
           References &amp; Sources
         </p>
 
@@ -803,7 +940,9 @@ function SourcesList({
         {sources.map((source, i) => {
           const compatible = sourceSupportsStyle(source, referenceStyle);
           const citationText = formattedSource(source, referenceStyle);
-          const statusText = compatible ? referenceStyle.toUpperCase() : "Basic fallback";
+          const statusText = compatible
+            ? referenceStyle.toUpperCase()
+            : "Basic fallback";
 
           return (
             <li
@@ -816,22 +955,32 @@ function SourcesList({
               }`}
             >
               <div className="flex items-start gap-3">
-                <span className={`mt-1 shrink-0 font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}>
+                <span
+                  className={`mt-1 shrink-0 font-mono text-xs font-bold ${isDark ? "text-amber-500" : "text-amber-600"}`}
+                >
                   [{i + 1}]
                 </span>
 
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
-                      compatible
-                        ? isDark ? "border-emerald-700/60 text-emerald-300" : "border-emerald-300 text-emerald-700"
-                        : isDark ? "border-stone-700 text-stone-500" : "border-stone-300 text-stone-500"
-                    }`}>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                        compatible
+                          ? isDark
+                            ? "border-emerald-700/60 text-emerald-300"
+                            : "border-emerald-300 text-emerald-700"
+                          : isDark
+                            ? "border-stone-700 text-stone-500"
+                            : "border-stone-300 text-stone-500"
+                      }`}
+                    >
                       {statusText}
                     </span>
                   </div>
 
-                  <p className={`text-sm leading-7 ${isDark ? "text-stone-400" : "text-stone-700"}`}>
+                  <p
+                    className={`text-sm leading-7 ${isDark ? "text-stone-400" : "text-stone-700"}`}
+                  >
                     {citationText}
                   </p>
 
@@ -841,7 +990,9 @@ function SourcesList({
                       target="_blank"
                       rel="noopener noreferrer"
                       className={`mt-1 inline-flex max-w-full items-center gap-1 break-all text-xs font-medium underline decoration-dashed underline-offset-4 ${
-                        isDark ? "text-amber-400 hover:text-amber-300" : "text-amber-700 hover:text-amber-800"
+                        isDark
+                          ? "text-amber-400 hover:text-amber-300"
+                          : "text-amber-700 hover:text-amber-800"
                       }`}
                     >
                       Open source link ↗
@@ -864,15 +1015,29 @@ function SourcesList({
 function AuthorBioCard({ author, theme }: { author: Author; theme: Theme }) {
   const isDark = theme === "dark";
   return (
-    <div className={`flex items-start gap-4 rounded-xl border p-4 ${isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50"}`}>
+    <div
+      className={`flex items-start gap-4 rounded-xl border p-4 ${isDark ? "border-stone-800 bg-stone-900/50" : "border-stone-200 bg-stone-50"}`}
+    >
       <AuthorPip author={author} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <span className={`text-sm font-semibold ${isDark ? "text-stone-100" : "text-stone-900"}`}>{author.name}</span>
+          <span
+            className={`text-sm font-semibold ${isDark ? "text-stone-100" : "text-stone-900"}`}
+          >
+            {author.name}
+          </span>
           <RoleBadge role={author.role} theme={theme} />
         </div>
-        <p className={`mb-1 text-xs ${isDark ? "text-stone-400" : "text-stone-600"}`}>{author.title}</p>
-        <p className={`text-xs leading-relaxed ${isDark ? "text-stone-500" : "text-stone-500"}`}>{author.bio}</p>
+        <p
+          className={`mb-1 text-xs ${isDark ? "text-stone-400" : "text-stone-600"}`}
+        >
+          {author.title}
+        </p>
+        <p
+          className={`text-xs leading-relaxed ${isDark ? "text-stone-500" : "text-stone-500"}`}
+        >
+          {author.bio}
+        </p>
       </div>
     </div>
   );
@@ -895,7 +1060,10 @@ function AdCard({ ad, theme }: { ad: AdUnit; theme: Theme }) {
           : "border-stone-200 bg-white shadow-sm hover:border-stone-400 hover:shadow-md"
       }`}
     >
-      <div className="absolute left-0 right-0 top-0 h-[2px]" style={{ background: ad.accentColor }} />
+      <div
+        className="absolute left-0 right-0 top-0 h-[2px]"
+        style={{ background: ad.accentColor }}
+      />
       <div className="mt-1 flex items-start gap-3">
         <div
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
@@ -904,8 +1072,16 @@ function AdCard({ ad, theme }: { ad: AdUnit; theme: Theme }) {
           {ad.logoInitials}
         </div>
         <div>
-          <p className={`text-sm font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}>{ad.company}</p>
-          <p className={`mt-1 text-xs leading-snug ${isDark ? "text-stone-500" : "text-stone-500"}`}>{ad.tagline}</p>
+          <p
+            className={`text-sm font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`}
+          >
+            {ad.company}
+          </p>
+          <p
+            className={`mt-1 text-xs leading-snug ${isDark ? "text-stone-500" : "text-stone-500"}`}
+          >
+            {ad.tagline}
+          </p>
         </div>
       </div>
     </a>
@@ -916,12 +1092,18 @@ function BottomAdStrip({ ads, theme }: { ads: AdUnit[]; theme: Theme }) {
   const isDark = theme === "dark";
   if (ads.length === 0) return null;
   return (
-    <section className={`mt-14 rounded-2xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}>
-      <p className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+    <section
+      className={`mt-14 rounded-2xl border p-5 ${isDark ? "border-stone-800 bg-stone-950" : "border-stone-200 bg-white shadow-sm"}`}
+    >
+      <p
+        className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}
+      >
         Sponsored
       </p>
       <div className="grid gap-4 md:grid-cols-3">
-        {ads.map((ad) => <AdCard key={ad.id} ad={ad} theme={theme} />)}
+        {ads.map((ad) => (
+          <AdCard key={ad.id} ad={ad} theme={theme} />
+        ))}
       </div>
     </section>
   );
@@ -937,22 +1119,25 @@ export default function BlogDetailPage({ params }: PageProps) {
   const searchParams = useSearchParams();
 
   const langParam = searchParams.get("lang");
-  const initialLang: LanguageCode = isLanguageCode(langParam) ? langParam : "en";
+  const initialLang: LanguageCode = isLanguageCode(langParam)
+    ? langParam
+    : "en";
 
-  const [theme, setTheme]         = useState<Theme>("dark");
-  const [language, setLanguage]   = useState<LanguageCode>(initialLang);
-  const [post, setPost]           = useState<BlogPost | null>(null);
-  const [allAds, setAllAds]       = useState<AdUnit[]>([]);
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [language, setLanguage] = useState<LanguageCode>(initialLang);
+  const [post, setPost] = useState<BlogPost | null>(null);
+  const [allAds, setAllAds] = useState<AdUnit[]>([]);
   const [languages, setLanguages] = useState<LanguageOption[]>([
     { code: "en", label: "English", nativeLabel: "English" },
   ]);
-  const [loading, setLoading]     = useState<boolean>(true);
-  const [error, setError]         = useState<string | null>(null);
-  const [isAdmin, setIsAdmin]     = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   // Detect system colour preference once on mount
   useEffect(() => {
-    if (window.matchMedia("(prefers-color-scheme: light)").matches) setTheme("light");
+    if (window.matchMedia("(prefers-color-scheme: light)").matches)
+      setTheme("light");
   }, []);
 
   // Check editor access — same probe used on the blog list page
@@ -964,8 +1149,14 @@ export default function BlogDetailPage({ params }: PageProps) {
     setLoading(true);
     setError(null);
     Promise.all([apiFetchPostDetail(slug), apiFetchAds(), apiFetchLanguages()])
-      .then(([p, ads, langs]) => { setPost(p); setAllAds(ads); setLanguages(langs); })
-      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "Unknown error"); })
+      .then(([p, ads, langs]) => {
+        setPost(p);
+        setAllAds(ads);
+        setLanguages(langs);
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : "Unknown error");
+      })
       .finally(() => setLoading(false));
   }, [slug]);
 
@@ -975,20 +1166,31 @@ export default function BlogDetailPage({ params }: PageProps) {
   }, [language, post]);
 
   const isDark = theme === "dark";
-  const ads       = useMemo(() => (post ? getAdsForPost(post, allAds) : []), [post, allAds]);
+  const ads = useMemo(
+    () => (post ? getAdsForPost(post, allAds) : []),
+    [post, allAds],
+  );
   const bottomAds = useMemo(() => allAds.slice(0, 3), [allAds]);
 
   function applyLanguage(lang: LanguageCode) {
     setLanguage(lang);
-    router.replace(`/modelblog/blog/${post!.slug}?lang=${lang}`, { scroll: false });
+    router.replace(`/modelblog/blog/${post!.slug}?lang=${lang}`, {
+      scroll: false,
+    });
   }
 
   if (loading) {
     return (
-      <div className={`flex min-h-screen items-center justify-center ${isDark ? "bg-stone-950" : "bg-stone-50"}`}>
+      <div
+        className={`flex min-h-screen items-center justify-center ${isDark ? "bg-stone-950" : "bg-stone-50"}`}
+      >
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-          <p className={`text-sm ${isDark ? "text-stone-500" : "text-stone-400"}`}>Loading article…</p>
+          <p
+            className={`text-sm ${isDark ? "text-stone-500" : "text-stone-400"}`}
+          >
+            Loading article…
+          </p>
         </div>
       </div>
     );
@@ -996,13 +1198,23 @@ export default function BlogDetailPage({ params }: PageProps) {
 
   if (error || !post) {
     return (
-      <div className={`flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center ${isDark ? "bg-stone-950 text-stone-400" : "bg-stone-50 text-stone-500"}`}>
-        <p className={`text-2xl font-bold ${isDark ? "text-stone-100" : "text-stone-900"}`}>
+      <div
+        className={`flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center ${isDark ? "bg-stone-950 text-stone-400" : "bg-stone-50 text-stone-500"}`}
+      >
+        <p
+          className={`text-2xl font-bold ${isDark ? "text-stone-100" : "text-stone-900"}`}
+        >
           {error ? "Failed to load article" : "Article not found"}
         </p>
         {error && <p className="max-w-md text-sm text-red-400">{error}</p>}
-        <p className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}>
-          The post <code className="rounded bg-stone-800/50 px-1 py-0.5 text-amber-400">{slug}</code> could not be found.
+        <p
+          className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}
+        >
+          The post{" "}
+          <code className="rounded bg-stone-800/50 px-1 py-0.5 text-amber-400">
+            {slug}
+          </code>{" "}
+          could not be found.
         </p>
         <button
           onClick={() => router.push(`/modelblog/blog?lang=${language}`)}
@@ -1014,26 +1226,36 @@ export default function BlogDetailPage({ params }: PageProps) {
     );
   }
 
-  const translation: BlogTranslation | undefined = getTranslation(post, language);
+  const translation: BlogTranslation | undefined = getTranslation(
+    post,
+    language,
+  );
 
   if (!translation) {
     return (
-      <div className={`flex min-h-screen items-center justify-center ${isDark ? "bg-stone-950 text-stone-400" : "bg-stone-50 text-stone-500"}`}>
+      <div
+        className={`flex min-h-screen items-center justify-center ${isDark ? "bg-stone-950 text-stone-400" : "bg-stone-50 text-stone-500"}`}
+      >
         No translation available for this article.
       </div>
     );
   }
 
-  const coverImage  = getCoverImage(post);
+  const coverImage = getCoverImage(post);
   const postSources = translation.sources ?? post.sources ?? [];
 
   return (
     <div
       className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"}`}
-      style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      style={{
+        fontFamily:
+          language === "ml"
+            ? "'Noto Sans Malayalam', 'Manjari', 'AnjaliOldLipi', system-ui, sans-serif"
+            : "'DM Sans', system-ui, sans-serif",
+      }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=Noto+Sans+Malayalam:wght@300;400;500;600;700&display=swap');
         li:target { animation: ref-flash 1.8s ease-out; }
         @keyframes ref-flash {
           0%   { background-color: rgba(245,158,11,0.25); }
@@ -1046,7 +1268,9 @@ export default function BlogDetailPage({ params }: PageProps) {
       {/* Floating edit button — only visible to editors */}
       {isAdmin && <FloatingEditButton slug={slug} theme={theme} />}
 
-      <header className={`sticky top-0 z-30 border-b backdrop-blur ${isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"}`}>
+      <header
+        className={`sticky top-0 z-30 border-b backdrop-blur ${isDark ? "border-stone-900 bg-stone-950/90" : "border-stone-200 bg-stone-50/90"}`}
+      >
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <button
             onClick={() => router.push(`/modelblog/blog?lang=${language}`)}
@@ -1054,7 +1278,10 @@ export default function BlogDetailPage({ params }: PageProps) {
           >
             ← All Articles
           </button>
-          <ThemeToggle theme={theme} onToggle={() => setTheme(isDark ? "light" : "dark")} />
+          <ThemeToggle
+            theme={theme}
+            onToggle={() => setTheme(isDark ? "light" : "dark")}
+          />
         </div>
       </header>
 
@@ -1062,61 +1289,103 @@ export default function BlogDetailPage({ params }: PageProps) {
 
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="xl:grid xl:grid-cols-[240px_minmax(0,760px)_280px] xl:gap-8 xl:items-start">
-
           <aside className="hidden xl:block self-start sticky top-[52px] max-h-[calc(100vh-64px)] overflow-y-auto space-y-4 pb-4">
-            <LanguageSwitcher post={post} language={language} languages={languages} theme={theme} onLanguageChange={applyLanguage} />
+            <LanguageSwitcher
+              post={post}
+              language={language}
+              languages={languages}
+              theme={theme}
+              onLanguageChange={applyLanguage}
+            />
             <HeadingSidebar translation={translation} theme={theme} />
           </aside>
 
           <article className="min-w-0">
-            <p className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}>
+            <p
+              className={`mb-4 text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-stone-500" : "text-stone-400"}`}
+            >
               {post.category}
             </p>
             <h1
               className={`mb-4 text-3xl font-bold leading-tight sm:text-4xl md:text-5xl ${isDark ? "text-stone-50" : "text-stone-900"}`}
-              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+              style={{ fontFamily: headingFontForLanguage(language) }}
             >
               {renderRichText(translation.title, theme, postSources)}
             </h1>
-            <p className={`mb-8 text-lg leading-relaxed ${isDark ? "text-stone-400" : "text-stone-600"}`}>
+            <p
+              className={`mb-8 text-lg leading-relaxed ${isDark ? "text-stone-400" : "text-stone-600"}`}
+            >
               {renderRichText(translation.subtitle, theme, postSources)}
             </p>
 
             <div className="mb-8 xl:hidden">
-              <LanguageSwitcher post={post} language={language} languages={languages} theme={theme} onLanguageChange={applyLanguage} />
+              <LanguageSwitcher
+                post={post}
+                language={language}
+                languages={languages}
+                theme={theme}
+                onLanguageChange={applyLanguage}
+              />
             </div>
 
-            <div className={`mb-10 flex flex-wrap items-center gap-4 border-y py-4 ${isDark ? "border-stone-800" : "border-stone-200"}`}>
+            <div
+              className={`mb-10 flex flex-wrap items-center gap-4 border-y py-4 ${isDark ? "border-stone-800" : "border-stone-200"}`}
+            >
               <div className="flex items-center gap-2">
                 <div className="flex -space-x-2">
-                  {post.authors.map((a) => <AuthorPip key={a.id} author={a} />)}
+                  {post.authors.map((a) => (
+                    <AuthorPip key={a.id} author={a} />
+                  ))}
                 </div>
-                <span className={`text-sm ${isDark ? "text-stone-400" : "text-stone-600"}`}>
+                <span
+                  className={`text-sm ${isDark ? "text-stone-400" : "text-stone-600"}`}
+                >
                   {post.authors.map((a) => a.name).join(" & ")}
                 </span>
               </div>
-              <span className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}>{formatDate(post.publishedAt)}</span>
-              <span className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}>{post.readingTimeMinutes} min read</span>
+              <span
+                className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}
+              >
+                {formatDate(post.publishedAt)}
+              </span>
+              <span
+                className={`text-sm ${isDark ? "text-stone-500" : "text-stone-500"}`}
+              >
+                {post.readingTimeMinutes} min read
+              </span>
             </div>
 
             {coverImage && (
-              <ArticleImage image={coverImage} theme={theme} language={language} sources={postSources} />
+              <ArticleImage
+                image={coverImage}
+                theme={theme}
+                language={language}
+                sources={postSources}
+              />
             )}
 
-            <ArticleBody post={post} translation={translation} theme={theme} language={language} />
+            <ArticleBody
+              post={post}
+              translation={translation}
+              theme={theme}
+              language={language}
+            />
             <SourcesList post={post} translation={translation} theme={theme} />
 
             <section className="mt-10 space-y-3">
-              {post.authors.map((a) => <AuthorBioCard key={a.id} author={a} theme={theme} />)}
+              {post.authors.map((a) => (
+                <AuthorBioCard key={a.id} author={a} theme={theme} />
+              ))}
             </section>
 
             <BottomAdStrip ads={bottomAds} theme={theme} />
           </article>
 
           <aside className="hidden xl:block self-start sticky top-[52px] max-h-[calc(100vh-64px)] overflow-y-auto space-y-4 pb-4">
-            {ads.map((ad) => <AdCard key={ad.id} ad={ad} theme={theme} />)}
+            {ads.map((ad) => (
+              <AdCard key={ad.id} ad={ad} theme={theme} />
+            ))}
           </aside>
-
         </div>
       </div>
     </div>

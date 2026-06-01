@@ -19,6 +19,26 @@ import {
 
 type Theme = "dark" | "light";
 
+const MALAYALAM_FONT = "'Noto Sans Malayalam', 'Manjari', 'AnjaliOldLipi', system-ui, sans-serif";
+const BODY_FONT = "'DM Sans', system-ui, sans-serif";
+const DISPLAY_FONT = "'Playfair Display', Georgia, serif";
+
+function containsMalayalamText(value: string): boolean {
+  return /[\u0D00-\u0D7F]/.test(value);
+}
+
+function fontForLanguage(language: LanguageCode): string {
+  return language === "ml" ? MALAYALAM_FONT : BODY_FONT;
+}
+
+function fontForText(value: string): string | undefined {
+  return containsMalayalamText(value) ? MALAYALAM_FONT : undefined;
+}
+
+function headingFontForText(value: string): string {
+  return containsMalayalamText(value) ? MALAYALAM_FONT : DISPLAY_FONT;
+}
+
 interface PageProps {
   params: Promise<{ slug: string }>;
 }
@@ -364,6 +384,7 @@ function Input({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       className={`w-full rounded-lg border px-3 py-2 text-sm outline-none transition ${inputClass} ${className}`}
+      style={{ fontFamily: fontForText(value) }}
     />
   );
 }
@@ -500,7 +521,8 @@ function RefAwareField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
-        className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y font-mono ${textareaClass} ${className}`}
+        className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y ${textareaClass} ${className}`}
+        style={{ fontFamily: fontForText(value) ?? "monospace" }}
       />
       {hasRefs && (
         <p className={`text-xs italic ${isDark ? "text-stone-600" : "text-stone-400"}`}>
@@ -694,7 +716,8 @@ function RefAwareParagraphEditor({
         onChange={(e) => handleTextChange(e.target.value)}
         placeholder="Paragraph text… select a phrase then click Wrap selection to add a reference"
         rows={para.type === "text" ? 4 : 2}
-        className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y font-mono ${textareaClass}`}
+        className={`w-full rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none transition resize-y ${textareaClass}`}
+        style={{ fontFamily: fontForText(para.text) ?? "monospace" }}
       />
 
       {showRefPanel && spans.length > 0 && (
@@ -1030,7 +1053,7 @@ function SectionEditor({
       <div className="flex cursor-pointer items-center justify-between px-5 py-4" onClick={() => setOpen((v) => !v)}>
         <div className="flex items-center gap-3">
           <span className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-stone-600" : "text-stone-400"}`}>Section</span>
-          <span className={`text-base font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`} style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+          <span className={`text-base font-semibold ${isDark ? "text-stone-200" : "text-stone-800"}`} style={{ fontFamily: headingFontForText(section.title) }}>
             {section.title
               ? stripRefSyntax(section.title)
               : <span className={isDark ? "text-stone-600" : "text-stone-400"}>Untitled section</span>}
@@ -1135,7 +1158,11 @@ function TranslationEditor({
   }
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      lang={translation.language}
+      style={{ fontFamily: fontForLanguage(translation.language) }}
+    >
       <div className="grid gap-4">
         <div>
           <Label isDark={isDark}>Title</Label>
@@ -1921,9 +1948,9 @@ export default function BlogEditPage({ params }: PageProps) {
   return (
     <div
       className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-stone-950 text-stone-100" : "bg-stone-50 text-stone-900"}`}
-      style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      style={{ fontFamily: BODY_FONT }}
     >
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=Noto+Sans+Malayalam:wght@300;400;500;600;700&display=swap');`}</style>
 
       <header className={`sticky top-0 z-30 border-b backdrop-blur ${headerClass}`}>
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">

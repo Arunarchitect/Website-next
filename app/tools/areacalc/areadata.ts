@@ -34,6 +34,7 @@ export type CategoryKey = keyof typeof CATEGORY_META;
 
 export interface SubSpaceTemplate {
   id: string;
+  dbId?: number;          // numeric DB pk — needed when saving public project templates
   name: string;
   L: number;
   B: number;
@@ -63,6 +64,11 @@ export interface SubSpaceInstance {
 
 export interface SpaceInstance {
   instanceId: string;
+  /** Backend row id when this room was loaded from a public project template.
+   *  Needed so updating an existing public template keeps/modifies the same rows
+   *  instead of the backend clearing/replacing them incorrectly.
+   */
+  projectSpaceDbId?: number;
   templateId: string;
   name: string;
   category: CategoryKey;
@@ -77,10 +83,11 @@ export interface SpaceInstance {
 
 export interface ProjectTemplate {
   id: string;
+  dbId?: number;          // numeric DB pk — populated by toProjectTemplate(); needed for in-place public updates
   label: string;
   description: string;
   icon: string;
-  spaces: { templateId: string; floor: number; L: number; B: number; subIds: string[] }[];
+  spaces: { dbId?: number; templateId: string; floor: number; L: number; B: number; subIds: string[] }[];
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -144,6 +151,7 @@ export function makeSpaceFromTemplate(
   subIds: string[],
   overrideL?: number,
   overrideB?: number,
+  projectSpaceDbId?: number,
 ): SpaceInstance {
   const L = overrideL ?? t.L;
   const B = overrideB ?? t.B;
@@ -164,6 +172,7 @@ export function makeSpaceFromTemplate(
 
   return {
     instanceId: uid(),
+    projectSpaceDbId,
     templateId: t.id,
     name: t.name,
     category: t.category,

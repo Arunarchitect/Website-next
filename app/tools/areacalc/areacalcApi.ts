@@ -17,35 +17,6 @@ function authHeaders() {
   };
 }
 
-export interface ApiFinishLevel {
-  value: string;
-  label: string;
-}
-
-export interface ApiOccupancyType {
-  value: string;
-  label: string;
-}
-
-export interface ApiRateOptions {
-  finish_levels: ApiFinishLevel[];
-  occupancy_types: ApiOccupancyType[];
-}
-
-/**
- * Fetch finish_level and occupancy_type options that have actual approved
- * survey data.
- *
- * • No placeId  → returns all values present anywhere in the database.
- * • With placeId → returns only values present for that specific place.
- *   If the place has no survey data both arrays will be empty; the caller
- *   should fall back to the no-placeId call in that case.
- */
-export const fetchRateOptions = (placeId?: number | null) => {
-  const params = placeId ? `?place_id=${placeId}` : "";
-  return get<ApiRateOptions>(`${BASE}/rates/options/${params}`);
-};
-
 // ── API Response Types ────────────────────────────────────────
 
 export interface ApiCountry {
@@ -77,32 +48,6 @@ export interface ApiPlace {
   fallback_rate_per_sqft: string | null;
   effective_rate: number | null;
   rate_status: ApiRateStatus;
-}
-
-export interface ApiSurveyFinishBreakdown {
-  finish_level: string;
-  finish_label: string;
-  avg_rate: number;
-  sample_count: number;
-}
-
-export interface ApiSurveyCategoryBreakdown {
-  category: string;
-  category_label: string;
-  avg_rate: number;
-  sample_count: number;
-  finish_breakdown: ApiSurveyFinishBreakdown[];
-}
-
-export interface ApiRateLookup {
-  place_id: number;
-  category: string | null;
-  place_name: string;
-  state_name: string;
-  country_name: string;
-  effective_rate: number | null;
-  rate_status: ApiRateStatus;
-  survey_breakdown: ApiSurveyCategoryBreakdown[];
 }
 
 export interface ApiSubSpace {
@@ -186,6 +131,31 @@ export interface ApiCustomProjectTemplate {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ApiRateOptions {
+  finish_levels: { value: string; label: string }[];
+  occupancy_types: { value: string; label: string }[];
+}
+
+export interface ApiRateSnapshot {
+  scope: "place" | "state" | "country";
+  country_id: number;
+  state_id: number | null;
+  place_id: number | null;
+  occupancy_type: string;
+  finish_level: string;
+  avg_rate: number;
+  sample_count: number;
+}
+
+export interface FetchSnapshotParams {
+  scope?: "place" | "state" | "country";
+  country_id?: number | null;
+  state_id?: number | null;
+  place_id?: number | null;
+  occupancy_type?: string | null;
+  finish_level?: string | null;
 }
 
 // ── Admin write payload types ─────────────────────────────────
@@ -300,44 +270,63 @@ export const fetchStates = (countryId: number) =>
 export const fetchPlaces = (stateId: number) =>
   get<ApiPlace[]>(`${BASE}/geography/places/?state=${stateId}`);
 
-// ── Rate lookup ───────────────────────────────────────────────
+// ── Rate Lookup (used for rateStatus badge in summary) ────────
 
-export const fetchRateLookup = (
+export async function fetchRateLookup(
   placeId: number,
-  category?: string,
-  finishLevel?: string,
-  occupancyType?: string,
-) => {
-  const params = new URLSearchParams({ place_id: String(placeId) });
-  if (category) params.set("category", category);
-  if (finishLevel && finishLevel !== "unknown") params.set("finish_level", finishLevel);
-  if (occupancyType && occupancyType !== "unknown") params.set("occupancy_type", occupancyType);
-  return get<ApiRateLookup>(`${BASE}/rates/lookup/?${params}`);
-};
+  category?: string | null,
+  finishLevel?: string | null,
+  occupancyType?: string | null,
+): Promise<{ effective_rate: number; rate_status: ApiRateStatus }> {
+  const p = new URLSearchParams({ place_id: String(placeId) });
+  if (category)       p.set("category",        category);
+  if (finishLevel)    p.set("finish_level",     finishLevel);
+  if (occupancyType)  p.set("occupancy_type",   occupancyType);
+  return get<{ effective_rate: number; rate_status: ApiRateStatus }>(
+    `${BASE}/rates/lookup/?${p}`,
+  );
+}
 
-export async function fetchAreaRate(options: {
+// ── Area Average Rate (country-level fallback) ────────────────
+
+export async function fetchAreaRate(params: {
   countryId: number;
-  stateId?: number | null;
-  placeId?: number | null;
-  category?: string;
-  finishLevel?: string;
-  occupancyType?: string;
+  category?: string | null;
+  finishLevel?: string | null;
+  occupancyType?: string | null;
 }): Promise<number | null> {
-  const { countryId, stateId, placeId, category, finishLevel, occupancyType } = options;
-  const params = new URLSearchParams({ country: String(countryId) });
-  if (stateId)  params.set("state",  String(stateId));
-  if (placeId)  params.set("place",  String(placeId));
-  if (category) params.set("category", category);
-  if (finishLevel   && finishLevel   !== "unknown") params.set("finish_level",   finishLevel);
-  if (occupancyType && occupancyType !== "unknown") params.set("occupancy_type", occupancyType);
-  try {
-    const data = await get<{ average_rate: number | null; scope: string }>(
-      `${BASE}/rates/average/?${params}`,
-    );
-    return data.average_rate;
-  } catch {
-    return null;
-  }
+  const p = new URLSearchParams({ country: String(params.countryId) });
+  if (params.category)       p.set("category",        params.category);
+  if (params.finishLevel)    p.set("finish_level",     params.finishLevel);
+  if (params.occupancyType)  p.set("occupancy_type",   params.occupancyType);
+  const data = await get<{ average_rate: number | null; scope: string }>(
+    `${BASE}/rates/average/?${p}`,
+  );
+  return data.average_rate;
+}
+
+// ── Rate Options ──────────────────────────────────────────────
+
+export async function fetchRateOptions(placeId?: number | null): Promise<ApiRateOptions> {
+  const url = placeId
+    ? `${BASE}/rates/options/?place_id=${placeId}`
+    : `${BASE}/rates/options/`;
+  return get<ApiRateOptions>(url);
+}
+
+// ── Rate Snapshot ─────────────────────────────────────────────
+
+export async function fetchRateSnapshot(
+  params: FetchSnapshotParams,
+): Promise<ApiRateSnapshot[]> {
+  const p = new URLSearchParams();
+  if (params.scope)                  p.set("scope",          params.scope);
+  if (params.country_id)             p.set("country_id",     String(params.country_id));
+  if (params.state_id)               p.set("state_id",       String(params.state_id));
+  if (params.place_id)               p.set("place_id",       String(params.place_id));
+  if (params.occupancy_type != null) p.set("occupancy_type", params.occupancy_type);
+  if (params.finish_level   != null) p.set("finish_level",   params.finish_level);
+  return get<ApiRateSnapshot[]>(`${BASE}/rates/snapshot/?${p}`);
 }
 
 // ── Templates (read) ──────────────────────────────────────────
@@ -381,6 +370,15 @@ export const updateCustomProjectTemplate = (
 
 export const saveGeneralProjectTemplate = (payload: ProjectTemplateWritePayload) =>
   post<ApiProjectTemplate>(`${BASE}/templates/projects/`, payload);
+
+/**
+ * Update an existing public project template in-place.
+ * Used by "Save" when the user opened a public template (member/admin only).
+ */
+export const updatePublicProjectTemplate = (
+  id: number,
+  payload: Partial<ProjectTemplateWritePayload>,
+) => patch<ApiProjectTemplate>(`${BASE}/templates/projects/${id}/`, payload);
 
 // ── Admin: Space Templates ────────────────────────────────────
 
@@ -426,6 +424,7 @@ export function toSpaceTemplate(api: ApiSpaceTemplate): SpaceTemplate {
     subSpaces: (api.sub_spaces ?? []).map(
       (s): SubSpaceTemplate => ({
         id: s.sub_id,
+        dbId: s.id,
         name: s.name,
         L: parseFloat(s.default_l),
         B: parseFloat(s.default_b),
@@ -438,10 +437,12 @@ export function toSpaceTemplate(api: ApiSpaceTemplate): SpaceTemplate {
 export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
   return {
     id: api.template_id,
+    dbId: api.id,
     label: api.label,
     description: api.description,
     icon: api.icon || "🏗️",
     spaces: (api.spaces ?? []).map((s) => ({
+      dbId: s.id,
       templateId: s.space_template_id,
       floor: s.floor,
       L: parseFloat(s.effective_l),
@@ -449,4 +450,25 @@ export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
       subIds: (s.sub_ids ?? []).map((sub) => sub.sub_id),
     })),
   };
+}
+
+// ── Delete custom project template ────────────────────────────
+export const deleteCustomProjectTemplate = (id: number) =>
+  del(`${BASE}/templates/custom-projects/${id}/`);
+
+// ── Delete public project template (member/admin only) ────────
+export const deletePublicProjectTemplate = (id: number) =>
+  del(`${BASE}/templates/projects/${id}/`);
+
+// ── Check name uniqueness before save ─────────────────────────
+export async function checkCustomTemplateName(
+  label: string,
+  excludeId?: number,
+): Promise<boolean> {
+  const all = await fetchCustomProjectTemplates();
+  return all.some(
+    (t) =>
+      t.label.trim().toLowerCase() === label.trim().toLowerCase() &&
+      t.id !== excludeId,
+  );
 }
