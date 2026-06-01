@@ -1,6 +1,4 @@
 // areadata.ts — constants, types, and pure utility functions only.
-// Hardcoded LOCATION_RATES / SPACE_TEMPLATES / PROJECT_TEMPLATES removed.
-// Fetch those from the Django API via areacalcApi.ts.
 
 export const UNIT_SYSTEMS = {
   sqft: { label: "sq ft", areaLabel: "sqft", factor: 1, dimLabel: "ft", dimFactor: 1 },
@@ -34,7 +32,7 @@ export type CategoryKey = keyof typeof CATEGORY_META;
 
 export interface SubSpaceTemplate {
   id: string;
-  dbId?: number;          // numeric DB pk — needed when saving public project templates
+  dbId?: number;
   name: string;
   L: number;
   B: number;
@@ -43,14 +41,14 @@ export interface SubSpaceTemplate {
 
 export interface SpaceTemplate {
   id: string;
-  dbId?: number;          // numeric DB pk — populated by toSpaceTemplate(); needed for admin writes
+  dbId?: number;
   name: string;
   category: CategoryKey;
   L: number;
   B: number;
   icon: string;
   description: string;
-  subSpaces?: SubSpaceTemplate[];
+  subSpaces?: SubSpaceTemplate[];  // Made optional with ?
 }
 
 export interface SubSpaceInstance {
@@ -64,10 +62,6 @@ export interface SubSpaceInstance {
 
 export interface SpaceInstance {
   instanceId: string;
-  /** Backend row id when this room was loaded from a public project template.
-   *  Needed so updating an existing public template keeps/modifies the same rows
-   *  instead of the backend clearing/replacing them incorrectly.
-   */
   projectSpaceDbId?: number;
   templateId: string;
   name: string;
@@ -83,7 +77,7 @@ export interface SpaceInstance {
 
 export interface ProjectTemplate {
   id: string;
-  dbId?: number;          // numeric DB pk — populated by toProjectTemplate(); needed for in-place public updates
+  dbId?: number;
   label: string;
   description: string;
   icon: string;
@@ -183,5 +177,50 @@ export function makeSpaceFromTemplate(
     icon: t.icon,
     subSpaces,
     isCustom: false,
+  };
+}
+
+// ── Add the missing converter functions ─────────────────────
+
+export function toSpaceTemplate(
+  apiSpace: Record<string, unknown> & { sub_spaces?: Record<string, unknown>[] }
+): SpaceTemplate {
+  return {
+    id: String(apiSpace.id ?? "") || `space_${Date.now()}`,
+    dbId: apiSpace.id as number | undefined,
+    name: apiSpace.name as string,
+    category: apiSpace.category as CategoryKey,
+    L: (apiSpace.length_ft ?? apiSpace.L ?? 0) as number,
+    B: (apiSpace.breadth_ft ?? apiSpace.B ?? 0) as number,
+    icon: (apiSpace.icon as string) || "📐",
+    description: (apiSpace.description as string) || "",
+    subSpaces: (apiSpace.sub_spaces || []).map((sub) => ({
+      id: String(sub.id ?? "") || `sub_${Date.now()}`,
+      dbId: sub.id as number | undefined,
+      name: sub.name as string,
+      L: (sub.length_ft ?? sub.L ?? 0) as number,
+      B: (sub.breadth_ft ?? sub.B ?? 0) as number,
+      description: (sub.description as string) || "",
+    })),
+  };
+}
+
+export function toProjectTemplate(
+  apiTemplate: Record<string, unknown> & { spaces?: Record<string, unknown>[] }
+): ProjectTemplate {
+  return {
+    id: String(apiTemplate.template_id || apiTemplate.id || "") || `tpl_${Date.now()}`,
+    dbId: apiTemplate.id as number | undefined,
+    label: (apiTemplate.label ?? apiTemplate.name ?? "Untitled Template") as string,
+    description: (apiTemplate.description as string) || "",
+    icon: (apiTemplate.icon as string) || "🏗️",
+    spaces: (apiTemplate.spaces || []).map((space) => ({
+      dbId: space.id as number | undefined,
+      templateId: String(space.space_template ?? space.template_id ?? ""),
+      floor: (space.floor ?? 0) as number,
+      L: (space.override_l ?? space.length_ft ?? 0) as number,
+      B: (space.override_b ?? space.breadth_ft ?? 0) as number,
+      subIds: ((space.sub_ids ?? []) as number[]).map((id) => String(id)),
+    })),
   };
 }
