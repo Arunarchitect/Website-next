@@ -291,7 +291,7 @@ export default function App() {
   // ── handleSave ───────────────────────────────────────────────
   async function handleSave() {
     if (!myRole?.can_save_custom_templates && !canSavePublic) {
-      setTemplateSaveMsg("Paid plan required to save templates."); return;
+      setTemplateSaveMsg("Beta Version."); return;
     }
     if (spaces.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
 
@@ -394,7 +394,7 @@ export default function App() {
 
   // ── handleSaveAsCustom ───────────────────────────────────────
   function handleSaveAsCustom() {
-    if (!myRole?.can_save_custom_templates) { setTemplateSaveMsg("Paid plan required."); return; }
+    if (!myRole?.can_save_custom_templates) { setTemplateSaveMsg("Beta Version."); return; }
     if (spaces.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
     setSaveAsCustomOpen(true);
   }
@@ -447,7 +447,7 @@ export default function App() {
     setProjectName(tpl.label || "Untitled Project");
     setClientName((prev) => prev || "Name");
     setActiveTemplateSource(tpl.dbId != null ? { type: "public", id: tpl.dbId } : null);
-    setTemplateSaveMsg("Opened public template. Save will update this template.");
+    setTemplateSaveMsg("Opened a public template.");
   }
 
   function handleLoadCustomTemplate(tpl: ApiCustomProjectTemplate) {
