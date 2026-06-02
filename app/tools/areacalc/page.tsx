@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
-  UNIT_SYSTEMS, calcGrossArea, groupByFloor, makeSpaceFromTemplate,
+  UNIT_SYSTEMS, calcGrossArea, groupByFloor, makeSpaceFromTemplate, uid,
   type UnitKey, type SpaceTemplate, type SpaceInstance, type ProjectTemplate,
 } from "./areadata";
 import {
@@ -16,7 +16,7 @@ import {
   type ApiCountry, type ApiState, type ApiRateStatus,
   type ApiMyRole, type ApiCustomProjectTemplate,
   type ApiProjectTemplate, type ApiRateSnapshot,
-  toSpaceTemplate, toProjectTemplate, 
+  toSpaceTemplate, toProjectTemplate,
 } from "./areacalcApi";
 import { type ImportPayload } from "./SpaceRequirementCsvButton";
 import { StickyBar } from "./_components/ui";
@@ -46,6 +46,15 @@ const FINISH_LEVEL_META: Record<string, { emoji: string; label: string; hint: st
   premium:  { emoji: "✨", label: "Premium",  hint: "Imported materials, false ceiling"  },
   luxury:   { emoji: "💎", label: "Luxury",   hint: "Marble, designer fittings"         },
 };
+
+// ─── Helper: re-assign fresh instanceIds to loaded spaces ────
+function freshInstanceIds(spaces: SpaceInstance[]): SpaceInstance[] {
+  return spaces.map((s) => ({
+    ...s,
+    instanceId: uid(),
+    subSpaces: s.subSpaces.map((sub) => ({ ...sub, instanceId: uid() })),
+  }));
+}
 
 // ─── App ──────────────────────────────────────────────────────
 
@@ -81,6 +90,12 @@ export default function App() {
   // ── Spaces ───────────────────────────────────────────────────
   const [spaces, setSpaces] = useState<SpaceInstance[]>([]);
 
+  const spacesRef = useRef<SpaceInstance[]>([]);
+  useEffect(() => { spacesRef.current = spaces; }, [spaces]);
+
+  const projectNameRef = useRef<string>("Untitled Project");
+  useEffect(() => { projectNameRef.current = projectName; }, [projectName]);
+
   // ── Rate ─────────────────────────────────────────────────────
   const [rateStatus,  setRateStatus]  = useState<ApiRateStatus | null>(null);
   const [loadingRate, setLoadingRate] = useState(false);
@@ -115,7 +130,6 @@ export default function App() {
         label: OCCUPANCY_TYPE_META[s.occupancy_type]?.label ?? s.occupancy_type,
         emoji: OCCUPANCY_TYPE_META[s.occupancy_type]?.emoji ?? "🏗️",
       }));
- 
   }, [allSnapshots]);
 
   const finishLevels = useMemo(() => {
@@ -129,7 +143,6 @@ export default function App() {
         emoji: FINISH_LEVEL_META[s.finish_level]?.emoji ?? "🏗️",
         hint:  FINISH_LEVEL_META[s.finish_level]?.hint  ?? "",
       }));
-  
   }, [allSnapshots]);
 
   const snapshotRate = useMemo((): number | null => {
@@ -221,7 +234,6 @@ export default function App() {
       if (pendingLocationRef.current) setStateId(pendingLocationRef.current.stateId);
       else { setStateId(null); setPlaceId(null); }
     }).catch(console.error).finally(() => setLoadingStates(false));
- 
   }, [countryId]);
 
   useEffect(() => {
@@ -247,16 +259,14 @@ export default function App() {
   };
 
   // ── Save helpers ─────────────────────────────────────────────
-  // NOTE: always pass current projectName explicitly so the saved data
-  // reflects whatever is in the header input at save time.
   function buildSaveData(nameOverride?: string) {
     return {
-      projectName: nameOverride ?? projectName,
+      projectName: nameOverride ?? projectNameRef.current,
       clientName,
       unit,
       wall,
       circ,
-      spaces,
+      spaces: spacesRef.current,
       countryId,
       stateId,
       placeId,
@@ -265,7 +275,7 @@ export default function App() {
   }
 
   function buildPublicSpacesPayload() {
-    return spaces
+    return spacesRef.current
       .filter((s) => {
         if (s.isCustom) return false;
         const st = spaceTemplates.find((x) => x.id === s.templateId);
@@ -293,9 +303,8 @@ export default function App() {
     if (!myRole?.can_save_custom_templates && !canSavePublic) {
       setTemplateSaveMsg("Beta Version."); return;
     }
-    if (spaces.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
+    if (spacesRef.current.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
 
-    // No active template → open the right "save as" modal
     if (activeTemplateSource === null) {
       if (myRole?.can_save_custom_templates) setSaveAsCustomOpen(true);
       else if (canSavePublic) setGeneralModalOpen(true);
@@ -306,15 +315,14 @@ export default function App() {
       setSavingTemplate(true); setTemplateSaveMsg("");
 
       if (activeTemplateSource.type === "custom") {
-        // ── Update existing custom template ──────────────────────
-        // Also update the label to match the current project name in the header.
-        const newLabel = projectName.trim() || customTemplates.find((t) => t.id === activeTemplateSource.id)?.label || "Untitled";
+        const newLabel = projectNameRef.current.trim()
+          || customTemplates.find((t) => t.id === activeTemplateSource.id)?.label
+          || "Untitled";
         const updated = await updateCustomProjectTemplate(activeTemplateSource.id, {
           label: newLabel,
           data: buildSaveData(newLabel),
         });
         setCustomTemplates((prev) => prev.map((t) => t.id === activeTemplateSource.id ? updated : t));
-        // Keep projectName in sync with saved label
         setProjectName(updated.label);
         setTemplateSaveMsg("✓ Template updated.");
 
@@ -328,41 +336,28 @@ export default function App() {
           setTemplateSaveMsg("No template-backed spaces found."); return;
         }
 
-        // Use current projectName as the template label if it differs from tpl.label
-        const newLabel = projectName.trim() || tpl.label;
-        const updated = await updatePublicProjectTemplate(activeTemplateSource.id, {
+        const newLabel = projectNameRef.current.trim() || tpl.label;
+
+        // PATCH the template, then re-fetch all project templates so we always
+        // have server-computed effective_l / effective_b values.
+        await updatePublicProjectTemplate(activeTemplateSource.id, {
           template_id: tpl.id,
           label: newLabel,
           description: tpl.description,
           icon: tpl.icon,
           spaces: spacesPayload,
         });
-        const updatedTpl = toProjectTemplate(updated);
 
-        if (updatedTpl.spaces.length === 0 && spacesPayload.length > 0) {
-          setProjectTemplates((prev) => prev.map((t) =>
-            t.dbId === activeTemplateSource.id
-              ? {
-                  ...tpl,
-                  label: newLabel,
-                  spaces: spacesPayload.map((sp) => {
-                    const st = spaceTemplates.find((x) => x.dbId === sp.space_template);
-                    return {
-                      dbId: sp.id,
-                      templateId: st?.id ?? "",
-                      floor: sp.floor,
-                      L: typeof sp.override_l === "number" ? sp.override_l : (st?.L ?? 0),
-                      B: typeof sp.override_b === "number" ? sp.override_b : (st?.B ?? 0),
-                      subIds: [],
-                    };
-                  }).filter((sp) => sp.templateId),
-                }
-              : t,
-          ));
-        } else {
-          setProjectTemplates((prev) => prev.map((t) => t.dbId === activeTemplateSource.id ? updatedTpl : t));
+        const freshTemplates = await fetchProjectTemplates();
+        const updatedTpl = freshTemplates
+          .map(toProjectTemplate)
+          .find((t) => t.dbId === activeTemplateSource.id);
+
+        if (updatedTpl) {
+          setProjectTemplates((prev) =>
+            prev.map((t) => t.dbId === activeTemplateSource.id ? updatedTpl : t),
+          );
         }
-        // Sync header project name to the saved label
         setProjectName(newLabel);
         setTemplateSaveMsg("✓ Public template updated.");
       }
@@ -375,18 +370,15 @@ export default function App() {
   }
 
   // ── handleSaveAsCustomConfirm ────────────────────────────────
-  // Called when the user confirms the name in SaveAsCustomModal.
-  // The chosen label becomes the new project name in the header.
   async function handleSaveAsCustomConfirm(label: string) {
     const saved = await saveCustomProjectTemplate({
       label,
       description: "User saved",
       icon: "🏠",
-      data: buildSaveData(label),          // persist the label as projectName too
+      data: buildSaveData(label),
       source_project_template: activeTemplateSource?.type === "public" ? activeTemplateSource.id : null,
     });
     setCustomTemplates((prev) => [saved, ...prev]);
-    // ── Sync header project name to saved label ──────────────
     setProjectName(label);
     setActiveTemplateSource({ type: "custom", id: saved.id });
     setTemplateSaveMsg("✓ Saved as custom template.");
@@ -395,23 +387,21 @@ export default function App() {
   // ── handleSaveAsCustom ───────────────────────────────────────
   function handleSaveAsCustom() {
     if (!myRole?.can_save_custom_templates) { setTemplateSaveMsg("Beta Version."); return; }
-    if (spaces.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
+    if (spacesRef.current.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
     setSaveAsCustomOpen(true);
   }
 
   // ── handleSaveAsPublic ───────────────────────────────────────
   function handleSaveAsPublic() {
     if (!canSavePublic) { setTemplateSaveMsg("Member / admin role required."); return; }
-    if (spaces.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
+    if (spacesRef.current.length === 0) { setTemplateSaveMsg("Add at least one space first."); return; }
     setGeneralModalOpen(true);
   }
 
   // ── handleGeneralTemplateSaved ───────────────────────────────
-  // Called after SaveAsGeneralModal finishes — label becomes the project name.
   function handleGeneralTemplateSaved(tpl: ApiProjectTemplate) {
     const converted = toProjectTemplate(tpl);
     setProjectTemplates((prev) => [...prev, converted]);
-    // ── Sync header project name to the published template label ──
     setProjectName(tpl.label || "Untitled Project");
     setActiveTemplateSource({ type: "public", id: tpl.id });
     setGeneralModalOpen(false);
@@ -452,13 +442,14 @@ export default function App() {
 
   function handleLoadCustomTemplate(tpl: ApiCustomProjectTemplate) {
     const data = tpl.data as Partial<ReturnType<typeof buildSaveData>>;
-    // Project name: prefer data.projectName, then template label
+
     const loadedProjectName =
-      typeof data.projectName === "string" && data.projectName.trim() && data.projectName !== "Untitled Project"
+      typeof data.projectName === "string" && data.projectName.trim()
         ? data.projectName
         : tpl.label;
     setProjectName(loadedProjectName || "Untitled Project");
-    setClientName(data.clientName ?? "Name");
+
+    setClientName(data.clientName ?? "");
     if (data.unit === "sqft" || data.unit === "sqm") setUnit(data.unit);
     if (typeof data.wall === "number") setWall(data.wall);
     if (typeof data.circ === "number") setCirc(data.circ);
@@ -470,7 +461,12 @@ export default function App() {
       };
     }
     setCustomRate(typeof data.customRate === "number" ? data.customRate : null);
-    setSpaces((data.spaces as SpaceInstance[] | undefined) || []);
+
+    const loadedSpaces = Array.isArray(data.spaces)
+      ? freshInstanceIds(data.spaces as SpaceInstance[])
+      : [];
+    setSpaces(loadedSpaces);
+
     setActiveTemplateSource({ type: "custom", id: tpl.id });
     setTemplateSaveMsg("Opened custom template. Save will update this template.");
   }
@@ -493,7 +489,6 @@ export default function App() {
       else setCountryId(payload.countryId);
     }
     setStep("spaces");
- 
   }, [countryId]);
 
   // ── Shared save button props ─────────────────────────────────
@@ -517,7 +512,7 @@ export default function App() {
         body { margin: 0; background: #f5f4f1; font-family: 'Segoe UI', system-ui, sans-serif; }
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { opacity: 1; }
- 
+
         .ac-root input,
         .ac-root select,
         .ac-root textarea {
@@ -564,7 +559,6 @@ export default function App() {
               ✏️ ₹{customRate.toLocaleString("en-IN")}/sqft
             </span>
           )}
-          {/* Show which template is active */}
           {activeTemplateSource && (
             <span style={{
               fontSize: 11,

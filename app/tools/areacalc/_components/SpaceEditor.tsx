@@ -263,20 +263,70 @@ export function SubSpaceRow({ sub, onUpdate, onRemove, onCopy, unit }: {
 }
 
 // ─── SpaceCard ────────────────────────────────────────────────
+// ─── SpaceCard ────────────────────────────────────────────────
 
-export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTemplates }: {
+export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTemplates, existingNames = [] }: {
   space: SpaceInstance; onUpdate: (s: SpaceInstance) => void;
   onRemove: () => void; onCopy: () => void; unit: UnitKey; spaceTemplates: SpaceTemplate[];
+  existingNames?: string[];
 }) {
   const [expanded, setExpanded] = useState(true);
   const [addSubOpen, setAddSubOpen] = useState(false);
   const [addingCustomSub, setAddingCustomSub] = useState(false);
   const [customSubName, setCustomSubName] = useState("");
+  
+  // Name editing state
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editName, setEditName] = useState(space.name);
+  const [nameError, setNameError] = useState("");
+
   const meta = CATEGORY_META[space.category];
   const template = spaceTemplates.find((t) => t.id === space.templateId);
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   const totalArea = fmt(calcSpaceArea(space), unit);
   const mainArea = fmt(space.L * space.B, unit);
+
+  // This would need to be passed from parent to check duplicates across all spaces
+  // For now, we'll assume it's available - you'll need to add this prop
+  const allSpaceNames = spaceTemplates.map(t => t.name); // This should come from parent
+
+  function startEditing() {
+    setIsEditingName(true);
+    setEditName(space.name);
+    setNameError("");
+  }
+
+  function saveNameChange() {
+  const newName = editName.trim();
+  if (!newName) {
+    setNameError("Name cannot be empty");
+    return;
+  }
+  
+  // Check for duplicate name (excluding current space)
+  if (existingNames?.some(n => n.toLowerCase() === newName.toLowerCase())) {
+    setNameError(`"${newName}" already exists. Choose a different name.`);
+    return;
+  }
+  
+  onUpdate({ ...space, name: newName });
+  setIsEditingName(false);
+  setNameError("");
+}
+
+  function cancelEditing() {
+    setIsEditingName(false);
+    setEditName(space.name);
+    setNameError("");
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      saveNameChange();
+    } else if (e.key === "Escape") {
+      cancelEditing();
+    }
+  }
 
   function addSubFromTemplate(subId: string) {
     const subT = (template?.subSpaces ?? []).find((s) => s.id === subId);
@@ -322,7 +372,62 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
           transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
         }}>▾</button>
         <span style={{ fontSize: 20 }}>{space.icon}</span>
-        <span style={{ fontWeight: 700, fontSize: 14, color: "#111827", flex: 1, minWidth: 80 }}>{space.name}</span>
+        
+        {/* Editable name */}
+        {isEditingName ? (
+          <div style={{ flex: 1, minWidth: 80 }}>
+            <input
+              autoFocus
+              value={editName}
+              onChange={(e) => {
+                setEditName(e.target.value);
+                setNameError("");
+              }}
+              onBlur={saveNameChange}
+              onKeyDown={handleKeyDown}
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: nameError ? "1.5px solid #ef4444" : "1.5px solid #6366f1",
+                outline: "none",
+                background: "#fff",
+                color: "#111827",
+                width: "100%",
+              }}
+            />
+            {nameError && (
+              <span style={{ fontSize: 10, color: "#ef4444", display: "block", marginTop: 2 }}>
+                {nameError}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span 
+            onClick={startEditing}
+            style={{ 
+              fontWeight: 700, 
+              fontSize: 14, 
+              color: "#111827", 
+              flex: 1, 
+              minWidth: 80,
+              cursor: "pointer",
+              borderBottom: "1px dashed #e5e7eb",
+              padding: "2px 0",
+              transition: "border-color 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLSpanElement).style.borderBottomColor = "#6366f1";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLSpanElement).style.borderBottomColor = "#e5e7eb";
+            }}
+          >
+            {space.name}
+          </span>
+        )}
+        
         {space.isCustom && (
           <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 20, background: "#e5e7eb", color: "#6b7280", fontWeight: 700 }}>Custom</span>
         )}

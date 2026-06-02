@@ -504,7 +504,7 @@ export function SaveButtons({
 
   const saveLabel = savingTemplate ? "Saving…" : "💾 Save";
   const saveTitle = (() => {
-    if (!canSaveCustom && !canSavePublic) return "Paid plan required to save templates";
+    if (!canSaveCustom && !canSavePublic) return "Beta Version ";
     if (!activeTemplateSource) return "Save as a new custom template";
     if (activeTemplateSource.type === "custom") return "Update this custom template";
     if (activeTemplateSource.type === "public") return "Update this public template";

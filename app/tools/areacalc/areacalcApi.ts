@@ -279,9 +279,9 @@ export async function fetchRateLookup(
   occupancyType?: string | null,
 ): Promise<{ effective_rate: number; rate_status: ApiRateStatus }> {
   const p = new URLSearchParams({ place_id: String(placeId) });
-  if (category)       p.set("category",        category);
-  if (finishLevel)    p.set("finish_level",     finishLevel);
-  if (occupancyType)  p.set("occupancy_type",   occupancyType);
+  if (category)      p.set("category",      category);
+  if (finishLevel)   p.set("finish_level",   finishLevel);
+  if (occupancyType) p.set("occupancy_type", occupancyType);
   return get<{ effective_rate: number; rate_status: ApiRateStatus }>(
     `${BASE}/rates/lookup/?${p}`,
   );
@@ -296,9 +296,9 @@ export async function fetchAreaRate(params: {
   occupancyType?: string | null;
 }): Promise<number | null> {
   const p = new URLSearchParams({ country: String(params.countryId) });
-  if (params.category)       p.set("category",        params.category);
-  if (params.finishLevel)    p.set("finish_level",     params.finishLevel);
-  if (params.occupancyType)  p.set("occupancy_type",   params.occupancyType);
+  if (params.category)      p.set("category",      params.category);
+  if (params.finishLevel)   p.set("finish_level",   params.finishLevel);
+  if (params.occupancyType) p.set("occupancy_type", params.occupancyType);
   const data = await get<{ average_rate: number | null; scope: string }>(
     `${BASE}/rates/average/?${p}`,
   );
@@ -445,22 +445,26 @@ export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
       dbId: s.id,
       templateId: s.space_template_id,
       floor: s.floor,
-      L: parseFloat(s.effective_l),
-      B: parseFloat(s.effective_b),
+      // Fall back to override values if effective_* are missing (e.g. after PATCH)
+      L: parseFloat(s.effective_l ?? s.override_l ?? "0") || 0,
+      B: parseFloat(s.effective_b ?? s.override_b ?? "0") || 0,
       subIds: (s.sub_ids ?? []).map((sub) => sub.sub_id),
     })),
   };
 }
 
 // ── Delete custom project template ────────────────────────────
+
 export const deleteCustomProjectTemplate = (id: number) =>
   del(`${BASE}/templates/custom-projects/${id}/`);
 
 // ── Delete public project template (member/admin only) ────────
+
 export const deletePublicProjectTemplate = (id: number) =>
   del(`${BASE}/templates/projects/${id}/`);
 
 // ── Check name uniqueness before save ─────────────────────────
+
 export async function checkCustomTemplateName(
   label: string,
   excludeId?: number,

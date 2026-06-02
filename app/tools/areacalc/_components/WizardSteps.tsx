@@ -546,7 +546,8 @@ export function StepSpaces({
             <SpaceCard key={s.instanceId} space={s} unit={unit} spaceTemplates={spaceTemplates}
               onUpdate={(u) => update(s.instanceId, u)}
               onRemove={() => remove(s.instanceId)}
-              onCopy={() => copySpace(s)} />
+              onCopy={() => copySpace(s)}
+              existingNames={spaces.filter(x => x.instanceId !== s.instanceId).map(x => x.name)} />
           ))}
         </div>
       ) : (
