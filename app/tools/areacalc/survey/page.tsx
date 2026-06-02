@@ -14,7 +14,7 @@ import {
   State,
   Place,
   SourceType,
-  ProjectCategory,
+  OccupancyType,
   FinishLevel,
   SurveyRateEntryPayload,
 } from "./surveyapi";
@@ -30,61 +30,50 @@ const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
   other: "Other",
 };
 
-const CATEGORY_LABELS: Record<ProjectCategory, string> = {
-  residence: "Residence",
-  school: "Education / School",
-  commercial: "Commercial",
-  healthcare: "Healthcare",
-  hospitality: "Hospitality",
+const OCCUPANCY_TYPE_LABELS: Record<OccupancyType, string> = {
+  residential: "Home / Villa",
+  commercial: "Shop / Office",
+  institutional: "School / Hospital",
+  industrial: "Warehouse / Factory",
+  mixed: "Mixed Use",
 };
 
 const FINISH_LEVEL_LABELS: Record<FinishLevel, string> = {
   basic: "Basic",
-  standard: "Standard",
+  medium: "Medium",
   premium: "Premium",
-  luxury: "Luxury",
-  unknown: "Unknown",
 };
 
 const COMMON_COUNTRY_CODES = [
-  { code: "+91", label: "+91 (India)" },
-  { code: "+1",  label: "+1 (US/Canada)" },
-  { code: "+44", label: "+44 (UK)" },
-  { code: "+971",label: "+971 (UAE)" },
-  { code: "+65", label: "+65 (Singapore)" },
-  { code: "+49", label: "+49 (Germany)" },
-  { code: "+61", label: "+61 (Australia)" },
-  { code: "+33", label: "+33 (France)" },
+  { code: "+91",  label: "+91 (India)" },
+  { code: "+1",   label: "+1 (US/Canada)" },
+  { code: "+44",  label: "+44 (UK)" },
+  { code: "+971", label: "+971 (UAE)" },
+  { code: "+65",  label: "+65 (Singapore)" },
+  { code: "+49",  label: "+49 (Germany)" },
+  { code: "+61",  label: "+61 (Australia)" },
+  { code: "+33",  label: "+33 (France)" },
 ];
 
 // ─── Types ────────────────────────────────────────────────────
 
-/**
- * One rate sub-row — only finish level + rate.
- * Category, date, notes live on the parent LocationBlock.
- */
 interface RateRow {
   id: string;
   finish_level: FinishLevel;
   rate_per_sqft: string;
 }
 
-/** One location block */
 interface LocationBlock {
   id: string;
-  // geography
   countryId: string;
   stateId: string;
   placeId: string;
   location_note: string;
-  // shared per location
-  project_category: ProjectCategory | "";
+  occupancy_type: OccupancyType | "";
   surveyed_on: string;
   notes: string;
-  // fetched lists
   states: State[];
   places: Place[];
-  // rate sub-rows
   rows: RateRow[];
 }
 
@@ -105,7 +94,7 @@ const EMPTY_SOURCE: SourceForm = {
 };
 
 function makeRow(): RateRow {
-  return { id: crypto.randomUUID(), finish_level: "unknown", rate_per_sqft: "" };
+  return { id: crypto.randomUUID(), finish_level: "medium", rate_per_sqft: "" };
 }
 
 function makeLocation(): LocationBlock {
@@ -113,7 +102,7 @@ function makeLocation(): LocationBlock {
     id: crypto.randomUUID(),
     countryId: "", stateId: "", placeId: "",
     location_note: "",
-    project_category: "",
+    occupancy_type: "",
     surveyed_on: "",
     notes: "",
     states: [], places: [],
@@ -174,13 +163,11 @@ function AccessDenied({ role }: { role: AreacalcRole }) {
         )}
         <div className="mt-8 flex flex-col gap-2">
           {isAnonymous && (
-            <a href="/auth/login?next=/tools/areacalc/survey"
-              className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2.5 rounded-md transition-colors">
+            <a href="/auth/login?next=/tools/areacalc/survey" className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2.5 rounded-md transition-colors">
               Sign in
             </a>
           )}
-          <a href="/tools/areacalc"
-            className="inline-flex items-center justify-center gap-2 border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 text-sm font-medium px-5 py-2.5 rounded-md transition-colors">
+          <a href="/tools/areacalc" className="inline-flex items-center justify-center gap-2 border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 text-sm font-medium px-5 py-2.5 rounded-md transition-colors">
             Back to areacalc
           </a>
         </div>
@@ -188,7 +175,6 @@ function AccessDenied({ role }: { role: AreacalcRole }) {
     </div>
   );
 }
-
 function LoadingScreen() {
   return (
     <div className="min-h-screen bg-[#f5f2ec] flex items-center justify-center">
@@ -224,14 +210,24 @@ function AddGeoModal({
       <div className="bg-white rounded-xl border border-stone-200 shadow-xl w-full max-w-sm p-6">
         <h3 className="text-sm font-semibold text-stone-800 mb-4">{title}</h3>
         {geo.error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-4">{geo.error}</p>
+          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-4">
+            {geo.error}
+          </p>
         )}
         <div className="space-y-3">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-stone-600">Name <span className="text-indigo-500">*</span></label>
-            <input type="text" value={geo.name}
+            <label className="text-xs font-medium text-stone-600">
+              Name <span className="text-indigo-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={geo.name}
               onChange={(e) => onChange({ name: e.target.value, error: null })}
-              placeholder={geo.mode === "country" ? "e.g. India" : geo.mode === "state" ? "e.g. Kerala" : "e.g. Kollam"}
+              placeholder={
+                geo.mode === "country" ? "e.g. India"
+                : geo.mode === "state" ? "e.g. Kerala"
+                : "e.g. Kollam"
+              }
               className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
@@ -240,7 +236,9 @@ function AddGeoModal({
               <label className="text-xs font-medium text-stone-600">
                 Code{geo.mode === "country" ? <span className="text-indigo-500"> *</span> : " (optional)"}
               </label>
-              <input type="text" value={geo.code}
+              <input
+                type="text"
+                value={geo.code}
                 onChange={(e) => onChange({ code: e.target.value, error: null })}
                 placeholder={geo.mode === "country" ? "e.g. IN, US" : "e.g. KL, CA (optional)"}
                 maxLength={20}
@@ -250,17 +248,25 @@ function AddGeoModal({
           )}
         </div>
         <div className="mt-5 flex gap-2 justify-end">
-          <button onClick={onClose}
-            className="text-sm px-4 py-2 rounded-md border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">
+          <button
+            onClick={onClose}
+            className="text-sm px-4 py-2 rounded-md border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
+          >
             Cancel
           </button>
-          <button onClick={onSubmit} disabled={geo.loading || !geo.name.trim()}
-            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium transition-colors">
-            {geo.loading
-              ? <><svg className="animate-spin" width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <button
+            onClick={onSubmit}
+            disabled={geo.loading || !geo.name.trim()}
+            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium transition-colors"
+          >
+            {geo.loading ? (
+              <>
+                <svg className="animate-spin" width="12" height="12" viewBox="0 0 12 12" fill="none">
                   <circle cx="6" cy="6" r="5" stroke="white" strokeWidth="1.5" strokeDasharray="16 8" />
-                </svg>Saving…</>
-              : "Add"}
+                </svg>
+                Saving…
+              </>
+            ) : "Add"}
           </button>
         </div>
       </div>
@@ -269,10 +275,7 @@ function AddGeoModal({
 }
 
 // ─── Rate rows table ──────────────────────────────────────────
-/**
- * Compact two-column inline table: Finish Level | Rate (₹/sqft)
- * No card wrappers — just a clean tight grid with column headers.
- */
+
 function RateRowsTable({
   rows, onAdd, onUpdate, onRemove,
 }: {
@@ -283,17 +286,14 @@ function RateRowsTable({
 }) {
   return (
     <div>
-      {/* Column headers */}
       <div className="grid grid-cols-[1fr_1fr_1.75rem] gap-x-2 mb-1.5 px-0.5">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">Finish Level</span>
         <span className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">Rate (₹/sqft)</span>
         <span />
       </div>
-
       <div className="space-y-1.5">
         {rows.map((row) => (
           <div key={row.id} className="grid grid-cols-[1fr_1fr_1.75rem] gap-x-2 items-center">
-            {/* Finish level */}
             <select
               value={row.finish_level}
               onChange={(e) => onUpdate(row.id, { finish_level: e.target.value as FinishLevel })}
@@ -309,8 +309,6 @@ function RateRowsTable({
                 <option key={v} value={v}>{l}</option>
               ))}
             </select>
-
-            {/* Rate */}
             <input
               type="number"
               value={row.rate_per_sqft}
@@ -319,8 +317,6 @@ function RateRowsTable({
               min={1}
               className="w-full rounded-md border border-stone-200 bg-stone-50 px-2.5 py-[7px] text-sm text-stone-800 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
-
-            {/* Remove */}
             {rows.length > 1 ? (
               <button
                 type="button"
@@ -331,14 +327,10 @@ function RateRowsTable({
                   <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 </svg>
               </button>
-            ) : (
-              <span />
-            )}
+            ) : <span />}
           </div>
         ))}
       </div>
-
-      {/* Add row */}
       <button
         type="button"
         onClick={onAdd}
@@ -377,7 +369,6 @@ function LocationBlockCard({
 
   return (
     <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
-      {/* Card header */}
       <div className="border-b border-stone-100 px-5 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span className="text-[10px] font-mono text-stone-300 uppercase tracking-widest tabular-nums">
@@ -386,7 +377,7 @@ function LocationBlockCard({
           {selectedPlace ? (
             <span className="text-xs font-medium text-stone-600">
               {selectedPlace.name}
-              {selectedState  && <span className="text-stone-400">, {selectedState.name}</span>}
+              {selectedState   && <span className="text-stone-400">, {selectedState.name}</span>}
               {selectedCountry && <span className="text-stone-400"> · {selectedCountry.code}</span>}
             </span>
           ) : (
@@ -394,8 +385,11 @@ function LocationBlockCard({
           )}
         </div>
         {canRemove && (
-          <button type="button" onClick={onRemoveBlock}
-            className="text-[11px] text-stone-300 hover:text-red-400 flex items-center gap-1 transition-colors">
+          <button
+            type="button"
+            onClick={onRemoveBlock}
+            className="text-[11px] text-stone-300 hover:text-red-400 flex items-center gap-1 transition-colors"
+          >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
               <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
@@ -405,8 +399,6 @@ function LocationBlockCard({
       </div>
 
       <div className="px-5 py-5 space-y-4">
-
-        {/* ── Geography ── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-stone-500">Country</label>
@@ -420,8 +412,12 @@ function LocationBlockCard({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-stone-500">State / Province</label>
             <div className="flex gap-1.5">
-              <GeoSelect value={block.stateId} onChange={(v) => onUpdateBlock({ stateId: v })}
-                disabled={!block.countryId || block.states.length === 0} placeholder="Select">
+              <GeoSelect
+                value={block.stateId}
+                onChange={(v) => onUpdateBlock({ stateId: v })}
+                disabled={!block.countryId || block.states.length === 0}
+                placeholder="Select"
+              >
                 {block.states.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </GeoSelect>
               <AddButton onClick={() => onOpenAddGeo("state")} disabled={!block.countryId} title="Add state" />
@@ -430,8 +426,12 @@ function LocationBlockCard({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-stone-500">Place / City</label>
             <div className="flex gap-1.5">
-              <GeoSelect value={block.placeId} onChange={(v) => onUpdateBlock({ placeId: v })}
-                disabled={!block.stateId || block.places.length === 0} placeholder="Select">
+              <GeoSelect
+                value={block.placeId}
+                onChange={(v) => onUpdateBlock({ placeId: v })}
+                disabled={!block.stateId || block.places.length === 0}
+                placeholder="Select"
+              >
                 {block.places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </GeoSelect>
               <AddButton onClick={() => onOpenAddGeo("place")} disabled={!block.stateId} title="Add place" />
@@ -439,7 +439,6 @@ function LocationBlockCard({
           </div>
         </div>
 
-        {/* Effective rate hint */}
         {selectedPlace && (
           <div className="flex items-center gap-2 text-xs text-stone-400 bg-stone-50 border border-stone-100 rounded-md px-3.5 py-2">
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
@@ -447,29 +446,30 @@ function LocationBlockCard({
               <path d="M5.5 4.5v2.5M5.5 3.25v.25" stroke="#a8a29e" strokeWidth="1.1" strokeLinecap="round" />
             </svg>
             Current:{" "}
-            {selectedPlace.effective_rate !== null
-              ? <><strong className="text-stone-600 font-medium">₹{selectedPlace.effective_rate}/sqft</strong> · {selectedPlace.rate_status.label}</>
-              : <em>no data yet</em>}
+            {selectedPlace.effective_rate !== null ? (
+              <>
+                <strong className="text-stone-600 font-medium">₹{selectedPlace.effective_rate}/sqft</strong>
+                {" · "}{selectedPlace.rate_status.label}
+              </>
+            ) : <em>no data yet</em>}
           </div>
         )}
 
-        {/* ── Location-level fields: Category · Date · Location Note ── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-stone-500">
-              Category <span className="text-indigo-400">*</span>
+              Occupancy Type <span className="text-indigo-400">*</span>
             </label>
             <GeoSelect
-              value={block.project_category}
-              onChange={(v) => onUpdateBlock({ project_category: v as ProjectCategory })}
+              value={block.occupancy_type}
+              onChange={(v) => onUpdateBlock({ occupancy_type: v as OccupancyType })}
               placeholder="Select"
             >
-              {(Object.entries(CATEGORY_LABELS) as [ProjectCategory, string][]).map(([v, l]) => (
+              {(Object.entries(OCCUPANCY_TYPE_LABELS) as [OccupancyType, string][]).map(([v, l]) => (
                 <option key={v} value={v}>{l}</option>
               ))}
             </GeoSelect>
           </div>
-
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-stone-500">Date Surveyed</label>
             <input
@@ -479,7 +479,6 @@ function LocationBlockCard({
               className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
-
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-stone-500">Location Note</label>
             <input
@@ -492,7 +491,6 @@ function LocationBlockCard({
           </div>
         </div>
 
-        {/* ── Rate sub-rows ── */}
         <div className="border-t border-stone-100 pt-4">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400 mb-2">
             Rates by Finish Level
@@ -505,7 +503,6 @@ function LocationBlockCard({
           />
         </div>
 
-        {/* Notes */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-stone-500">
             Notes <span className="font-normal text-stone-400">(optional)</span>
@@ -518,7 +515,6 @@ function LocationBlockCard({
             className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
         </div>
-
       </div>
     </div>
   );
@@ -532,17 +528,15 @@ export default function SurveyPage() {
   const [allowed, setAllowed]         = useState(false);
 
   const [countries, setCountries]     = useState<Country[]>([]);
-
   const [source, setSource]           = useState<SourceForm>(EMPTY_SOURCE);
   const [blocks, setBlocks]           = useState<LocationBlock[]>([makeLocation()]);
-
   const [addGeo, setAddGeo]           = useState<AddGeoState>(EMPTY_ADD_GEO);
 
   const [submitting, setSubmitting]   = useState(false);
   const [result, setResult]           = useState<SubmitResult | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
-  // ── Role ────────────────────────────────────────────────────
+  // ── Role check ───────────────────────────────────────────────
   useEffect(() => {
     fetchMyRole()
       .then((data) => {
@@ -625,7 +619,10 @@ export default function SurveyPage() {
 
     try {
       if (addGeo.mode === "country") {
-        if (!addGeo.code.trim()) { patchAddGeo({ loading: false, error: "Country code is required (e.g. IN, US)." }); return; }
+        if (!addGeo.code.trim()) {
+          patchAddGeo({ loading: false, error: "Country code is required (e.g. IN, US)." });
+          return;
+        }
         const created = await createCountry(addGeo.name.trim(), addGeo.code.trim());
         setCountries((p) => [...p, created].sort((a, b) => a.name.localeCompare(b.name)));
         handleCountryChange(blockId, String(created.id));
@@ -634,7 +631,9 @@ export default function SurveyPage() {
         if (!block.countryId) { patchAddGeo({ loading: false, error: "Select a country first." }); return; }
         const created = await createState(addGeo.name.trim(), addGeo.code.trim(), Number(block.countryId));
         setBlocks((p) => p.map((b) =>
-          b.id === blockId ? { ...b, states: [...b.states, created].sort((a, b) => a.name.localeCompare(b.name)) } : b
+          b.id === blockId
+            ? { ...b, states: [...b.states, created].sort((a, b) => a.name.localeCompare(b.name)) }
+            : b
         ));
         updateBlock(blockId, { stateId: String(created.id), placeId: "", places: [] });
         closeAddGeo();
@@ -642,7 +641,9 @@ export default function SurveyPage() {
         if (!block.stateId) { patchAddGeo({ loading: false, error: "Select a state first." }); return; }
         const created = await createPlace(addGeo.name.trim(), Number(block.stateId));
         setBlocks((p) => p.map((b) =>
-          b.id === blockId ? { ...b, places: [...b.places, created].sort((a, b) => a.name.localeCompare(b.name)) } : b
+          b.id === blockId
+            ? { ...b, places: [...b.places, created].sort((a, b) => a.name.localeCompare(b.name)) }
+            : b
         ));
         updateBlock(blockId, { placeId: String(created.id) });
         closeAddGeo();
@@ -658,8 +659,8 @@ export default function SurveyPage() {
     for (let bi = 0; bi < blocks.length; bi++) {
       const b = blocks[bi];
       const loc = `Location ${bi + 1}`;
-      if (!b.placeId)           return `${loc}: please select a place.`;
-      if (!b.project_category)  return `${loc}: please select a project category.`;
+      if (!b.placeId)          return `${loc}: please select a place.`;
+      if (!b.occupancy_type)   return `${loc}: please select an occupancy type.`;
       for (let ri = 0; ri < b.rows.length; ri++) {
         const rate = parseFloat(b.rows[ri].rate_per_sqft);
         if (isNaN(rate) || rate < 1) return `${loc} / row ${ri + 1}: rate must be at least ₹1.`;
@@ -683,7 +684,7 @@ export default function SurveyPage() {
         contact_email: source.contact_email || undefined,
         contact_phone_country_code: source.contact_phone ? source.contact_phone_country_code : undefined,
         contact_phone: source.contact_phone || undefined,
-        project_category: b.project_category as ProjectCategory,
+        occupancy_type: b.occupancy_type as OccupancyType,
         rate_per_sqft: parseFloat(r.rate_per_sqft),
         finish_level: r.finish_level,
         location_note: b.location_note || undefined,
@@ -721,8 +722,9 @@ export default function SurveyPage() {
         <AddGeoModal
           geo={addGeo} onChange={patchAddGeo} onSubmit={submitAddGeo} onClose={closeAddGeo}
           parentLabel={
-            addGeo.mode === "state"  ? activeGeoCountry?.name :
-            addGeo.mode === "place"  ? activeGeoState?.name   : undefined
+            addGeo.mode === "state" ? activeGeoCountry?.name
+            : addGeo.mode === "place" ? activeGeoState?.name
+            : undefined
           }
         />
       )}
@@ -751,7 +753,6 @@ export default function SurveyPage() {
 
       <main className="max-w-3xl mx-auto px-6 py-10 space-y-8">
 
-        {/* Title */}
         <div>
           <h2 className="text-2xl font-semibold text-stone-800 mb-1.5 tracking-tight">Batch Rate Entry</h2>
           <p className="text-sm text-stone-500 leading-relaxed">
@@ -762,9 +763,11 @@ export default function SurveyPage() {
         {/* Result banner */}
         {result && (
           <div className={`flex items-start gap-3 rounded-lg px-5 py-4 border ${
-            result.failed === 0 ? "bg-emerald-50 border-emerald-200"
-            : result.succeeded > 0 ? "bg-amber-50 border-amber-200"
-            : "bg-red-50 border-red-200"
+            result.failed === 0
+              ? "bg-emerald-50 border-emerald-200"
+              : result.succeeded > 0
+              ? "bg-amber-50 border-amber-200"
+              : "bg-red-50 border-red-200"
           }`}>
             <svg className="mt-0.5 shrink-0" width="16" height="16" viewBox="0 0 16 16" fill="none">
               {result.failed === 0 ? (<>
@@ -780,7 +783,9 @@ export default function SurveyPage() {
                 {result.succeeded} of {result.total} entr{result.total !== 1 ? "ies" : "y"} submitted
                 {result.succeeded === result.total ? " successfully." : "."}
               </p>
-              {result.errors.map((e, i) => <p key={i} className="text-xs text-red-600 mt-0.5">{e}</p>)}
+              {result.errors.map((e, i) => (
+                <p key={i} className="text-xs text-red-600 mt-0.5">{e}</p>
+              ))}
               {result.succeeded > 0 && (
                 <p className="text-xs text-stone-400 mt-1">Pending review before publication.</p>
               )}
@@ -806,9 +811,11 @@ export default function SurveyPage() {
               <label className="text-xs font-medium text-stone-600">
                 Source Type <span className="text-indigo-400">*</span>
               </label>
-              <GeoSelect value={source.source_type}
+              <GeoSelect
+                value={source.source_type}
                 onChange={(v) => { setSource((s) => ({ ...s, source_type: v as SourceType })); setGlobalError(null); setResult(null); }}
-                placeholder="Select type">
+                placeholder="Select type"
+              >
                 {(Object.entries(SOURCE_TYPE_LABELS) as [SourceType, string][]).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
@@ -816,7 +823,9 @@ export default function SurveyPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-stone-600">Source Name</label>
-              <input type="text" value={source.source_name}
+              <input
+                type="text"
+                value={source.source_name}
                 onChange={(e) => setSource((s) => ({ ...s, source_name: e.target.value }))}
                 placeholder="e.g. XYZ Architects"
                 className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -831,7 +840,9 @@ export default function SurveyPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-stone-600">Email</label>
-                <input type="email" value={source.contact_email}
+                <input
+                  type="email"
+                  value={source.contact_email}
                   onChange={(e) => setSource((s) => ({ ...s, contact_email: e.target.value }))}
                   placeholder="e.g. architect@example.com"
                   className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -840,19 +851,30 @@ export default function SurveyPage() {
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-stone-600">Phone</label>
                 <div className="flex gap-2">
-                  <select value={source.contact_phone_country_code}
+                  <select
+                    value={source.contact_phone_country_code}
                     onChange={(e) => setSource((s) => ({ ...s, contact_phone_country_code: e.target.value }))}
                     className="rounded-md border border-stone-200 bg-white px-2 py-2.5 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-[6.5rem] shrink-0 appearance-none"
                     style={{
                       backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23a8a29e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E")`,
-                      backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center", paddingRight: "1.5rem",
-                    }}>
-                    {COMMON_COUNTRY_CODES.map(({ code, label }) => <option key={code} value={code}>{label}</option>)}
-                    {!COMMON_COUNTRY_CODES.some((c) => c.code === source.contact_phone_country_code) && source.contact_phone_country_code && (
-                      <option value={source.contact_phone_country_code}>{source.contact_phone_country_code}</option>
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 6px center",
+                      paddingRight: "1.5rem",
+                    }}
+                  >
+                    {COMMON_COUNTRY_CODES.map(({ code, label }) => (
+                      <option key={code} value={code}>{label}</option>
+                    ))}
+                    {!COMMON_COUNTRY_CODES.some((c) => c.code === source.contact_phone_country_code)
+                      && source.contact_phone_country_code && (
+                      <option value={source.contact_phone_country_code}>
+                        {source.contact_phone_country_code}
+                      </option>
                     )}
                   </select>
-                  <input type="tel" value={source.contact_phone}
+                  <input
+                    type="tel"
+                    value={source.contact_phone}
                     onChange={(e) => setSource((s) => ({ ...s, contact_phone: e.target.value }))}
                     placeholder="e.g. 9876543210"
                     className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-800 placeholder:text-stone-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -889,8 +911,11 @@ export default function SurveyPage() {
               />
             ))}
 
-            <button type="button" onClick={addBlock}
-              className="w-full flex items-center justify-center gap-2 text-sm font-medium text-stone-400 hover:text-indigo-600 border-2 border-dashed border-stone-200 hover:border-indigo-300 rounded-xl py-3.5 transition-colors">
+            <button
+              type="button"
+              onClick={addBlock}
+              className="w-full flex items-center justify-center gap-2 text-sm font-medium text-stone-400 hover:text-indigo-600 border-2 border-dashed border-stone-200 hover:border-indigo-300 rounded-xl py-3.5 transition-colors"
+            >
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                 <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
@@ -901,19 +926,26 @@ export default function SurveyPage() {
 
         {/* Submit */}
         <div className="pt-2 flex items-center gap-4">
-          <button onClick={handleSubmit} disabled={submitting}
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-6 py-2.5 rounded-md transition-colors">
-            {submitting ? (<>
-              <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle cx="7" cy="7" r="6" stroke="white" strokeWidth="1.5" strokeDasharray="20 10" />
-              </svg>
-              Submitting {totalRows} entr{totalRows !== 1 ? "ies" : "y"}…
-            </>) : (<>
-              Submit {totalRows} entr{totalRows !== 1 ? "ies" : "y"}
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M3 7h8M8 4l3 3-3 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </>)}
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-6 py-2.5 rounded-md transition-colors"
+          >
+            {submitting ? (
+              <>
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <circle cx="7" cy="7" r="6" stroke="white" strokeWidth="1.5" strokeDasharray="20 10" />
+                </svg>
+                Submitting {totalRows} entr{totalRows !== 1 ? "ies" : "y"}…
+              </>
+            ) : (
+              <>
+                Submit {totalRows} entr{totalRows !== 1 ? "ies" : "y"}
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M3 7h8M8 4l3 3-3 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </>
+            )}
           </button>
           <p className="text-xs text-stone-400">
             {totalRows} rate{totalRows !== 1 ? "s" : ""} across {blocks.length} location{blocks.length !== 1 ? "s" : ""} · pending review.
@@ -949,12 +981,18 @@ function GeoSelect({
   children: React.ReactNode;
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
       className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
       style={{
         backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23a8a29e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E")`,
-        backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center", paddingRight: "2rem",
-      }}>
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "right 10px center",
+        paddingRight: "2rem",
+      }}
+    >
       {placeholder && <option value="" disabled>{placeholder}</option>}
       {children}
     </select>
@@ -963,8 +1001,13 @@ function GeoSelect({
 
 function AddButton({ onClick, disabled, title }: { onClick: () => void; disabled?: boolean; title?: string }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} title={title}
-      className="shrink-0 w-9 h-[2.125rem] flex items-center justify-center rounded-md border border-stone-200 bg-white text-stone-400 hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="shrink-0 w-9 h-[2.125rem] flex items-center justify-center rounded-md border border-stone-200 bg-white text-stone-400 hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+    >
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
         <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       </svg>

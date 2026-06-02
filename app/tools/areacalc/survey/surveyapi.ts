@@ -54,14 +54,16 @@ export type SourceType =
   | "completed_project"
   | "other";
 
-export type ProjectCategory =
-  | "residence"
-  | "school"
+// Matches Django OCCUPANCY_TYPE_CHOICES
+export type OccupancyType =
+  | "residential"
   | "commercial"
-  | "healthcare"
-  | "hospitality";
+  | "institutional"
+  | "industrial"
+  | "mixed";
 
-export type FinishLevel = "basic" | "standard" | "premium" | "luxury" | "unknown";
+// Matches Django FINISH_LEVEL_CHOICES
+export type FinishLevel = "basic" | "medium" | "premium";
 
 export interface SurveyRateEntry {
   id: number;
@@ -71,11 +73,10 @@ export interface SurveyRateEntry {
   country_name: string;
   source_name: string;
   source_type: SourceType;
-  // contact fields
   contact_email: string;
   contact_phone_country_code: string;
   contact_phone: string;
-  project_category: ProjectCategory;
+  occupancy_type: OccupancyType;
   rate_per_sqft: string;
   finish_level: FinishLevel;
   location_note: string;
@@ -90,11 +91,10 @@ export interface SurveyRateEntryPayload {
   place: number;
   source_name?: string;
   source_type: SourceType;
-  // contact fields (all optional)
   contact_email?: string;
   contact_phone_country_code?: string;
   contact_phone?: string;
-  project_category: ProjectCategory;
+  occupancy_type: OccupancyType;
   rate_per_sqft: number;
   finish_level?: FinishLevel;
   location_note?: string;
@@ -105,15 +105,15 @@ export interface SurveyRateEntryPayload {
 // ─── Geography API functions ──────────────────────────────────
 
 export async function fetchCountries(): Promise<Country[]> {
-  const res = await fetch(`${BASE}/api/areacalc/geography/countries/`);
+  const res = await fetch(`${BASE}/api/areacalc/geography/countries/?all=true`);
   if (!res.ok) throw new Error(`Countries fetch failed: ${res.status}`);
   return res.json() as Promise<Country[]>;
 }
 
 export async function fetchStates(countryId?: number): Promise<State[]> {
   const url = countryId
-    ? `${BASE}/api/areacalc/geography/states/?country=${countryId}`
-    : `${BASE}/api/areacalc/geography/states/`;
+    ? `${BASE}/api/areacalc/geography/states/?country=${countryId}&all=true`
+    : `${BASE}/api/areacalc/geography/states/?all=true`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`States fetch failed: ${res.status}`);
   return res.json() as Promise<State[]>;
@@ -121,8 +121,8 @@ export async function fetchStates(countryId?: number): Promise<State[]> {
 
 export async function fetchPlaces(stateId?: number): Promise<Place[]> {
   const url = stateId
-    ? `${BASE}/api/areacalc/geography/places/?state=${stateId}`
-    : `${BASE}/api/areacalc/geography/places/`;
+    ? `${BASE}/api/areacalc/geography/places/?state=${stateId}&all=true`
+    : `${BASE}/api/areacalc/geography/places/?all=true`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Places fetch failed: ${res.status}`);
   return res.json() as Promise<Place[]>;
@@ -190,12 +190,12 @@ export async function submitSurveyEntry(
 
 export async function fetchSurveyEntries(filters?: {
   place?: number;
-  project_category?: ProjectCategory;
+  occupancy_type?: OccupancyType;
   is_approved?: boolean;
 }): Promise<SurveyRateEntry[]> {
   const params = new URLSearchParams();
   if (filters?.place) params.set("place", String(filters.place));
-  if (filters?.project_category) params.set("project_category", filters.project_category);
+  if (filters?.occupancy_type) params.set("occupancy_type", filters.occupancy_type);
   if (filters?.is_approved !== undefined)
     params.set("is_approved", String(filters.is_approved));
 

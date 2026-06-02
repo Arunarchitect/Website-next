@@ -20,9 +20,7 @@ export interface MyRoleResponse {
 export async function fetchMyRole(): Promise<MyRoleResponse> {
   const token = getToken();
   const res = await fetch(`${BASE}/api/areacalc/me/role/`, {
-    headers: token
-      ? { Authorization: `Bearer ${token}` }
-      : {},
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new Error(`Role fetch failed: ${res.status}`);
   return res.json() as Promise<MyRoleResponse>;

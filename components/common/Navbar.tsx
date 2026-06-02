@@ -12,15 +12,58 @@ import { useLogoutMutation } from "@/redux/features/authApiSlice";
 import { logout as setLogout } from "@/redux/features/authSlice";
 import { NavLink } from "@/components/common";
 import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import {
+  fetchOrgRole,
+  fetchAreacalcRole,
+  resolveDestination,
+} from "@/lib/resolveUserDestination";
+
+function Spinner() {
+  return (
+    <svg
+      className="animate-spin"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        cx="7"
+        cy="7"
+        r="5.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeDasharray="22 10"
+      />
+    </svg>
+  );
+}
 
 export default function Navbar() {
   const pathname = usePathname();
   const dispatch = useAppDispatch();
+  const router = useRouter();
 
   const [logout] = useLogoutMutation();
   const { isAuthenticated } = useAppSelector((state) => state.auth);
 
-  const router = useRouter();
+  const [dashUrl, setDashUrl] = useState<string | null>(null);
+  const [dashLoading, setDashLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setDashUrl(null);
+      return;
+    }
+    const access = localStorage.getItem("access") ?? "";
+    Promise.all([fetchOrgRole(access), fetchAreacalcRole(access)])
+      .then(([orgRole, areacalcRole]) =>
+        setDashUrl(resolveDestination({ orgRole, areacalcRole }))
+      )
+      .catch(() => setDashUrl("/new/dash/dashnormal"));
+  }, [isAuthenticated]);
 
   const handleLogout = () => {
     logout(undefined)
@@ -31,24 +74,40 @@ export default function Navbar() {
       });
   };
 
+  const handleDashboard = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+    e.preventDefault();
+
+    if (dashUrl) {
+      router.push(dashUrl);
+      return;
+    }
+
+    setDashLoading(true);
+    try {
+      const access = localStorage.getItem("access") ?? "";
+      const [orgRole, areacalcRole] = await Promise.all([
+        fetchOrgRole(access),
+        fetchAreacalcRole(access),
+      ]);
+      const dest = resolveDestination({ orgRole, areacalcRole });
+      setDashUrl(dest);
+      router.push(dest);
+    } finally {
+      setDashLoading(false);
+    }
+  };
+
   const isSelected = (path: string) => pathname === path;
 
   const toolsLink = (isMobile: boolean) => (
-    <NavLink
-      isSelected={isSelected("/tools")}
-      isMobile={isMobile}
-      href="/tools"
-    >
+    <NavLink isSelected={isSelected("/tools")} isMobile={isMobile} href="/tools">
       Tools
     </NavLink>
   );
 
   const coursesLink = (isMobile: boolean) => (
-    <NavLink
-      isSelected={isSelected("/courses")}
-      isMobile={isMobile}
-      href="/courses"
-    >
+    <NavLink isSelected={isSelected("/courses")} isMobile={isMobile} href="/courses">
       Courses
     </NavLink>
   );
@@ -64,39 +123,40 @@ export default function Navbar() {
   );
 
   const donateLink = (isMobile: boolean) => (
-    <NavLink
-      isSelected={isSelected("/donate")}
-      isMobile={isMobile}
-      href="/donate"
-    >
+    <NavLink isSelected={isSelected("/donate")} isMobile={isMobile} href="/donate">
       Donate
     </NavLink>
   );
 
   const aboutLink = (isMobile: boolean) => (
-    <NavLink
-      isSelected={isSelected("/about")}
-      isMobile={isMobile}
-      href="/about"
-    >
+    <NavLink isSelected={isSelected("/about")} isMobile={isMobile} href="/about">
       About
     </NavLink>
+  );
+
+  const dashboardLink = (isMobile: boolean) => (
+    <a
+      href={dashUrl ?? "#"}
+      onClick={handleDashboard}
+      className={
+        isMobile
+          ? "flex items-center gap-2 rounded-md px-3 py-2 text-base font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
+          : "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
+      }
+    >
+      {dashLoading && <Spinner />}
+      Dashboard
+    </a>
   );
 
   const authLinks = (isMobile: boolean) => (
     <>
       {toolsLink(isMobile)}
       {coursesLink(isMobile)}
-      {modelBlogLink(isMobile)} {/* Add ModelBlog Link */}
+      {modelBlogLink(isMobile)}
       {donateLink(isMobile)}
       {aboutLink(isMobile)}
-      <NavLink
-        isSelected={isSelected("/new/dash/dashadmin")}
-        isMobile={isMobile}
-        href="/new/dash/dashadmin"
-      >
-        Dashboard
-      </NavLink>
+      {dashboardLink(isMobile)}
       <NavLink isMobile={isMobile} onClick={handleLogout}>
         Logout
       </NavLink>
@@ -107,7 +167,7 @@ export default function Navbar() {
     <>
       {toolsLink(isMobile)}
       {coursesLink(isMobile)}
-      {modelBlogLink(isMobile)} {/* Add ModelBlog Link */}
+      {modelBlogLink(isMobile)}
       {donateLink(isMobile)}
       {aboutLink(isMobile)}
       <NavLink
