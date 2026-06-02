@@ -1,10 +1,25 @@
-
 services:
-  app:
-    build:
-      context: .
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-    command: npm start
+postgres:
+image: postgres:17
+
+```
+container_name: postgres-db
+
+env_file:
+  - .env
+
+volumes:
+  - postgres_data:/var/lib/postgresql/data
+
+restart: unless-stopped
+
+networks:
+  - backend
+```
+
+volumes:
+postgres_data:
+
+networks:
+backend:
+external: true
