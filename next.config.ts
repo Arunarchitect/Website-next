@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   images: {
     domains: [
       "img.youtube.com",
@@ -12,9 +13,8 @@ const nextConfig: NextConfig = {
       "media.istockphoto.com",
       "res.cloudinary.com",
     ],
-    unoptimized: true,   // 👈 prevents Next.js from fetching images at build
+    unoptimized: true,
   },
 };
-
 
 export default nextConfig;

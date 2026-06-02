@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    image: website-next:green
+    container_name: next-green
+    env_file:
+      - .env.local
+    ports:
+      - "127.0.0.1:3002:3000"
+    restart: unless-stopped
