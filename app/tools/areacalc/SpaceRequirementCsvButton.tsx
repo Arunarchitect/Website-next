@@ -36,13 +36,13 @@ type Props = {
   circ: number;
   totals: Totals;
   locationLabel: string;
-  // Location IDs — saved to CSV so import can restore the full location
   countryId?: number | null;
   stateId?: number | null;
   placeId?: number | null;
   disabled?: boolean;
   importOnly?: boolean;
   onImport?: (payload: ImportPayload) => void;
+  customRate?: number | null;
 };
 
 export type ImportPayload = {
@@ -52,9 +52,10 @@ export type ImportPayload = {
   wall: number;
   circ: number;
   spaces: SpaceInstance[];
-  countryId?: number | null;
-  stateId?: number | null;
-  placeId?: number | null;
+  countryId: number | null;
+  stateId: number | null;
+  placeId: number | null;
+  customRate: number | null;
 };
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -138,6 +139,7 @@ function buildCsv(
   countryId?: number | null,
   stateId?: number | null,
   placeId?: number | null,
+  customRate?: number | null,
 ): string {
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   const dLabel = UNIT_SYSTEMS[unit].dimLabel;
@@ -170,11 +172,11 @@ function buildCsv(
   lines.push(csvRow("##META", "unit", unit));
   lines.push(csvRow("##META", "wall", String(wall)));
   lines.push(csvRow("##META", "circ", String(circ)));
+  lines.push(csvRow("##META", "customRate", customRate != null ? String(customRate) : ""));
   lines.push(csvRow("##META", "locationLabel", locationLabel || ""));
   lines.push(csvRow("##META", "exportedAt", generatedDate));
 
-  // META rows — location IDs (only written when present; used to restore
-  // country → state → city dropdowns on re-import)
+  // META rows — location IDs (only written when present)
   if (countryId != null) lines.push(csvRow("##META", "countryId", String(countryId)));
   if (stateId   != null) lines.push(csvRow("##META", "stateId",   String(stateId)));
   if (placeId   != null) lines.push(csvRow("##META", "placeId",   String(placeId)));
@@ -310,10 +312,10 @@ function buildCsv(
 
   // Summary
   lines.push(csvRow("── AREA SUMMARY ──"));
-  lines.push(csvRow("Net Carpet Area",    "", "", "", fmt(totals.net,   unit), aLabel));
-  lines.push(csvRow(`Wall Area (${wall}%)`, "", "", "", fmt(totals.wallA, unit), aLabel));
+  lines.push(csvRow("Net Carpet Area",       "", "", "", fmt(totals.net,   unit), aLabel));
+  lines.push(csvRow(`Wall Area (${wall}%)`,  "", "", "", fmt(totals.wallA, unit), aLabel));
   lines.push(csvRow(`Circulation (${circ}%)`, "", "", "", fmt(totals.circA, unit), aLabel));
-  lines.push(csvRow("Gross Built-up Area", "", "", "", fmt(totals.gross, unit), aLabel));
+  lines.push(csvRow("Gross Built-up Area",   "", "", "", fmt(totals.gross, unit), aLabel));
 
   return "\uFEFF" + lines.join("\r\n");
 }
@@ -369,10 +371,15 @@ function parseCsv(text: string): ParseResult {
   const wall = Math.max(0, parseFloat(meta.wall ?? "10") || 10);
   const circ = Math.max(0, parseFloat(meta.circ ?? "15") || 15);
 
-  // Parse location IDs — present only if they were set when the CSV was exported
-  const countryId = meta.countryId ? parseInt(meta.countryId) || null : null;
-  const stateId   = meta.stateId   ? parseInt(meta.stateId)   || null : null;
-  const placeId   = meta.placeId   ? parseInt(meta.placeId)   || null : null;
+  // Parse customRate — if present and valid, restore as override; otherwise null
+  const customRateRaw = meta.customRate?.trim();
+  const customRate: number | null =
+    customRateRaw ? (parseFloat(customRateRaw) || null) : null;
+
+  // Parse location IDs
+  const countryId: number | null = meta.countryId ? parseInt(meta.countryId) || null : null;
+  const stateId: number | null   = meta.stateId   ? parseInt(meta.stateId)   || null : null;
+  const placeId: number | null   = meta.placeId   ? parseInt(meta.placeId)   || null : null;
 
   // Build sub-space lookup by parentId
   const subsByParent = new Map<string, SubSpaceInstance[]>();
@@ -444,6 +451,7 @@ function parseCsv(text: string): ParseResult {
       countryId,
       stateId,
       placeId,
+      customRate,
     },
   };
 }
@@ -465,6 +473,7 @@ export default function SpaceRequirementCsvButton({
   disabled = false,
   importOnly = false,
   onImport,
+  customRate,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -483,6 +492,7 @@ export default function SpaceRequirementCsvButton({
       countryId,
       stateId,
       placeId,
+      customRate,
     );
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);

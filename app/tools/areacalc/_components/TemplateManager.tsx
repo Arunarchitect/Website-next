@@ -311,8 +311,8 @@ export function SaveAsGeneralModal({ spaces, spaceTemplates, onClose, onSaved }:
       return {
         space_template: dbId,
         floor: s.floor,
-        override_l: s.L !== tpl.L ? s.L : null,
-        override_b: s.B !== tpl.B ? s.B : null,
+        override_l: s.L !== tpl.L ? +s.L.toFixed(2) : null,
+        override_b: s.B !== tpl.B ? +s.B.toFixed(2) : null,
         sort_order: idx,
         sub_ids: subIds,
       };

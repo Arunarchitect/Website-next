@@ -286,9 +286,7 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
   const totalArea = fmt(calcSpaceArea(space), unit);
   const mainArea = fmt(space.L * space.B, unit);
 
-  // This would need to be passed from parent to check duplicates across all spaces
-  // For now, we'll assume it's available - you'll need to add this prop
-  const allSpaceNames = spaceTemplates.map(t => t.name); // This should come from parent
+  
 
   function startEditing() {
     setIsEditingName(true);

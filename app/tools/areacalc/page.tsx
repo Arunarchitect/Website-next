@@ -241,8 +241,12 @@ export default function App() {
     setLoadingPlaces(true);
     fetchPlaces(stateId).then((data) => {
       setPlacesList(data);
-      if (pendingLocationRef.current) { setPlaceId(pendingLocationRef.current.placeId); pendingLocationRef.current = null; }
-      else setPlaceId(null);
+      if (pendingLocationRef.current) {
+        setPlaceId(pendingLocationRef.current.placeId);
+        pendingLocationRef.current = null;
+      } else {
+        setPlaceId(null);
+      }
     }).catch(console.error).finally(() => setLoadingPlaces(false));
   }, [stateId]);
 
@@ -290,8 +294,8 @@ export default function App() {
           id: s.projectSpaceDbId,
           space_template: st.dbId!,
           floor: s.floor,
-          override_l: s.L !== st.L ? s.L : null,
-          override_b: s.B !== st.B ? s.B : null,
+          override_l: s.L !== st.L ? +s.L.toFixed(2) : null,
+          override_b: s.B !== st.B ? +s.B.toFixed(2) : null,
           sort_order: idx,
           sub_ids: subIds,
         };
@@ -338,8 +342,6 @@ export default function App() {
 
         const newLabel = projectNameRef.current.trim() || tpl.label;
 
-        // PATCH the template, then re-fetch all project templates so we always
-        // have server-computed effective_l / effective_b values.
         await updatePublicProjectTemplate(activeTemplateSource.id, {
           template_id: tpl.id,
           label: newLabel,
@@ -472,9 +474,7 @@ export default function App() {
   }
 
   // ── CSV import ───────────────────────────────────────────────
-  const handleCsvImport = useCallback((
-    payload: ImportPayload & { countryId?: number | null; stateId?: number | null; placeId?: number | null },
-  ) => {
+  const handleCsvImport = useCallback((payload: ImportPayload) => {
     setProjectName(payload.projectName);
     setClientName(payload.clientName);
     setUnit(payload.unit);
@@ -483,11 +483,38 @@ export default function App() {
     setSpaces(payload.spaces);
     setActiveTemplateSource(null);
     setTemplateSaveMsg("");
+
+    // Restore custom rate override
+    setCustomRate(typeof payload.customRate === "number" ? payload.customRate : null);
+
     if (payload.countryId && payload.stateId && payload.placeId) {
-      pendingLocationRef.current = { stateId: payload.stateId, placeId: payload.placeId };
-      if (countryId === payload.countryId) setStateId(payload.stateId);
-      else setCountryId(payload.countryId);
+      const targetCountryId = payload.countryId;
+      const targetStateId   = payload.stateId;
+      const targetPlaceId   = payload.placeId;
+
+      if (countryId !== targetCountryId) {
+        // Different country: set ref and let the normal cascade handle everything.
+        // countryId useEffect → fetches states → reads ref → sets stateId
+        // stateId useEffect   → fetches places → reads ref → sets placeId → clears ref
+        pendingLocationRef.current = { stateId: targetStateId, placeId: targetPlaceId };
+        setCountryId(targetCountryId);
+      } else {
+        // Same country (India already selected by default).
+        // The countryId useEffect won't fire, so we manually fetch states
+        // then set stateId — which fires the stateId useEffect, which fetches
+        // places and reads pendingLocationRef to set placeId.
+        pendingLocationRef.current = { stateId: targetStateId, placeId: targetPlaceId };
+        setLoadingStates(true);
+        fetchStates(targetCountryId)
+          .then((statesData) => {
+            setStatesList(statesData);
+            setStateId(targetStateId);
+          })
+          .catch(console.error)
+          .finally(() => setLoadingStates(false));
+      }
     }
+
     setStep("spaces");
   }, [countryId]);
 
@@ -626,6 +653,7 @@ export default function App() {
             onLoadProjectTemplate={handleLoadPublicTemplate}
             onLoadCustomProjectTemplate={handleLoadCustomTemplate}
             onNext={() => goNext("spaces")} onBack={() => goBack("spaces")}
+            customRate={customRate}
             {...saveButtonSharedProps}
           />
         )}

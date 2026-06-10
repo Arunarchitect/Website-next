@@ -389,6 +389,7 @@ export function StepSpaces({
   locationLabel, clientName, projectName, wall, circ, costPerSqft,
   totals, floorGroups, onCsvImport,
   onNext, onBack,
+  customRate, 
 }: {
   spaces: SpaceInstance[]; setSpaces: (s: SpaceInstance[]) => void;
   spaceTemplates: SpaceTemplate[]; projectTemplates: ProjectTemplate[];
@@ -412,6 +413,7 @@ export function StepSpaces({
   onLoadProjectTemplate: (tpl: ProjectTemplate) => void;
   onLoadCustomProjectTemplate: (tpl: ApiCustomProjectTemplate) => void;
   onNext: () => void; onBack: () => void;
+  customRate: number | null;
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [customModalOpen, setCustomModalOpen] = useState(false);
@@ -504,6 +506,7 @@ export function StepSpaces({
           projectName={projectName} clientName={clientName}
           spaces={spaces} unit={unit} wall={wall} circ={circ}
           totals={totals} locationLabel={locationLabel}
+          customRate={customRate}
           disabled={false} onImport={handleCsvImportHere} />
       </div>
 
@@ -710,7 +713,7 @@ export function StepSummary({
           locationLabel={locationLabel} disabled={false} />
         <SpaceRequirementCsvButton projectName={projectName} clientName={clientName}
           spaces={spaces} unit={unit} wall={wall} circ={circ}
-          totals={totals} locationLabel={locationLabel} disabled={false} onImport={onCsvImport} />
+          totals={totals} locationLabel={locationLabel} disabled={false} onImport={onCsvImport} customRate={customRate} />
         <SaveButtons
           myRole={myRole} savingTemplate={savingTemplate} templateSaveMsg={templateSaveMsg}
           activeTemplateSource={activeTemplateSource}
@@ -756,7 +759,7 @@ export function StepSummary({
         <p style={{ fontSize: 11, fontWeight: 800, color: "#059669", textTransform: "uppercase", letterSpacing: .7, margin: "0 0 6px" }}>Estimated Construction Cost</p>
         <p style={{ fontFamily: "monospace", fontWeight: 900, fontSize: 36, color: "#047857", margin: "0 0 6px", letterSpacing: -1 }}>{fmtCost(totals.cost)}</p>
         <p style={{ fontSize: 12, color: "#6ee7b7", margin: 0 }}>₹{costPerSqft.toLocaleString("en-IN")}/sqft × {fmt(totals.gross, "sqft")} sqft</p>
-        <p style={{ fontSize: 11, color: "#059669", margin: "4px 0 0", opacity: .7 }}>Finishing, MEP &amp; professional fees not included</p>
+        <p style={{ fontSize: 11, color: "#059669", margin: "4px 0 0", opacity: .7 }}>All finishes, furnishings &amp; professional fees included , also estimate is not final - subjected to the final design</p>
       </div>
 
       {floorGroups.size > 1 && (
