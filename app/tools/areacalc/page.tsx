@@ -278,6 +278,9 @@ export default function App() {
     };
   }
 
+  // ── buildPublicSpacesPayload ──────────────────────────────────
+  // Includes `notes` (= space.description) so it's persisted in the
+  // ProjectTemplateSpace.notes column on the backend.
   function buildPublicSpacesPayload() {
     return spacesRef.current
       .filter((s) => {
@@ -298,6 +301,10 @@ export default function App() {
           override_b: s.B !== st.B ? +s.B.toFixed(2) : null,
           sort_order: idx,
           sub_ids: subIds,
+          notes: JSON.stringify({
+          desc: s.description || "",
+          subs: s.subSpaces.map((sub) => sub.description || ""),
+        }),
         };
       });
   }
@@ -430,11 +437,36 @@ export default function App() {
   }
 
   // ── Load templates ───────────────────────────────────────────
+
+  // handleLoadPublicTemplate: maps tpl.spaces[].notes → space.description
   function handleLoadPublicTemplate(tpl: ProjectTemplate) {
-    const newSpaces = tpl.spaces.map(({ dbId, templateId, floor, L, B, subIds }) => {
-      const t = spaceTemplates.find((x) => x.id === templateId);
-      return t ? makeSpaceFromTemplate(t, floor, subIds, L, B, dbId) : null;
-    }).filter((x): x is SpaceInstance => x !== null);
+    const newSpaces = tpl.spaces.map(({ dbId, templateId, floor, L, B, subIds, notes }) => {
+    const t = spaceTemplates.find((x) => x.id === templateId);
+    if (!t) return null;
+    const s = makeSpaceFromTemplate(t, floor, subIds, L, B, dbId);
+
+    let spaceDesc = notes ?? "";
+    let subDescs: string[] = [];
+    try {
+      const parsed = JSON.parse(notes ?? "");
+      if (parsed && typeof parsed === "object" && "desc" in parsed) {
+        spaceDesc = parsed.desc ?? "";
+        subDescs = Array.isArray(parsed.subs) ? parsed.subs : [];
+      }
+    } catch {
+      // plain-string notes (old format) — spaceDesc stays as-is
+    }
+
+    return {
+      ...s,
+      description: spaceDesc,
+      subSpaces: s.subSpaces.map((sub, i) => ({
+        ...sub,
+        description: subDescs[i] ?? sub.description,
+      })),
+    };
+  }).filter((x): x is SpaceInstance => x !== null);
+
     setSpaces(newSpaces);
     setProjectName(tpl.label || "Untitled Project");
     setClientName((prev) => prev || "Name");
@@ -484,7 +516,6 @@ export default function App() {
     setActiveTemplateSource(null);
     setTemplateSaveMsg("");
 
-    // Restore custom rate override
     setCustomRate(typeof payload.customRate === "number" ? payload.customRate : null);
 
     if (payload.countryId && payload.stateId && payload.placeId) {
@@ -493,16 +524,9 @@ export default function App() {
       const targetPlaceId   = payload.placeId;
 
       if (countryId !== targetCountryId) {
-        // Different country: set ref and let the normal cascade handle everything.
-        // countryId useEffect → fetches states → reads ref → sets stateId
-        // stateId useEffect   → fetches places → reads ref → sets placeId → clears ref
         pendingLocationRef.current = { stateId: targetStateId, placeId: targetPlaceId };
         setCountryId(targetCountryId);
       } else {
-        // Same country (India already selected by default).
-        // The countryId useEffect won't fire, so we manually fetch states
-        // then set stateId — which fires the stateId useEffect, which fetches
-        // places and reads pendingLocationRef to set placeId.
         pendingLocationRef.current = { stateId: targetStateId, placeId: targetPlaceId };
         setLoadingStates(true);
         fetchStates(targetCountryId)

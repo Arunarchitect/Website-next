@@ -463,6 +463,24 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
             <DimAreaEditor L={space.L} B={space.B} unit={unit}
               onUpdate={(newL, newB) => onUpdate({ ...space, L: newL, B: newB })} />
           </div>
+          <div style={{ marginTop: 8 }}>
+            <input
+              type="text"
+              value={space.description}
+              onChange={(e) => onUpdate({ ...space, description: e.target.value })}
+              placeholder="Note…"
+              style={{
+                width: "100%",
+                fontSize: 11,
+                padding: "4px 8px",
+                borderRadius: 6,
+                border: "1px solid #e5e7eb",
+                color: "#6b7280",
+                background: "#fff",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
           {space.subSpaces.map((sub) => (
             <SubSpaceRow key={sub.instanceId} sub={sub} unit={unit}
               onUpdate={(u) => onUpdate({ ...space, subSpaces: space.subSpaces.map((s) => s.instanceId === sub.instanceId ? u : s) })}

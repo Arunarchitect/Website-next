@@ -48,7 +48,7 @@ export interface SpaceTemplate {
   B: number;
   icon: string;
   description: string;
-  subSpaces?: SubSpaceTemplate[];  // Made optional with ?
+  subSpaces?: SubSpaceTemplate[];
 }
 
 export interface SubSpaceInstance {
@@ -75,13 +75,25 @@ export interface SpaceInstance {
   isCustom: boolean;
 }
 
+// ── ProjectTemplate space entry now includes notes ────────────
+
+export interface ProjectTemplateSpaceEntry {
+  dbId?: number;
+  templateId: string;
+  floor: number;
+  L: number;
+  B: number;
+  subIds: string[];
+  notes: string; // ← maps to SpaceInstance.description on load/save
+}
+
 export interface ProjectTemplate {
   id: string;
   dbId?: number;
   label: string;
   description: string;
   icon: string;
-  spaces: { dbId?: number; templateId: string; floor: number; L: number; B: number; subIds: string[] }[];
+  spaces: ProjectTemplateSpaceEntry[];
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -180,7 +192,7 @@ export function makeSpaceFromTemplate(
   };
 }
 
-// ── Add the missing converter functions ─────────────────────
+// ── Converters ────────────────────────────────────────────────
 
 export function toSpaceTemplate(
   apiSpace: Record<string, unknown> & { sub_spaces?: Record<string, unknown>[] }
@@ -216,11 +228,14 @@ export function toProjectTemplate(
     icon: (apiTemplate.icon as string) || "🏗️",
     spaces: (apiTemplate.spaces || []).map((space) => ({
       dbId: space.id as number | undefined,
-      templateId: String(space.space_template ?? space.template_id ?? ""),
+      templateId: String(space.space_template_id ?? space.space_template ?? space.template_id ?? ""),
       floor: (space.floor ?? 0) as number,
-      L: (space.override_l ?? space.length_ft ?? 0) as number,
-      B: (space.override_b ?? space.breadth_ft ?? 0) as number,
-      subIds: ((space.sub_ids ?? []) as number[]).map((id) => String(id)),
+      L: parseFloat(String(space.effective_l ?? space.override_l ?? 0)) || 0,
+      B: parseFloat(String(space.effective_b ?? space.override_b ?? 0)) || 0,
+      subIds: ((space.sub_ids ?? []) as { sub_id: string }[]).map((s) =>
+        typeof s === "object" ? s.sub_id : String(s)
+      ),
+      notes: (space.notes as string) ?? "", // ← persisted space description
     })),
   };
 }

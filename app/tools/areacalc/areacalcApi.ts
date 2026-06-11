@@ -91,6 +91,7 @@ export interface ApiProjectSpace {
   effective_l: string;
   effective_b: string;
   sort_order: number;
+  notes?: string; 
   sub_ids: ApiSubId[] | null | undefined;
 }
 
@@ -190,6 +191,7 @@ export interface ProjectSpaceWritePayload {
   override_b?: number | null;
   sort_order?: number;
   sub_ids?: number[];
+  notes?: string; 
 }
 
 export interface ProjectTemplateWritePayload {
@@ -449,6 +451,7 @@ export function toProjectTemplate(api: ApiProjectTemplate): ProjectTemplate {
       L: parseFloat(s.effective_l ?? s.override_l ?? "0") || 0,
       B: parseFloat(s.effective_b ?? s.override_b ?? "0") || 0,
       subIds: (s.sub_ids ?? []).map((sub) => sub.sub_id),
+      notes: s.notes ?? "", 
     })),
   };
 }
