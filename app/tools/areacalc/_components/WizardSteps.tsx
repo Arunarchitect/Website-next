@@ -15,7 +15,7 @@ import {
 } from "../areacalcApi";
 import { Spin, InfoBox, RateBadge, BigOption } from "./ui";
 import {
-  SpaceCard, CustomSpaceModal, PaletteDrawer, TotalAreaScaler,
+  CustomSpaceModal, PaletteDrawer, TotalAreaScaler, DraggableSpaceList,
 } from "./SpaceEditor";
 import {
   TemplatePanel, SaveAsCustomModal,
@@ -389,7 +389,7 @@ export function StepSpaces({
   locationLabel, clientName, projectName, wall, circ, costPerSqft,
   totals, floorGroups, onCsvImport,
   onNext, onBack,
-  customRate, 
+  customRate,
 }: {
   spaces: SpaceInstance[]; setSpaces: (s: SpaceInstance[]) => void;
   spaceTemplates: SpaceTemplate[]; projectTemplates: ProjectTemplate[];
@@ -419,7 +419,7 @@ export function StepSpaces({
   const [customModalOpen, setCustomModalOpen] = useState(false);
   const [templatePanelOpen, setTemplatePanelOpen] = useState(false);
   const [importBanner, setImportBanner] = useState(false);
-  
+
   // Copy modal state
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyTarget, setCopyTarget] = useState<SpaceInstance | null>(null);
@@ -440,9 +440,6 @@ export function StepSpaces({
     onCsvImport(payload);
   }
 
-  const update = (id: string, s: SpaceInstance) => setSpaces(spaces.map((x) => x.instanceId === id ? s : x));
-  const remove = (id: string) => setSpaces(spaces.filter((x) => x.instanceId !== id));
-
   function copySpace(space: SpaceInstance) {
     setCopyTarget(space);
     setCopyName(`${space.name} (copy)`);
@@ -451,22 +448,17 @@ export function StepSpaces({
 
   function confirmCopy() {
     if (!copyTarget) return;
-    
     const finalName = copyName.trim() || `${copyTarget.name} (copy)`;
-    
     const copied: SpaceInstance = {
-      ...copyTarget, 
-      instanceId: uid(), 
+      ...copyTarget,
+      instanceId: uid(),
       name: finalName,
       subSpaces: copyTarget.subSpaces.map((sub) => ({ ...sub, instanceId: uid() })),
     };
-    
     const idx = spaces.findIndex((s) => s.instanceId === copyTarget.instanceId);
     const next = [...spaces];
     next.splice(idx + 1, 0, copied);
     setSpaces(next);
-    
-    // Close modal and reset
     setCopyModalOpen(false);
     setCopyTarget(null);
     setCopyName("");
@@ -540,19 +532,15 @@ export function StepSpaces({
         <TotalAreaScaler spaces={spaces} unit={unit} currentNet={totals.net} onScale={setSpaces} />
       )}
 
+      {/* ── Draggable space list ── */}
       {spaces.length > 0 ? (
-        <div>
-          <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: .4 }}>
-            {spaces.length} Room{spaces.length !== 1 ? "s" : ""}
-          </p>
-          {spaces.map((s) => (
-            <SpaceCard key={s.instanceId} space={s} unit={unit} spaceTemplates={spaceTemplates}
-              onUpdate={(u) => update(s.instanceId, u)}
-              onRemove={() => remove(s.instanceId)}
-              onCopy={() => copySpace(s)}
-              existingNames={spaces.filter(x => x.instanceId !== s.instanceId).map(x => x.name)} />
-          ))}
-        </div>
+        <DraggableSpaceList
+          spaces={spaces}
+          setSpaces={setSpaces}
+          unit={unit}
+          spaceTemplates={spaceTemplates}
+          onCopy={copySpace}
+        />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderRadius: 16, border: "2px dashed #e5e7eb", background: "#fafafa", padding: "40px 16px", textAlign: "center" }}>
           <span style={{ fontSize: 44, marginBottom: 10 }}>🏗️</span>
@@ -580,78 +568,42 @@ export function StepSpaces({
           onClose={() => setPaletteOpen(false)} />
       )}
       {customModalOpen && (
-        <CustomSpaceModal onAdd={(s) => setSpaces([...spaces, s])} onClose={() => setCustomModalOpen(false)} unit={unit}  />
+        <CustomSpaceModal onAdd={(s) => setSpaces([...spaces, s])} onClose={() => setCustomModalOpen(false)} unit={unit} />
       )}
 
       {/* Copy Space Modal */}
       {copyModalOpen && copyTarget && (
         <div style={{
-          position: "fixed", inset: 0,
-          background: "rgba(0,0,0,.5)",
+          position: "fixed", inset: 0, background: "rgba(0,0,0,.5)",
           display: "flex", alignItems: "center", justifyContent: "center",
           zIndex: 400, padding: 16,
         }}>
           <div style={{
-            background: "#ffffff",
-            borderRadius: 16, padding: 24,
-            width: "100%", maxWidth: 380,
-            boxShadow: "0 24px 64px rgba(0,0,0,.2)",
+            background: "#ffffff", borderRadius: 16, padding: 24,
+            width: "100%", maxWidth: 380, boxShadow: "0 24px 64px rgba(0,0,0,.2)",
           }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 800, color: "#111827" }}>
-              📋 Copy Space
-            </h3>
-            
-            <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>
-              Space Name
-            </label>
-            
+            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 800, color: "#111827" }}>📋 Copy Space</h3>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", display: "block", marginBottom: 4 }}>Space Name</label>
             <input
-              autoFocus
-              value={copyName}
+              autoFocus value={copyName}
               onChange={(e) => setCopyName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && confirmCopy()}
               placeholder="Enter space name"
               style={{
-                width: "100%",
-                fontSize: 14,
-                padding: "9px 11px",
-                borderRadius: 9,
-                border: "1.5px solid #e5e7eb",
-                boxSizing: "border-box",
-                outline: "none",
-                background: "#ffffff",
-                color: "#111827",
-                marginBottom: 20,
+                width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 9,
+                border: "1.5px solid #e5e7eb", boxSizing: "border-box", outline: "none",
+                background: "#ffffff", color: "#111827", marginBottom: 20,
               }}
             />
-            
             <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={confirmCopy}
-                style={{
-                  flex: 1, padding: "11px", borderRadius: 9, border: "none",
-                  background: "#16a34a",
-                  color: "#fff",
-                  fontWeight: 700, fontSize: 14,
-                  cursor: "pointer",
-                }}>
-                Copy Space
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCopyModalOpen(false);
-                  setCopyTarget(null);
-                  setCopyName("");
-                }}
-                style={{
-                  padding: "11px 16px", borderRadius: 9,
-                  border: "1px solid #e5e7eb", background: "#fff",
-                  cursor: "pointer", fontSize: 14, color: "#374151",
-                }}>
-                Cancel
-              </button>
+              <button type="button" onClick={confirmCopy} style={{
+                flex: 1, padding: "11px", borderRadius: 9, border: "none",
+                background: "#16a34a", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer",
+              }}>Copy Space</button>
+              <button type="button" onClick={() => { setCopyModalOpen(false); setCopyTarget(null); setCopyName(""); }} style={{
+                padding: "11px 16px", borderRadius: 9, border: "1px solid #e5e7eb",
+                background: "#fff", cursor: "pointer", fontSize: 14, color: "#374151",
+              }}>Cancel</button>
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   UNIT_SYSTEMS, CATEGORY_META, FLOORS,
   getFloorLabel, uid, dimFromUnit, dimToUnit, fmt, calcSpaceArea,
@@ -218,9 +218,10 @@ export function TotalAreaScaler({ spaces, unit, currentNet, onScale }: {
 
 // ─── SubSpaceRow ──────────────────────────────────────────────
 
-export function SubSpaceRow({ sub, onUpdate, onRemove, onCopy, unit }: {
+export function SubSpaceRow({ sub, onUpdate, onRemove, onCopy, unit, dragHandle }: {
   sub: SubSpaceInstance; onUpdate: (s: SubSpaceInstance) => void;
   onRemove: () => void; onCopy: () => void; unit: UnitKey;
+  dragHandle?: React.ReactNode;
 }) {
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   return (
@@ -230,7 +231,10 @@ export function SubSpaceRow({ sub, onUpdate, onRemove, onCopy, unit }: {
       borderRadius: 8, padding: "10px 12px",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>↳ {sub.name}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {dragHandle}
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>↳ {sub.name}</span>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <button onClick={onCopy} title="Duplicate sub-space" style={{
             fontSize: 13, background: "none", border: "1px solid #d1d5db",
@@ -262,31 +266,70 @@ export function SubSpaceRow({ sub, onUpdate, onRemove, onCopy, unit }: {
   );
 }
 
-// ─── SpaceCard ────────────────────────────────────────────────
+// ─── DragHandle ───────────────────────────────────────────────
+
+function DragHandle({ onMouseDown }: { onMouseDown?: (e: React.MouseEvent) => void }) {
+  return (
+    <span
+      onMouseDown={onMouseDown}
+      title="Drag to reorder"
+      style={{
+        cursor: "grab",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "2px 4px",
+        color: "#d1d5db",
+        flexShrink: 0,
+        userSelect: "none",
+        fontSize: 14,
+        lineHeight: 1,
+        borderRadius: 4,
+        transition: "color .15s",
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#9ca3af"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#d1d5db"; }}
+    >
+      ⠿
+    </span>
+  );
+}
+
 // ─── SpaceCard ────────────────────────────────────────────────
 
-export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTemplates, existingNames = [] }: {
+export function SpaceCard({
+  space, onUpdate, onRemove, onCopy, unit, spaceTemplates, existingNames = [],
+  dragHandle,
+  isDragging,
+  isDragOver,
+}: {
   space: SpaceInstance; onUpdate: (s: SpaceInstance) => void;
   onRemove: () => void; onCopy: () => void; unit: UnitKey; spaceTemplates: SpaceTemplate[];
   existingNames?: string[];
+  dragHandle?: React.ReactNode;
+  isDragging?: boolean;
+  isDragOver?: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [addSubOpen, setAddSubOpen] = useState(false);
   const [addingCustomSub, setAddingCustomSub] = useState(false);
   const [customSubName, setCustomSubName] = useState("");
-  
+
   // Name editing state
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState(space.name);
   const [nameError, setNameError] = useState("");
+
+  // Sub-space drag state
+  const subDragIdx = useRef<number | null>(null);
+  const subDragOverIdx = useRef<number | null>(null);
+  const [subDragState, setSubDragState] = useState<{ dragIdx: number | null; overIdx: number | null }>({ dragIdx: null, overIdx: null });
 
   const meta = CATEGORY_META[space.category];
   const template = spaceTemplates.find((t) => t.id === space.templateId);
   const aLabel = UNIT_SYSTEMS[unit].areaLabel;
   const totalArea = fmt(calcSpaceArea(space), unit);
   const mainArea = fmt(space.L * space.B, unit);
-
-  
 
   function startEditing() {
     setIsEditingName(true);
@@ -295,22 +338,16 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
   }
 
   function saveNameChange() {
-  const newName = editName.trim();
-  if (!newName) {
-    setNameError("Name cannot be empty");
-    return;
+    const newName = editName.trim();
+    if (!newName) { setNameError("Name cannot be empty"); return; }
+    if (existingNames?.some(n => n.toLowerCase() === newName.toLowerCase())) {
+      setNameError(`"${newName}" already exists. Choose a different name.`);
+      return;
+    }
+    onUpdate({ ...space, name: newName });
+    setIsEditingName(false);
+    setNameError("");
   }
-  
-  // Check for duplicate name (excluding current space)
-  if (existingNames?.some(n => n.toLowerCase() === newName.toLowerCase())) {
-    setNameError(`"${newName}" already exists. Choose a different name.`);
-    return;
-  }
-  
-  onUpdate({ ...space, name: newName });
-  setIsEditingName(false);
-  setNameError("");
-}
 
   function cancelEditing() {
     setIsEditingName(false);
@@ -319,11 +356,8 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter") {
-      saveNameChange();
-    } else if (e.key === "Escape") {
-      cancelEditing();
-    }
+    if (e.key === "Enter") saveNameChange();
+    else if (e.key === "Escape") cancelEditing();
   }
 
   function addSubFromTemplate(subId: string) {
@@ -357,75 +391,101 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
     onUpdate({ ...space, subSpaces: next });
   }
 
+  // Sub-space drag handlers
+  function onSubDragStart(idx: number) {
+    subDragIdx.current = idx;
+    setSubDragState({ dragIdx: idx, overIdx: null });
+  }
+
+  function onSubDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault();
+    if (subDragOverIdx.current !== idx) {
+      subDragOverIdx.current = idx;
+      setSubDragState((s) => ({ ...s, overIdx: idx }));
+    }
+  }
+
+  function onSubDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation(); // prevent bubbling to parent card drag
+    const from = subDragIdx.current;
+    const to = subDragOverIdx.current;
+    if (from !== null && to !== null && from !== to) {
+      const next = [...space.subSpaces];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      onUpdate({ ...space, subSpaces: next });
+    }
+    subDragIdx.current = null;
+    subDragOverIdx.current = null;
+    setSubDragState({ dragIdx: null, overIdx: null });
+  }
+
+  function onSubDragEnd() {
+    subDragIdx.current = null;
+    subDragOverIdx.current = null;
+    setSubDragState({ dragIdx: null, overIdx: null });
+  }
+
   return (
     <div style={{
-      borderRadius: 12, border: `1.5px solid ${meta.border}`,
-      background: "#fff", overflow: "hidden", marginBottom: 8,
-      boxShadow: "0 1px 4px rgba(0,0,0,.04)",
+      borderRadius: 12,
+      border: `1.5px solid ${isDragOver ? "#f59e0b" : meta.border}`,
+      background: isDragging ? "#f9fafb" : "#fff",
+      overflow: "hidden", marginBottom: 8,
+      boxShadow: isDragging
+        ? "0 8px 24px rgba(0,0,0,.12)"
+        : isDragOver
+          ? "0 0 0 2px #fcd34d"
+          : "0 1px 4px rgba(0,0,0,.04)",
+      opacity: isDragging ? 0.5 : 1,
+      transition: "box-shadow .15s, border-color .15s, opacity .15s",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", flexWrap: "wrap" }}>
+        {/* Drag handle for the whole card */}
+        {dragHandle}
+
         <button onClick={() => setExpanded(!expanded)} style={{
           background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#9ca3af",
           flexShrink: 0, transition: "transform .15s",
           transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
         }}>▾</button>
         <span style={{ fontSize: 20 }}>{space.icon}</span>
-        
+
         {/* Editable name */}
         {isEditingName ? (
           <div style={{ flex: 1, minWidth: 80 }}>
             <input
               autoFocus
               value={editName}
-              onChange={(e) => {
-                setEditName(e.target.value);
-                setNameError("");
-              }}
+              onChange={(e) => { setEditName(e.target.value); setNameError(""); }}
               onBlur={saveNameChange}
               onKeyDown={handleKeyDown}
               style={{
-                fontSize: 14,
-                fontWeight: 700,
-                padding: "4px 8px",
-                borderRadius: 6,
+                fontSize: 14, fontWeight: 700, padding: "4px 8px", borderRadius: 6,
                 border: nameError ? "1.5px solid #ef4444" : "1.5px solid #6366f1",
-                outline: "none",
-                background: "#fff",
-                color: "#111827",
-                width: "100%",
+                outline: "none", background: "#fff", color: "#111827", width: "100%",
               }}
             />
             {nameError && (
-              <span style={{ fontSize: 10, color: "#ef4444", display: "block", marginTop: 2 }}>
-                {nameError}
-              </span>
+              <span style={{ fontSize: 10, color: "#ef4444", display: "block", marginTop: 2 }}>{nameError}</span>
             )}
           </div>
         ) : (
-          <span 
+          <span
             onClick={startEditing}
-            style={{ 
-              fontWeight: 700, 
-              fontSize: 14, 
-              color: "#111827", 
-              flex: 1, 
-              minWidth: 80,
-              cursor: "pointer",
-              borderBottom: "1px dashed #e5e7eb",
-              padding: "2px 0",
+            style={{
+              fontWeight: 700, fontSize: 14, color: "#111827", flex: 1, minWidth: 80,
+              cursor: "pointer", borderBottom: "1px dashed #e5e7eb", padding: "2px 0",
               transition: "border-color 0.2s",
             }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLSpanElement).style.borderBottomColor = "#6366f1";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLSpanElement).style.borderBottomColor = "#e5e7eb";
-            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.borderBottomColor = "#6366f1"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.borderBottomColor = "#e5e7eb"; }}
           >
             {space.name}
           </span>
         )}
-        
+
         {space.isCustom && (
           <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 20, background: "#e5e7eb", color: "#6b7280", fontWeight: 700 }}>Custom</span>
         )}
@@ -470,23 +530,46 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
               onChange={(e) => onUpdate({ ...space, description: e.target.value })}
               placeholder="Note…"
               style={{
-                width: "100%",
-                fontSize: 11,
-                padding: "4px 8px",
-                borderRadius: 6,
-                border: "1px solid #e5e7eb",
-                color: "#6b7280",
-                background: "#fff",
-                boxSizing: "border-box",
+                width: "100%", fontSize: 11, padding: "4px 8px", borderRadius: 6,
+                border: "1px solid #e5e7eb", color: "#6b7280", background: "#fff", boxSizing: "border-box",
               }}
             />
           </div>
-          {space.subSpaces.map((sub) => (
-            <SubSpaceRow key={sub.instanceId} sub={sub} unit={unit}
-              onUpdate={(u) => onUpdate({ ...space, subSpaces: space.subSpaces.map((s) => s.instanceId === sub.instanceId ? u : s) })}
-              onRemove={() => onUpdate({ ...space, subSpaces: space.subSpaces.filter((s) => s.instanceId !== sub.instanceId) })}
-              onCopy={() => copySubSpace(sub)} />
-          ))}
+
+          {/* Sub-space list with drag-to-reorder */}
+          <div onDrop={onSubDrop} onDragOver={(e) => e.preventDefault()}>
+            {space.subSpaces.map((sub, subIdx) => (
+              <div
+                key={sub.instanceId}
+                draggable
+                onDragStart={(e) => {
+                  e.stopPropagation(); // don't trigger parent card drag
+                  onSubDragStart(subIdx);
+                }}
+                onDragOver={(e) => onSubDragOver(e, subIdx)}
+                onDragEnd={onSubDragEnd}
+                style={{
+                  opacity: subDragState.dragIdx === subIdx ? 0.4 : 1,
+                  borderTop: subDragState.overIdx === subIdx && subDragState.dragIdx !== subIdx
+                    ? "2px solid #f59e0b"
+                    : "2px solid transparent",
+                  transition: "opacity .15s, border-color .1s",
+                }}
+              >
+                <SubSpaceRow
+                  sub={sub}
+                  unit={unit}
+                  dragHandle={
+                    <DragHandle />
+                  }
+                  onUpdate={(u) => onUpdate({ ...space, subSpaces: space.subSpaces.map((s) => s.instanceId === sub.instanceId ? u : s) })}
+                  onRemove={() => onUpdate({ ...space, subSpaces: space.subSpaces.filter((s) => s.instanceId !== sub.instanceId) })}
+                  onCopy={() => copySubSpace(sub)}
+                />
+              </div>
+            ))}
+          </div>
+
           <div style={{ marginTop: 10, marginLeft: 12 }}>
             {addSubOpen ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
@@ -528,18 +611,15 @@ export function SpaceCard({ space, onUpdate, onRemove, onCopy, unit, spaceTempla
 
 // ─── CustomSpaceModal ─────────────────────────────────────────
 
-// CHANGE 1: added `unit` to props type and destructure
 export function CustomSpaceModal({ onAdd, onClose, unit }: {
   onAdd: (s: SpaceInstance) => void; onClose: () => void; unit: UnitKey;
 }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState<CategoryKey>("residence");
-  // CHANGE 2: default L/B initialised in display units
   const [L, setL] = useState(() => unit === "sqm" ? +dimToUnit(12, "sqm").toFixed(2) : 12);
   const [B, setB] = useState(() => unit === "sqm" ? +dimToUnit(10, "sqm").toFixed(2) : 10);
   const [icon, setIcon] = useState("📐");
   const [floor, setFloor] = useState(0);
-  // CHANGE 3: derive uLabel from unit
   const uLabel = UNIT_SYSTEMS[unit].dimLabel;
   const icons = ["📐","🏗️","🏠","🛋️","🛏️","🍳","🚿","🌿","🚗","💼","📚","🔬","🏥","🛍️","🎉","✨","🏨","🏢","🪑","🩺","💊","🎭","📖","🅿️","🍴","🔑","🪜","↔️"];
 
@@ -552,7 +632,6 @@ export function CustomSpaceModal({ onAdd, onClose, unit }: {
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && name.trim() && (onAdd({
               instanceId: uid(), templateId: "custom", name: name.trim(), category,
-              // CHANGE 4a: convert display units → ft on Enter keydown
               L: dimFromUnit(L, unit),
               B: dimFromUnit(B, unit),
               floor, icon, description: "", subSpaces: [], isCustom: true,
@@ -577,7 +656,6 @@ export function CustomSpaceModal({ onAdd, onClose, unit }: {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-          {/* CHANGE 5: dynamic label using uLabel; step adapts to unit */}
           {[{ label: `Length (${uLabel})`, val: L, set: setL }, { label: `Width (${uLabel})`, val: B, set: setB }].map(({ label, val, set }) => (
             <div key={label} style={{ flex: 1 }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", display: "block", marginBottom: 4 }}>{label}</label>
@@ -602,7 +680,6 @@ export function CustomSpaceModal({ onAdd, onClose, unit }: {
             if (!name.trim()) return;
             onAdd({
               instanceId: uid(), templateId: "custom", name: name.trim(), category,
-              // CHANGE 4b: convert display units → ft on button click
               L: dimFromUnit(L, unit),
               B: dimFromUnit(B, unit),
               floor, icon, description: "", subSpaces: [], isCustom: true,
@@ -684,6 +761,104 @@ export function PaletteDrawer({ spaceTemplates, onAdd, onCustom, onClose }: {
           cursor: "pointer", fontSize: 12, color: "#6b7280", fontWeight: 600,
         }}>✏️ Custom Space</button>
       </div>
+    </div>
+  );
+}
+
+// ─── DraggableSpaceList ───────────────────────────────────────
+// Wraps the spaces array with HTML5 drag-and-drop reordering.
+// Kept as a separate component so StepSpaces stays clean.
+
+export function DraggableSpaceList({
+  spaces, setSpaces, unit, spaceTemplates, onCopy,
+}: {
+  spaces: SpaceInstance[];
+  setSpaces: (s: SpaceInstance[]) => void;
+  unit: UnitKey;
+  spaceTemplates: SpaceTemplate[];
+  onCopy: (space: SpaceInstance) => void;
+}) {
+  const dragIdx = useRef<number | null>(null);
+  const dragOverIdx = useRef<number | null>(null);
+  const [dragState, setDragState] = useState<{ dragIdx: number | null; overIdx: number | null }>({ dragIdx: null, overIdx: null });
+
+  function onDragStart(idx: number) {
+    dragIdx.current = idx;
+    setDragState({ dragIdx: idx, overIdx: null });
+  }
+
+  function onDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault();
+    if (dragOverIdx.current !== idx) {
+      dragOverIdx.current = idx;
+      setDragState((s) => ({ ...s, overIdx: idx }));
+    }
+  }
+
+  function onDrop(e: React.DragEvent, idx: number) {
+    e.preventDefault();
+    const from = dragIdx.current;
+    const to = idx;
+    if (from !== null && from !== to) {
+      const next = [...spaces];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      setSpaces(next);
+    }
+    dragIdx.current = null;
+    dragOverIdx.current = null;
+    setDragState({ dragIdx: null, overIdx: null });
+  }
+
+  function onDragEnd() {
+    dragIdx.current = null;
+    dragOverIdx.current = null;
+    setDragState({ dragIdx: null, overIdx: null });
+  }
+
+  const update = (id: string, s: SpaceInstance) =>
+    setSpaces(spaces.map((x) => x.instanceId === id ? s : x));
+  const remove = (id: string) =>
+    setSpaces(spaces.filter((x) => x.instanceId !== id));
+
+  return (
+    <div>
+      <p style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: .4 }}>
+        {spaces.length} Room{spaces.length !== 1 ? "s" : ""}
+        <span style={{ fontSize: 10, fontWeight: 400, color: "#d1d5db", marginLeft: 8 }}>drag ⠿ to reorder</span>
+      </p>
+      {spaces.map((s, idx) => (
+        <div
+          key={s.instanceId}
+          draggable
+          onDragStart={() => onDragStart(idx)}
+          onDragOver={(e) => onDragOver(e, idx)}
+          onDrop={(e) => onDrop(e, idx)}
+          onDragEnd={onDragEnd}
+          style={{
+            borderTop: dragState.overIdx === idx && dragState.dragIdx !== idx && dragState.dragIdx !== null && dragState.dragIdx > idx
+              ? "2px solid #f59e0b"
+              : "2px solid transparent",
+            borderBottom: dragState.overIdx === idx && dragState.dragIdx !== idx && dragState.dragIdx !== null && dragState.dragIdx < idx
+              ? "2px solid #f59e0b"
+              : "2px solid transparent",
+            transition: "border-color .1s",
+          }}
+        >
+          <SpaceCard
+            space={s}
+            unit={unit}
+            spaceTemplates={spaceTemplates}
+            onUpdate={(u) => update(s.instanceId, u)}
+            onRemove={() => remove(s.instanceId)}
+            onCopy={() => onCopy(s)}
+            existingNames={spaces.filter((x) => x.instanceId !== s.instanceId).map((x) => x.name)}
+            isDragging={dragState.dragIdx === idx}
+            isDragOver={dragState.overIdx === idx && dragState.dragIdx !== idx}
+            dragHandle={<DragHandle />}
+          />
+        </div>
+      ))}
     </div>
   );
 }
