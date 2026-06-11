@@ -303,7 +303,13 @@ export default function App() {
           sub_ids: subIds,
           notes: JSON.stringify({
           desc: s.description || "",
-          subs: s.subSpaces.map((sub) => sub.description || ""),
+          subs: s.subSpaces.map((sub) => ({
+            desc: sub.description || "",
+            L: sub.L,
+            B: sub.B,
+            name: sub.name,
+            templateId: sub.templateId,  // "custom" for custom subspaces
+          })),
         }),
         };
       });
@@ -358,6 +364,7 @@ export default function App() {
         });
 
         const freshTemplates = await fetchProjectTemplates();
+        console.log("fresh space sample:", freshTemplates.find(t => t.id === activeTemplateSource.id)?.spaces?.[0]);
         const updatedTpl = freshTemplates
           .map(toProjectTemplate)
           .find((t) => t.dbId === activeTemplateSource.id);
@@ -446,7 +453,7 @@ export default function App() {
     const s = makeSpaceFromTemplate(t, floor, subIds, L, B, dbId);
 
     let spaceDesc = notes ?? "";
-    let subDescs: string[] = [];
+    let subDescs: Array<{ desc: string; L: number; B: number; name: string; templateId: string }> = [];
     try {
       const parsed = JSON.parse(notes ?? "");
       if (parsed && typeof parsed === "object" && "desc" in parsed) {
@@ -458,13 +465,36 @@ export default function App() {
     }
 
     return {
-      ...s,
-      description: spaceDesc,
-      subSpaces: s.subSpaces.map((sub, i) => ({
+  ...s,
+  description: spaceDesc,
+  subSpaces: (() => {
+    // Restore template-backed subspaces with saved dims/desc
+    const restored = s.subSpaces.map((sub, i) => {
+      const saved = subDescs[i];
+      if (!saved || typeof saved !== "object") return sub;
+      return {
         ...sub,
-        description: subDescs[i] ?? sub.description,
-      })),
-    };
+        L: typeof saved.L === "number" ? saved.L : sub.L,
+        B: typeof saved.B === "number" ? saved.B : sub.B,
+        description: saved.desc ?? sub.description,
+      };
+    });
+
+    // Re-append custom subspaces that were packed into notes
+    const customSubs = (subDescs as Array<{templateId?: string; name?: string; L?: number; B?: number; desc?: string}>)
+      .filter((saved) => saved?.templateId === "custom")
+      .map((saved) => ({
+        instanceId: uid(),
+        templateId: "custom" as const,
+        name: saved.name || "Custom",
+        L: saved.L ?? 8,
+        B: saved.B ?? 6,
+        description: saved.desc || "",
+      }));
+
+    return [...restored, ...customSubs];
+  })(),
+};
   }).filter((x): x is SpaceInstance => x !== null);
 
     setSpaces(newSpaces);

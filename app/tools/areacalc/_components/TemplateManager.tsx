@@ -309,13 +309,23 @@ export function SaveAsGeneralModal({ spaces, spaceTemplates, onClose, onSaved }:
         .map((sub) => tpl.subSpaces?.find((x) => x.id === sub.templateId)?.dbId)
         .filter((id): id is number => typeof id === "number");
       return {
-        space_template: dbId,
-        floor: s.floor,
-        override_l: s.L !== tpl.L ? +s.L.toFixed(2) : null,
-        override_b: s.B !== tpl.B ? +s.B.toFixed(2) : null,
-        sort_order: idx,
-        sub_ids: subIds,
-      };
+  space_template: dbId,
+  floor: s.floor,
+  override_l: s.L !== tpl.L ? +s.L.toFixed(2) : null,
+  override_b: s.B !== tpl.B ? +s.B.toFixed(2) : null,
+  sort_order: idx,
+  sub_ids: subIds,
+  notes: JSON.stringify({
+    desc: s.description || "",
+    subs: s.subSpaces.map((sub) => ({
+      desc: sub.description || "",
+      L: sub.L,
+      B: sub.B,
+      name: sub.name,
+      templateId: sub.templateId,
+    })),
+  }),
+};
     });
     try {
       setSaving(true); setError("");
@@ -440,6 +450,13 @@ export function SaveAsGeneralModal({ spaces, spaceTemplates, onClose, onSaved }:
           {spaces.some((s) => s.isCustom) && (
             <p style={{ margin: "10px 0 0", fontSize: 11, color: "#b45309", background: "#fffbeb", padding: "6px 9px", borderRadius: 6, lineHeight: 1.5 }}>
               ⚠️ {spaces.filter((s) => s.isCustom).length} custom space(s) will be skipped.
+            </p>
+          )}
+
+          {/* ADD THIS BELOW */}
+          {spaces.some((s) => s.subSpaces.some((sub) => sub.templateId === "custom")) && (
+            <p style={{ margin: "6px 0 0", fontSize: 11, color: "#b45309", background: "#fffbeb", padding: "6px 9px", borderRadius: 6, lineHeight: 1.5 }}>
+              ⚠️ Custom sub-spaces cannot be saved in public templates and will be skipped.
             </p>
           )}
         </div>
