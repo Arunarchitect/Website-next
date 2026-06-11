@@ -1,3 +1,4 @@
+name: green
 services:
   app:
     build: .
