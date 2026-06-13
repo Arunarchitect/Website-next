@@ -1,6 +1,9 @@
 // app/feecalc/feeCalcApi.ts
 
-const BASE = process.env.NEXT_PUBLIC_HOST ?? "";
+import type { QuoteOption, DiscountPackage, QuotePreviewResult } from "./feeCalcTypes";
+
+const BASE = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_HOST ?? "") : "";
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,7 +106,7 @@ function authHeaders(): Record<string, string> {
   };
 }
 
-// ─── API calls ────────────────────────────────────────────────────────────────
+// ─── Authenticated API calls ──────────────────────────────────────────────────
 
 export async function fetchFeeTemplates(
   organisationId?: number,
@@ -176,6 +179,55 @@ export async function fetchTemplatePreview(
     throw new Error(
       (err as { detail?: string }).detail ?? `Preview failed: ${res.status}`,
     );
+  }
+  return res.json();
+}
+
+// ─── Public (no-auth) API calls ───────────────────────────────────────────────
+
+export async function fetchPublicQuote(code: string): Promise<QuoteOption> {
+  const res = await fetch(
+    `${BASE}/api/feecalc/public/quote/?code=${encodeURIComponent(code.trim().toUpperCase())}`,
+    { headers: JSON_HEADERS },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function unlockDiscount(quoteCode: string, activationCode: string): Promise<DiscountPackage> {
+  const res = await fetch(`${BASE}/api/feecalc/public/unlock-discount/`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      quote_access_code: quoteCode.trim().toUpperCase(),
+      activation_code: activationCode.trim().toUpperCase(),
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function publicPreview(payload: {
+  code: string;
+  quantity: string;
+  applied_rule_ids: number[];
+  opted_out_deliverable_ids: number[];
+  currency: string;
+}): Promise<QuotePreviewResult> {
+  const res = await fetch(`${BASE}/api/feecalc/public/preview/`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `HTTP ${res.status}`);
   }
   return res.json();
 }
