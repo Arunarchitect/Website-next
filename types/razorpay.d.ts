@@ -6,12 +6,34 @@ export interface RazorpayOptions {
   name: string;
   description: string;
   handler: (response: RazorpayResponse) => void;
-  prefill: {
-    name: string;
-    email: string;
+  prefill?: {
+    name?: string;
+    email?: string;
+    contact?: string;
   };
-  theme: {
-    color: string;
+  config?: {
+    display?: {
+      blocks?: Record<
+        string,
+        {
+          name: string;
+          instruments: { method: string }[];
+        }
+      >;
+      sequence?: string[];
+      preferences?: {
+        show_default_blocks?: boolean;
+      };
+    };
+  };
+  modal?: {
+    backdropclose?: boolean;
+    escape?: boolean;
+    handleback?: boolean;
+    confirm_close?: boolean;
+  };
+  theme?: {
+    color?: string;
   };
 }
 
