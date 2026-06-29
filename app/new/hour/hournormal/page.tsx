@@ -15,6 +15,8 @@ import {
   type DeliverableOption, type OrgOption, type ProjectOption,
 } from "@/app/new/worklog_api";
 
+import WorklogPDFButton from "@/app/new/hour/hournormal/WorklogPDFReport";
+
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
@@ -612,23 +614,18 @@ export default function WorklogPage() {
   const [rowsLoading,         setRowsLoading]         = useState(false);
   const [error,               setError]               = useState<string|null>(null);
 
-  // ── allActiveDates: full set of dates with worklogs for the current
-  //    calendar view — fetched independently from paginated rows so the
-  //    calendar always shows the complete picture regardless of page.
   const [allActiveDates, setAllActiveDates] = useState<Set<string>>(new Set());
   const [datesLoading,   setDatesLoading]   = useState(false);
 
   const dateRangeRef = useRef<{from?:string;to?:string}>({});
 
-  // Fetch all worklog dates for a range (no pagination, just dates).
-  // Runs in parallel with loadRows so neither blocks the other.
   async function loadActiveDates(params: {from?:string; to?:string}) {
     setDatesLoading(true);
     try {
       const dates = await fetchWorkLogDates(params);
       setAllActiveDates(new Set(dates));
     } catch {
-      // Non-fatal — calendar dots simply won't show
+      // non-fatal
     } finally {
       setDatesLoading(false);
     }
@@ -645,14 +642,11 @@ export default function WorklogPage() {
     finally { setRowsLoading(false); }
   }
 
-  // Load rows + dates together when filter changes (dates fetch separately, non-blocking)
   async function loadAll(params: {from?:string; to?:string; page?:number}) {
-    // Dates and rows are independent — fire both, don't await dates before rows
     loadActiveDates({from:params.from, to:params.to});
     await loadRows(params);
   }
 
-  // Initial load
   useEffect(() => {
     const {from, to} = currentWeekRange();
     Promise.all([
@@ -671,7 +665,6 @@ export default function WorklogPage() {
     }).catch(e => { setError(e.message); setLoading(false); });
   }, []);
 
-  // Re-fetch when filter selection changes
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
@@ -686,7 +679,6 @@ export default function WorklogPage() {
     loadAll({from, to, page:1});
   }, [selDates, selMonth, selYear]);
 
-  // Pagination — only re-fetches rows (dates don't change between pages)
   function goToPage(p: number) { loadRows({...dateRangeRef.current, page:p}); }
 
   const totalMinutes = useMemo(() => rows.reduce((s, r) => {
@@ -752,8 +744,6 @@ export default function WorklogPage() {
         </div>
         <button onClick={nextMonth} style={{ width:28, height:28, borderRadius:7, background:T.panel2, border:`1px solid ${T.panel2B}`, color:T.t4, cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
       </div>
-      {/* Calendar uses allActiveDates so ALL days with worklogs are shown,
-          not just those on the current paginated page */}
       <CalGrid
         year={calYear}
         month={calMonth}
@@ -859,6 +849,7 @@ export default function WorklogPage() {
     </div>
   ) : null;
 
+  // ── Main render ───────────────────────────────────────────────────────────
   return (
     <>
       <ProgressBar loading={rowsLoading} />
@@ -878,9 +869,18 @@ export default function WorklogPage() {
           }
         `}</style>
 
-        <div style={{ marginBottom:isMobile?14:22 }}>
-          <h1 style={{ fontSize:isMobile?20:24, fontWeight:700, fontFamily:"'Sora',sans-serif", letterSpacing:"-0.03em", color:T.t1, margin:0 }}>Worklog</h1>
-          <p style={{ color:T.t5, fontSize:12, margin:"3px 0 0" }}>Current week · {totalCount} total entries</p>
+        {/* ── Page header with PDF button ── */}
+        <div style={{ marginBottom:isMobile?14:22, display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+          <div>
+            <h1 style={{ fontSize:isMobile?20:24, fontWeight:700, fontFamily:"'Sora',sans-serif", letterSpacing:"-0.03em", color:T.t1, margin:0 }}>Worklog</h1>
+            <p style={{ color:T.t5, fontSize:12, margin:"3px 0 0" }}>Current week · {totalCount} total entries</p>
+          </div>
+          <WorklogPDFButton
+            workLogs={rows}
+            totalMinutes={totalMinutes}
+            dateFrom={dateRangeRef.current.from}
+            dateTo={dateRangeRef.current.to}
+          />
         </div>
 
         {isMobile ? (
