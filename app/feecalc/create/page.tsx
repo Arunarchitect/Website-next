@@ -366,7 +366,7 @@ export default function CreateQuotePage() {
       })
       .catch((e: unknown) => setEditError(e instanceof Error ? e.message : "Failed to load quote"))
       .finally(() => setLoadingEdit(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, [hasToken, editId]);
 
   // ── load templates/packages/projects/quotes scoped to selected org ──
