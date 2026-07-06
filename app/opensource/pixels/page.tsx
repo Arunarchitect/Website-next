@@ -1,6 +1,7 @@
+
 // app/pixels/buy/page.tsx
 "use client";
-
+import Image from "next/image";
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 
@@ -214,7 +215,7 @@ export default function BuyPixelsPage() {
             Buy Pixels to Support Open Source
           </h1>
           <p className={`${t.textSecondary} max-w-2xl mx-auto text-sm sm:text-base`}>
-            Type in your block size, or upload your logo and we'll size it automatically to match its shape.
+            Type in your block size, or upload your logo and we`&apos;`ll size it automatically to match its shape.
           </p>
         </section>
 
@@ -233,10 +234,12 @@ export default function BuyPixelsPage() {
                   style={{ width: previewW, height: previewH }}
                 >
                   {imagePreview ? (
-                    <img
-                      src={imagePreview}
-                      alt="Logo preview"
-                      className="w-full h-full object-cover"
+                    <Image
+                        src={imagePreview}
+                        alt="Logo preview"
+                        fill
+                        className="object-cover"
+                        unoptimized
                     />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-indigo-500/40 to-indigo-700/40" />
@@ -322,7 +325,7 @@ export default function BuyPixelsPage() {
 
               {autoDetected && isCustomSize && (
                 <p className="mt-2 text-xs text-amber-500">
-                  Custom size — no longer matches your uploaded image's proportions.
+                  Custom size — no longer matches your uploaded image`&apos;`s proportions.
                 </p>
               )}
             </div>
@@ -370,7 +373,7 @@ export default function BuyPixelsPage() {
               {imagePreview && !imageError && autoDetected && (
                 <div className="mt-3 flex items-center justify-between">
                   <p className="text-xs text-green-500">
-                    Detected {autoDetected.w}×{autoDetected.h} from your image's aspect ratio
+                    Detected {autoDetected.w}×{autoDetected.h} from your image `&apos;`s aspect ratio
                   </p>
                   <button
                     onClick={clearImage}
@@ -382,10 +385,10 @@ export default function BuyPixelsPage() {
               )}
 
               <p className={`mt-4 text-xs ${t.textSecondary} leading-relaxed`}>
-                We read your image's real resolution and scale its longer side
+                We read your image `&apos;`s real resolution and scale its longer side
                 to {TARGET_LONG_SIDE} grid units, keeping the same proportions
                 as your logo. You can still type in any width/height by hand.
-                SVGs aren't supported since they have no fixed pixel resolution.
+                SVGs aren`&apos;`t supported since they have no fixed pixel resolution.
               </p>
             </div>
           </div>
@@ -504,9 +507,9 @@ export default function BuyPixelsPage() {
               </p>
             </div>
             <div>
-              <h4 className="font-medium text-sm">Why can't I upload an SVG?</h4>
+              <h4 className="font-medium text-sm">Why can`&apos;`t I upload an SVG?</h4>
               <p className={`${t.textSecondary} text-sm mt-1`}>
-                SVGs are vector graphics — they don't have a fixed pixel resolution, so we can't size a pixel block from them automatically. Export your logo as PNG or JPG first.
+                SVGs are vector graphics — they don`&apos;`t have a fixed pixel resolution, so we can`&apos;`t size a pixel block from them automatically. Export your logo as PNG or JPG first.
               </p>
             </div>
             <div>
