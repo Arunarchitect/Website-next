@@ -1,4 +1,4 @@
-import type { ContentBlock, InlineRun, Reference } from "../../types";
+import type { ContentBlock, InlineRun, Reference } from "../types";
 
 interface ChapterContentProps {
   content: ContentBlock[];
