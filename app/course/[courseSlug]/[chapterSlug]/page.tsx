@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import VideoPlayer from "../../components/VideoPlayer";
+import ChapterContent from "../../components/ChapterContent";
 import {
   getCourseBySlug,
   getChapterBySlug,
@@ -34,9 +35,10 @@ export default async function ChapterPage({ params }: Props) {
   const { prev, next } = getAdjacentChapters(course, chapter);
 
   const allChapters = getAllChapters(course);
-  const currentIndex = allChapters.findIndex((ch) => ch.id === chapter.id);
   const completedCount = allChapters.filter((ch) => ch.completed).length;
   const isDone = !!chapter.completed;
+  const hasVideo = !!chapter.video;
+  const hasContent = !!chapter.content && chapter.content.length > 0;
 
   return (
     <main className={`${display.variable} ${mono.variable} chapter-page`}>
@@ -107,7 +109,8 @@ export default async function ChapterPage({ params }: Props) {
         .chapter-title-row {
           display: flex;
           align-items: center;
-          gap: 12px;
+          flex-wrap: wrap;
+          gap: 10px 12px;
           margin-bottom: 8px;
         }
         .chapter-title {
@@ -197,6 +200,22 @@ export default async function ChapterPage({ params }: Props) {
           font-size: 0.92rem;
         }
         .chapter-nav-spacer { flex: 1; }
+
+        @media (max-width: 640px) {
+          .chapter-page { padding: 16px 16px 48px; }
+          .chapter-desc { font-size: 14.5px; margin-bottom: 22px; }
+          .chapter-nav {
+            flex-direction: column;
+          }
+          .chapter-nav-link,
+          .chapter-nav-link.next {
+            max-width: 100%;
+            width: 100%;
+            margin-left: 0;
+            text-align: left;
+            align-items: flex-start;
+          }
+        }
       `}</style>
 
       <Link href={`/course/${course.slug}`} className="chapter-back">
@@ -230,14 +249,20 @@ export default async function ChapterPage({ params }: Props) {
       </div>
       <p className="chapter-desc">{chapter.description}</p>
 
-      {chapter.video ? (
+      {hasVideo ? (
         <VideoPlayer
-          src={chapter.video}
+          src={chapter.video!}
           poster={chapter.poster ?? ""}
           subtitles={chapter.subtitles}
         />
-      ) : (
+      ) : !hasContent ? (
         <div className="chapter-media-empty">No video for this lesson — text/notes only.</div>
+      ) : null}
+
+      {hasContent && (
+        <div className="chapter-body" style={{ marginTop: hasVideo ? 28 : 0 }}>
+          <ChapterContent content={chapter.content!} references={chapter.references} />
+        </div>
       )}
 
       <div className="chapter-nav">

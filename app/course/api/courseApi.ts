@@ -22,6 +22,117 @@ const COURSES: Course[] = [
             description: "Understand and break down a real client brief before modeling begins.",
             order: 1,
             completed: true,
+            content: [
+              { type: "heading", level: 2, text: "Why the brief comes first" },
+              {
+                type: "paragraph",
+                runs: [
+                  { type: "text", text: "Every project starts as a document, not a model. A " },
+                  { type: "bold", text: "client brief" },
+                  {
+                    type: "text",
+                    text: " is the client's own account of what they need — rooms, budget, site, timeline — and it is usually incomplete, contradictory, or written in language that has nothing to do with construction.",
+                  },
+                ],
+              },
+              {
+                type: "paragraph",
+                runs: [
+                  { type: "text", text: "Your job in this stage is " },
+                  { type: "highlight", text: "translation, not modeling" },
+                  {
+                    type: "text",
+                    text: ": turning ambiguous requirements into a structured, checkable list before a single wall goes into BonsaiBIM.",
+                  },
+                  { type: "ref", refId: "riba-plan-of-work" },
+                ],
+              },
+              { type: "heading", level: 3, text: "What a good brief actually contains" },
+              {
+                type: "list",
+                items: [
+                  [{ type: "text", text: "Spatial requirements — room list, adjacencies, approximate areas" }],
+                  [{ type: "text", text: "Site constraints — orientation, access, boundary conditions" }],
+                  [
+                    { type: "text", text: "Budget and " },
+                    { type: "italic", text: "quality" },
+                    { type: "text", text: " expectations, which are often in tension" },
+                  ],
+                  [{ type: "text", text: "Regulatory context — local building codes, setbacks, FAR" }],
+                  [{ type: "text", text: "Timeline and phasing expectations" }],
+                ],
+              },
+              {
+                type: "callout",
+                variant: "tip",
+                title: "Turn vague language into questions",
+                runs: [
+                  {
+                    type: "text",
+                    text: "\"Open and airy\" is not a spec. Convert it into questions you can actually answer: ceiling height, glazing ratio, cross-ventilation, sightlines between spaces.",
+                  },
+                ],
+              },
+              {
+                type: "image",
+                src: "/courses/bonsai-bim/m1/brief-annotation-example.jpg",
+                alt: "A client brief document annotated with margin notes translating requirements into spatial data",
+                caption:
+                  "A marked-up brief: vague client language on the left, translated spatial requirements on the right.",
+                source: "Illustration: Modelflick course materials.",
+              },
+              { type: "heading", level: 3, text: "Reading between the lines" },
+              {
+                type: "list",
+                ordered: true,
+                items: [
+                  [{ type: "text", text: "List every explicit requirement, verbatim, before interpreting anything." }],
+                  [{ type: "text", text: "Flag contradictions (e.g. budget vs. finish level) for clarification, don't resolve them yourself." }],
+                  [
+                    { type: "text", text: "Cross-check against " },
+                    { type: "italic", text: "typical" },
+                    { type: "text", text: " program areas for the building type" },
+                    { type: "ref", refId: "neufert" },
+                    { type: "text", text: " to catch omissions." },
+                  ],
+                  [{ type: "text", text: "Produce a one-page requirements summary the client signs off on before Module 1 continues." }],
+                ],
+              },
+              {
+                type: "callout",
+                variant: "warning",
+                title: "Don't let assumptions become requirements",
+                runs: [
+                  {
+                    type: "text",
+                    text: "Anything you infer from the brief should be labelled as an assumption in your summary — not silently folded into the design as if the client asked for it.",
+                  },
+                ],
+              },
+              { type: "divider" },
+              {
+                type: "paragraph",
+                runs: [
+                  {
+                    type: "text",
+                    text: "Next, you'll take this requirements summary and convert it into a functional space program with target areas — the direct input to your first BonsaiBIM space layout.",
+                  },
+                ],
+              },
+            ],
+            references: [
+              {
+                id: "riba-plan-of-work",
+                style: "apa",
+                text: "RIBA. (2020). RIBA Plan of Work 2020 overview. Royal Institute of British Architects.",
+                url: "https://www.architecture.com/knowledge-and-resources/resources-landing-page/riba-plan-of-work",
+              },
+              {
+                id: "neufert",
+                style: "mla",
+                text: "Neufert, Ernst, and Peter Neufert. Architects' Data. 4th ed., Wiley-Blackwell, 2012.",
+              },
+            ],
           },
           {
             id: 2,
@@ -100,6 +211,47 @@ const COURSES: Course[] = [
             poster: "/videos/bonsai/m2/ifc-fundamentals-poster.jpg",
             order: 8,
             completed: true,
+            content: [
+              { type: "heading", level: 2, text: "Key terms from this lesson" },
+              {
+                type: "list",
+                items: [
+                  [
+                    { type: "bold", text: "IFC (Industry Foundation Classes)" },
+                    { type: "text", text: " — the open, vendor-neutral schema BonsaiBIM reads and writes" },
+                    { type: "ref", refId: "buildingsmart-ifc" },
+                    { type: "text", text: "." },
+                  ],
+                  [
+                    { type: "bold", text: "Property set (Pset)" },
+                    { type: "text", text: " — a named group of properties attached to an IFC entity, e.g. Pset_WallCommon." },
+                  ],
+                  [
+                    { type: "bold", text: "Spatial structure" },
+                    { type: "text", text: " — the Project → Site → Building → Storey → Space hierarchy every element sits inside." },
+                  ],
+                ],
+              },
+              {
+                type: "callout",
+                variant: "note",
+                title: "Watch the video first",
+                runs: [
+                  {
+                    type: "text",
+                    text: "This section is a written reference to revisit after the walkthrough above — it isn't a substitute for it.",
+                  },
+                ],
+              },
+            ],
+            references: [
+              {
+                id: "buildingsmart-ifc",
+                style: "apa",
+                text: "buildingSMART International. (2024). IFC4.3 documentation.",
+                url: "https://ifc43-docs.standards.buildingsmart.org/",
+              },
+            ],
           },
           {
             id: 9,
