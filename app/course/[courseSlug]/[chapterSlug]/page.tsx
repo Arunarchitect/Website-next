@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import VideoPlayer from "../../components/VideoPlayer";
 import {
   getCourseBySlug,
   getChapterBySlug,
   getAdjacentChapters,
+  getAllChapters,
 } from "../../api/courseApi";
+
+const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
+const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 interface Props {
   params: Promise<{ courseSlug: string; chapterSlug: string }>;
@@ -28,15 +33,202 @@ export default async function ChapterPage({ params }: Props) {
   const { chapter, courseModule } = result;
   const { prev, next } = getAdjacentChapters(course, chapter);
 
+  const allChapters = getAllChapters(course);
+  const currentIndex = allChapters.findIndex((ch) => ch.id === chapter.id);
+  const completedCount = allChapters.filter((ch) => ch.completed).length;
+  const isDone = !!chapter.completed;
+
   return (
-    <main style={{ maxWidth: "1000px", margin: "40px auto", padding: "0 20px" }}>
-      <Link href={`/course/${course.slug}`} style={{ fontSize: "0.9rem", color: "#666" }}>
+    <main className={`${display.variable} ${mono.variable} chapter-page`}>
+      <style>{`
+        .chapter-page {
+          --paper: #F7F5EF;
+          --ink: #1E1E1A;
+          --blue: #2C5F8A;
+          --blue-deep: #17324A;
+          --slate: #6E6B62;
+          --line: #DFDACB;
+          --green: #2f7a4f;
+
+          max-width: 1000px;
+          margin: 0 auto;
+          padding: 24px 24px 60px;
+          background: var(--paper);
+          color: var(--ink);
+        }
+        .chapter-back {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-family: var(--font-mono), monospace;
+          font-size: 0.78rem;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--blue);
+          text-decoration: none;
+        }
+        .chapter-back:hover { color: var(--blue-deep); }
+
+        .chapter-progress-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin: 22px 0 6px;
+        }
+        .chapter-progress-bar {
+          flex: 1;
+          height: 4px;
+          background: var(--line);
+          border-radius: 2px;
+          overflow: hidden;
+        }
+        .chapter-progress-fill {
+          height: 100%;
+          background: var(--blue);
+          border-radius: 2px;
+        }
+        .chapter-progress-label {
+          font-family: var(--font-mono), monospace;
+          font-size: 0.7rem;
+          letter-spacing: 0.05em;
+          color: var(--slate);
+          white-space: nowrap;
+        }
+
+        .chapter-module-label {
+          font-family: var(--font-mono), monospace;
+          font-size: 12px;
+          letter-spacing: 0.12em;
+          color: var(--blue);
+          margin: 16px 0 6px;
+          text-transform: uppercase;
+        }
+
+        .chapter-title-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 8px;
+        }
+        .chapter-title {
+          font-family: var(--font-display), sans-serif;
+          font-weight: 700;
+          font-size: clamp(1.6rem, 3.6vw, 2.2rem);
+          letter-spacing: -0.02em;
+          margin: 0;
+        }
+        .chapter-done-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-family: var(--font-mono), monospace;
+          font-size: 0.68rem;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: #fff;
+          background: var(--green);
+          border-radius: 999px;
+          padding: 4px 10px 4px 8px;
+          flex-shrink: 0;
+        }
+        .chapter-done-badge svg { width: 10px; height: 10px; }
+
+        .chapter-desc {
+          font-size: 15px;
+          color: var(--slate);
+          line-height: 1.55;
+          margin: 0 0 28px;
+          max-width: 720px;
+        }
+
+        .chapter-media-empty {
+          padding: 48px 20px;
+          text-align: center;
+          border: 1px dashed var(--line);
+          border-radius: 6px;
+          background: #fff;
+          color: var(--slate);
+          font-size: 0.9rem;
+          margin-bottom: 8px;
+        }
+
+        .chapter-nav {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          margin-top: 40px;
+        }
+        .chapter-nav-link {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          max-width: 46%;
+          padding: 14px 18px;
+          border: 1px solid var(--line);
+          border-radius: 4px;
+          background: #fff;
+          text-decoration: none;
+          color: inherit;
+          transition: border-color 0.18s ease, transform 0.18s ease;
+        }
+        .chapter-nav-link:hover {
+          border-color: var(--blue);
+          transform: translateY(-1px);
+        }
+        .chapter-nav-link.next {
+          margin-left: auto;
+          text-align: right;
+          align-items: flex-end;
+          background: var(--blue-deep);
+          border-color: var(--blue-deep);
+          color: #fff;
+        }
+        .chapter-nav-eyebrow {
+          font-family: var(--font-mono), monospace;
+          font-size: 0.68rem;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--blue);
+        }
+        .chapter-nav-link.next .chapter-nav-eyebrow { color: #cfe0ee; }
+        .chapter-nav-title {
+          font-family: var(--font-display), sans-serif;
+          font-weight: 500;
+          font-size: 0.92rem;
+        }
+        .chapter-nav-spacer { flex: 1; }
+      `}</style>
+
+      <Link href={`/course/${course.slug}`} className="chapter-back">
         &larr; {course.title}
       </Link>
 
-      <p style={{ fontSize: "0.8rem", color: "#999", margin: "16px 0 4px" }}>{courseModule.title}</p>
-      <h1 style={{ fontSize: "1.8rem", margin: "0 0 8px" }}>{chapter.title}</h1>
-      <p style={{ color: "#666", marginBottom: "24px" }}>{chapter.description}</p>
+      <div className="chapter-progress-row">
+        <div className="chapter-progress-bar">
+          <div
+            className="chapter-progress-fill"
+            style={{ width: `${allChapters.length ? (completedCount / allChapters.length) * 100 : 0}%` }}
+          />
+        </div>
+        <span className="chapter-progress-label">
+          {completedCount}/{allChapters.length} complete
+        </span>
+      </div>
+
+      <p className="chapter-module-label">{courseModule.title}</p>
+
+      <div className="chapter-title-row">
+        <h1 className="chapter-title">{chapter.title}</h1>
+        {isDone && (
+          <span className="chapter-done-badge">
+            <svg viewBox="0 0 12 12" fill="none">
+              <path d="M2 6.2L4.6 9L10 3" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Completed
+          </span>
+        )}
+      </div>
+      <p className="chapter-desc">{chapter.description}</p>
 
       {chapter.video ? (
         <VideoPlayer
@@ -45,63 +237,28 @@ export default async function ChapterPage({ params }: Props) {
           subtitles={chapter.subtitles}
         />
       ) : (
-        <div
-          style={{
-            padding: "40px 20px",
-            textAlign: "center",
-            border: "1px dashed #ccc",
-            borderRadius: "10px",
-            color: "#999",
-            marginBottom: "8px",
-          }}
-        >
-          No video for this lesson — text/notes only.
-        </div>
+        <div className="chapter-media-empty">No video for this lesson — text/notes only.</div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "32px" }}>
+      <div className="chapter-nav">
         {prev ? (
-          <Link
-            href={`/course/${course.slug}/${prev.slug}`}
-            style={{
-              padding: "10px 18px",
-              border: "1px solid #ccc",
-              borderRadius: "8px",
-              textDecoration: "none",
-              color: "inherit",
-            }}
-          >
-            &larr; {prev.title}
+          <Link href={`/course/${course.slug}/${prev.slug}`} className="chapter-nav-link">
+            <span className="chapter-nav-eyebrow">&larr; Previous</span>
+            <span className="chapter-nav-title">{prev.title}</span>
           </Link>
         ) : (
-          <span />
+          <span className="chapter-nav-spacer" />
         )}
 
         {next ? (
-          <Link
-            href={`/course/${course.slug}/${next.slug}`}
-            style={{
-              padding: "10px 18px",
-              backgroundColor: "#111",
-              color: "#fff",
-              borderRadius: "8px",
-              textDecoration: "none",
-            }}
-          >
-            Next: {next.title} &rarr;
+          <Link href={`/course/${course.slug}/${next.slug}`} className="chapter-nav-link next">
+            <span className="chapter-nav-eyebrow">Next</span>
+            <span className="chapter-nav-title">{next.title} &rarr;</span>
           </Link>
         ) : (
-          <Link
-            href={`/course/${course.slug}`}
-            style={{
-              padding: "10px 18px",
-              backgroundColor: "#111",
-              color: "#fff",
-              borderRadius: "8px",
-              textDecoration: "none",
-            }}
-          >
-            Finish course
+          <Link href={`/course/${course.slug}`} className="chapter-nav-link next">
+            <span className="chapter-nav-eyebrow">Course</span>
+            <span className="chapter-nav-title">Finish course &rarr;</span>
           </Link>
         )}
       </div>

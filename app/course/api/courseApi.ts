@@ -21,6 +21,7 @@ const COURSES: Course[] = [
             title: "Client Brief Analysis",
             description: "Understand and break down a real client brief before modeling begins.",
             order: 1,
+            completed: true,
           },
           {
             id: 2,
@@ -28,6 +29,7 @@ const COURSES: Course[] = [
             title: "Space Requirements & Functional Programming",
             description: "Translate the brief into a functional space program.",
             order: 2,
+            completed: true,
           },
           {
             id: 3,
@@ -35,6 +37,7 @@ const COURSES: Course[] = [
             title: "Site Analysis (Orientation, Access, Terrain)",
             description: "Analyze site orientation, access points, and terrain constraints.",
             order: 3,
+            completed: true,
           },
           {
             id: 4,
@@ -52,6 +55,7 @@ const COURSES: Course[] = [
               },
             ],
             order: 4,
+            completed: true,
           },
           {
             id: 5,
@@ -61,6 +65,7 @@ const COURSES: Course[] = [
             video: "/videos/bonsai/m1/project-setup.mp4",
             poster: "/videos/bonsai/m1/project-setup-poster.jpg",
             order: 5,
+            completed: true,
           },
           {
             id: 6,
@@ -68,6 +73,7 @@ const COURSES: Course[] = [
             title: "Coordinate System & Project Origin",
             description: "Set true north, survey point, and project origin correctly.",
             order: 6,
+            completed: true,
           },
           {
             id: 7,
@@ -75,6 +81,7 @@ const COURSES: Course[] = [
             title: "Storeys, Grids & Project Organization",
             description: "Structure the project with storeys, grids, and a clean outliner hierarchy.",
             order: 7,
+            completed: true,
           },
         ],
       },
@@ -92,6 +99,7 @@ const COURSES: Course[] = [
             video: "/videos/bonsai/m2/ifc-fundamentals.mp4",
             poster: "/videos/bonsai/m2/ifc-fundamentals-poster.jpg",
             order: 8,
+            completed: true,
           },
           {
             id: 9,
@@ -101,6 +109,7 @@ const COURSES: Course[] = [
             video: "/videos/bonsai/m2/walls-slabs-roofs.mp4",
             poster: "/videos/bonsai/m2/walls-slabs-roofs-poster.jpg",
             order: 9,
+            completed: true,
           },
           {
             id: 10,
@@ -108,6 +117,7 @@ const COURSES: Course[] = [
             title: "Doors and Windows",
             description: "Place parametric doors and windows and manage their properties.",
             order: 10,
+            completed: true,
           },
           {
             id: 11,
@@ -115,6 +125,7 @@ const COURSES: Course[] = [
             title: "Columns, Beams, and Stairs",
             description: "Model structural columns, beams, and stair assemblies.",
             order: 11,
+            completed: true,
           },
           {
             id: 12,
@@ -122,6 +133,7 @@ const COURSES: Course[] = [
             title: "Openings and Voids",
             description: "Create and manage openings and boolean voids in building elements.",
             order: 12,
+            completed: false,
           },
           {
             id: 13,
@@ -129,6 +141,7 @@ const COURSES: Course[] = [
             title: "Spaces (Rooms) and Zoning",
             description: "Define IFC spaces, assign zones, and organize rooms for area reporting.",
             order: 13,
+            completed: false,
           },
           {
             id: 14,
@@ -136,6 +149,7 @@ const COURSES: Course[] = [
             title: "Materials and Classifications",
             description: "Assign materials and map elements to classification systems (e.g. Uniclass).",
             order: 14,
+            completed: false,
           },
           {
             id: 15,
@@ -143,6 +157,7 @@ const COURSES: Course[] = [
             title: "Model Validation and Quality Checks",
             description: "Run quality checks and validate the IFC model before deliverables.",
             order: 15,
+            completed: false,
           },
         ],
       },
@@ -158,6 +173,7 @@ const COURSES: Course[] = [
             title: "Floor Plans",
             description: "Generate annotated floor plans from the BIM model.",
             order: 16,
+            completed: false,
           },
           {
             id: 17,
@@ -165,6 +181,7 @@ const COURSES: Course[] = [
             title: "Elevations",
             description: "Set up and annotate building elevations.",
             order: 17,
+            completed: false,
           },
           {
             id: 18,
@@ -172,6 +189,7 @@ const COURSES: Course[] = [
             title: "Sections",
             description: "Create building sections for client and construction review.",
             order: 18,
+            completed: false,
           },
           {
             id: 19,
@@ -181,6 +199,7 @@ const COURSES: Course[] = [
             video: "/videos/bonsai/m3/3d-views.mp4",
             poster: "/videos/bonsai/m3/3d-views-poster.jpg",
             order: 19,
+            completed: false,
           },
           {
             id: 20,
@@ -188,6 +207,7 @@ const COURSES: Course[] = [
             title: "Room, Door, Window, and Area Schedules",
             description: "Generate schedules for rooms, doors, windows, and areas directly from the model.",
             order: 20,
+            completed: false,
           },
           {
             id: 21,
@@ -195,6 +215,7 @@ const COURSES: Course[] = [
             title: "Quantity Take-offs (BOQ Basics)",
             description: "Extract quantities from the model for a basic bill of quantities.",
             order: 21,
+            completed: false,
           },
           {
             id: 22,
@@ -202,6 +223,7 @@ const COURSES: Course[] = [
             title: "Sheet Creation and Annotations",
             description: "Lay out sheets and annotate drawings for issue.",
             order: 22,
+            completed: false,
           },
           {
             id: 23,
@@ -209,6 +231,7 @@ const COURSES: Course[] = [
             title: "IFC Export and OpenBIM Deliverables",
             description: "Export clean IFC deliverables for OpenBIM coordination.",
             order: 23,
+            completed: false,
           },
           {
             id: 24,
@@ -216,6 +239,7 @@ const COURSES: Course[] = [
             title: "Model Revisions and Final Project Submission",
             description: "Handle revision cycles and prepare the final project submission.",
             order: 24,
+            completed: false,
           },
         ],
       },

@@ -14,6 +14,7 @@ export interface Chapter {
   poster?: string;
   subtitles?: Subtitle[];
   order: number; // global order within the course, used for prev/next
+  completed?: boolean;
 }
 
 export interface Module {
