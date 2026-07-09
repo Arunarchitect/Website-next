@@ -1,11 +1,22 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { getIssues } from "@/app/issues/issueApi";
+import { Issue, isBimIssue } from "@/app/issues/issueTypes";
 
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
+const display = Space_Grotesk({ 
+  subsets: ["latin"], 
+  weight: ["500", "700"], 
+  variable: "--font-display" 
+});
+const mono = IBM_Plex_Mono({ 
+  subsets: ["latin"], 
+  weight: ["400", "500"], 
+  variable: "--font-mono" 
+});
 
 interface Tool {
   key: string;
@@ -28,17 +39,6 @@ interface QuickLink {
   label: string;
   href: string;
   icon: string;
-}
-
-interface Issue {
-  id: string;
-  title: string;
-  description: string;
-  project: string;
-  raisedBy: string;
-  role: "Client" | "Architect" | "Project Manager" | "Team Member";
-  priority: "High" | "Medium" | "Low";
-  timestamp: string;
 }
 
 const tools: Tool[] = [
@@ -77,61 +77,50 @@ const quickLinks: QuickLink[] = [
   { label: "Projects", href: "/new/dash/dashadmin", icon: "ti-briefcase" },
 ];
 
-const issues: Issue[] = [
-  {
-    id: "ISS-001",
-    title: "Incorrect area calculation for Lot 42B",
-    description: "The survey data shows 1,245 sqm but calculations are returning 1,180 sqm. Needs immediate verification.",
-    project: "Riverside Estate",
-    raisedBy: "Sarah Chen",
-    role: "Architect",
-    priority: "High",
-    timestamp: "2026-07-08T09:30:00",
-  },
-  {
-    id: "ISS-002",
-    title: "Missing documentation for Phase 3 deliverables",
-    description: "Client requires updated floor plans and structural drawings before next week's review.",
-    project: "Harbour View Tower",
-    raisedBy: "James Okafor",
-    role: "Client",
-    priority: "High",
-    timestamp: "2026-07-08T08:15:00",
-  },
-  {
-    id: "ISS-003",
-    title: "Space template mismatch for conference rooms",
-    description: "The standard template doesn't match the actual measurements taken on site. Adjust dimensions.",
-    project: "Tech Hub Campus",
-    raisedBy: "Maria Rodriguez",
-    role: "Project Manager",
-    priority: "Medium",
-    timestamp: "2026-07-07T16:45:00",
-  },
-  {
-    id: "ISS-004",
-    title: "Team member access permissions need updating",
-    description: "New team members don't have proper access to project files and survey data.",
-    project: "Riverside Estate",
-    raisedBy: "David Kim",
-    role: "Team Member",
-    priority: "Low",
-    timestamp: "2026-07-07T14:20:00",
-  },
-  {
-    id: "ISS-005",
-    title: "Survey boundary dispute with adjacent lot",
-    description: "Neighbor claims our survey markers are 2 meters into their property. Need to review original documentation.",
-    project: "Harbour View Tower",
-    raisedBy: "Sarah Chen",
-    role: "Architect",
-    priority: "High",
-    timestamp: "2026-07-07T11:00:00",
-  },
-];
-
 export default function MainAdminPage() {
   const router = useRouter();
+  const [recentIssues, setRecentIssues] = useState<Issue[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [issueStats, setIssueStats] = useState({
+    open: 0,
+    inProgress: 0,
+    resolved: 0,
+    highPriority: 0,
+  });
+
+  useEffect(() => {
+    const fetchIssues = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const allIssues = await getIssues();
+        
+        // Sort by created date (newest first)
+        const sorted = [...allIssues].sort((a, b) => 
+          new Date(b.created).getTime() - new Date(a.created).getTime()
+        );
+        
+        // Get only the 5 most recent issues
+        setRecentIssues(sorted.slice(0, 5));
+        
+        // Calculate stats
+        setIssueStats({
+          open: allIssues.filter(i => i.status === "Open").length,
+          inProgress: allIssues.filter(i => i.status === "In Progress").length,
+          resolved: allIssues.filter(i => i.status === "Resolved").length,
+          highPriority: allIssues.filter(i => i.priority === "High").length,
+        });
+      } catch (err) {
+        console.error('Error fetching issues:', err);
+        setError('Failed to load issues');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchIssues();
+  }, []);
 
   const getPriorityColor = (priority: Issue["priority"]) => {
     switch (priority) {
@@ -146,16 +135,16 @@ export default function MainAdminPage() {
     }
   };
 
-  const getRoleColor = (role: Issue["role"]) => {
-    switch (role) {
-      case "Client":
-        return "#2C5F8A";
-      case "Architect":
-        return "#6B4C8A";
-      case "Project Manager":
-        return "#2A7A6B";
-      case "Team Member":
-        return "#8A7A4A";
+  const getStatusColor = (status: Issue["status"]) => {
+    switch (status) {
+      case "Open":
+        return "#D43E3E";
+      case "In Progress":
+        return "#E8A838";
+      case "Resolved":
+        return "#4A8B6B";
+      case "Closed":
+        return "#6B7280";
       default:
         return "var(--slate)";
     }
@@ -174,6 +163,14 @@ export default function MainAdminPage() {
     if (diffHours < 24) return `${diffHours}h ago`;
     return `${diffDays}d ago`;
   };
+
+  // Add stat cards for issues
+  const issueStatsCards: Stat[] = [
+    { label: "Open Issues", value: String(issueStats.open), icon: "ti-alert-circle" },
+    { label: "In Progress", value: String(issueStats.inProgress), icon: "ti-loader" },
+    { label: "Resolved", value: String(issueStats.resolved), icon: "ti-check" },
+    { label: "High Priority", value: String(issueStats.highPriority), icon: "ti-flag" },
+  ];
 
   return (
     <main className={`${display.variable} ${mono.variable} admin-page`}>
@@ -370,6 +367,55 @@ export default function MainAdminPage() {
           color: var(--blue);
         }
 
+        /* --- Loading / Error --- */
+        .loading-text, .error-text {
+          padding: 16px;
+          text-align: center;
+          color: var(--slate);
+          font-size: 14px;
+        }
+
+        .error-text {
+          color: #D43E3E;
+        }
+
+        .error-text button {
+          margin-left: 12px;
+          padding: 4px 12px;
+          border: 1px solid #D43E3E;
+          border-radius: 4px;
+          background: transparent;
+          color: #D43E3E;
+          cursor: pointer;
+          font-family: var(--font-mono), monospace;
+          font-size: 12px;
+        }
+
+        .error-text button:hover {
+          background: #D43E3E10;
+        }
+
+        /* --- No Issues --- */
+        .no-issues {
+          padding: 24px;
+          text-align: center;
+          color: var(--slate);
+          background: #ffffff;
+          border: 1px solid var(--line);
+          border-radius: 4px;
+        }
+
+        .no-issues i {
+          font-size: 32px;
+          display: block;
+          margin-bottom: 8px;
+          color: var(--line);
+        }
+
+        .no-issues p {
+          margin: 0;
+        }
+
         /* --- Issues Grid --- */
         .issues-grid {
           display: grid;
@@ -447,6 +493,10 @@ export default function MainAdminPage() {
           color: var(--slate);
           margin: 0 0 6px;
           line-height: 1.5;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
         }
 
         .issue-meta {
@@ -470,7 +520,24 @@ export default function MainAdminPage() {
           font-size: 13px;
         }
 
-        .issue-role-badge {
+        .issue-domain-badge {
+          padding: 2px 8px;
+          border-radius: 2px;
+          font-size: 10px;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+          color: #ffffff;
+        }
+
+        .issue-domain-bim {
+          background: var(--blue);
+        }
+
+        .issue-domain-design {
+          background: var(--purple-text);
+        }
+
+        .issue-status-badge {
           padding: 2px 8px;
           border-radius: 2px;
           font-size: 10px;
@@ -809,6 +876,10 @@ export default function MainAdminPage() {
             <i className="ti ti-ruler-measure" aria-hidden="true" />
             <span>Areacalc</span>
           </Link>
+          <Link href="/issues/page" className="admin-nav-link">
+            <i className="ti ti-bug" aria-hidden="true" />
+            <span>Issues</span>
+          </Link>
         </nav>
       </header>
 
@@ -819,7 +890,7 @@ export default function MainAdminPage() {
         <p className="admin-sub">You have full admin access across all connected applications.</p>
       </div>
 
-      {/* Stats */}
+      {/* Stats - includes issue stats */}
       <div className="stats-grid">
         {stats.map((stat) => (
           <div key={stat.label} className="stat-card">
@@ -830,64 +901,99 @@ export default function MainAdminPage() {
             </div>
           </div>
         ))}
+        {issueStatsCards.map((stat) => (
+          <div key={stat.label} className="stat-card">
+            <i className={`ti ${stat.icon} stat-icon`} aria-hidden="true" />
+            <div>
+              <p className="stat-label">{stat.label}</p>
+              <p className="stat-value">{stat.value}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* Issues Section */}
+      {/* Issues Section - shows recent issues */}
       <div className="section-label">
-        <span>Issues</span>
+        <span>Recent Issues</span>
         <Link href="/issues/page" className="section-label-link">
           View all →
         </Link>
       </div>
-      <div className="issues-grid">
-        {issues.slice(0, 3).map((issue) => (
-          <Link key={issue.id} href="/issues/page" className="issue-card">
-            <div className="issue-left">
-              <div
-                className="issue-priority-badge"
-                style={{ background: getPriorityColor(issue.priority) }}
-              />
-              <div className="issue-content">
-                <div className="issue-header">
-                  <span className="issue-id">{issue.id}</span>
-                  <h3 className="issue-title">{issue.title}</h3>
-                </div>
-                <p className="issue-description">{issue.description}</p>
-                <div className="issue-meta">
-                  <span className="issue-meta-item">
-                    <i className="ti ti-folder" aria-hidden="true" />
-                    {issue.project}
-                  </span>
-                  <span className="issue-meta-item">
-                    <i className="ti ti-user" aria-hidden="true" />
-                    {issue.raisedBy}
-                  </span>
-                  <span
-                    className="issue-role-badge"
-                    style={{ background: getRoleColor(issue.role) }}
-                  >
-                    {issue.role}
-                  </span>
-                  <span
-                    className="issue-meta-item"
-                    style={{
-                      color: getPriorityColor(issue.priority),
-                      fontWeight: 500,
-                    }}
-                  >
-                    <i className="ti ti-flag" aria-hidden="true" />
-                    {issue.priority}
-                  </span>
+
+      {loading ? (
+        <div className="loading-text">Loading issues…</div>
+      ) : error ? (
+        <div className="error-text">
+          {error}
+          <button onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      ) : recentIssues.length === 0 ? (
+        <div className="no-issues">
+          <i className="ti ti-check" />
+          <p>No issues found. Everything is clean!</p>
+        </div>
+      ) : (
+        <div className="issues-grid">
+          {recentIssues.map((issue) => (
+            <Link key={issue.id} href="/issues/page" className="issue-card">
+              <div className="issue-left">
+                <div
+                  className="issue-priority-badge"
+                  style={{ background: getPriorityColor(issue.priority) }}
+                />
+                <div className="issue-content">
+                  <div className="issue-header">
+                    <span className="issue-id">#{issue.id}</span>
+                    <h3 className="issue-title">{issue.title}</h3>
+                    <span className={`issue-domain-badge issue-domain-${issue.domain}`}>
+                      {isBimIssue(issue) ? 'BCF' : 'Design'}
+                    </span>
+                  </div>
+                  <p className="issue-description">{issue.description}</p>
+                  <div className="issue-meta">
+                    <span className="issue-meta-item">
+                      <i className="ti ti-user" aria-hidden="true" />
+                      {issue.reportedBy}
+                    </span>
+                    {issue.assignedTo && (
+                      <span className="issue-meta-item">
+                        <i className="ti ti-user-check" aria-hidden="true" />
+                        {issue.assignedTo}
+                      </span>
+                    )}
+                    <span
+                      className="issue-status-badge"
+                      style={{ background: getStatusColor(issue.status) }}
+                    >
+                      {issue.status}
+                    </span>
+                    <span
+                      className="issue-meta-item"
+                      style={{
+                        color: getPriorityColor(issue.priority),
+                        fontWeight: 500,
+                      }}
+                    >
+                      <i className="ti ti-flag" aria-hidden="true" />
+                      {issue.priority}
+                    </span>
+                    {isBimIssue(issue) && (
+                      <span className="issue-meta-item">
+                        <i className="ti ti-tag" aria-hidden="true" />
+                        {issue.topicType}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="issue-right">
-              <span className="issue-timestamp">{formatTimestamp(issue.timestamp)}</span>
-              <i className="ti ti-chevron-right issue-arrow" aria-hidden="true" />
-            </div>
-          </Link>
-        ))}
-      </div>
+              <div className="issue-right">
+                <span className="issue-timestamp">{formatTimestamp(issue.created)}</span>
+                <i className="ti ti-chevron-right issue-arrow" aria-hidden="true" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {/* Tools */}
       <p className="section-label">Applications</p>

@@ -51,8 +51,18 @@ export default function IssuesPage() {
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const refresh = async () => setIssues(await getIssues());
+  const refresh = async () => {
+    try {
+      setError(null);
+      const data = await getIssues();
+      setIssues(data);
+    } catch (err: any) {
+      console.error('Refresh error:', err);
+      setError('Failed to load issues. Please try again.');
+    }
+  };
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
@@ -116,13 +126,32 @@ export default function IssuesPage() {
         </p>
       </section>
 
+      {error && (
+        <div className="error-banner">
+          <i className="ti ti-alert-circle" />
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>✕</button>
+        </div>
+      )}
+
       {showNewIssueForm && (
         <NewIssueForm
           onCancel={() => setShowNewIssueForm(false)}
           onCreate={async (input) => {
-            await createIssue(input);
-            await refresh();
-            setShowNewIssueForm(false);
+            try {
+              setError(null);
+              await createIssue(input);
+              await refresh();
+              setShowNewIssueForm(false);
+            } catch (err: any) {
+              console.error('Create error:', err);
+              if (err.response?.data) {
+                const errors = Object.values(err.response.data).flat().join('\n');
+                setError(`Validation Error: ${errors}`);
+              } else {
+                setError('Failed to create issue. Please try again.');
+              }
+            }
           }}
         />
       )}
@@ -170,12 +199,29 @@ export default function IssuesPage() {
                 key={issue.id}
                 issue={issue}
                 onSave={async (patch) => {
-                  await updateIssue(issue.id, patch);
-                  await refresh();
+                  try {
+                    setError(null);
+                    await updateIssue(issue.id, patch);
+                    await refresh();
+                  } catch (err: any) {
+                    console.error('Update error:', err);
+                    if (err.response?.data) {
+                      const errors = Object.values(err.response.data).flat().join('\n');
+                      setError(`Validation Error: ${errors}`);
+                    } else {
+                      setError('Failed to update issue. Please try again.');
+                    }
+                  }
                 }}
                 onResolve={async (resolution) => {
-                  await resolveIssue(issue.id, resolution, CURRENT_USER);
-                  await refresh();
+                  try {
+                    setError(null);
+                    await resolveIssue(issue.id, resolution, CURRENT_USER);
+                    await refresh();
+                  } catch (err: any) {
+                    console.error('Resolve error:', err);
+                    setError('Failed to resolve issue. Please try again.');
+                  }
                 }}
               />
             ))}
@@ -211,34 +257,61 @@ function IssueCard({
   const [isResolving, setIsResolving] = useState(false);
   const [resolutionText, setResolutionText] = useState("");
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: issue.title,
     description: issue.description,
     status: issue.status,
     priority: issue.priority,
     assignedTo: issue.assignedTo ?? "",
+    assignedToId: issue.assignedToId ?? null,
     dueDate: issue.dueDate ?? "",
   });
 
   const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
 
   const handleSave = async () => {
-    await onSave({
-      title: form.title,
-      description: form.description,
-      status: form.status,
-      priority: form.priority,
-      assignedTo: form.assignedTo || undefined,
-      dueDate: form.dueDate || undefined,
-    });
-    setIsEditing(false);
+    try {
+      setSaveError(null);
+      const patch: any = {
+        title: form.title,
+        description: form.description,
+        status: form.status,
+        priority: form.priority,
+        dueDate: form.dueDate || undefined,
+      };
+      
+      // Only include assignedToId if it's a valid number
+      if (form.assignedToId && typeof form.assignedToId === 'number') {
+        patch.assignedToId = form.assignedToId;
+      } else if (form.assignedTo && !isNaN(Number(form.assignedTo))) {
+        patch.assignedToId = Number(form.assignedTo);
+      }
+      
+      await onSave(patch);
+      setIsEditing(false);
+    } catch (err: any) {
+      console.error('Save error:', err);
+      if (err.response?.data) {
+        const errors = Object.values(err.response.data).flat().join('\n');
+        setSaveError(`Validation Error: ${errors}`);
+      } else {
+        setSaveError('Failed to save changes. Please try again.');
+      }
+    }
   };
 
   const handleResolveConfirm = async () => {
     if (!resolutionText.trim()) return;
-    await onResolve(resolutionText.trim());
-    setResolutionText("");
-    setIsResolving(false);
+    try {
+      setSaveError(null);
+      await onResolve(resolutionText.trim());
+      setResolutionText("");
+      setIsResolving(false);
+    } catch (err: any) {
+      console.error('Resolve error:', err);
+      setSaveError('Failed to resolve issue. Please try again.');
+    }
   };
 
   const hasScreenshot = isBimIssue(issue) && issue.viewpoint?.snapshot;
@@ -246,11 +319,9 @@ function IssueCard({
 
   // Helper to get image source
   const getImageSrc = (imageData: string): string => {
-    // If it's a URL (starts with / or http), use it directly
     if (imageData.startsWith('/') || imageData.startsWith('http')) {
       return imageData;
     }
-    // Otherwise treat as base64
     return `data:image/jpeg;base64,${imageData}`;
   };
 
@@ -284,6 +355,14 @@ function IssueCard({
             </span>
           </div>
 
+          {saveError && (
+            <div className="error-banner small">
+              <i className="ti ti-alert-circle" />
+              <span>{saveError}</span>
+              <button onClick={() => setSaveError(null)}>✕</button>
+            </div>
+          )}
+
           {isEditing ? (
             <textarea
               className="field-input description-input"
@@ -295,7 +374,6 @@ function IssueCard({
             <p className="issue-description">{issue.description}</p>
           )}
 
-          {/* Display main screenshot from viewpoint if available */}
           {hasScreenshot && isBimIssue(issue) && (
             <div className="screenshot-container">
               <img
@@ -379,9 +457,12 @@ function IssueCard({
                 </select>
                 <input
                   className="field-input small"
-                  placeholder="Assigned to"
-                  value={form.assignedTo}
-                  onChange={(e) => setForm((f) => ({ ...f, assignedTo: e.target.value }))}
+                  placeholder="Assigned to ID (number)"
+                  value={form.assignedToId ?? ''}
+                  onChange={(e) => setForm((f) => ({ 
+                    ...f, 
+                    assignedToId: e.target.value ? Number(e.target.value) : null 
+                  }))}
                 />
                 <input
                   className="field-input small"
@@ -415,7 +496,6 @@ function IssueCard({
             )}
           </div>
 
-          {/* Display comments with screenshots */}
           {commentWithScreenshots.map((comment, index) => (
             <div key={`${comment.id}-snapshot`} className="comment-with-snapshot">
               {comment.snapshot && (
@@ -509,7 +589,6 @@ function IssueCard({
         <i className="ti ti-chevron-right issue-arrow" />
       </div>
 
-      {/* Screenshot Modal */}
       {selectedScreenshot && (
         <div className="screenshot-modal" onClick={() => setSelectedScreenshot(null)}>
           <button 
@@ -545,6 +624,8 @@ function NewIssueForm({
   const [category, setCategory] = useState("");
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [screenshotFormat, setScreenshotFormat] = useState<"png" | "jpg">("png");
+  const [projectId, setProjectId] = useState<number>(1); // Default project ID
+  const [error, setError] = useState<string | null>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -562,45 +643,84 @@ function NewIssueForm({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim()) return;
-    
-    const base = {
-      title: title.trim(),
-      description: description.trim(),
-      status: "Open" as IssueStatus,
-      priority,
-      module: module.trim() || (domain === "bim" ? "Modeling" : "General"),
-      reportedBy: CURRENT_USER,
-    };
-    
-    if (domain === "bim") {
-      const bimInput = {
-        ...base,
-        domain: "bim" as const,
-        topicType,
-        viewpoint: screenshot ? {
-          guid: `vp-${Date.now()}`,
-          cameraPosition: { x: 0, y: 0, z: 0 },
-          cameraDirection: { x: 0, y: 0, z: -1 },
-          snapshot: {
-            data: screenshot,
-            format: screenshotFormat,
-          }
-        } : undefined
+    try {
+      setError(null);
+      
+      if (!title.trim()) {
+        setError('Title is required');
+        return;
+      }
+      
+      if (!projectId) {
+        setError('Project ID is required');
+        return;
+      }
+      
+      const base = {
+        project_id: projectId,
+        title: title.trim(),
+        description: description.trim(),
+        status: "Open" as IssueStatus,
+        priority,
+        module: module.trim() || (domain === "bim" ? "Modeling" : "General"),
+        reportedBy: CURRENT_USER,
       };
-      await onCreate(bimInput);
-    } else {
-      await onCreate({ 
-        ...base, 
-        domain: "design", 
-        category: category.trim() || undefined 
-      });
+      
+      if (domain === "bim") {
+        const bimInput = {
+          ...base,
+          domain: "bim" as const,
+          topicType,
+          viewpoint: screenshot ? {
+            guid: `vp-${Date.now()}`,
+            cameraPosition: { x: 0, y: 0, z: 0 },
+            cameraDirection: { x: 0, y: 0, z: -1 },
+            snapshot: {
+              data: screenshot,
+              format: screenshotFormat,
+            }
+          } : undefined
+        };
+        await onCreate(bimInput);
+      } else {
+        await onCreate({ 
+          ...base, 
+          domain: "design", 
+          category: category.trim() || undefined 
+        });
+      }
+    } catch (err: any) {
+      console.error('Submit error:', err);
+      if (err.response?.data) {
+        const errors = Object.values(err.response.data).flat().join('\n');
+        setError(`Validation Error: ${errors}`);
+      } else {
+        setError('Failed to create issue. Please try again.');
+      }
     }
   };
 
   return (
     <section className="new-issue-form">
+      {error && (
+        <div className="error-banner small">
+          <i className="ti ti-alert-circle" />
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>✕</button>
+        </div>
+      )}
+
       <div className="form-row">
+        <div className="form-field">
+          <label>Project ID</label>
+          <input
+            className="field-input"
+            type="number"
+            placeholder="Project ID"
+            value={projectId}
+            onChange={(e) => setProjectId(Number(e.target.value))}
+          />
+        </div>
         <div className="form-field">
           <label>Type</label>
           <select className="field-select" value={domain} onChange={(e) => setDomain(e.target.value as IssueDomain)}>
