@@ -876,7 +876,7 @@ export default function MainAdminPage() {
             <i className="ti ti-ruler-measure" aria-hidden="true" />
             <span>Areacalc</span>
           </Link>
-          <Link href="/issues/page" className="admin-nav-link">
+          <Link href="/issues" className="admin-nav-link">
             <i className="ti ti-bug" aria-hidden="true" />
             <span>Issues</span>
           </Link>
@@ -915,7 +915,7 @@ export default function MainAdminPage() {
       {/* Issues Section - shows recent issues */}
       <div className="section-label">
         <span>Recent Issues</span>
-        <Link href="/issues/page" className="section-label-link">
+        <Link href="/issues" className="section-label-link">
           View all →
         </Link>
       </div>
@@ -935,7 +935,7 @@ export default function MainAdminPage() {
       ) : (
         <div className="issues-grid">
           {recentIssues.map((issue) => (
-            <Link key={issue.id} href="/issues/page" className="issue-card">
+            <Link key={issue.id} href="/issues" className="issue-card">
               <div className="issue-left">
                 <div
                   className="issue-priority-badge"
