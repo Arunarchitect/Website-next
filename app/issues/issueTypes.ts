@@ -96,12 +96,16 @@ interface BaseIssue {
   deleted_at?: string | null;
   deleted_by?: string | null;
   
+  
   // Django-specific fields
   project?: number;
   project_id?: number;
   deliverable?: number | null;
   reported_by?: number;
   assigned_to?: number | null;
+  organisation: string | null;
+  
+
 }
 
 // ---------------------------------------------------------------------------

@@ -1626,3 +1626,80 @@ textarea.field-input {
   font-weight: 600;
   white-space: nowrap;
 }
+
+
+
+/* Deleted issue styling */
+.issue-card.issue-deleted {
+  opacity: 0.7;
+  border-left: 3px solid #D43E3E;
+  background: rgba(212, 62, 62, 0.05);
+}
+
+.deleted-text {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.issue-deleted-badge {
+  background: #D43E3E;
+  color: white;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.issue-organisation-badge {
+  background: #4A8B6B20;
+  color: #4A8B6B;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deleted-date {
+  color: #D43E3E;
+}
+
+.comments-section.deleted-comments {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.issue-time.deleted {
+  color: #D43E3E;
+}
+
+
+/* issues.css - Add these styles */
+
+.loading-indicator {
+  padding: 8px 12px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  color: #666;
+  font-size: 14px;
+}
+
+.field-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #6c757d;
+}
+
+.btn-primary:disabled:hover {
+  background: #6c757d;
+}

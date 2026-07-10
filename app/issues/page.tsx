@@ -1,4 +1,5 @@
 // app/issues/page.tsx
+
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -61,6 +62,19 @@ const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
 const DEFAULT_CAMERA_UP_VECTOR = { x: 0, y: 1, z: 0 };
 const DEFAULT_FIELD_OF_VIEW = 60;
 
+// Interfaces for dropdowns
+interface OrganisationOption {
+  id: number;
+  name: string;
+}
+
+interface ProjectOption {
+  id: number;
+  name: string;
+  organisation_id: number;
+  organisation_name: string;
+}
+
 export default function IssuesPage() {
   const dispatch = useAppDispatch();
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -101,20 +115,20 @@ export default function IssuesPage() {
     return isUserMatch(reportedBy, user);
   };
 
-  // Always fetch ALL issues including deleted
   const refresh = async () => {
     try {
       setError(null);
       console.log('🔄 Refreshing issues...');
 
-      // Always fetch all issues including deleted
-      const data = await getIssues({ include_deleted: true });
+      const data = await getIssues({ 
+        include_deleted: showDeleted
+      });
+      
       console.log('✅ Issues fetched:', data.length, 'items');
 
-      // Log each issue's status for debugging
       data.forEach(issue => {
         const isCreator = isUserCreator(issue.reportedBy, currentUser);
-        console.log(`📋 Issue #${issue.id}: "${issue.title}" - is_deleted: ${issue.is_deleted}, isCreator: ${isCreator}, domain: ${issue.domain}`);
+        console.log(`📋 Issue #${issue.id}: "${issue.title}" - is_deleted: ${issue.is_deleted}, isCreator: ${isCreator}, domain: ${issue.domain}, organisation: ${issue.organisation || 'N/A'}`);
       });
 
       setIssues(data);
@@ -126,37 +140,30 @@ export default function IssuesPage() {
     }
   };
 
-  // Initial load
+  // Initial load - only show non-deleted by default
   useEffect(() => {
     refresh().finally(() => setLoading(false));
   }, []);
 
-  // Refresh when showDeleted changes
   useEffect(() => {
-    refresh();
+    if (!loading) {
+      refresh();
+    }
   }, [showDeleted]);
 
-  // Filter issues based on domain and deleted status
   const visibleIssues = issues.filter((issue) => {
-    // Filter by domain
     if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
-    // Filter by deleted status (only if NOT showing deleted)
     if (!showDeleted && issue.is_deleted === true) return false;
     return true;
   });
 
-  // 🐛 DEBUG: log the current filter state and result every render, so we can
-  // see immediately whether showDeleted/domainFilter changed and whether the
-  // deleted issue is being excluded by the domain tab or something else.
   console.log(
     `🧮 RENDER — showDeleted=${showDeleted}, domainFilter="${domainFilter}", ` +
     `issues.length=${issues.length}, visibleIssues.length=${visibleIssues.length}`
   );
 
-  // Count deleted issues from all fetched data
   const deletedIssuesCount = issues.filter(i => i.is_deleted === true).length;
 
-  // Stats (excluding deleted issues)
   const openIssues = issues.filter((i) => i.status === "Open" && !i.is_deleted).length;
   const inProgressIssues = issues.filter((i) => i.status === "In Progress" && !i.is_deleted).length;
   const resolvedIssues = issues.filter((i) => i.status === "Resolved" && !i.is_deleted).length;
@@ -196,8 +203,6 @@ export default function IssuesPage() {
     }
   };
 
-  // Toggle handler — also resets the domain tab to "all" so a mismatched
-  // BIM/Other tab can never hide a deleted issue after this is switched on.
   const toggleShowDeleted = () => {
     const next = !showDeleted;
     console.log('🔴 DELETED TOGGLE CLICKED! Current:', showDeleted, '->', next);
@@ -509,14 +514,116 @@ function NewIssueForm({
   const [category, setCategory] = useState("");
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [screenshotFormat, setScreenshotFormat] = useState<"png" | "jpg">("png");
-  const [projectId, setProjectId] = useState<number>(1);
+  const [projectId, setProjectId] = useState<number | null>(null);
+  const [organisationId, setOrganisationId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  
+  // State for dropdowns
+  const [organisations, setOrganisations] = useState<OrganisationOption[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [filteredProjects, setFilteredProjects] = useState<ProjectOption[]>([]);
+  const [loadingOrganisations, setLoadingOrganisations] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentUserData = useCurrentUser();
-  const userDisplayName = currentUserData?.display_name || currentUserData?.full_name || currentUserData?.email || 'Unknown';
+
+  // Fetch user's organisations on mount
+  useEffect(() => {
+    const fetchOrganisations = async () => {
+      setLoadingOrganisations(true);
+      try {
+        const token = localStorage.getItem('access');
+        if (!token) {
+          console.error('No access token found');
+          setLoadingOrganisations(false);
+          return;
+        }
+
+        const response = await fetch('http://localhost:8000/api/my-organisations/', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Organisations fetched:', data);
+          setOrganisations(data);
+          
+          // Auto-select first organisation if available
+          if (data.length > 0) {
+            setOrganisationId(data[0].id);
+          }
+        } else {
+          console.error('Failed to fetch organisations:', response.status);
+          setError('Failed to load organisations.');
+        }
+      } catch (error) {
+        console.error('Error fetching organisations:', error);
+        setError('Failed to load organisations.');
+      } finally {
+        setLoadingOrganisations(false);
+      }
+    };
+    fetchOrganisations();
+  }, []);
+
+  // Fetch projects when organisation changes
+  useEffect(() => {
+    if (!organisationId) {
+      setFilteredProjects([]);
+      setProjectId(null);
+      return;
+    }
+
+    const fetchProjects = async () => {
+      setLoadingProjects(true);
+      try {
+        const token = localStorage.getItem('access');
+        if (!token) {
+          console.error('No access token found');
+          setLoadingProjects(false);
+          return;
+        }
+
+        const response = await fetch(`http://localhost:8000/api/organisations/${organisationId}/projects/`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Projects fetched for organisation ${organisationId}:`, data);
+          setFilteredProjects(data);
+          
+          // Auto-select first project if available
+          if (data.length > 0) {
+            setProjectId(data[0].id);
+          } else {
+            setProjectId(null);
+          }
+        } else {
+          console.error('Failed to fetch projects:', response.status);
+          setFilteredProjects([]);
+          setProjectId(null);
+        }
+      } catch (error) {
+        console.error('Error fetching projects:', error);
+        setFilteredProjects([]);
+        setProjectId(null);
+      } finally {
+        setLoadingProjects(false);
+      }
+    };
+    fetchProjects();
+  }, [organisationId]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -553,7 +660,7 @@ function NewIssueForm({
       }
 
       if (!projectId) {
-        setError('Project ID is required');
+        setError('Please select a project');
         return;
       }
 
@@ -626,16 +733,64 @@ function NewIssueForm({
       )}
 
       <div className="form-row">
+        {/* Organisation Dropdown */}
         <div className="form-field">
-          <label>Project ID</label>
-          <input
-            className="field-input"
-            type="number"
-            placeholder="Project ID"
-            value={projectId}
-            onChange={(e) => setProjectId(Number(e.target.value))}
-          />
+          <label>Organisation <span style={{ color: '#D43E3E' }}>*</span></label>
+          {loadingOrganisations ? (
+            <div className="loading-indicator">Loading organisations...</div>
+          ) : organisations.length > 0 ? (
+            <select
+              className="field-select"
+              value={organisationId || ''}
+              onChange={(e) => setOrganisationId(Number(e.target.value))}
+              required
+            >
+              <option value="">Select an organisation...</option>
+              {organisations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div style={{ color: '#D43E3E', fontSize: '14px', padding: '8px' }}>
+              You are not a member of any organisation.
+            </div>
+          )}
         </div>
+
+        {/* Project Dropdown */}
+        <div className="form-field">
+          <label>Project <span style={{ color: '#D43E3E' }}>*</span></label>
+          {loadingProjects ? (
+            <div className="loading-indicator">Loading projects...</div>
+          ) : organisationId ? (
+            <select
+              className="field-select"
+              value={projectId || ''}
+              onChange={(e) => setProjectId(Number(e.target.value))}
+              required
+              disabled={filteredProjects.length === 0}
+            >
+              <option value="">Select a project...</option>
+              {filteredProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div style={{ color: '#6B7280', fontSize: '14px', padding: '8px' }}>
+              Please select an organisation first
+            </div>
+          )}
+          {filteredProjects.length === 0 && organisationId && !loadingProjects && (
+            <div style={{ color: '#D43E3E', fontSize: '12px', marginTop: '4px' }}>
+              No projects available in this organisation.
+            </div>
+          )}
+        </div>
+
         <div className="form-field">
           <label>Type</label>
           <select className="field-select" value={domain} onChange={(e) => setDomain(e.target.value as IssueDomain)}>
@@ -643,6 +798,7 @@ function NewIssueForm({
             <option value="other">Other (general)</option>
           </select>
         </div>
+
         {domain === "bim" ? (
           <div className="form-field">
             <label>Topic type</label>
@@ -669,6 +825,7 @@ function NewIssueForm({
             />
           </div>
         )}
+        
         <div className="form-field">
           <label>Priority</label>
           <select
@@ -686,7 +843,7 @@ function NewIssueForm({
       </div>
 
       <div className="form-field">
-        <label>Title</label>
+        <label>Title <span style={{ color: '#D43E3E' }}>*</span></label>
         <input className="field-input" value={title} onChange={(e) => setTitle(e.target.value)} />
       </div>
 
@@ -748,7 +905,11 @@ function NewIssueForm({
         <button className="btn-outline" onClick={onCancel}>
           Cancel
         </button>
-        <button className="btn-primary" onClick={handleSubmit}>
+        <button 
+          className="btn-primary" 
+          onClick={handleSubmit}
+          disabled={!projectId || !title.trim() || !organisationId}
+        >
           <i className="ti ti-plus" /> Create Issue
         </button>
       </div>

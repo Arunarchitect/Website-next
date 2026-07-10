@@ -1,3 +1,5 @@
+// issues/issueApi.ts
+
 import axios from 'axios';
 import {
   Issue,
@@ -267,9 +269,10 @@ const convertDjangoIssue = (data: any): Issue => {
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
-    is_deleted: data.is_deleted || false, // ✅ Added is_deleted
-    deleted_at: data.deleted_at || null, // ✅ Added deleted_at
-    deleted_by: data.deleted_by || null, // ✅ Added deleted_by
+    is_deleted: data.is_deleted || false,
+    deleted_at: data.deleted_at || null,
+    deleted_by: data.deleted_by || null,
+    organisation: data.organisation || data.organisation_details?.name || data.project_details?.organisation_name || null,
     comments: (data.comments || []).map((c: any) => ({
       id: String(c.id),
       author: c.author?.email || c.author?.full_name || c.author?.username || 'Unknown',
@@ -443,16 +446,31 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
 // CRUD OPERATIONS
 // ---------------------------------------------------------------------------
 
+/**
+ * Get all issues with optional filters
+ * @param params - Optional filters including include_deleted
+ */
 export async function getIssues(params?: {
   project?: number;
   domain?: string;
   status?: string;
   assigned_to?: number;
   deliverable?: number;
+  include_deleted?: boolean;  // ✅ Added this parameter
 }): Promise<Issue[]> {
   try {
     console.log('Fetching issues with params:', params);
-    const response = await apiClient.get('/issues/issues/', { params });
+    
+    // ✅ Build query params with proper include_deleted handling
+    const queryParams: any = { ...params };
+    if (params?.include_deleted !== undefined) {
+      queryParams.include_deleted = params.include_deleted ? 'true' : 'false';
+    }
+    
+    const response = await apiClient.get('/issues/issues/', { 
+      params: queryParams 
+    });
+    
     console.log('✅ Issues fetched successfully:', response.data?.length || 0, 'items');
     return response.data.map(convertDjangoIssue);
   } catch (error) {
@@ -604,7 +622,7 @@ export async function removeAttachment(id: string | number, index: number): Prom
 }
 
 // ---------------------------------------------------------------------------
-// COMMENTS - FIXED ENDPOINTS
+// COMMENTS
 // ---------------------------------------------------------------------------
 
 export async function addComment(
@@ -688,16 +706,12 @@ export async function getComments(id: string | number): Promise<IssueComment[]> 
   }
 }
 
-/**
- * Delete a comment - FIXED: Use correct endpoint
- */
 export async function deleteComment(
   issueId: string | number,
   commentId: string | number
 ): Promise<void> {
   try {
     console.log(`📤 Deleting comment ${commentId} from issue ${issueId}`);
-    // CORRECT ENDPOINT: comments are at /api/issues/comments/{commentId}/
     await apiClient.delete(`/issues/comments/${commentId}/`);
     console.log('✅ Comment deleted successfully');
   } catch (error) {
@@ -716,9 +730,6 @@ export async function deleteComment(
   }
 }
 
-/**
- * Edit a comment - FIXED: Use correct endpoint
- */
 export async function editComment(
   issueId: string | number,
   commentId: string | number,
@@ -726,7 +737,6 @@ export async function editComment(
 ): Promise<IssueComment> {
   try {
     console.log(`📤 Editing comment ${commentId} on issue ${issueId}`);
-    // CORRECT ENDPOINT: comments are at /api/issues/comments/{commentId}/
     const response = await apiClient.patch(`/issues/comments/${commentId}/`, {
       text: text,
     });
@@ -842,22 +852,22 @@ export async function fromBcfTopic(topic: any, projectId: number): Promise<Issue
 // ---------------------------------------------------------------------------
 
 export const getIssuesByTopicType = async (type: BcfTopicType) => {
-  const issues = await getIssues();
+  const issues = await getIssues({ include_deleted: false });
   return issues.filter(isBimIssue).filter((i) => i.topicType === type);
 };
 
 export const getIssuesByAssignee = async (assignee: string) => {
-  const issues = await getIssues();
+  const issues = await getIssues({ include_deleted: false });
   return issues.filter((i) => i.assignedTo === assignee);
 };
 
 export const getIssuesByDomain = async (domain: IssueDomain) => {
-  const issues = await getIssues();
+  const issues = await getIssues({ include_deleted: false });
   return issues.filter((i) => i.domain === domain);
 };
 
 export const getIssuesByIfcElement = async (ifcGuid: string) => {
-  const issues = await getIssues();
+  const issues = await getIssues({ include_deleted: false });
   return issues.filter(isBimIssue).filter((i) => i.ifcElements?.includes(ifcGuid));
 };
 

@@ -1,3 +1,4 @@
+// app/issues/IssueCard.tsx
 "use client";
 
 import { useState, useRef } from "react";
@@ -135,7 +136,7 @@ export function IssueCard({
     dueDate: issue.dueDate ?? "",
   });
 
-  const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
+  const canResolve = issue.status !== "Resolved" && issue.status !== "Closed" && issue.is_deleted !== true;
   const isBim = isBimIssue(issue);
   
   const isCreator = isUserCreator(issue.reportedBy, currentUser);
@@ -144,7 +145,7 @@ export function IssueCard({
     return isUserMatch(commentAuthor, currentUser);
   };
 
-  console.log(`🔍 Issue #${issue.id}: reportedBy="${issue.reportedBy}", isCreator=${isCreator}, is_deleted=${issue.is_deleted}`);
+  console.log(`🔍 Issue #${issue.id}: reportedBy="${issue.reportedBy}", isCreator=${isCreator}, is_deleted=${issue.is_deleted}, organisation=${issue.organisation || 'N/A'}`);
 
   const getCurrentScreenshot = (): string | null => {
     if (isBim) {
@@ -397,7 +398,7 @@ export function IssueCard({
   };
 
   return (
-    <div className="issue-card">
+    <div className={`issue-card ${issue.is_deleted ? 'issue-deleted' : ''}`}>
       <div className="issue-left">
         <div className="priority-strip" style={{ background: getPriorityColor(issue.priority) }} />
 
@@ -411,7 +412,9 @@ export function IssueCard({
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
               />
             ) : (
-              <h3 className="issue-title">{issue.title}</h3>
+              <h3 className={`issue-title ${issue.is_deleted ? 'deleted-text' : ''}`}>
+                {issue.title}
+              </h3>
             )}
             <span className={`domain-badge domain-${issue.domain}`}>
               {isBim ? (
@@ -428,7 +431,13 @@ export function IssueCard({
               <span className="issue-owner-badge">(You)</span>
             )}
             {!isEditing && issue.is_deleted === true && (
-              <span className="issue-deleted-badge">(Deleted)</span>
+              <span className="issue-deleted-badge">🗑️ Deleted</span>
+            )}
+            {!isEditing && issue.organisation && (
+              <span className="issue-organisation-badge">
+                <i className="ti ti-building" />
+                {issue.organisation}
+              </span>
             )}
           </div>
 
@@ -448,7 +457,9 @@ export function IssueCard({
               rows={3}
             />
           ) : (
-            <p className="issue-description">{issue.description}</p>
+            <p className={`issue-description ${issue.is_deleted ? 'deleted-text' : ''}`}>
+              {issue.description}
+            </p>
           )}
 
           <div className="screenshot-section">
@@ -462,7 +473,7 @@ export function IssueCard({
                   onError={() => setImageLoadError(true)}
                 />
                 <span className="screenshot-hint">Click to enlarge</span>
-                {isCreator && (
+                {isCreator && issue.is_deleted !== true && (
                   <button
                     className="screenshot-delete-btn"
                     onClick={handleRemoveSavedScreenshot}
@@ -603,6 +614,13 @@ export function IssueCard({
               </span>
             )}
 
+            {issue.is_deleted && issue.deleted_at && (
+              <span className="meta-item deleted-date">
+                <i className="ti ti-calendar" />
+                Deleted: {issue.deleted_at}
+              </span>
+            )}
+
             {isEditing ? (
               <>
                 <select
@@ -668,8 +686,8 @@ export function IssueCard({
             )}
           </div>
 
-          {/* Comments section */}
-          {issue.comments.length > 0 && !isEditing && (
+          {/* Comments section - only show if not deleted */}
+          {issue.comments.length > 0 && !isEditing && issue.is_deleted !== true && (
             <div className="comments-section">
               <div className="comments-header">
                 <div className="comments-header-left">
@@ -785,7 +803,19 @@ export function IssueCard({
             </div>
           )}
 
-          {isResolving && (
+          {/* Comments section for deleted issues - collapsed view */}
+          {issue.comments.length > 0 && !isEditing && issue.is_deleted === true && (
+            <div className="comments-section deleted-comments">
+              <div className="comments-header">
+                <div className="comments-header-left">
+                  <i className="ti ti-message-circle" />
+                  <span>{issue.comments.length} comments (hidden - issue deleted)</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isResolving && issue.is_deleted !== true && (
             <div className="resolve-panel">
               <textarea
                 className="field-input"
@@ -911,7 +941,7 @@ export function IssueCard({
             )}
           </div>
 
-          {showAddScreenshot && (
+          {showAddScreenshot && issue.is_deleted !== true && (
             <div className="resolve-screenshot-upload" style={{ marginTop: '12px' }}>
               {extraPreview ? (
                 <div className="screenshot-preview">
@@ -954,7 +984,7 @@ export function IssueCard({
             </div>
           )}
 
-          {showCommentInput && (
+          {showCommentInput && issue.is_deleted !== true && (
             <div className="comment-input-panel" style={{ marginTop: '12px' }}>
               <textarea
                 className="field-input"
@@ -996,6 +1026,12 @@ export function IssueCard({
             <span className="issue-time updated">
               <i className="ti ti-refresh" />
               {issue.updated}
+            </span>
+          )}
+          {issue.is_deleted && issue.deleted_at && (
+            <span className="issue-time deleted">
+              <i className="ti ti-trash" />
+              Deleted: {issue.deleted_at}
             </span>
           )}
         </div>
