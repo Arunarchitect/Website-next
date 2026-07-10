@@ -1,172 +1,233 @@
+// app/main/client/page.tsx
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import "./styles.css";
+import { getCurrentUser, getAreacalcRole } from "./clientApi";
+import { clientSections } from "./constants";
+import { User } from "./types";
 
-const sections = [
-  {
-    icon: "ti-briefcase",
-    label: "My Projects",
-    description: "View projects shared with you by your organisation.",
-    href: "/new/dash/dashnormal",
-    cta: "View projects",
-  },
-  {
-    icon: "ti-file-description",
-    label: "Deliverables",
-    description: "Track the status of deliverables assigned or visible to you.",
-    href: "/new/dash/dashnormal",
-    cta: "View deliverables",
-  },
-  {
-    icon: "ti-ruler-measure",
-    label: "Area Calculator",
-    description: "Use the area and cost estimation tool.",
-    href: "/tools/areacalc",
-    cta: "Open tool",
-  },
-];
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "700"],
+  variable: "--font-display",
+});
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
+});
 
 export default function DashClientPage() {
-  return (
-    <div style={{ minHeight: "100vh", background: "var(--color-background-tertiary)" }}>
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const [user, role] = await Promise.all([
+          getCurrentUser(),
+          getAreacalcRole(),
+        ]);
+        setCurrentUser(user);
+        setAreacalcRole(role);
+        console.log('👤 Client user:', user?.email);
+        console.log('📐 Areacalc role:', role);
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUserData();
+  }, []);
+
+  // Get user's display name
+  const getDisplayName = (): string => {
+    if (!currentUser) return 'Guest';
+    return currentUser.full_name || currentUser.email || 'Client';
+  };
+
+  // Get user's initials for avatar
+  const getInitials = (): string => {
+    if (!currentUser) return '?';
+    const name = currentUser.full_name || currentUser.email || 'Client';
+    const parts = name.split(' ');
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  // Get greeting based on time of day
+  const getGreeting = (): string => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
+
+  // ✅ Filter sections based on Areacalc role
+  const visibleSections = clientSections.filter((section) => {
+    // If section requires Areacalc, check if user has a role
+    if (section.requiresAreacalc) {
+      return areacalcRole !== null && areacalcRole !== 'anonymous';
+    }
+    return true; // Always show sections that don't require Areacalc
+  });
+
+  return (
+    <main className={`${display.variable} ${mono.variable} client-page`}>
       {/* Header */}
-      <header style={{
-        background: "var(--color-background-primary)",
-        borderBottom: "0.5px solid var(--color-border-tertiary)",
-        padding: "0 2rem",
-        height: "56px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        position: "sticky",
-        top: 0,
-        zIndex: 10,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{
-            width: "28px", height: "28px", borderRadius: "6px",
-            background: "#712B13",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <i className="ti ti-user" style={{ color: "#FAECE7", fontSize: "15px" }} aria-hidden="true" />
+      <header className="client-header">
+        <div className="client-brand">
+          <span className="client-brand-icon">
+            <i className="ti ti-user" aria-hidden="true" />
           </span>
-          <span style={{ fontWeight: 500, fontSize: "15px", letterSpacing: "-0.01em" }}>
-            Client Portal
-          </span>
+          <span className="client-brand-text">Client Portal</span>
         </div>
-        <span style={{
-          fontSize: "11px",
-          padding: "3px 10px",
-          borderRadius: "var(--border-radius-md)",
-          background: "#FAECE7",
-          color: "#712B13",
-          fontWeight: 500,
-        }}>
-          Client access
-        </span>
+        <nav className="client-nav">
+          <Link href="/new/dash/dashnormal" className="client-nav-link">
+            <i className="ti ti-layout-dashboard" aria-hidden="true" />
+            <span>Dashboard</span>
+          </Link>
+          {areacalcRole && areacalcRole !== 'anonymous' && (
+            <Link href="/tools/areacalc" className="client-nav-link">
+              <i className="ti ti-ruler-measure" aria-hidden="true" />
+              <span>Areacalc</span>
+            </Link>
+          )}
+          <Link href="/issues" className="client-nav-link">
+            <i className="ti ti-bug" aria-hidden="true" />
+            <span>Issues</span>
+          </Link>
+          <span className="client-role-badge">
+            <i className="ti ti-shield" aria-hidden="true" />
+            Client
+          </span>
+        </nav>
       </header>
 
-      <main style={{ maxWidth: "640px", margin: "0 auto", padding: "2.5rem 1.5rem" }}>
+      {/* Hero */}
+      <div className="client-hero">
+        <p className="client-eyebrow">Client Portal</p>
+        <h1 className="client-title">Your workspace</h1>
+        <p className="client-sub">
+          Access your project updates and available tools below.
+        </p>
+      </div>
 
-        {/* Hero */}
-        <div style={{ marginBottom: "2.5rem" }}>
-          <p style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-tertiary)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "6px" }}>
-            Client portal
-          </p>
-          <h1 style={{ fontSize: "26px", fontWeight: 500, margin: "0 0 8px", letterSpacing: "-0.02em" }}>
-            Your workspace
-          </h1>
-          <p style={{ fontSize: "15px", color: "var(--color-text-secondary)", margin: 0 }}>
-            Access your project updates, deliverables, and tools below.
-          </p>
-        </div>
-
-        {/* Section cards */}
-        <div style={{ display: "grid", gap: "10px" }}>
-          {sections.map((s) => (
-            <div key={s.href + s.label} style={{
-              background: "var(--color-background-primary)",
-              border: "0.5px solid var(--color-border-tertiary)",
-              borderRadius: "var(--border-radius-lg)",
-              padding: "20px 24px",
-              display: "flex",
-              alignItems: "center",
-              gap: "16px",
-            }}>
-              {/* Icon */}
-              <div style={{
-                width: "40px", height: "40px", flexShrink: 0,
-                borderRadius: "var(--border-radius-md)",
-                border: "0.5px solid var(--color-border-tertiary)",
-                background: "var(--color-background-secondary)",
-                display: "flex", alignItems: "center", justifyContent: "center",
+      {/* User Profile */}
+      {!loading && currentUser && (
+        <div className="user-profile">
+          <div className="user-avatar">{getInitials()}</div>
+          <div className="user-info">
+            <p className="user-greeting">{getGreeting()} 👋</p>
+            <h2 className="user-name">{getDisplayName()}</h2>
+            <p className="user-email">
+              <i className="ti ti-mail" />
+              {currentUser.email}
+            </p>
+            <span className="user-role-badge">
+              <i className="ti ti-shield" />
+              Client Access
+            </span>
+            {areacalcRole && areacalcRole !== 'anonymous' && (
+              <span className="user-role-badge" style={{ 
+                marginLeft: '8px',
+                background: '#E1F5EE',
+                color: '#0F6E56',
               }}>
-                <i className={`ti ${s.icon}`} style={{ fontSize: "19px" }} aria-hidden="true" />
-              </div>
-
-              {/* Text */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontWeight: 500, fontSize: "15px", margin: "0 0 3px" }}>{s.label}</p>
-                <p style={{ fontSize: "13px", color: "var(--color-text-secondary)", margin: 0 }}>{s.description}</p>
-              </div>
-
-              {/* Actions */}
-              <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                <a
-                  href={s.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open in new tab"
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    width: "34px", height: "34px",
-                    borderRadius: "var(--border-radius-md)",
-                    border: "0.5px solid var(--color-border-tertiary)",
-                    color: "var(--color-text-secondary)",
-                    textDecoration: "none",
-                  }}
-                  aria-label={`Open ${s.label} in new tab`}
-                >
-                  <i className="ti ti-external-link" style={{ fontSize: "15px" }} aria-hidden="true" />
-                </a>
-                <Link href={s.href} style={{
-                  height: "34px", padding: "0 14px",
-                  borderRadius: "var(--border-radius-md)",
-                  border: "0.5px solid var(--color-border-tertiary)",
-                  color: "var(--color-text-primary)",
-                  textDecoration: "none",
-                  fontSize: "13px", fontWeight: 500,
-                  display: "flex", alignItems: "center", gap: "5px",
-                  background: "var(--color-background-primary)",
-                }}>
-                  {s.cta} <i className="ti ti-arrow-right" style={{ fontSize: "13px" }} aria-hidden="true" />
-                </Link>
-              </div>
-            </div>
-          ))}
+                <i className="ti ti-calculator" />
+                Areacalc: {areacalcRole}
+              </span>
+            )}
+          </div>
         </div>
+      )}
 
-        {/* Access note */}
-        <div style={{
-          marginTop: "2rem",
-          padding: "14px 18px",
-          borderRadius: "var(--border-radius-md)",
-          background: "#FAECE7",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "10px",
-          fontSize: "13px",
-          color: "#712B13",
-        }}>
-          <i className="ti ti-info-circle" style={{ fontSize: "16px", flexShrink: 0, marginTop: "1px" }} aria-hidden="true" />
-          <span>
-            You have client-level access. Some features may be restricted.
-            Contact your project manager if you need additional permissions.
-          </span>
-        </div>
+      {loading ? (
+        <div className="loading-text">Loading your workspace…</div>
+      ) : (
+        <>
+          {/* Section Label */}
+          <p className="section-label">Available Tools & Resources</p>
 
-      </main>
-    </div>
+          {/* Client Sections */}
+          <div className="client-sections-grid">
+            {visibleSections.length > 0 ? (
+              visibleSections.map((section) => (
+                <div key={section.href + section.label} className="client-section-card">
+                  <div className="client-section-icon-wrapper">
+                    <i className={`ti ${section.icon}`} aria-hidden="true" />
+                  </div>
+                  <div className="client-section-info">
+                    <p className="client-section-label">{section.label}</p>
+                    <p className="client-section-description">{section.description}</p>
+                    {section.requiresAreacalc && (
+                      <span style={{
+                        fontSize: '10px',
+                        padding: '1px 8px',
+                        borderRadius: '2px',
+                        background: '#E1F5EE',
+                        color: '#0F6E56',
+                        fontFamily: 'var(--font-mono), monospace',
+                        letterSpacing: '0.04em',
+                        display: 'inline-block',
+                        marginTop: '4px',
+                      }}>
+                        <i className="ti ti-lock-open" style={{ fontSize: '10px', marginRight: '4px' }} />
+                        Access granted
+                      </span>
+                    )}
+                  </div>
+                  <div className="client-section-actions">
+                    <a
+                      href={section.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="client-section-btn client-section-btn-icon"
+                      aria-label={`Open ${section.label} in new tab`}
+                      title="Open in new tab"
+                    >
+                      <i className="ti ti-external-link" aria-hidden="true" />
+                    </a>
+                    <Link href={section.href} className="client-section-btn client-section-btn-go">
+                      {section.cta}
+                      <i className="ti ti-arrow-right" aria-hidden="true" />
+                    </Link>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{
+                padding: '32px',
+                textAlign: 'center',
+                color: 'var(--slate)',
+                background: '#ffffff',
+                border: '1px solid var(--line)',
+                borderRadius: '4px',
+              }}>
+                <i className="ti ti-info-circle" style={{ fontSize: '32px', display: 'block', marginBottom: '8px', color: 'var(--line)' }} />
+                <p>No tools available at the moment.</p>
+                <p style={{ fontSize: '13px', marginTop: '4px' }}>Contact your organisation admin for access.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Access Note */}
+          <div className="client-access-note">
+            <i className="ti ti-info-circle" aria-hidden="true" />
+            <span>
+              You have client-level access. Some features may be restricted.
+              Contact your project manager if you need additional permissions.
+            </span>
+          </div>
+        </>
+      )}
+    </main>
   );
 }

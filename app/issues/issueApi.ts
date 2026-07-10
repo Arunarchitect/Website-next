@@ -1,5 +1,7 @@
 // issues/issueApi.ts
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import axios from 'axios';
 import {
   Issue,
@@ -252,10 +254,14 @@ const mapTopicTypeToFrontend = (topicType: string): string => {
 // Helper to convert Django issue to frontend Issue type
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Helper to convert Django issue to frontend Issue type
+// ---------------------------------------------------------------------------
+
 const convertDjangoIssue = (data: any): Issue => {
-  const baseIssue: Issue = {
+  // Create the base object without specifying domain type explicitly
+  const baseIssue = {
     id: String(data.id),
-    domain: data.domain as IssueDomain,
     title: data.title,
     description: data.description || '',
     status: mapStatusToFrontend(data.status) as IssueStatus,
@@ -283,10 +289,11 @@ const convertDjangoIssue = (data: any): Issue => {
     })),
   };
 
+  // Handle BIM domain
   if (data.domain === 'bim') {
-    const bimIssue: BimIssue = {
+    return {
       ...baseIssue,
-      domain: 'bim',
+      domain: 'bim' as const,  // Use 'as const' to enforce literal type
       bcfGuid: data.bcf_guid,
       topicType: mapTopicTypeToFrontend(data.topic_type) || 'General',
       ifcElements: data.ifc_elements || [],
@@ -308,12 +315,12 @@ const convertDjangoIssue = (data: any): Issue => {
         })),
       } : undefined,
     };
-    return bimIssue;
   }
 
+  // Handle non-BIM domains (design/other)
   return {
     ...baseIssue,
-    domain: 'other',
+    domain: (data.domain === 'design' ? 'design' : 'other') as const,  // Use 'as const' to enforce literal type
     category: data.category || '',
     attachments: (data.attachments || []).map((a: any) => {
       if (typeof a === 'string') {

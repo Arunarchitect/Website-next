@@ -1,0 +1,710 @@
+/* app/main/user/styles.css */
+
+.user-page {
+  --paper: #F7F5EF;
+  --ink: #1E1E1A;
+  --blue: #2C5F8A;
+  --blue-deep: #17324A;
+  --slate: #6E6B62;
+  --line: #DFDACB;
+  --teal: #085041;
+  --teal-bg: #E1F5EE;
+  --teal-text: #0F6E56;
+  --purple-bg: #EEEDFE;
+  --purple-text: #3C3489;
+  --client-red: #712B13;
+  --client-bg: #FAECE7;
+
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2px 24px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display), system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+/* ============================================
+   HEADER
+   ============================================ */
+
+.user-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.user-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.user-brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background: var(--teal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--paper);
+  font-size: 16px;
+}
+
+.user-brand-text {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.user-email-badge {
+  font-size: 12px;
+  color: var(--slate);
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: var(--paper);
+}
+
+.user-role-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.user-role-badge-admin {
+  background: #D43E3E20;
+  color: #D43E3E;
+}
+
+.user-role-badge-manager {
+  background: #E8A83820;
+  color: #E8A838;
+}
+
+.user-role-badge-member {
+  background: #08504120;
+  color: #085041;
+}
+
+.user-role-badge-client {
+  background: #FAECE7;
+  color: #712B13;
+}
+
+.user-role-badge-no_organisation {
+  background: #F0F0F0;
+  color: #6B7280;
+}
+
+.user-nav {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.user-nav-link {
+  font-size: 13px;
+  color: var(--slate);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  transition: border-color 0.18s ease, background 0.18s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.user-nav-link:hover {
+  border-color: var(--teal);
+  background: rgba(8, 80, 65, 0.05);
+}
+
+/* ============================================
+   HERO
+   ============================================ */
+
+.user-hero {
+  margin-bottom: 32px;
+}
+
+.user-eyebrow {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--teal);
+  text-transform: uppercase;
+  margin: 0 0 2px;
+}
+
+.user-title {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  letter-spacing: -0.02em;
+  margin: 0 0 2px;
+  line-height: 1.2;
+}
+
+.user-sub {
+  font-size: 15px;
+  color: var(--slate);
+  margin: 0;
+  line-height: 1.55;
+}
+
+.user-role-text {
+  font-size: 13px;
+  color: var(--slate);
+  margin: 6px 0 0;
+}
+
+.user-role-text span {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* ============================================
+   USER PROFILE
+   ============================================ */
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 24px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-bottom: 24px;
+}
+
+.user-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--teal);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--font-display), sans-serif;
+  flex-shrink: 0;
+}
+
+.user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-greeting {
+  font-size: 14px;
+  color: var(--slate);
+  margin: 0 0 2px;
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.04em;
+}
+
+.user-name {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 2px;
+  color: var(--ink);
+}
+
+.user-email {
+  font-size: 14px;
+  color: var(--slate);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-email i {
+  font-size: 16px;
+}
+
+.user-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.04em;
+}
+
+.user-badge-org {
+  background: var(--teal-bg);
+  color: var(--teal-text);
+}
+
+.user-badge-areacalc {
+  background: var(--teal-bg);
+  color: var(--teal-text);
+}
+
+.user-badge-client {
+  background: var(--client-bg);
+  color: var(--client-red);
+}
+
+.user-badge-no-access {
+  background: #F0F0F0;
+  color: #6B7280;
+}
+
+/* ============================================
+   SECTION LABEL
+   ============================================ */
+
+.section-label {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--teal);
+  text-transform: uppercase;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ============================================
+   TILES GRID
+   ============================================ */
+
+.tiles-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.tile-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.tile-card:hover {
+  border-color: var(--teal);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(8, 80, 65, 0.08);
+}
+
+.tile-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tile-icon-wrapper {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile-icon-wrapper i {
+  font-size: 20px;
+  color: var(--ink);
+}
+
+.tile-info {
+  min-width: 0;
+}
+
+.tile-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  flex-wrap: wrap;
+}
+
+.tile-label {
+  font-weight: 500;
+  font-size: 15px;
+}
+
+.tile-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  background: var(--paper);
+  color: var(--slate);
+  font-weight: 500;
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.04em;
+}
+
+.tile-tag-areacalc {
+  background: var(--teal-bg);
+  color: var(--teal-text);
+}
+
+.tile-description {
+  font-size: 13px;
+  color: var(--slate);
+  margin: 0;
+}
+
+.tile-access-badge {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 2px;
+  background: var(--teal-bg);
+  color: var(--teal-text);
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.04em;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.tile-access-badge i {
+  font-size: 10px;
+  margin-right: 4px;
+}
+
+.tile-access-badge-locked {
+  background: #F0F0F0;
+  color: #6B7280;
+}
+
+.tile-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tile-btn {
+  height: 34px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--slate);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+}
+
+.tile-btn:hover {
+  border-color: var(--teal);
+  background: rgba(8, 80, 65, 0.05);
+  color: var(--teal);
+}
+
+.tile-btn-icon {
+  width: 34px;
+  padding: 0;
+}
+
+.tile-btn-go {
+  padding: 0 16px;
+  gap: 4px;
+  color: var(--ink);
+}
+
+.tile-btn-go i {
+  font-size: 13px;
+}
+
+.tile-btn-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tile-btn-disabled:hover {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--slate);
+}
+
+/* ============================================
+   EMPTY STATE
+   ============================================ */
+
+.empty-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--slate);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.empty-state i {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 8px;
+  color: var(--line);
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+.empty-state p:last-child {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* ============================================
+   HELP STRIP
+   ============================================ */
+
+.help-strip {
+  margin-top: 2rem;
+  padding: 14px 18px;
+  border-radius: 4px;
+  border: 0.5px solid var(--line);
+  background: var(--paper);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--slate);
+}
+
+.help-strip i {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* ============================================
+   DEBUG INFO
+   ============================================ */
+
+.debug-info {
+  margin-top: 2rem;
+  padding: 14px 18px;
+  border-radius: 4px;
+  border: 0.5px solid var(--line);
+  background: #F7F5EF;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--slate);
+}
+
+.debug-info summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.debug-info pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ============================================
+   LOADING & ERROR
+   ============================================ */
+
+.loading-text,
+.error-text {
+  padding: 16px;
+  text-align: center;
+  color: var(--slate);
+  font-size: 14px;
+}
+
+.error-text {
+  color: #D43E3E;
+}
+
+.error-text button {
+  margin-left: 12px;
+  padding: 4px 12px;
+  border: 1px solid #D43E3E;
+  border-radius: 4px;
+  background: transparent;
+  color: #D43E3E;
+  cursor: pointer;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+}
+
+.error-text button:hover {
+  background: #D43E3E10;
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 780px) {
+  .user-page {
+    padding: 2px 16px 10px;
+  }
+
+  .user-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .user-nav {
+    flex-wrap: wrap;
+  }
+
+  .user-profile {
+    flex-direction: column;
+    text-align: center;
+    padding: 16px;
+  }
+
+  .user-email {
+    justify-content: center;
+  }
+
+  .user-badges {
+    justify-content: center;
+  }
+
+  .tile-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 16px 18px;
+  }
+
+  .tile-actions {
+    justify-content: flex-end;
+  }
+
+  .tile-info {
+    text-align: center;
+  }
+
+  .tile-header {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .user-nav {
+    gap: 4px;
+  }
+
+  .user-nav-link {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+
+  .user-nav-link span {
+    display: none;
+  }
+
+  .user-nav-link i {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .user-page {
+    padding: 2px 12px 10px;
+  }
+
+  .tile-actions {
+    justify-content: stretch;
+  }
+
+  .tile-btn-go {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .user-avatar {
+    width: 48px;
+    height: 48px;
+    font-size: 18px;
+  }
+
+  .user-name {
+    font-size: 18px;
+  }
+
+  .tile-card {
+    padding: 14px 16px;
+  }
+
+  .tile-icon-wrapper {
+    width: 36px;
+    height: 36px;
+  }
+
+  .tile-icon-wrapper i {
+    font-size: 16px;
+  }
+
+  .tile-label {
+    font-size: 14px;
+  }
+
+  .tile-description {
+    font-size: 12px;
+  }
+
+  .user-email-badge {
+    font-size: 10px;
+    padding: 1px 8px;
+  }
+
+  .user-role-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  .help-strip {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+}

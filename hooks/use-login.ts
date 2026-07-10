@@ -25,67 +25,145 @@ interface RoleBundle {
 
 async function fetchOrgRole(accessToken: string): Promise<OrgRole> {
   try {
+    console.log('🔍 [fetchOrgRole] Fetching organisation memberships...');
     const res = await fetch(`${BASE_URL}/api/my-memberships/`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.log(`❌ [fetchOrgRole] Failed with status: ${res.status}`);
+      return null;
+    }
     const data: OrganisationMembership[] = await res.json();
-    if (!data.length) return null;
+    console.log('✅ [fetchOrgRole] Raw memberships data:', JSON.stringify(data, null, 2));
+    
+    if (!data.length) {
+      console.log('⚠️ [fetchOrgRole] No memberships found');
+      return null;
+    }
 
     const PRIORITY: OrgRole[] = ["admin", "manager", "member", "client"];
     for (const role of PRIORITY) {
-      if (data.some((m) => m.role === role)) return role;
+      if (data.some((m) => m.role === role)) {
+        console.log(`✅ [fetchOrgRole] Found role: "${role}"`);
+        return role;
+      }
     }
+    console.log('⚠️ [fetchOrgRole] No matching role found in priority list');
     return null;
-  } catch {
+  } catch (error) {
+    console.error('❌ [fetchOrgRole] Error:', error);
     return null;
   }
 }
 
 async function fetchAreacalcRole(accessToken: string): Promise<AreacalcRole> {
   try {
+    console.log('🔍 [fetchAreacalcRole] Fetching Areacalc role...');
     const res = await fetch(`${BASE_URL}/api/areacalc/me/role/`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return "anonymous";
+    if (!res.ok) {
+      console.log(`❌ [fetchAreacalcRole] Failed with status: ${res.status}`);
+      return "anonymous";
+    }
     const data = await res.json();
-    return (data.role as AreacalcRole) ?? "anonymous";
-  } catch {
+    console.log('✅ [fetchAreacalcRole] Raw API response:', data);
+    
+    // ✅ The API returns: { authenticated, role, can_save_custom_templates }
+    // Use the role from API, default to 'anonymous'
+    const role = (data.role as AreacalcRole) ?? "anonymous";
+    console.log(`✅ [fetchAreacalcRole] Found role: "${role}"`);
+    return role;
+  } catch (error) {
+    console.error('❌ [fetchAreacalcRole] Error:', error);
     return "anonymous";
   }
 }
 
-// ✅ NEW: Fetch user profile
+// Fetch user profile
 async function fetchUserProfile(accessToken: string) {
   try {
+    console.log('🔍 [fetchUserProfile] Fetching user profile...');
     const res = await fetch(`${BASE_URL}/api/users/me/`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    if (!res.ok) {
+      console.log(`❌ [fetchUserProfile] Failed with status: ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    console.log('✅ [fetchUserProfile] User data:', {
+      id: data.id,
+      email: data.email,
+      full_name: data.full_name || `${data.first_name || ''} ${data.last_name || ''}`.trim(),
+    });
+    return data;
+  } catch (error) {
+    console.error('❌ [fetchUserProfile] Error:', error);
     return null;
   }
 }
 
 // ── Routing table ─────────────────────────────────────────────────────────────
+// Priority: Organisation roles > Areacalc roles > Default user page
 
 function resolveDestination({ orgRole, areacalcRole }: RoleBundle): string {
-  const isOrgPrivileged   = orgRole === "admin" || orgRole === "manager" || orgRole === "member";
-  const isOrgLow          = orgRole === "client";
+  console.log('📍 [resolveDestination] Input:', { orgRole, areacalcRole });
+  
   const isAreacalcPriv    = areacalcRole === "admin" || areacalcRole === "member";
   const isAreacalcLow     = areacalcRole === "customer" || areacalcRole === "user";
-  const hasOrgRole        = orgRole !== null;
   const hasAreacalcRole   = areacalcRole !== "anonymous";
+  const hasOrgRole        = orgRole !== null;
 
-  if (isOrgPrivileged && isAreacalcPriv)    return "/main/admin";
-  if (hasOrgRole && isAreacalcLow)          return "/main/user";
-  if (isOrgLow && hasAreacalcRole)          return "/main/user";
-  if (orgRole === "admin" || orgRole === "manager") return "/new/dash/dashadmin";
-  if (orgRole === "member")                          return "/new/dash/dashnormal";
-  if (orgRole === "client")                          return "/main/client";
-  if (hasAreacalcRole)                               return "/tools/areacalc";
-  return "/new/dash/dashnormal";
+  console.log('📍 [resolveDestination] Evaluated flags:', {
+    isAreacalcPriv,
+    isAreacalcLow,
+    hasAreacalcRole,
+    hasOrgRole,
+    orgRole
+  });
+
+  let destination: string;
+
+  // ✅ PRIORITY 1: ORGANISATION ROLES (Highest priority)
+  // Organisation roles take precedence over Areacalc roles
+  if (hasOrgRole) {
+    if (orgRole === "admin" || orgRole === "manager") {
+      destination = "/new/dash/dashadmin";
+      console.log('📍 [resolveDestination] → Organisation Admin/Manager (Org priority 1)');
+    } 
+    else if (orgRole === "member") {
+      destination = "/new/dash/dashnormal";
+      console.log('📍 [resolveDestination] → Organisation Member (Org priority 2)');
+    } 
+    else if (orgRole === "client") {
+      destination = "/main/client";
+      console.log('📍 [resolveDestination] → Organisation Client (Org priority 3)');
+    } 
+    else {
+      // Fallback for any other org role
+      destination = "/new/dash/dashnormal";
+      console.log('📍 [resolveDestination] → Unknown org role, defaulting to user dashboard');
+    }
+  } 
+  
+  // ✅ PRIORITY 2: AREACALC ROLES (Only if no organisation role)
+  // Users with Areacalc but no organisation go to /main/user
+  else if (hasAreacalcRole) {
+    destination = "/main/user";
+    console.log('📍 [resolveDestination] → Areacalc user without organisation → /main/user');
+  } 
+  
+  // ✅ PRIORITY 3: NO ROLES AT ALL
+  // User has no organisation and no Areacalc role
+  // They go to /main/user which will show minimal content
+  else {
+    destination = "/main/user";
+    console.log('📍 [resolveDestination] → No roles found, redirecting to user page (minimal content)');
+  }
+
+  console.log(`📍 [resolveDestination] → Final destination: "${destination}"`);
+  return destination;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -107,25 +185,30 @@ export default function useLogin() {
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    console.log('📤 [useLogin] Login attempt for:', email);
+
     login({ email, password })
       .unwrap()
       .then(async (data) => {
+        console.log('✅ [useLogin] Login successful, storing tokens...');
+        
         // Store tokens
         localStorage.setItem("access", data.access);
         localStorage.setItem("refresh", data.refresh);
 
-        // ✅ Fetch user profile
+        // Fetch user profile
         const userData = await fetchUserProfile(data.access);
         
         if (userData) {
-          // ✅ Store user in Redux
+          // Store user in Redux
           dispatch(setAuth({
             user: userData,
             token: data.access
           }));
           
-          // ✅ Also store in localStorage as fallback
+          // Also store in localStorage as fallback
           localStorage.setItem('user', JSON.stringify(userData));
+          console.log('✅ [useLogin] User stored in Redux and localStorage');
         } else {
           // Fallback: create minimal user from token or email
           const minimalUser = {
@@ -140,6 +223,7 @@ export default function useLogin() {
             token: data.access
           }));
           localStorage.setItem('user', JSON.stringify(minimalUser));
+          console.log('⚠️ [useLogin] Using minimal user fallback');
         }
 
         toast.success("Logged in successfully", {
@@ -151,20 +235,29 @@ export default function useLogin() {
         const next = searchParams.get("next");
         if (next) {
           const destination = next.startsWith("/") ? next : "/";
+          console.log(`📍 [useLogin] Using next param: "${destination}"`);
           setTimeout(() => router.push(destination), 3000);
           return;
         }
 
+        console.log('🔄 [useLogin] Fetching roles for redirection...');
+        
         // Fetch both roles in parallel
         const [orgRole, areacalcRole] = await Promise.all([
           fetchOrgRole(data.access),
           fetchAreacalcRole(data.access),
         ]);
 
+        console.log('📊 [useLogin] Final roles:', { orgRole, areacalcRole });
+
+        // Resolve destination based on roles
         const destination = resolveDestination({ orgRole, areacalcRole });
+        console.log(`🚀 [useLogin] Redirecting to: "${destination}" in 3 seconds...`);
+        
         setTimeout(() => router.push(destination), 3000);
       })
       .catch((error) => {
+        console.error('❌ [useLogin] Login failed:', error);
         const toastOptions = { autoClose: 5000, pauseOnHover: true };
         if (error.status === 400) {
           toast.error(error.data?.detail || "Invalid request format", toastOptions);
