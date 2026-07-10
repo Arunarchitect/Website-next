@@ -49,22 +49,18 @@ const getCsrfToken = (): string | null => {
 const getImageSource = (imageData: string | undefined): string => {
   if (!imageData) return '';
 
-  // If it's already a data URL
   if (imageData.startsWith('data:image')) {
     return imageData;
   }
 
-  // If it's a full URL (http, https)
   if (imageData.startsWith('http://') || imageData.startsWith('https://')) {
     return imageData;
   }
 
-  // If it's a relative path starting with /
   if (imageData.startsWith('/')) {
     return `${API_BASE_URL}${imageData}`;
   }
 
-  // If it's a base64 string without the data URL prefix
   if (imageData.length > 100) {
     try {
       const isBase64 = /^[A-Za-z0-9+/=]+$/.test(imageData.substring(0, 100));
@@ -78,7 +74,6 @@ const getImageSource = (imageData: string | undefined): string => {
     }
   }
 
-  // If it looks like a media file path
   if (imageData.includes('issue_snapshots/') || imageData.includes('media/')) {
     const path = imageData.startsWith('/') ? imageData : `/${imageData}`;
     return `${API_BASE_URL}${path}`;
@@ -98,7 +93,7 @@ const apiClient = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor - adds auth token to every request
+// Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
     const token = getAuthToken();
@@ -219,7 +214,6 @@ const mapTopicTypeToBackend = (topicType: string): string => {
   return topicTypeMap[topicType] || 'general';
 };
 
-// Helper to convert backend enums to frontend enums
 const mapStatusToFrontend = (status: string): string => {
   const statusMap: {[key: string]: string} = {
     'open': 'Open',
@@ -273,6 +267,9 @@ const convertDjangoIssue = (data: any): Issue => {
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
+    is_deleted: data.is_deleted || false, // ✅ Added is_deleted
+    deleted_at: data.deleted_at || null, // ✅ Added deleted_at
+    deleted_by: data.deleted_by || null, // ✅ Added deleted_by
     comments: (data.comments || []).map((c: any) => ({
       id: String(c.id),
       author: c.author?.email || c.author?.full_name || c.author?.username || 'Unknown',
@@ -311,7 +308,6 @@ const convertDjangoIssue = (data: any): Issue => {
     return bimIssue;
   }
 
-  // For 'other' domain (design issues in frontend)
   return {
     ...baseIssue,
     domain: 'other',
@@ -558,12 +554,37 @@ export async function resolveIssue(
 
 export async function deleteIssue(id: string | number): Promise<void> {
   try {
+    console.log(`📤 Deleting issue ${id}`);
     await apiClient.delete(`/issues/issues/${id}/`);
+    console.log('✅ Issue deleted successfully');
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
-      return;
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('❌ Error deleting issue:', error.response.data);
+      if (error.response.status === 403) {
+        throw new Error('You can only delete issues you created.');
+      }
+    } else {
+      console.error('❌ Error deleting issue:', error);
     }
-    console.error('Error deleting issue:', error);
+    throw error;
+  }
+}
+
+export async function restoreIssue(id: string | number): Promise<Issue | undefined> {
+  try {
+    console.log(`📤 Restoring issue ${id}`);
+    const response = await apiClient.post(`/issues/issues/${id}/restore/`);
+    console.log('✅ Issue restored successfully');
+    return convertDjangoIssue(response.data);
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('❌ Error restoring issue:', error.response.data);
+      if (error.response.status === 403) {
+        throw new Error('You can only restore issues you created.');
+      }
+    } else {
+      console.error('❌ Error restoring issue:', error);
+    }
     throw error;
   }
 }
@@ -583,7 +604,7 @@ export async function removeAttachment(id: string | number, index: number): Prom
 }
 
 // ---------------------------------------------------------------------------
-// COMMENTS
+// COMMENTS - FIXED ENDPOINTS
 // ---------------------------------------------------------------------------
 
 export async function addComment(
@@ -612,10 +633,8 @@ export async function addComment(
     const response = await apiClient.post(`/issues/issues/${id}/add-comment/`, payload);
     console.log('✅ Comment added successfully:', response.data);
     
-    // Wait a moment for the backend to process the image
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    // Fetch the updated issue to get the latest state
     const updatedIssue = await getIssue(id);
     console.log('📥 Fetched updated issue with comments:', updatedIssue?.comments?.length || 0, 'comments');
     
@@ -665,6 +684,66 @@ export async function getComments(id: string | number): Promise<IssueComment[]> 
     }));
   } catch (error) {
     console.error('Error fetching comments:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a comment - FIXED: Use correct endpoint
+ */
+export async function deleteComment(
+  issueId: string | number,
+  commentId: string | number
+): Promise<void> {
+  try {
+    console.log(`📤 Deleting comment ${commentId} from issue ${issueId}`);
+    // CORRECT ENDPOINT: comments are at /api/issues/comments/{commentId}/
+    await apiClient.delete(`/issues/comments/${commentId}/`);
+    console.log('✅ Comment deleted successfully');
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('❌ Error deleting comment:', error.response.data);
+      if (error.response.status === 403) {
+        throw new Error('You can only delete your own comments.');
+      }
+      if (error.response.status === 404) {
+        throw new Error('Comment not found.');
+      }
+    } else {
+      console.error('❌ Error deleting comment:', error);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Edit a comment - FIXED: Use correct endpoint
+ */
+export async function editComment(
+  issueId: string | number,
+  commentId: string | number,
+  text: string
+): Promise<IssueComment> {
+  try {
+    console.log(`📤 Editing comment ${commentId} on issue ${issueId}`);
+    // CORRECT ENDPOINT: comments are at /api/issues/comments/{commentId}/
+    const response = await apiClient.patch(`/issues/comments/${commentId}/`, {
+      text: text,
+    });
+    console.log('✅ Comment edited successfully');
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('❌ Error editing comment:', error.response.data);
+      if (error.response.status === 403) {
+        throw new Error('You can only edit your own comments.');
+      }
+      if (error.response.status === 404) {
+        throw new Error('Comment not found.');
+      }
+    } else {
+      console.error('❌ Error editing comment:', error);
+    }
     throw error;
   }
 }
@@ -820,52 +899,6 @@ export const getPriorityColor = (priority: IssuePriority): string => {
   }
 };
 
-
-/**
- * Delete a comment
- */
-export async function deleteComment(
-  issueId: string | number,
-  commentId: string | number
-): Promise<void> {
-  try {
-    console.log(`📤 Deleting comment ${commentId} from issue ${issueId}`);
-    await apiClient.delete(`/issues/issues/${issueId}/comments/${commentId}/`);
-    console.log('✅ Comment deleted successfully');
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error deleting comment:', error.response.data);
-    } else {
-      console.error('❌ Error deleting comment:', error);
-    }
-    throw error;
-  }
-}
-
-/**
- * Edit a comment
- */
-export async function editComment(
-  issueId: string | number,
-  commentId: string | number,
-  text: string
-): Promise<IssueComment> {
-  try {
-    console.log(`📤 Editing comment ${commentId} on issue ${issueId}`);
-    const response = await apiClient.patch(`/issues/issues/${issueId}/comments/${commentId}/`, {
-      text: text,
-    });
-    console.log('✅ Comment edited successfully');
-    return response.data;
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error editing comment:', error.response.data);
-    } else {
-      console.error('❌ Error editing comment:', error);
-    }
-    throw error;
-  }
-}
 // ---------------------------------------------------------------------------
 // EXPORT DEFAULTS
 // ---------------------------------------------------------------------------
@@ -877,11 +910,14 @@ export default {
   updateIssue,
   resolveIssue,
   deleteIssue,
+  restoreIssue,
   removeSnapshot,
   removeAttachment,
   addComment,
   addCommentWithSnapshot,
   getComments,
+  deleteComment,
+  editComment,
   linkIssue,
   unlinkIssue,
   getViewpoint,
@@ -895,6 +931,4 @@ export default {
   getMyIssues,
   getStatusColor,
   getPriorityColor,
-  editComment,
-  deleteComment
 };

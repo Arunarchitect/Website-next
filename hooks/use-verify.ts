@@ -34,6 +34,7 @@ export default function useVerify() {
       try {
         if (access) {
           await verify({ token: access }).unwrap();
+          // ✅ Call setAuth without payload - it will load user from localStorage
           dispatch(setAuth());
 
           if (currentPath.startsWith("/auth/")) {
@@ -44,13 +45,13 @@ export default function useVerify() {
 
           if (response?.access) {
             localStorage.setItem("access", response.access);
+            // ✅ Call setAuth without payload
+            dispatch(setAuth());
           }
 
           if (response?.refresh) {
             localStorage.setItem("refresh", response.refresh);
           }
-
-          dispatch(setAuth());
 
           if (currentPath.startsWith("/auth/")) {
             router.push("/dashboard");
@@ -69,6 +70,7 @@ export default function useVerify() {
           if (err.status === 401 || err.status === "FETCH_ERROR") {
             localStorage.removeItem("access");
             localStorage.removeItem("refresh");
+            localStorage.removeItem("user");
           }
         }
 

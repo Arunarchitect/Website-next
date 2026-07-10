@@ -1,3 +1,4 @@
+// hooks/useLogin.ts
 "use client";
 
 import { useState, ChangeEvent, FormEvent } from "react";
@@ -31,7 +32,6 @@ async function fetchOrgRole(accessToken: string): Promise<OrgRole> {
     const data: OrganisationMembership[] = await res.json();
     if (!data.length) return null;
 
-    // If user has multiple memberships, pick the highest-privilege role
     const PRIORITY: OrgRole[] = ["admin", "manager", "member", "client"];
     for (const role of PRIORITY) {
       if (data.some((m) => m.role === role)) return role;
@@ -55,16 +55,20 @@ async function fetchAreacalcRole(accessToken: string): Promise<AreacalcRole> {
   }
 }
 
+// ✅ NEW: Fetch user profile
+async function fetchUserProfile(accessToken: string) {
+  try {
+    const res = await fetch(`${BASE_URL}/api/users/me/`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 // ── Routing table ─────────────────────────────────────────────────────────────
-//
-//  Priority (high → low):
-//  1. Admin/member/manager in BOTH apps        → /mainadmin
-//  2. User/customer in BOTH apps               → /mainuser
-//  3. Org: admin/manager only                  → /new/dash/dashadmin
-//  4. Org: member only                         → /new/dash/dashnormal
-//  5. Org: client only                         → /new/dash/dashclient
-//  6. Areacalc only (any role)                 → /tools/areacalc
-//  7. No role anywhere                         → /new/dash/dashnormal
 
 function resolveDestination({ orgRole, areacalcRole }: RoleBundle): string {
   const isOrgPrivileged   = orgRole === "admin" || orgRole === "manager" || orgRole === "member";
@@ -74,23 +78,13 @@ function resolveDestination({ orgRole, areacalcRole }: RoleBundle): string {
   const hasOrgRole        = orgRole !== null;
   const hasAreacalcRole   = areacalcRole !== "anonymous";
 
-  // ── Cross-app combinations ───────────────────────────────
-  // Both privileged → main admin hub
   if (isOrgPrivileged && isAreacalcPriv)    return "/main/admin";
-
-  // Both low-privilege → main user hub
   if (hasOrgRole && isAreacalcLow)          return "/main/user";
   if (isOrgLow && hasAreacalcRole)          return "/main/user";
-
-  // ── Org-only ─────────────────────────────────────────────
   if (orgRole === "admin" || orgRole === "manager") return "/new/dash/dashadmin";
   if (orgRole === "member")                          return "/new/dash/dashnormal";
   if (orgRole === "client")                          return "/main/client";
-
-  // ── Areacalc-only ─────────────────────────────────────────
   if (hasAreacalcRole)                               return "/tools/areacalc";
-
-  // ── Fallback ──────────────────────────────────────────────
   return "/new/dash/dashnormal";
 }
 
@@ -116,9 +110,37 @@ export default function useLogin() {
     login({ email, password })
       .unwrap()
       .then(async (data) => {
+        // Store tokens
         localStorage.setItem("access", data.access);
         localStorage.setItem("refresh", data.refresh);
-        dispatch(setAuth());
+
+        // ✅ Fetch user profile
+        const userData = await fetchUserProfile(data.access);
+        
+        if (userData) {
+          // ✅ Store user in Redux
+          dispatch(setAuth({
+            user: userData,
+            token: data.access
+          }));
+          
+          // ✅ Also store in localStorage as fallback
+          localStorage.setItem('user', JSON.stringify(userData));
+        } else {
+          // Fallback: create minimal user from token or email
+          const minimalUser = {
+            id: 0,
+            email: email,
+            username: email.split('@')[0],
+            full_name: email.split('@')[0],
+            display_name: email.split('@')[0],
+          };
+          dispatch(setAuth({
+            user: minimalUser,
+            token: data.access
+          }));
+          localStorage.setItem('user', JSON.stringify(minimalUser));
+        }
 
         toast.success("Logged in successfully", {
           autoClose: 3000,

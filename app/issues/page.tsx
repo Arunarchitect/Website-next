@@ -1,3 +1,4 @@
+// app/issues/page.tsx
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -14,8 +15,8 @@ import {
   addComment,
   deleteComment,
   editComment,
-  getPriorityColor,
-  getStatusColor,
+  deleteIssue,
+  restoreIssue,
 } from "./issueApi";
 import {
   Issue,
@@ -25,6 +26,11 @@ import {
   BcfTopicType,
   isBimIssue,
 } from "./issueTypes";
+import { IssueCard } from "./IssueCard";
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { isUserMatch } from '@/components/utils/userMatching';
+import { useAppDispatch } from '@/redux/hooks';
+import { setUser } from '@/redux/features/authSlice';
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -38,8 +44,6 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
-const CURRENT_USER = "You";
-
 const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 const TOPIC_TYPE_OPTIONS: BcfTopicType[] = [
@@ -52,64 +56,67 @@ const TOPIC_TYPE_OPTIONS: BcfTopicType[] = [
   "Fault",
 ];
 
-const getImageSource = (imageData: string | undefined): string => {
-  if (!imageData) return '';
-
-  if (imageData.startsWith('data:image')) {
-    return imageData;
-  }
-
-  if (imageData.startsWith('http://') || imageData.startsWith('https://')) {
-    return imageData;
-  }
-
-  if (imageData.startsWith('/')) {
-    const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
-    return `${baseUrl}${imageData}`;
-  }
-
-  if (imageData.length > 100) {
-    try {
-      const isBase64 = /^[A-Za-z0-9+/=]+$/.test(imageData.substring(0, 100));
-      if (isBase64) {
-        const isPng = imageData.startsWith('iVBORw0KGgo');
-        const format = isPng ? 'png' : 'jpeg';
-        return `data:image/${format};base64,${imageData}`;
-      }
-    } catch (e) {
-      console.warn('Failed to process image data:', e);
-    }
-  }
-
-  if (imageData.includes('issue_snapshots/') || imageData.includes('media/')) {
-    const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
-    const path = imageData.startsWith('/') ? imageData : `/${imageData}`;
-    return `${baseUrl}${path}`;
-  }
-
-  console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return '';
-};
-
 const DEFAULT_CAMERA_POSITION = { x: 0, y: 0, z: 0 };
 const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
 const DEFAULT_CAMERA_UP_VECTOR = { x: 0, y: 1, z: 0 };
 const DEFAULT_FIELD_OF_VIEW = 60;
 
 export default function IssuesPage() {
+  const dispatch = useAppDispatch();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
 
+  // Load user from localStorage into Redux on mount
+  useEffect(() => {
+    const loadUserFromStorage = () => {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        try {
+          const userData = JSON.parse(userStr);
+          console.log('✅ Loading user from localStorage into Redux:', userData);
+          dispatch(setUser(userData));
+        } catch (e) {
+          console.error('Failed to parse user data:', e);
+        }
+      }
+    };
+    loadUserFromStorage();
+  }, [dispatch]);
+
+  const currentUserData = useCurrentUser();
+
+  const currentUser = {
+    email: currentUserData?.email || '',
+    fullName: currentUserData?.full_name || currentUserData?.display_name || '',
+    username: currentUserData?.username || '',
+    displayName: currentUserData?.display_name || currentUserData?.full_name || currentUserData?.email || '',
+  };
+
+  const isUserCreator = (reportedBy: string, user: { email: string; fullName: string; username: string; displayName: string }): boolean => {
+    return isUserMatch(reportedBy, user);
+  };
+
+  // Always fetch ALL issues including deleted
   const refresh = async () => {
     try {
       setError(null);
       console.log('🔄 Refreshing issues...');
-      const data = await getIssues();
-      console.log('✅ Issues refreshed:', data.length, 'items');
+
+      // Always fetch all issues including deleted
+      const data = await getIssues({ include_deleted: true });
+      console.log('✅ Issues fetched:', data.length, 'items');
+
+      // Log each issue's status for debugging
+      data.forEach(issue => {
+        const isCreator = isUserCreator(issue.reportedBy, currentUser);
+        console.log(`📋 Issue #${issue.id}: "${issue.title}" - is_deleted: ${issue.is_deleted}, isCreator: ${isCreator}, domain: ${issue.domain}`);
+      });
+
       setIssues(data);
       return data;
     } catch (err: any) {
@@ -119,21 +126,86 @@ export default function IssuesPage() {
     }
   };
 
+  // Initial load
   useEffect(() => {
     refresh().finally(() => setLoading(false));
   }, []);
 
-  const visibleIssues =
-    domainFilter === "all" ? issues : issues.filter((i) => i.domain === domainFilter);
+  // Refresh when showDeleted changes
+  useEffect(() => {
+    refresh();
+  }, [showDeleted]);
 
-  const openIssues = issues.filter((i) => i.status === "Open").length;
-  const inProgressIssues = issues.filter((i) => i.status === "In Progress").length;
-  const resolvedIssues = issues.filter((i) => i.status === "Resolved").length;
-  const bimIssueCount = issues.filter(isBimIssue).length;
-  const clashIssues = issues.filter(isBimIssue).filter((i) => i.topicType === "Clash").length;
-  const highPriorityIssues = issues.filter((i) => i.priority === "High").length;
+  // Filter issues based on domain and deleted status
+  const visibleIssues = issues.filter((issue) => {
+    // Filter by domain
+    if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
+    // Filter by deleted status (only if NOT showing deleted)
+    if (!showDeleted && issue.is_deleted === true) return false;
+    return true;
+  });
 
-  const assignees = [...new Set(issues.map((i) => i.assignedTo).filter(Boolean))] as string[];
+  // 🐛 DEBUG: log the current filter state and result every render, so we can
+  // see immediately whether showDeleted/domainFilter changed and whether the
+  // deleted issue is being excluded by the domain tab or something else.
+  console.log(
+    `🧮 RENDER — showDeleted=${showDeleted}, domainFilter="${domainFilter}", ` +
+    `issues.length=${issues.length}, visibleIssues.length=${visibleIssues.length}`
+  );
+
+  // Count deleted issues from all fetched data
+  const deletedIssuesCount = issues.filter(i => i.is_deleted === true).length;
+
+  // Stats (excluding deleted issues)
+  const openIssues = issues.filter((i) => i.status === "Open" && !i.is_deleted).length;
+  const inProgressIssues = issues.filter((i) => i.status === "In Progress" && !i.is_deleted).length;
+  const resolvedIssues = issues.filter((i) => i.status === "Resolved" && !i.is_deleted).length;
+  const bimIssueCount = issues.filter(i => isBimIssue(i) && !i.is_deleted).length;
+  const clashIssues = issues.filter(i => isBimIssue(i) && i.topicType === "Clash" && !i.is_deleted).length;
+  const highPriorityIssues = issues.filter((i) => i.priority === "High" && !i.is_deleted).length;
+
+  const assignees = [...new Set(
+    issues
+      .filter(i => !i.is_deleted)
+      .map((i) => i.assignedTo)
+      .filter(Boolean)
+  )] as string[];
+
+  const handleDeleteIssue = async (issueId: string) => {
+    if (!confirm('Are you sure you want to delete this issue? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      setError(null);
+      await deleteIssue(issueId);
+      await refresh();
+    } catch (err: any) {
+      console.error('Delete issue error:', err);
+      setError(err.message || 'Failed to delete issue. Please try again.');
+    }
+  };
+
+  const handleRestoreIssue = async (issueId: string) => {
+    try {
+      setError(null);
+      await restoreIssue(issueId);
+      await refresh();
+    } catch (err: any) {
+      console.error('Restore issue error:', err);
+      setError(err.message || 'Failed to restore issue. Please try again.');
+    }
+  };
+
+  // Toggle handler — also resets the domain tab to "all" so a mismatched
+  // BIM/Other tab can never hide a deleted issue after this is switched on.
+  const toggleShowDeleted = () => {
+    const next = !showDeleted;
+    console.log('🔴 DELETED TOGGLE CLICKED! Current:', showDeleted, '->', next);
+    setShowDeleted(next);
+    if (next) {
+      setDomainFilter("all");
+    }
+  };
 
   return (
     <main className={`${display.variable} ${mono.variable} issues-page`}>
@@ -165,10 +237,37 @@ export default function IssuesPage() {
               Other
             </button>
           </div>
-          <button className="btn-primary" onClick={() => setShowNewIssueForm((v) => !v)}>
-            <i className="ti ti-plus" />
-            New Issue
-          </button>
+          <div className="header-actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {deletedIssuesCount > 0 && (
+              <button
+                type="button"
+                onClick={toggleShowDeleted}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  border: `2px solid ${showDeleted ? '#D43E3E' : '#6B7280'}`,
+                  backgroundColor: showDeleted ? '#D43E3E' : 'transparent',
+                  color: showDeleted ? 'white' : '#6B7280',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                  fontSize: '14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontFamily: 'system-ui, sans-serif',
+                  position: 'relative',
+                  zIndex: 1,
+                }}
+              >
+                <span style={{ fontSize: '16px' }}>🗑️</span>
+                {showDeleted ? 'Hide Deleted' : `Deleted (${deletedIssuesCount})`}
+              </button>
+            )}
+            <button className="btn-primary" onClick={() => setShowNewIssueForm((v) => !v)}>
+              <i className="ti ti-plus" />
+              New Issue
+            </button>
+          </div>
         </div>
       </header>
 
@@ -231,7 +330,7 @@ export default function IssuesPage() {
                 <i className="ti ti-user" />
                 {assignee}
                 <span className="assignee-count">
-                  {issues.filter((i) => i.assignedTo === assignee).length}
+                  {issues.filter((i) => i.assignedTo === assignee && !i.is_deleted).length}
                 </span>
               </div>
             ))}
@@ -242,11 +341,27 @@ export default function IssuesPage() {
       <section>
         <div className="section-title">
           <span>All Issues</span>
-          <span className="issue-count">{visibleIssues.length} shown</span>
+          <span className="issue-count">
+            {visibleIssues.length} shown
+            {deletedIssuesCount > 0 && !showDeleted && (
+              <span style={{ color: '#D43E3E', marginLeft: '8px' }}>
+                ({deletedIssuesCount} deleted)
+              </span>
+            )}
+            {showDeleted && (
+              <span style={{ color: '#4A8B6B', marginLeft: '8px' }}>
+                (showing deleted)
+              </span>
+            )}
+          </span>
         </div>
 
         {loading ? (
           <p className="hero-subtitle">Loading issues…</p>
+        ) : visibleIssues.length === 0 ? (
+          <p className="hero-subtitle">
+            {showDeleted ? 'No deleted issues found.' : 'No issues found. Create a new issue to get started!'}
+          </p>
         ) : (
           <div className="issues-grid">
             {visibleIssues.map((issue) => (
@@ -255,6 +370,10 @@ export default function IssuesPage() {
                 issue={issue}
                 commentSortOrder={commentSortOrder}
                 onSortChange={() => setCommentSortOrder(commentSortOrder === "desc" ? "asc" : "desc")}
+                currentUser={currentUser}
+                isUserCreator={isUserCreator}
+                onDeleteIssue={handleDeleteIssue}
+                onRestoreIssue={issue.is_deleted === true ? handleRestoreIssue : undefined}
                 onSave={async (patch) => {
                   try {
                     setError(null);
@@ -273,7 +392,7 @@ export default function IssuesPage() {
                 onResolve={async (resolution, snapshotData, snapshotFormat) => {
                   try {
                     setError(null);
-                    await resolveIssue(issue.id, resolution, CURRENT_USER, snapshotData, snapshotFormat);
+                    await resolveIssue(issue.id, resolution, currentUser.email, snapshotData, snapshotFormat);
                     await refresh();
                   } catch (err: any) {
                     console.error('Resolve error:', err);
@@ -310,10 +429,10 @@ export default function IssuesPage() {
                     setError(null);
                     console.log('📸 Adding screenshot to issue:', issue.id);
                     await addCommentWithSnapshot(
-                      issue.id, 
-                      CURRENT_USER, 
-                      "Screenshot added", 
-                      snapshotData, 
+                      issue.id,
+                      currentUser.email || currentUser.fullName,
+                      "Screenshot added",
+                      snapshotData,
                       snapshotFormat
                     );
                     await refresh();
@@ -326,7 +445,7 @@ export default function IssuesPage() {
                   try {
                     setError(null);
                     console.log('💬 Adding comment to issue:', issue.id);
-                    await addComment(issue.id, CURRENT_USER, text);
+                    await addComment(issue.id, currentUser.email || currentUser.fullName, text);
                     await refresh();
                   } catch (err: any) {
                     console.error('Add comment error:', err);
@@ -374,882 +493,6 @@ function StatCard({ icon, label, value }: { icon: string; label: string; value: 
   );
 }
 
-function IssueCard({
-  issue,
-  commentSortOrder,
-  onSortChange,
-  onSave,
-  onResolve,
-  onRemoveSnapshot,
-  onRemoveAttachment,
-  onAddScreenshot,
-  onAddComment,
-  onDeleteComment,
-  onEditComment,
-}: {
-  issue: Issue;
-  commentSortOrder: "asc" | "desc";
-  onSortChange: () => void;
-  onSave: (patch: Partial<Issue>) => Promise<void>;
-  onResolve: (resolution: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
-  onRemoveSnapshot: () => Promise<void>;
-  onRemoveAttachment: (index: number) => Promise<void>;
-  onAddScreenshot: (snapshotData: string, snapshotFormat: "png" | "jpg") => Promise<void>;
-  onAddComment: (text: string) => Promise<void>;
-  onDeleteComment: (commentId: string) => Promise<void>;
-  onEditComment: (commentId: string, text: string) => Promise<void>;
-}) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [isResolving, setIsResolving] = useState(false);
-  const [resolutionText, setResolutionText] = useState("");
-  const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [newScreenshot, setNewScreenshot] = useState<string | null>(null);
-  const [newScreenshotFormat, setNewScreenshotFormat] = useState<"png" | "jpg">("png");
-  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [resolutionScreenshot, setResolutionScreenshot] = useState<string | null>(null);
-  const [resolutionScreenshotFormat, setResolutionScreenshotFormat] = useState<"png" | "jpg">("png");
-  const [resolutionPreview, setResolutionPreview] = useState<string | null>(null);
-  const resolveFileInputRef = useRef<HTMLInputElement>(null);
-
-  const [extraScreenshot, setExtraScreenshot] = useState<string | null>(null);
-  const [extraScreenshotFormat, setExtraScreenshotFormat] = useState<"png" | "jpg">("png");
-  const [extraPreview, setExtraPreview] = useState<string | null>(null);
-  const [showAddScreenshot, setShowAddScreenshot] = useState(false);
-  const extraFileInputRef = useRef<HTMLInputElement>(null);
-
-  const [showCommentInput, setShowCommentInput] = useState(false);
-  const [commentText, setCommentText] = useState("");
-  
-  const [showHistory, setShowHistory] = useState(false);
-  const [showAllComments, setShowAllComments] = useState(false);
-  
-  // Edit comment state
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [editingCommentText, setEditingCommentText] = useState("");
-
-  const [form, setForm] = useState({
-    title: issue.title,
-    description: issue.description,
-    status: issue.status,
-    priority: issue.priority,
-    assignedTo: issue.assignedTo ?? "",
-    assignedToId: issue.assignedToId ?? null,
-    dueDate: issue.dueDate ?? "",
-  });
-
-  const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
-  const isBim = isBimIssue(issue);
-
-  const getCurrentScreenshot = (): string | null => {
-    if (isBim) {
-      if (!isBimIssue(issue) || !issue.viewpoint?.snapshot) return null;
-      return getImageSource(issue.viewpoint.snapshot.data);
-    }
-    const attachments = (issue as any).attachments as string[] | undefined;
-    if (attachments && attachments.length > 0) {
-      return getImageSource(attachments[0]);
-    }
-    return null;
-  };
-
-  const currentScreenshot = getCurrentScreenshot();
-  const displayScreenshot = newScreenshot
-    ? `data:image/${newScreenshotFormat};base64,${newScreenshot}`
-    : currentScreenshot;
-  const hasScreenshot = !!displayScreenshot && displayScreenshot.length > 0;
-
-  const commentSnapshots = issue.comments.filter((c) => !!c.snapshot);
-
-  // Sort comments by timestamp
-  const sortedComments = [...issue.comments].sort((a, b) => {
-    const dateA = new Date(a.timestamp).getTime();
-    const dateB = new Date(b.timestamp).getTime();
-    return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
-  });
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 5 * 1024 * 1024) {
-      setSaveError('Image size must be less than 5MB');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
-      setNewScreenshot(base64);
-      setNewScreenshotFormat(format);
-      setImageLoadError(false);
-    };
-    reader.onerror = () => {
-      setSaveError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleResolutionFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 5 * 1024 * 1024) {
-      setSaveError('Image size must be less than 5MB');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
-      setResolutionScreenshot(base64);
-      setResolutionScreenshotFormat(format);
-      setResolutionPreview(dataUrl);
-    };
-    reader.onerror = () => {
-      setSaveError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleExtraFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setSaveError('Image size must be less than 5MB');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setExtraScreenshot(dataUrl.split(',')[1]);
-      setExtraScreenshotFormat(file.type === 'image/jpeg' ? 'jpg' : 'png');
-      setExtraPreview(dataUrl);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleAddScreenshot = async () => {
-    if (!extraScreenshot) return;
-    try {
-      setSaveError(null);
-      await onAddScreenshot(extraScreenshot, extraScreenshotFormat);
-      setExtraScreenshot(null);
-      setExtraPreview(null);
-      setShowAddScreenshot(false);
-    } catch {
-      setSaveError('Failed to add screenshot.');
-    }
-  };
-
-  const handleAddComment = async () => {
-    if (!commentText.trim()) return;
-    try {
-      setSaveError(null);
-      await onAddComment(commentText.trim());
-      setCommentText("");
-      setShowCommentInput(false);
-    } catch {
-      setSaveError('Failed to add comment.');
-    }
-  };
-
-  const handleEditComment = async (commentId: string) => {
-    if (!editingCommentText.trim()) return;
-    try {
-      setSaveError(null);
-      await onEditComment(commentId, editingCommentText.trim());
-      setEditingCommentId(null);
-      setEditingCommentText("");
-    } catch {
-      setSaveError('Failed to edit comment.');
-    }
-  };
-
-  const handleDeleteComment = async (commentId: string) => {
-    if (!confirm('Are you sure you want to delete this comment?')) return;
-    try {
-      setSaveError(null);
-      await onDeleteComment(commentId);
-    } catch {
-      setSaveError('Failed to delete comment.');
-    }
-  };
-
-  const handleSave = async () => {
-    try {
-      setSaveError(null);
-      const patch: any = {
-        title: form.title,
-        description: form.description,
-        status: form.status,
-        priority: form.priority,
-        dueDate: form.dueDate || undefined,
-      };
-
-      if (form.assignedToId && typeof form.assignedToId === 'number') {
-        patch.assignedToId = form.assignedToId;
-      } else if (form.assignedTo && !isNaN(Number(form.assignedTo))) {
-        patch.assignedToId = Number(form.assignedTo);
-      }
-
-      if (newScreenshot && isBim) {
-        patch.domain = 'bim';
-        patch.viewpoint = {
-          camera_position: (issue as any).viewpoint?.cameraPosition || DEFAULT_CAMERA_POSITION,
-          camera_direction: (issue as any).viewpoint?.cameraDirection || DEFAULT_CAMERA_DIRECTION,
-          camera_up_vector: (issue as any).viewpoint?.cameraUpVector || DEFAULT_CAMERA_UP_VECTOR,
-          field_of_view: (issue as any).viewpoint?.fieldOfView || DEFAULT_FIELD_OF_VIEW,
-          clipping_planes: (issue as any).viewpoint?.clippingPlanes || [],
-          snapshot_data: newScreenshot,
-          snapshot_format: newScreenshotFormat,
-        };
-      } else if (newScreenshot && !isBim) {
-        patch.domain = 'other';
-        patch.newAttachmentData = newScreenshot;
-        patch.newAttachmentFormat = newScreenshotFormat;
-      }
-
-      await onSave(patch);
-      setIsEditing(false);
-      setNewScreenshot(null);
-      setImageLoadError(false);
-    } catch (err: any) {
-      console.error('Save error:', err);
-      if (err.response?.data) {
-        const errors = Object.values(err.response.data).flat().join('\n');
-        setSaveError(`Validation Error: ${errors}`);
-      } else {
-        setSaveError('Failed to save changes. Please try again.');
-      }
-    }
-  };
-
-  const handleResolveConfirm = async () => {
-    if (!resolutionText.trim()) return;
-    try {
-      setSaveError(null);
-      await onResolve(
-        resolutionText.trim(),
-        resolutionScreenshot || undefined,
-        resolutionScreenshot ? resolutionScreenshotFormat : undefined
-      );
-      setResolutionText("");
-      setResolutionScreenshot(null);
-      setResolutionPreview(null);
-      setIsResolving(false);
-    } catch (err: any) {
-      console.error('Resolve error:', err);
-      setSaveError('Failed to resolve issue. Please try again.');
-    }
-  };
-
-  const handleImageClick = (src: string) => {
-    setSelectedScreenshot(src);
-  };
-
-  const handleRemoveSavedScreenshot = async () => {
-    try {
-      setSaveError(null);
-      if (isBim) {
-        await onRemoveSnapshot();
-      } else {
-        await onRemoveAttachment(0);
-      }
-      setImageLoadError(false);
-    } catch (err) {
-      setSaveError('Failed to remove screenshot. Please try again.');
-    }
-  };
-
-  return (
-    <div className="issue-card">
-      <div className="issue-left">
-        <div className="priority-strip" style={{ background: getPriorityColor(issue.priority) }} />
-
-        <div className="issue-content">
-          <div className="issue-header-row">
-            <span className="issue-id">#{issue.id}</span>
-            {isEditing ? (
-              <input
-                className="field-input title-input"
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              />
-            ) : (
-              <h3 className="issue-title">{issue.title}</h3>
-            )}
-            <span className={`domain-badge domain-${issue.domain}`}>
-              {isBim ? (
-                <>
-                  <i className="ti ti-file-barcode" /> BIM
-                </>
-              ) : (
-                <>
-                  <i className="ti ti-pencil" /> Other
-                </>
-              )}
-            </span>
-          </div>
-
-          {saveError && (
-            <div className="error-banner small">
-              <i className="ti ti-alert-circle" />
-              <span>{saveError}</span>
-              <button onClick={() => setSaveError(null)}>✕</button>
-            </div>
-          )}
-
-          {isEditing ? (
-            <textarea
-              className="field-input description-input"
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              rows={3}
-            />
-          ) : (
-            <p className="issue-description">{issue.description}</p>
-          )}
-
-          <div className="screenshot-section">
-            {!isEditing && hasScreenshot && !imageLoadError && (
-              <div className="screenshot-thumbnail-container">
-                <img
-                  src={displayScreenshot}
-                  alt="Issue screenshot"
-                  className="screenshot-thumbnail-image"
-                  onClick={() => handleImageClick(displayScreenshot!)}
-                  onError={() => setImageLoadError(true)}
-                />
-                <span className="screenshot-hint">Click to enlarge</span>
-              </div>
-            )}
-
-            {isEditing && (
-              <div className="screenshot-edit-area">
-                {hasScreenshot && !imageLoadError && (
-                  <div className="screenshot-preview-container">
-                    <img
-                      src={displayScreenshot}
-                      alt="Screenshot preview"
-                      className="screenshot-preview-image"
-                      onError={() => setImageLoadError(true)}
-                    />
-                  </div>
-                )}
-                <div className="screenshot-upload">
-                  <button
-                    className="btn-outline small"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <i className="ti ti-upload" />
-                    {newScreenshot ? 'Change Screenshot' : hasScreenshot ? 'Change Screenshot' : 'Upload Screenshot'}
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg"
-                    onChange={handleFileUpload}
-                    style={{ display: 'none' }}
-                  />
-                  {newScreenshot && (
-                    <button
-                      className="btn-outline small danger"
-                      onClick={() => setNewScreenshot(null)}
-                    >
-                      <i className="ti ti-x" /> Discard new upload
-                    </button>
-                  )}
-                  {!newScreenshot && hasScreenshot && (
-                    <button
-                      className="btn-outline small danger"
-                      onClick={handleRemoveSavedScreenshot}
-                    >
-                      <i className="ti ti-trash" /> Delete saved screenshot
-                    </button>
-                  )}
-                  <span className="file-hint">Max 5MB</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {commentSnapshots.length > 0 && (
-            <div className="screenshot-history">
-              <button
-                className="history-toggle"
-                onClick={() => setShowHistory((v) => !v)}
-                type="button"
-              >
-                <i className={`ti ${showHistory ? 'ti-chevron-down' : 'ti-chevron-right'}`} />
-                <i className="ti ti-photo" />
-                {commentSnapshots.length} snapshot{commentSnapshots.length > 1 ? 's' : ''} in history
-              </button>
-              {showHistory && (
-                <div className="history-thumbnails">
-                  {commentSnapshots.map((c) => (
-                    <div key={c.id} className="history-thumbnail-item">
-                      <img
-                        src={c.snapshot!}
-                        alt={`Snapshot from ${c.author}`}
-                        onClick={() => handleImageClick(c.snapshot!)}
-                        onError={(e) => {
-                          console.error('Failed to load image:', c.snapshot);
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                      <span className="history-thumbnail-caption">
-                        {c.author} · {c.timestamp}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="issue-meta">
-            <span className="meta-item">
-              <i className="ti ti-box" />
-              {issue.module}
-            </span>
-
-            <span className="meta-item">
-              <i className="ti ti-user" />
-              {issue.reportedBy}
-            </span>
-
-            {isBim && (
-              <span className="meta-item topic-type">
-                <i className="ti ti-tag" />
-                {(issue as any).topicType}
-              </span>
-            )}
-
-            {isBim && (issue as any).ifcElements && (issue as any).ifcElements.length > 0 && (
-              <span className="meta-item">
-                <i className="ti ti-cube" />
-                {(issue as any).ifcElements.length} IFC elements
-              </span>
-            )}
-
-            {!isBim && (issue as any).category && (
-              <span className="meta-item topic-type">
-                <i className="ti ti-tag" />
-                {(issue as any).category}
-              </span>
-            )}
-
-            {issue.comments.length > 0 && (
-              <span className="meta-item">
-                <i className="ti ti-message" />
-                {issue.comments.length} comments
-              </span>
-            )}
-
-            {issue.dueDate && (
-              <span className="meta-item due-date">
-                <i className="ti ti-calendar-due" />
-                Due: {issue.dueDate}
-              </span>
-            )}
-
-            {isEditing ? (
-              <>
-                <select
-                  className="field-select"
-                  value={form.priority}
-                  onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as IssuePriority }))}
-                >
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="field-select"
-                  value={form.status}
-                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as IssueStatus }))}
-                >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="field-input small"
-                  placeholder="Assigned to ID (number)"
-                  value={form.assignedToId ?? ''}
-                  onChange={(e) => setForm((f) => ({
-                    ...f,
-                    assignedToId: e.target.value ? Number(e.target.value) : null
-                  }))}
-                />
-                <input
-                  className="field-input small"
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
-                />
-              </>
-            ) : (
-              <>
-                {issue.assignedTo && (
-                  <span className="meta-item">
-                    <i className="ti ti-user-check" />
-                    {issue.assignedTo}
-                  </span>
-                )}
-                <span className="priority-badge" style={{ color: getPriorityColor(issue.priority) }}>
-                  <i className="ti ti-flag" />
-                  {issue.priority}
-                </span>
-                <span
-                  className="status-badge"
-                  style={{
-                    background: `${getStatusColor(issue.status)}20`,
-                    color: getStatusColor(issue.status),
-                  }}
-                >
-                  {issue.status}
-                </span>
-              </>
-            )}
-          </div>
-
-          {/* Comments section - with sort, edit, delete */}
-          {issue.comments.length > 0 && !isEditing && (
-            <div className="comments-section">
-              <div className="comments-header">
-                <div className="comments-header-left">
-                  <i className="ti ti-message-circle" />
-                  <span>{issue.comments.length} comments</span>
-                </div>
-                <div className="comments-header-actions">
-                  <button 
-                    className="sort-toggle"
-                    onClick={onSortChange}
-                    title={commentSortOrder === "desc" ? "Newest first" : "Oldest first"}
-                  >
-                    <i className={`ti ${commentSortOrder === "desc" ? 'ti-arrow-down' : 'ti-arrow-up'}`} />
-                    {commentSortOrder === "desc" ? "Newest" : "Oldest"}
-                  </button>
-                  {issue.comments.length > 3 && (
-                    <button 
-                      className="comments-toggle"
-                      onClick={() => setShowAllComments(!showAllComments)}
-                    >
-                      {showAllComments ? 'Show less' : `Show all (${issue.comments.length})`}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="comments-list">
-                {(showAllComments ? sortedComments : sortedComments.slice(0, 3)).map((comment) => (
-                  <div key={comment.id} className="comment-item">
-                    {editingCommentId === comment.id ? (
-                      // Edit mode
-                      <div className="comment-edit-mode">
-                        <textarea
-                          className="field-input"
-                          value={editingCommentText}
-                          onChange={(e) => setEditingCommentText(e.target.value)}
-                          rows={2}
-                        />
-                        <div className="comment-edit-actions">
-                          <button 
-                            className="btn-outline small" 
-                            onClick={() => {
-                              setEditingCommentId(null);
-                              setEditingCommentText("");
-                            }}
-                          >
-                            Cancel
-                          </button>
-                          <button 
-                            className="btn-primary small" 
-                            onClick={() => handleEditComment(comment.id)}
-                            disabled={!editingCommentText.trim()}
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      // View mode
-                      <>
-                        <div className="comment-header">
-                          <span className="comment-author">{comment.author}</span>
-                          <span className="comment-time">{comment.timestamp}</span>
-                        </div>
-                        <div className="comment-text">{comment.text}</div>
-                        {comment.snapshot && (
-                          <div className="comment-snapshot">
-                            <img 
-                              src={comment.snapshot} 
-                              alt="Comment screenshot"
-                              onClick={() => handleImageClick(comment.snapshot)}
-                              className="comment-snapshot-thumb"
-                              onError={(e) => {
-                                console.error('Failed to load comment image:', comment.snapshot);
-                                e.currentTarget.style.display = 'none';
-                              }}
-                            />
-                          </div>
-                        )}
-                        <div className="comment-actions">
-                          <button 
-                            className="comment-action-btn"
-                            onClick={() => {
-                              setEditingCommentId(comment.id);
-                              setEditingCommentText(comment.text);
-                            }}
-                          >
-                            <i className="ti ti-edit" /> Edit
-                          </button>
-                          <button 
-                            className="comment-action-btn danger"
-                            onClick={() => handleDeleteComment(comment.id)}
-                          >
-                            <i className="ti ti-trash" /> Delete
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-                {!showAllComments && sortedComments.length > 3 && (
-                  <div className="comments-more">
-                    + {sortedComments.length - 3} more comments
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {isResolving && (
-            <div className="resolve-panel">
-              <textarea
-                className="field-input"
-                placeholder="Describe how this was resolved…"
-                value={resolutionText}
-                onChange={(e) => setResolutionText(e.target.value)}
-                rows={2}
-              />
-
-              <div className="resolve-screenshot-upload">
-                {resolutionPreview ? (
-                  <div className="screenshot-preview">
-                    <img src={resolutionPreview} alt="Resolution screenshot preview" />
-                    <button
-                      className="remove-btn"
-                      onClick={() => {
-                        setResolutionScreenshot(null);
-                        setResolutionPreview(null);
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="btn-outline small"
-                    onClick={() => resolveFileInputRef.current?.click()}
-                    type="button"
-                  >
-                    <i className="ti ti-camera" /> Attach proof-of-fix screenshot (optional)
-                  </button>
-                )}
-                <input
-                  ref={resolveFileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg"
-                  onChange={handleResolutionFileUpload}
-                  style={{ display: 'none' }}
-                />
-              </div>
-
-              <div className="form-actions">
-                <button
-                  className="btn-outline"
-                  onClick={() => {
-                    setIsResolving(false);
-                    setResolutionScreenshot(null);
-                    setResolutionPreview(null);
-                  }}
-                >
-                  Cancel
-                </button>
-                <button className="btn-primary" onClick={handleResolveConfirm}>
-                  <i className="ti ti-check" /> Confirm Resolve
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="issue-actions">
-            {isEditing ? (
-              <>
-                <button className="btn-outline" onClick={() => {
-                  setIsEditing(false);
-                  setNewScreenshot(null);
-                  setImageLoadError(false);
-                }}>
-                  Cancel
-                </button>
-                <button className="btn-primary" onClick={handleSave}>
-                  <i className="ti ti-device-floppy" /> Save
-                </button>
-              </>
-            ) : (
-              <>
-                <button className="btn-outline" onClick={() => setIsEditing(true)}>
-                  <i className="ti ti-edit" /> Edit
-                </button>
-                {canResolve && (
-                  <button className="btn-outline" onClick={() => setIsResolving((v) => !v)}>
-                    <i className="ti ti-check" /> Resolve
-                  </button>
-                )}
-                <button 
-                  className="btn-outline" 
-                  onClick={() => setShowAddScreenshot((v) => !v)}
-                >
-                  <i className="ti ti-photo-plus" /> Add Screenshot
-                </button>
-                <button 
-                  className="btn-outline" 
-                  onClick={() => setShowCommentInput((v) => !v)}
-                >
-                  <i className="ti ti-message-plus" /> Add Comment
-                </button>
-              </>
-            )}
-          </div>
-
-          {showAddScreenshot && (
-            <div className="resolve-screenshot-upload" style={{ marginTop: '12px' }}>
-              {extraPreview ? (
-                <div className="screenshot-preview">
-                  <img src={extraPreview} alt="New screenshot preview" />
-                  <button 
-                    className="remove-btn" 
-                    onClick={() => { 
-                      setExtraScreenshot(null); 
-                      setExtraPreview(null); 
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <button 
-                  className="btn-outline small" 
-                  onClick={() => extraFileInputRef.current?.click()} 
-                  type="button"
-                >
-                  <i className="ti ti-camera" /> Choose image
-                </button>
-              )}
-              <input 
-                ref={extraFileInputRef} 
-                type="file" 
-                accept="image/png,image/jpeg" 
-                onChange={handleExtraFileUpload} 
-                style={{ display: 'none' }} 
-              />
-              {extraScreenshot && (
-                <button 
-                  className="btn-primary small" 
-                  onClick={handleAddScreenshot}
-                  style={{ marginTop: '8px' }}
-                >
-                  Add
-                </button>
-              )}
-            </div>
-          )}
-
-          {showCommentInput && (
-            <div className="comment-input-panel" style={{ marginTop: '12px' }}>
-              <textarea
-                className="field-input"
-                placeholder="Add a comment…"
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                rows={2}
-              />
-              <div className="form-actions" style={{ marginTop: '8px' }}>
-                <button 
-                  className="btn-outline" 
-                  onClick={() => {
-                    setShowCommentInput(false);
-                    setCommentText('');
-                  }}
-                >
-                  Cancel
-                </button>
-                <button 
-                  className="btn-primary" 
-                  onClick={handleAddComment}
-                  disabled={!commentText.trim()}
-                >
-                  <i className="ti ti-send" /> Post Comment
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="issue-right">
-        <div className="issue-timestamps">
-          <span className="issue-time">
-            <i className="ti ti-clock" />
-            {issue.created}
-          </span>
-          {issue.updated && (
-            <span className="issue-time updated">
-              <i className="ti ti-refresh" />
-              {issue.updated}
-            </span>
-          )}
-        </div>
-        <i className="ti ti-chevron-right issue-arrow" />
-      </div>
-
-      {selectedScreenshot && (
-        <div className="screenshot-modal" onClick={() => setSelectedScreenshot(null)}>
-          <button
-            className="screenshot-modal-close"
-            onClick={() => setSelectedScreenshot(null)}
-          >
-            ✕
-          </button>
-          <div className="screenshot-modal-content">
-            <img
-              src={selectedScreenshot}
-              alt="Full size screenshot"
-              onClick={(e) => e.stopPropagation()}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-              }}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function NewIssueForm({
   onCreate,
   onCancel,
@@ -1271,6 +514,9 @@ function NewIssueForm({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const currentUserData = useCurrentUser();
+  const userDisplayName = currentUserData?.display_name || currentUserData?.full_name || currentUserData?.email || 'Unknown';
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1318,7 +564,6 @@ function NewIssueForm({
         status: "Open" as IssueStatus,
         priority,
         module: module.trim() || (domain === "bim" ? "Modeling" : "General"),
-        reportedBy: CURRENT_USER,
       };
 
       if (domain === "bim") {

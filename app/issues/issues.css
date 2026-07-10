@@ -1419,3 +1419,210 @@ textarea.field-input {
     flex-wrap: wrap;
   }
 }
+
+.issue-owner-badge {
+  font-size: 0.6rem;
+  background: #4A8B6B20;
+  color: #4A8B6B;
+  padding: 2px 10px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.comment-owner-badge {
+  font-size: 0.55rem;
+  background: #E8A83820;
+  color: #E8A838;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.btn-outline.danger {
+  color: #D43E3E;
+  border-color: #D43E3E;
+}
+
+.btn-outline.danger:hover {
+  background: #D43E3E10;
+  border-color: #D43E3E;
+}
+
+.btn-outline.danger:active {
+  background: #D43E3E20;
+}
+
+.comment-action-btn.danger {
+  color: #D43E3E;
+}
+
+.comment-action-btn.danger:hover {
+  background: #D43E3E10;
+}
+
+.comment-action-btn.danger:active {
+  background: #D43E3E20;
+}
+
+
+
+.issue-owner-badge {
+  font-size: 0.6rem;
+  background: #4A8B6B20;
+  color: #4A8B6B;
+  padding: 2px 10px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.comment-owner-badge {
+  font-size: 0.55rem;
+  background: #E8A83820;
+  color: #E8A838;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.btn-outline.danger {
+  color: #D43E3E;
+  border-color: #D43E3E;
+}
+
+.btn-outline.danger:hover {
+  background: #D43E3E10;
+  border-color: #D43E3E;
+}
+
+.btn-outline.danger:active {
+  background: #D43E3E20;
+}
+
+.comment-action-btn.danger {
+  color: #D43E3E;
+}
+
+.comment-action-btn.danger:hover {
+  background: #D43E3E10;
+}
+
+.comment-action-btn.danger:active {
+  background: #D43E3E20;
+}
+
+/* Owner badges */
+.issue-owner-badge {
+  font-size: 0.6rem;
+  background: #4A8B6B20;
+  color: #4A8B6B;
+  padding: 2px 10px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.comment-owner-badge {
+  font-size: 0.55rem;
+  background: #E8A83820;
+  color: #E8A838;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+/* Danger buttons */
+.btn-outline.danger {
+  color: #D43E3E;
+  border-color: #D43E3E;
+}
+
+.btn-outline.danger:hover {
+  background: #D43E3E10;
+  border-color: #D43E3E;
+}
+
+.btn-outline.danger:active {
+  background: #D43E3E20;
+}
+
+.comment-action-btn.danger {
+  color: #D43E3E;
+}
+
+.comment-action-btn.danger:hover {
+  background: #D43E3E10;
+}
+
+.comment-action-btn.danger:active {
+  background: #D43E3E20;
+}
+
+/* Screenshot delete button */
+.screenshot-thumbnail-container {
+  position: relative;
+  display: inline-block;
+}
+
+.screenshot-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(212, 62, 62, 0.9);
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.screenshot-delete-btn:hover {
+  background: #D43E3E;
+  transform: scale(1.1);
+}
+
+.screenshot-delete-btn i {
+  font-size: 14px;
+}
+
+
+/* Header actions with flex */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Active state for the Show Deleted button */
+.btn-outline.active {
+  background: rgba(212, 62, 62, 0.15) !important;
+  border-color: #D43E3E !important;
+  color: #D43E3E !important;
+}
+
+.btn-outline.active:hover {
+  background: rgba(212, 62, 62, 0.25) !important;
+}
+
+/* Deleted badge style */
+.issue-deleted-badge {
+  font-size: 0.6rem;
+  background: #D43E3E20;
+  color: #D43E3E;
+  padding: 2px 10px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
