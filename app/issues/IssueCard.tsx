@@ -17,8 +17,11 @@ import { isUserMatch } from '@/components/utils/userMatching';
 const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 
+// Get image source with fallback
 const getImageSource = (imageData: string | undefined): string => {
-  if (!imageData) return '';
+  if (!imageData) {
+    return '/images/placeholder-image.png';
+  }
 
   if (imageData.startsWith('data:image')) {
     return imageData;
@@ -31,6 +34,12 @@ const getImageSource = (imageData: string | undefined): string => {
   if (imageData.startsWith('/')) {
     const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
     return `${baseUrl}${imageData}`;
+  }
+
+  if (imageData.includes('issue_snapshots/') || imageData.includes('media/')) {
+    const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
+    const path = imageData.startsWith('/') ? imageData : `/${imageData}`;
+    return `${baseUrl}${path}`;
   }
 
   if (imageData.length > 100) {
@@ -46,14 +55,8 @@ const getImageSource = (imageData: string | undefined): string => {
     }
   }
 
-  if (imageData.includes('issue_snapshots/') || imageData.includes('media/')) {
-    const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
-    const path = imageData.startsWith('/') ? imageData : `/${imageData}`;
-    return `${baseUrl}${path}`;
-  }
-
   console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return '';
+  return '/images/placeholder-image.png';
 };
 
 const DEFAULT_CAMERA_POSITION = { x: 0, y: 0, z: 0 };
@@ -70,9 +73,9 @@ interface IssueCardProps {
   onRemoveSnapshot: () => Promise<void>;
   onRemoveAttachment: (index: number) => Promise<void>;
   onAddScreenshot: (snapshotData: string, snapshotFormat: "png" | "jpg") => Promise<void>;
-  onAddComment: (text: string) => Promise<void>;
+  onAddComment: (text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
-  onEditComment: (commentId: string, text: string) => Promise<void>;
+  onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onDeleteIssue: (issueId: string) => Promise<void>;
   onRestoreIssue?: (issueId: string) => Promise<void>;
   currentUser: { email: string; fullName: string; username: string; displayName: string };
@@ -119,12 +122,21 @@ export function IssueCard({
 
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [commentScreenshot, setCommentScreenshot] = useState<string | null>(null);
+  const [commentScreenshotFormat, setCommentScreenshotFormat] = useState<"png" | "jpg">("png");
+  const [commentPreview, setCommentPreview] = useState<string | null>(null);
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
   
   const [showHistory, setShowHistory] = useState(false);
   const [showAllComments, setShowAllComments] = useState(false);
   
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentText, setEditingCommentText] = useState("");
+  const [editingCommentScreenshot, setEditingCommentScreenshot] = useState<string | null>(null);
+  const [editingCommentScreenshotFormat, setEditingCommentScreenshotFormat] = useState<"png" | "jpg">("png");
+  const [editingCommentPreview, setEditingCommentPreview] = useState<string | null>(null);
+  const [editingCommentHasExistingImage, setEditingCommentHasExistingImage] = useState(false);
+  const editCommentFileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     title: issue.title,
@@ -173,6 +185,7 @@ export function IssueCard({
     return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
 
+  // Handle file upload for replacing image
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -190,6 +203,56 @@ export function IssueCard({
       setNewScreenshot(base64);
       setNewScreenshotFormat(format);
       setImageLoadError(false);
+    };
+    reader.onerror = () => {
+      setSaveError('Failed to read image file');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle comment file upload
+  const handleCommentFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveError('Image size must be less than 5MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const base64 = dataUrl.split(',')[1];
+      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+      setCommentScreenshot(base64);
+      setCommentScreenshotFormat(format);
+      setCommentPreview(dataUrl);
+    };
+    reader.onerror = () => {
+      setSaveError('Failed to read image file');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle edit comment file upload
+  const handleEditCommentFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveError('Image size must be less than 5MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const base64 = dataUrl.split(',')[1];
+      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+      setEditingCommentScreenshot(base64);
+      setEditingCommentScreenshotFormat(format);
+      setEditingCommentPreview(dataUrl);
     };
     reader.onerror = () => {
       setSaveError('Failed to read image file');
@@ -255,8 +318,14 @@ export function IssueCard({
     if (!commentText.trim()) return;
     try {
       setSaveError(null);
-      await onAddComment(commentText.trim());
+      await onAddComment(
+        commentText.trim(),
+        commentScreenshot || undefined,
+        commentScreenshot ? commentScreenshotFormat : undefined
+      );
       setCommentText("");
+      setCommentScreenshot(null);
+      setCommentPreview(null);
       setShowCommentInput(false);
     } catch {
       setSaveError('Failed to add comment.');
@@ -267,9 +336,17 @@ export function IssueCard({
     if (!editingCommentText.trim()) return;
     try {
       setSaveError(null);
-      await onEditComment(commentId, editingCommentText.trim());
+      await onEditComment(
+        commentId,
+        editingCommentText.trim(),
+        editingCommentScreenshot || undefined,
+        editingCommentScreenshot ? editingCommentScreenshotFormat : undefined
+      );
       setEditingCommentId(null);
       setEditingCommentText("");
+      setEditingCommentScreenshot(null);
+      setEditingCommentPreview(null);
+      setEditingCommentHasExistingImage(false);
     } catch {
       setSaveError('Failed to edit comment.');
     }
@@ -302,21 +379,24 @@ export function IssueCard({
         patch.assignedToId = Number(form.assignedTo);
       }
 
-      if (newScreenshot && isBim) {
-        patch.domain = 'bim';
-        patch.viewpoint = {
-          camera_position: (issue as any).viewpoint?.cameraPosition || DEFAULT_CAMERA_POSITION,
-          camera_direction: (issue as any).viewpoint?.cameraDirection || DEFAULT_CAMERA_DIRECTION,
-          camera_up_vector: (issue as any).viewpoint?.cameraUpVector || DEFAULT_CAMERA_UP_VECTOR,
-          field_of_view: (issue as any).viewpoint?.fieldOfView || DEFAULT_FIELD_OF_VIEW,
-          clipping_planes: (issue as any).viewpoint?.clippingPlanes || [],
-          snapshot_data: newScreenshot,
-          snapshot_format: newScreenshotFormat,
-        };
-      } else if (newScreenshot && !isBim) {
-        patch.domain = 'other';
-        patch.newAttachmentData = newScreenshot;
-        patch.newAttachmentFormat = newScreenshotFormat;
+      // Handle image replacement
+      if (newScreenshot) {
+        if (isBim) {
+          patch.domain = 'bim';
+          patch.viewpoint = {
+            camera_position: (issue as any).viewpoint?.cameraPosition || DEFAULT_CAMERA_POSITION,
+            camera_direction: (issue as any).viewpoint?.cameraDirection || DEFAULT_CAMERA_DIRECTION,
+            camera_up_vector: (issue as any).viewpoint?.cameraUpVector || DEFAULT_CAMERA_UP_VECTOR,
+            field_of_view: (issue as any).viewpoint?.fieldOfView || DEFAULT_FIELD_OF_VIEW,
+            clipping_planes: (issue as any).viewpoint?.clippingPlanes || [],
+            snapshot_data: newScreenshot,
+            snapshot_format: newScreenshotFormat,
+          };
+        } else {
+          patch.domain = 'other';
+          patch.newAttachmentData = newScreenshot;
+          patch.newAttachmentFormat = newScreenshotFormat;
+        }
       }
 
       await onSave(patch);
@@ -397,6 +477,33 @@ export function IssueCard({
     }
   };
 
+  // Handle image error with fallback
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    const img = e.currentTarget;
+    if (!img.src.includes('placeholder-image.png')) {
+      img.src = '/images/placeholder-image.png';
+    }
+    setImageLoadError(true);
+    console.warn('Failed to load image:', img.src);
+  };
+
+  // Start editing a comment
+  const startEditComment = (comment: any) => {
+    setEditingCommentId(comment.id);
+    setEditingCommentText(comment.text);
+    setEditingCommentHasExistingImage(!!comment.snapshot);
+    // If there's an existing image, we keep it unless user replaces it
+    setEditingCommentScreenshot(null);
+    setEditingCommentPreview(null);
+  };
+
+  // Remove comment image during edit
+  const removeCommentImage = () => {
+    setEditingCommentHasExistingImage(false);
+    setEditingCommentScreenshot(null);
+    setEditingCommentPreview(null);
+  };
+
   return (
     <div className={`issue-card ${issue.is_deleted ? 'issue-deleted' : ''}`}>
       <div className="issue-left">
@@ -462,15 +569,16 @@ export function IssueCard({
             </p>
           )}
 
+          {/* Screenshot Section with Replace functionality */}
           <div className="screenshot-section">
-            {!isEditing && hasScreenshot && !imageLoadError && (
+            {!isEditing && hasScreenshot && (
               <div className="screenshot-thumbnail-container">
                 <img
-                  src={displayScreenshot}
+                  src={displayScreenshot || '/images/placeholder-image.png'}
                   alt="Issue screenshot"
                   className="screenshot-thumbnail-image"
-                  onClick={() => handleImageClick(displayScreenshot!)}
-                  onError={() => setImageLoadError(true)}
+                  onClick={() => handleImageClick(getImageSource(displayScreenshot!))}
+                  onError={handleImageError}
                 />
                 <span className="screenshot-hint">Click to enlarge</span>
                 {isCreator && issue.is_deleted !== true && (
@@ -485,26 +593,39 @@ export function IssueCard({
               </div>
             )}
 
+            {/* Show screenshot controls in edit mode */}
             {isEditing && (
               <div className="screenshot-edit-area">
-                {hasScreenshot && !imageLoadError && (
+                <div className="screenshot-edit-header">
+                  <i className="ti ti-photo" />
+                  <span className="screenshot-label">Screenshot</span>
+                </div>
+
+                {/* Show current or preview image */}
+                {hasScreenshot && (
                   <div className="screenshot-preview-container">
                     <img
-                      src={displayScreenshot}
+                      src={displayScreenshot || '/images/placeholder-image.png'}
                       alt="Screenshot preview"
                       className="screenshot-preview-image"
-                      onError={() => setImageLoadError(true)}
+                      onError={handleImageError}
                     />
+                    {!newScreenshot && (
+                      <span className="screenshot-current-label">Current image</span>
+                    )}
                   </div>
                 )}
-                <div className="screenshot-upload">
+
+                {/* Upload button for replacement */}
+                <div className="screenshot-upload-actions">
                   <button
-                    className="btn-outline small"
+                    className="btn-primary small"
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <i className="ti ti-upload" />
-                    {newScreenshot ? 'Change Screenshot' : hasScreenshot ? 'Change Screenshot' : 'Upload Screenshot'}
+                    {newScreenshot ? 'Change New Image' : hasScreenshot ? 'Replace Image' : 'Upload Image'}
                   </button>
+                  
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -512,24 +633,42 @@ export function IssueCard({
                     onChange={handleFileUpload}
                     style={{ display: 'none' }}
                   />
+
                   {newScreenshot && (
                     <button
                       className="btn-outline small danger"
-                      onClick={() => setNewScreenshot(null)}
+                      onClick={() => {
+                        setNewScreenshot(null);
+                      }}
                     >
-                      <i className="ti ti-x" /> Discard new upload
+                      <i className="ti ti-x" /> Discard New
                     </button>
                   )}
+
                   {!newScreenshot && hasScreenshot && (
                     <button
                       className="btn-outline small danger"
                       onClick={handleRemoveSavedScreenshot}
                     >
-                      <i className="ti ti-trash" /> Delete saved screenshot
+                      <i className="ti ti-trash" /> Delete
                     </button>
                   )}
-                  <span className="file-hint">Max 5MB</span>
+
+                  <span className="file-hint">Max 5MB (PNG/JPG)</span>
                 </div>
+
+                {/* Show preview of new screenshot */}
+                {newScreenshot && (
+                  <div className="screenshot-new-preview">
+                    <span className="preview-label">📸 New image (will replace current):</span>
+                    <img
+                      src={`data:image/${newScreenshotFormat};base64,${newScreenshot}`}
+                      alt="New screenshot preview"
+                      className="screenshot-preview-image"
+                    />
+                    <span className="screenshot-pending-badge">Pending replacement</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -550,13 +689,10 @@ export function IssueCard({
                   {commentSnapshots.map((c) => (
                     <div key={c.id} className="history-thumbnail-item">
                       <img
-                        src={c.snapshot!}
+                        src={getImageSource(c.snapshot!)}
                         alt={`Snapshot from ${c.author}`}
-                        onClick={() => handleImageClick(c.snapshot!)}
-                        onError={(e) => {
-                          console.error('Failed to load image:', c.snapshot);
-                          e.currentTarget.style.display = 'none';
-                        }}
+                        onClick={() => handleImageClick(getImageSource(c.snapshot!))}
+                        onError={handleImageError}
                       />
                       <span className="history-thumbnail-caption">
                         {c.author} · {c.timestamp}
@@ -727,12 +863,84 @@ export function IssueCard({
                             onChange={(e) => setEditingCommentText(e.target.value)}
                             rows={2}
                           />
+                          
+                          {/* ✅ Comment image edit section */}
+                          <div className="comment-image-edit-section">
+                            <div className="comment-image-edit-header">
+                              <i className="ti ti-photo" />
+                              <span>Comment Image</span>
+                            </div>
+                            
+                            {/* Show existing image if no new image uploaded */}
+                            {editingCommentHasExistingImage && !editingCommentScreenshot && (
+                              <div className="comment-existing-image">
+                                <img
+                                  src={comment.snapshot ? getImageSource(comment.snapshot) : '/images/placeholder-image.png'}
+                                  alt="Existing comment image"
+                                  className="comment-edit-image-preview"
+                                  onError={handleImageError}
+                                />
+                                <span className="existing-image-label">Current image</span>
+                                <button
+                                  className="btn-outline small danger"
+                                  onClick={removeCommentImage}
+                                  style={{ marginTop: '4px' }}
+                                >
+                                  <i className="ti ti-trash" /> Remove image
+                                </button>
+                              </div>
+                            )}
+                            
+                            {/* Show new uploaded image preview */}
+                            {editingCommentScreenshot && (
+                              <div className="comment-new-image-preview">
+                                <img
+                                  src={editingCommentPreview || ''}
+                                  alt="New comment image preview"
+                                  className="comment-edit-image-preview"
+                                />
+                                <span className="new-image-label">📸 New image (pending)</span>
+                                <button
+                                  className="btn-outline small danger"
+                                  onClick={() => {
+                                    setEditingCommentScreenshot(null);
+                                    setEditingCommentPreview(null);
+                                  }}
+                                >
+                                  <i className="ti ti-x" /> Discard
+                                </button>
+                              </div>
+                            )}
+                            
+                            {/* Upload button for comment image */}
+                            <div className="comment-image-upload-actions">
+                              <button
+                                className="btn-outline small"
+                                onClick={() => editCommentFileInputRef.current?.click()}
+                              >
+                                <i className="ti ti-upload" />
+                                {editingCommentScreenshot ? 'Change Image' : editingCommentHasExistingImage ? 'Replace Image' : 'Add Image'}
+                              </button>
+                              <input
+                                ref={editCommentFileInputRef}
+                                type="file"
+                                accept="image/png,image/jpeg"
+                                onChange={handleEditCommentFileUpload}
+                                style={{ display: 'none' }}
+                              />
+                              <span className="file-hint">Max 5MB</span>
+                            </div>
+                          </div>
+                          
                           <div className="comment-edit-actions">
                             <button 
                               className="btn-outline small" 
                               onClick={() => {
                                 setEditingCommentId(null);
                                 setEditingCommentText("");
+                                setEditingCommentScreenshot(null);
+                                setEditingCommentPreview(null);
+                                setEditingCommentHasExistingImage(false);
                               }}
                             >
                               Cancel
@@ -759,14 +967,11 @@ export function IssueCard({
                           {comment.snapshot && (
                             <div className="comment-snapshot">
                               <img 
-                                src={comment.snapshot} 
+                                src={getImageSource(comment.snapshot)}
                                 alt="Comment screenshot"
-                                onClick={() => handleImageClick(comment.snapshot)}
+                                onClick={() => handleImageClick(getImageSource(comment.snapshot))}
                                 className="comment-snapshot-thumb"
-                                onError={(e) => {
-                                  console.error('Failed to load comment image:', comment.snapshot);
-                                  e.currentTarget.style.display = 'none';
-                                }}
+                                onError={handleImageError}
                               />
                             </div>
                           )}
@@ -774,10 +979,7 @@ export function IssueCard({
                             <div className="comment-actions">
                               <button 
                                 className="comment-action-btn"
-                                onClick={() => {
-                                  setEditingCommentId(comment.id);
-                                  setEditingCommentText(comment.text);
-                                }}
+                                onClick={() => startEditComment(comment)}
                               >
                                 <i className="ti ti-edit" /> Edit
                               </button>
@@ -896,7 +1098,6 @@ export function IssueCard({
                     <button className="btn-outline" onClick={() => setIsEditing(true)}>
                       <i className="ti ti-edit" /> Edit
                     </button>
-                    {/* ✅ Only show Delete if issue is NOT already deleted */}
                     {issue.is_deleted !== true && (
                       <button 
                         className="btn-outline danger" 
@@ -905,7 +1106,6 @@ export function IssueCard({
                         <i className="ti ti-trash" /> Delete
                       </button>
                     )}
-                    {/* ✅ Only show Restore if issue IS deleted */}
                     {issue.is_deleted === true && onRestoreIssue && (
                       <button 
                         className="btn-outline" 
@@ -993,12 +1193,48 @@ export function IssueCard({
                 onChange={(e) => setCommentText(e.target.value)}
                 rows={2}
               />
+              
+              {/* Comment image upload */}
+              <div className="comment-image-upload">
+                {commentPreview ? (
+                  <div className="comment-image-preview">
+                    <img src={commentPreview} alt="Comment image preview" />
+                    <button
+                      className="remove-btn"
+                      onClick={() => {
+                        setCommentScreenshot(null);
+                        setCommentPreview(null);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn-outline small"
+                    onClick={() => commentFileInputRef.current?.click()}
+                    type="button"
+                  >
+                    <i className="ti ti-camera" /> Add image (optional)
+                  </button>
+                )}
+                <input
+                  ref={commentFileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={handleCommentFileUpload}
+                  style={{ display: 'none' }}
+                />
+              </div>
+              
               <div className="form-actions" style={{ marginTop: '8px' }}>
                 <button 
                   className="btn-outline" 
                   onClick={() => {
                     setShowCommentInput(false);
                     setCommentText('');
+                    setCommentScreenshot(null);
+                    setCommentPreview(null);
                   }}
                 >
                   Cancel
@@ -1051,9 +1287,7 @@ export function IssueCard({
               src={selectedScreenshot}
               alt="Full size screenshot"
               onClick={(e) => e.stopPropagation()}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-              }}
+              onError={handleImageError}
             />
           </div>
         </div>

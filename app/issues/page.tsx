@@ -467,10 +467,10 @@ export default function IssuesPage() {
                     setError('Failed to delete comment. Please try again.');
                   }
                 }}
-                onEditComment={async (commentId, text) => {
+                onEditComment={async (commentId, text, snapshotData, snapshotFormat) => {
                   try {
                     setError(null);
-                    await editComment(issue.id, commentId, text);
+                    await editComment(issue.id, commentId, text, snapshotData, snapshotFormat);
                     await refresh();
                   } catch (err: any) {
                     console.error('Edit comment error:', err);

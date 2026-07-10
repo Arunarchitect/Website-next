@@ -110,14 +110,10 @@ async function fetchUserProfile(accessToken: string) {
 function resolveDestination({ orgRole, areacalcRole }: RoleBundle): string {
   console.log('📍 [resolveDestination] Input:', { orgRole, areacalcRole });
   
-  const isAreacalcPriv    = areacalcRole === "admin" || areacalcRole === "member";
-  const isAreacalcLow     = areacalcRole === "customer" || areacalcRole === "user";
-  const hasAreacalcRole   = areacalcRole !== "anonymous";
-  const hasOrgRole        = orgRole !== null;
+  const hasAreacalcRole = areacalcRole !== "anonymous";
+  const hasOrgRole = orgRole !== null;
 
   console.log('📍 [resolveDestination] Evaluated flags:', {
-    isAreacalcPriv,
-    isAreacalcLow,
     hasAreacalcRole,
     hasOrgRole,
     orgRole
@@ -126,40 +122,43 @@ function resolveDestination({ orgRole, areacalcRole }: RoleBundle): string {
   let destination: string;
 
   // ✅ PRIORITY 1: ORGANISATION ROLES (Highest priority)
-  // Organisation roles take precedence over Areacalc roles
   if (hasOrgRole) {
     if (orgRole === "admin" || orgRole === "manager") {
-      destination = "/new/dash/dashadmin";
-      console.log('📍 [resolveDestination] → Organisation Admin/Manager (Org priority 1)');
-    } 
-    else if (orgRole === "member") {
-      destination = "/new/dash/dashnormal";
-      console.log('📍 [resolveDestination] → Organisation Member (Org priority 2)');
+      destination = "/main/admin";
+      console.log('📍 [resolveDestination] → Organisation Admin/Manager → /main/admin');
     } 
     else if (orgRole === "client") {
       destination = "/main/client";
-      console.log('📍 [resolveDestination] → Organisation Client (Org priority 3)');
+      console.log('📍 [resolveDestination] → Organisation Client → /main/client');
+    } 
+    else if (orgRole === "member") {
+      // ✅ UPDATED: Redirect to /main/member instead of /main/user
+      destination = "/main/member";
+      console.log('📍 [resolveDestination] → Organisation Member → /main/member');
     } 
     else {
       // Fallback for any other org role
-      destination = "/new/dash/dashnormal";
-      console.log('📍 [resolveDestination] → Unknown org role, defaulting to user dashboard');
+      destination = "/main/member";
+      console.log('📍 [resolveDestination] → Unknown org role → /main/member');
     }
   } 
   
   // ✅ PRIORITY 2: AREACALC ROLES (Only if no organisation role)
-  // Users with Areacalc but no organisation go to /main/user
   else if (hasAreacalcRole) {
-    destination = "/main/user";
-    console.log('📍 [resolveDestination] → Areacalc user without organisation → /main/user');
+    if (areacalcRole === "admin" || areacalcRole === "member") {
+      destination = "/main/admin";
+      console.log('📍 [resolveDestination] → Areacalc Admin/Member (no org) → /main/admin');
+    } 
+    else {
+      destination = "/main/member";
+      console.log('📍 [resolveDestination] → Areacalc Customer/User (no org) → /main/member');
+    }
   } 
   
   // ✅ PRIORITY 3: NO ROLES AT ALL
-  // User has no organisation and no Areacalc role
-  // They go to /main/user which will show minimal content
   else {
-    destination = "/main/user";
-    console.log('📍 [resolveDestination] → No roles found, redirecting to user page (minimal content)');
+    destination = "/main/member";
+    console.log('📍 [resolveDestination] → No roles found → /main/member');
   }
 
   console.log(`📍 [resolveDestination] → Final destination: "${destination}"`);

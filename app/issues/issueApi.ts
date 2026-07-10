@@ -49,9 +49,11 @@ const getCsrfToken = (): string | null => {
   return match ? match[1] : null;
 };
 
-// Helper to safely get image source - handles both URLs and base64
-const getImageSource = (imageData: string | undefined): string => {
-  if (!imageData) return '';
+// ✅ UPDATED: Helper to safely get image source with fallback
+export const getImageSource = (imageData: string | undefined, fallback?: string): string => {
+  if (!imageData) {
+    return fallback || '/images/placeholder-image.png';
+  }
 
   if (imageData.startsWith('data:image')) {
     return imageData;
@@ -62,7 +64,14 @@ const getImageSource = (imageData: string | undefined): string => {
   }
 
   if (imageData.startsWith('/')) {
-    return `${API_BASE_URL}${imageData}`;
+    const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
+    return `${baseUrl}${imageData}`;
+  }
+
+  if (imageData.includes('issue_snapshots/') || imageData.includes('media/')) {
+    const baseUrl = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
+    const path = imageData.startsWith('/') ? imageData : `/${imageData}`;
+    return `${baseUrl}${path}`;
   }
 
   if (imageData.length > 100) {
@@ -78,13 +87,32 @@ const getImageSource = (imageData: string | undefined): string => {
     }
   }
 
-  if (imageData.includes('issue_snapshots/') || imageData.includes('media/')) {
-    const path = imageData.startsWith('/') ? imageData : `/${imageData}`;
-    return `${API_BASE_URL}${path}`;
-  }
-
   console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return '';
+  return fallback || '/images/placeholder-image.png';
+};
+
+// ✅ NEW: Helper to check if an image URL is accessible
+export const checkImageAccessibility = async (url: string): Promise<boolean> => {
+  if (!url || url.startsWith('data:')) return true;
+  
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+// ✅ NEW: Helper to validate image URL
+export const validateImageUrl = (url: string): boolean => {
+  if (!url) return false;
+  if (url.startsWith('data:')) return true;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    // Return true for remote URLs, they'll be handled by onError
+    return true;
+  }
+  // For local media paths, return true but they'll be handled by onError
+  return true;
 };
 
 // Axios instance
@@ -254,10 +282,6 @@ const mapTopicTypeToFrontend = (topicType: string): string => {
 // Helper to convert Django issue to frontend Issue type
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Helper to convert Django issue to frontend Issue type
-// ---------------------------------------------------------------------------
-
 const convertDjangoIssue = (data: any): Issue => {
   // Create the base object without specifying domain type explicitly
   const baseIssue = {
@@ -293,7 +317,7 @@ const convertDjangoIssue = (data: any): Issue => {
   if (data.domain === 'bim') {
     return {
       ...baseIssue,
-      domain: 'bim' as const,  // Use 'as const' to enforce literal type
+      domain: 'bim' as const,
       bcfGuid: data.bcf_guid,
       topicType: mapTopicTypeToFrontend(data.topic_type) || 'General',
       ifcElements: data.ifc_elements || [],
@@ -320,7 +344,7 @@ const convertDjangoIssue = (data: any): Issue => {
   // Handle non-BIM domains (design/other)
   return {
     ...baseIssue,
-    domain: (data.domain === 'design' ? 'design' : 'other') as const,  // Use 'as const' to enforce literal type
+    domain: (data.domain === 'design' ? 'design' : 'other') as const,
     category: data.category || '',
     attachments: (data.attachments || []).map((a: any) => {
       if (typeof a === 'string') {
@@ -463,12 +487,11 @@ export async function getIssues(params?: {
   status?: string;
   assigned_to?: number;
   deliverable?: number;
-  include_deleted?: boolean;  // ✅ Added this parameter
+  include_deleted?: boolean;
 }): Promise<Issue[]> {
   try {
     console.log('Fetching issues with params:', params);
     
-    // ✅ Build query params with proper include_deleted handling
     const queryParams: any = { ...params };
     if (params?.include_deleted !== undefined) {
       queryParams.include_deleted = params.include_deleted ? 'true' : 'false';
