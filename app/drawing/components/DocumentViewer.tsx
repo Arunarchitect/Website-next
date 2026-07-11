@@ -2,38 +2,42 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DrawingDocument } from "../../types";
+import { DrawingDocumentResolved } from "../types";
 
 interface DocumentViewerProps {
-  document: DrawingDocument;
+  document: DrawingDocumentResolved;
   isOpen: boolean;
   onClose: () => void;
   onFavoriteToggle: (id: number) => void;
-  onDownload: (doc: DrawingDocument) => void;
+  onDownload: (doc: DrawingDocumentResolved) => void;
 }
 
 export default function DocumentViewer({
-  document,
+  document: doc,
   isOpen,
   onClose,
   onFavoriteToggle,
-  onDownload
+  onDownload,
 }: DocumentViewerProps) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [hasError, setHasError] = useState<boolean>(false);
 
-  // Close on Escape key
+  useEffect(() => {
+    setIsLoading(true);
+    setHasError(false);
+  }, [doc.id]);
+
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
         onClose();
       }
     };
-    
+
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
-  // Prevent body scroll when modal is open
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -47,100 +51,109 @@ export default function DocumentViewer({
 
   if (!isOpen) return null;
 
-  const isPDF = document.file_type === 'pdf';
-  const isImage = document.file_type === 'image';
+  const isPDF = doc.file_type === 'pdf';
+  const isImage = doc.file_type === 'image';
 
   return (
     <div className="document-viewer-overlay" onClick={onClose}>
-      <div 
-        className="document-viewer-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
+      <div className="document-viewer-modal" onClick={(e) => e.stopPropagation()}>
         <div className="document-viewer-header">
           <div className="document-viewer-title-section">
-            <h2 className="document-viewer-title">{document.title}</h2>
-            <span className="document-viewer-version">v{document.version}</span>
+            <h2 className="document-viewer-title">{doc.title}</h2>
+            <span className="document-viewer-version">v{doc.version}</span>
           </div>
           <div className="document-viewer-controls">
-            <button
-              className="document-viewer-btn"
-              onClick={() => onFavoriteToggle(document.id)}
-              aria-label={document.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <i className={`ti ${document.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
+            <button className="document-viewer-btn" onClick={() => onFavoriteToggle(doc.id)} aria-label={doc.is_favorite ? 'Remove from favorites' : 'Add to favorites'}>
+              <i className={`ti ${doc.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
             </button>
-            <button
-              className="document-viewer-btn"
-              onClick={() => onDownload(document)}
-              aria-label="Download document"
-            >
+            <button className="document-viewer-btn" onClick={() => onDownload(doc)} aria-label="Download document">
               <i className="ti ti-download" />
             </button>
-            <button
-              className="document-viewer-btn document-viewer-close"
-              onClick={onClose}
-              aria-label="Close viewer"
-            >
+            {isPDF ? <a className="document-viewer-btn" href={doc.file_url} target="_blank" rel="noopener noreferrer" aria-label="Open in new tab"><i className="ti ti-external-link" /></a> : null}
+            <button className="document-viewer-btn document-viewer-close" onClick={onClose} aria-label="Close viewer">
               <i className="ti ti-x" />
             </button>
           </div>
         </div>
 
-        {/* Content */}
         <div className="document-viewer-content">
-          {isLoading && (
+          {isLoading && !hasError && (
             <div className="document-viewer-loading">
               <i className="ti ti-loader" />
               <p>Loading document...</p>
             </div>
           )}
-          
-          {isImage && (
+
+          {hasError && (
+            <div className="document-viewer-loading document-viewer-error-state">
+              <i className="ti ti-alert-triangle" />
+              <p>Couldn&apos;t load this file.</p>
+              <p className="document-viewer-error-path">{doc.file_url}</p>
+              <p className="document-viewer-error-hint">
+                Check the file exists at <code>public{doc.file_url}</code>
+              </p>
+            </div>
+          )}
+
+          {isImage && !hasError && (
             <div className="document-viewer-image-wrapper">
               <img
-                src={document.file_url}
-                alt={document.title}
+                src={doc.file_url}
+                alt={doc.title}
                 className="document-viewer-image"
                 onLoad={() => setIsLoading(false)}
-                onError={() => setIsLoading(false)}
+                onError={() => {
+                  setIsLoading(false);
+                  setHasError(true);
+                }}
+                style={{ display: isLoading ? 'none' : 'block' }}
               />
             </div>
           )}
-          
-          {isPDF && (
+
+          {isPDF && !hasError && (
             <div className="document-viewer-pdf-wrapper">
-              <iframe
-                src={`${document.file_url}#toolbar=1`}
-                className="document-viewer-pdf"
-                title={document.title}
-                onLoad={() => setIsLoading(false)}
-              />
+              <object data={`${doc.file_url}#toolbar=1`} type="application/pdf" className="document-viewer-pdf" onLoad={() => setIsLoading(false)}>
+                <div className="document-viewer-loading document-viewer-error-state">
+                  <i className="ti ti-file-pdf" />
+                  <p>Your browser can&apos;t preview PDFs inline.</p>
+                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="documents-retry-btn">Open PDF in new tab</a>
+                </div>
+              </object>
             </div>
           )}
         </div>
 
-        {/* Footer */}
         <div className="document-viewer-footer">
           <div className="document-viewer-footer-left">
             <span className="document-viewer-meta">
+              <i className="ti ti-building" />
+              {doc.organisation_name}
+            </span>
+            <span className="document-viewer-meta">
+              <i className="ti ti-briefcase" />
+              {doc.project_name}
+            </span>
+            <span className="document-viewer-meta">
+              <i className="ti ti-list-check" />
+              {doc.deliverable_name}
+            </span>
+            <span className="document-viewer-meta">
               <i className="ti ti-user" />
-              {document.uploaded_by}
+              {doc.uploaded_by}
             </span>
             <span className="document-viewer-meta">
               <i className="ti ti-calendar" />
-              {new Date(document.uploaded_at).toLocaleString()}
-            </span>
-            <span className="document-viewer-meta">
-              <i className="ti ti-folder" />
-              {document.category}
+              {new Date(doc.uploaded_at).toLocaleString()}
             </span>
           </div>
           <div className="document-viewer-footer-right">
             <span className="document-viewer-meta">
               <i className="ti ti-tag" />
-              {document.tags.map((tag, idx) => (
-                <span key={idx} className="document-viewer-tag">#{tag}</span>
+              {doc.tags.map((tag, idx) => (
+                <span key={idx} className="document-viewer-tag">
+                  #{tag}
+                </span>
               ))}
             </span>
           </div>

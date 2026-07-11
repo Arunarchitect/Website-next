@@ -14,8 +14,6 @@ export type IssueStatus = "Open" | "In Progress" | "Resolved" | "Closed";
 export type IssuePriority = "High" | "Medium" | "Low";
 export type IssueDomain = "bim" | "design" | "other";
 
-// BCF topic_type is free text in the spec, but this set matches what most
-// BCF servers ship by default.
 export type BcfTopicType =
   | "Clash"
   | "Coordinate"
@@ -50,7 +48,6 @@ export interface BcfViewpoint {
   clear_snapshot?: boolean;
 }
 
-// BCF Snapshot for export/import
 export interface BcfSnapshot {
   guid: string; // viewpoint guid
   snapshot: string; // base64 or URL
@@ -66,7 +63,7 @@ export interface IssueComment {
   author: string;
   text: string;
   timestamp: string; // ISO 8601
-  viewpointGuid?: string; // BCF: comment can reference a specific viewpoint
+  viewpointGuid?: string;
   snapshot?: string; // base64 or URL
 }
 
@@ -75,28 +72,24 @@ export interface IssueComment {
 // ---------------------------------------------------------------------------
 
 interface BaseIssue {
-  id: string | number; // internal id (can be string or number from Django)
+  id: string | number;
   domain: IssueDomain;
   title: string;
   description: string;
   status: IssueStatus;
   priority: IssuePriority;
-  module: string; // e.g. "Modeling", "Import", "Documentation"
+  module: string;
   reportedBy: string;
-  assignedTo: string | null; // Display name of assigned user
-  assignedToId: number | null; // ID of assigned user (for API calls)
-  created: string; // ISO 8601
-  updated?: string; // ISO 8601
-  dueDate?: string | null; // ISO 8601 date
-  labels?: string[]; // BCF: labels[]
+  assignedTo: string | null;
+  assignedToId: number | null;
+  created: string;
+  updated?: string;
+  dueDate?: string | null;
+  labels?: string[];
   comments: IssueComment[];
-  linkedIssues?: string[]; // BCF: related_topic
+  linkedIssues?: string[];
   resolution?: string | null;
-  is_deleted?: boolean; // ✅ Soft delete flag
-  deleted_at?: string | null;
-  deleted_by?: string | null;
-  
-  
+
   // Django-specific fields
   project?: number;
   project_id?: number;
@@ -104,51 +97,33 @@ interface BaseIssue {
   reported_by?: number;
   assigned_to?: number | null;
   organisation: string | null;
-  
-
 }
-
-// ---------------------------------------------------------------------------
-// Model-linked issue -> BCF Topic
-// ---------------------------------------------------------------------------
 
 export interface BimIssue extends BaseIssue {
   domain: "bim";
-  bcfGuid: string; // BCF topic guid
-  topicType: BcfTopicType; // BCF topic_type
-  ifcElements?: string[]; // IFC GUIDs of affected elements
+  bcfGuid: string;
+  topicType: BcfTopicType;
+  ifcElements?: string[];
   viewpoint?: BcfViewpoint;
-  category?: never; // BIM issues don't have category
-  attachments?: never; // BIM issues don't have attachments
+  category?: never;
+  attachments?: never;
 }
-
-// ---------------------------------------------------------------------------
-// Non-model design issue
-// ---------------------------------------------------------------------------
 
 export interface DesignIssue extends BaseIssue {
   domain: "design" | "other";
-  category?: string; // e.g. "Documentation", "Schedule", "Coordination"
-  attachments?: string[]; // file URLs, no IFC involved
-  bcfGuid?: never; // Design issues don't have BCF GUID
-  topicType?: never; // Design issues don't have topic type
-  ifcElements?: never; // Design issues don't have IFC elements
-  viewpoint?: never; // Design issues don't have viewpoints
+  category?: string;
+  attachments?: string[];
+  bcfGuid?: never;
+  topicType?: never;
+  ifcElements?: never;
+  viewpoint?: never;
 }
 
-// ---------------------------------------------------------------------------
-// Type Guards
-// ---------------------------------------------------------------------------
-
-export const isBimIssue = (issue: Issue): issue is BimIssue => 
+export const isBimIssue = (issue: Issue): issue is BimIssue =>
   issue.domain === "bim";
 
-export const isDesignIssue = (issue: Issue): issue is DesignIssue => 
+export const isDesignIssue = (issue: Issue): issue is DesignIssue =>
   issue.domain === "design" || issue.domain === "other";
-
-// ---------------------------------------------------------------------------
-// Helper to check if an issue is a BimIssue with type safety
-// ---------------------------------------------------------------------------
 
 export function assertBimIssue(issue: Issue): asserts issue is BimIssue {
   if (issue.domain !== "bim") {
@@ -161,10 +136,6 @@ export function assertDesignIssue(issue: Issue): asserts issue is DesignIssue {
     throw new Error(`Expected Design issue but got domain: ${issue.domain}`);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Issue Types
-// ---------------------------------------------------------------------------
 
 export type Issue = BimIssue | DesignIssue;
 
@@ -195,10 +166,10 @@ export interface IssueCreatePayload {
   assignedToId?: number | null;
   due_date?: string | null;
   labels?: string[];
-  topic_type?: BcfTopicType; // Required for BIM
-  ifc_elements?: string[]; // BIM only
-  category?: string; // Design only
-  attachments?: string[]; // Design only
+  topic_type?: BcfTopicType;
+  ifc_elements?: string[];
+  category?: string;
+  attachments?: string[];
 }
 
 export interface IssueUpdatePayload extends Partial<IssueCreatePayload> {
@@ -213,7 +184,7 @@ export interface IssueResolvePayload {
 export interface IssueCommentPayload {
   text: string;
   viewpoint?: number | null;
-  snapshot?: string; // base64 or URL
+  snapshot?: string;
 }
 
 export interface LinkIssuePayload {
@@ -299,17 +270,9 @@ export const getDomainLabel = (domain: IssueDomain): string => {
   return domain === "bim" ? "BIM Issue" : "Design Issue";
 };
 
-export const getStatusLabel = (status: IssueStatus): string => {
-  return status;
-};
-
-export const getPriorityLabel = (priority: IssuePriority): string => {
-  return priority;
-};
-
-export const getTopicTypeLabel = (type: BcfTopicType): string => {
-  return type;
-};
+export const getStatusLabel = (status: IssueStatus): string => status;
+export const getPriorityLabel = (priority: IssuePriority): string => priority;
+export const getTopicTypeLabel = (type: BcfTopicType): string => type;
 
 // ---------------------------------------------------------------------------
 // Default Values
@@ -325,7 +288,6 @@ export const getDefaultIssue = (domain: IssueDomain = "design"): Partial<Issue> 
     labels: [],
     assignedTo: null,
     assignedToId: null,
-    is_deleted: false,
   };
 
   if (domain === "bim") {
@@ -347,7 +309,7 @@ export const getDefaultIssue = (domain: IssueDomain = "design"): Partial<Issue> 
 };
 
 // ---------------------------------------------------------------------------
-// Helper to create a BCF Topic from a BimIssue
+// BCF <-> Issue helpers
 // ---------------------------------------------------------------------------
 
 export function toBcfTopic(issue: BimIssue): BcfTopic {
@@ -374,10 +336,6 @@ export function toBcfTopic(issue: BimIssue): BcfTopic {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Helper to create a BimIssue from a BCF Topic
-// ---------------------------------------------------------------------------
-
 export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimIssue {
   return {
     id: topic.guid,
@@ -391,7 +349,7 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
     module,
     reportedBy: topic.creation_author || "Unknown",
     assignedTo: topic.assigned_to || null,
-    assignedToId: null, // We don't have the ID from BCF import
+    assignedToId: null,
     created: topic.creation_date || new Date().toISOString(),
     updated: topic.modified_date,
     dueDate: topic.due_date,
@@ -404,13 +362,9 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
       viewpointGuid: c.viewpoint_guid,
     })),
     ifcElements: [],
-    is_deleted: false,
+    organisation: null,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Helper to create an Issue from Django data (for API responses)
-// ---------------------------------------------------------------------------
 
 export function fromDjangoIssue(data: any): Issue {
   const base: BaseIssue = {
@@ -429,9 +383,6 @@ export function fromDjangoIssue(data: any): Issue {
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
-    is_deleted: data.is_deleted || false,
-    deleted_at: data.deleted_at || null,
-    deleted_by: data.deleted_by || null,
     comments: (data.comments || []).map((c: any) => ({
       id: String(c.id),
       author: c.author?.email || c.author?.full_name || 'Unknown',
@@ -445,6 +396,7 @@ export function fromDjangoIssue(data: any): Issue {
     deliverable: data.deliverable?.id || data.deliverable || null,
     reported_by: data.reported_by?.id || null,
     assigned_to: data.assigned_to?.id || null,
+    organisation: data.organisation || null,
   };
 
   if (data.domain === 'bim') {

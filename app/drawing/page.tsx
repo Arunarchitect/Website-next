@@ -4,15 +4,17 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
-import { 
-  getDocuments, 
-  getDocumentCategories, 
+import {
+  getOrganisations,
+  getProjects,
+  getDeliverables,
+  getDocuments,
   toggleFavorite,
-  downloadDocument 
-} from "../drawingApi";
-import { getCurrentUser } from "../clientApi";
-import { DrawingDocument, DocumentCategory, User } from "./types";
+  downloadDocument,
+} from "./drawingApi";
+import { Organisation, Project, Deliverable, DrawingDocumentResolved } from "./types";
 import DocumentViewer from "./components/DocumentViewer";
+import PdfThumbnail from "./components/PdfThumbnail";
 import "./styles.css";
 
 const display = Space_Grotesk({
@@ -27,77 +29,76 @@ const mono = IBM_Plex_Mono({
 });
 
 export default function DocumentsPage() {
-  const [documents, setDocuments] = useState<DrawingDocument[]>([]);
-  const [categories, setCategories] = useState<DocumentCategory[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [organisations, setOrganisations] = useState<Organisation[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
+  const [documents, setDocuments] = useState<DrawingDocumentResolved[]>([]);
+
+  const [selectedOrgId, setSelectedOrgId] = useState<number | undefined>(undefined);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
+  const [selectedDeliverableId, setSelectedDeliverableId] = useState<number | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [selectedDoc, setSelectedDoc] = useState<DrawingDocument | null>(null);
+
+  const [selectedDoc, setSelectedDoc] = useState<DrawingDocumentResolved | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load data
-  const loadData = useCallback(async () => {
+  useEffect(() => {
+    getOrganisations().then(setOrganisations);
+  }, []);
+
+  useEffect(() => {
+    getProjects(selectedOrgId).then(setProjects);
+    setSelectedProjectId(undefined);
+    setSelectedDeliverableId(undefined);
+  }, [selectedOrgId]);
+
+  useEffect(() => {
+    getDeliverables(selectedProjectId).then(setDeliverables);
+    setSelectedDeliverableId(undefined);
+  }, [selectedProjectId]);
+
+  const loadDocuments = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const [user, categoriesData, documentsData] = await Promise.all([
-        getCurrentUser(),
-        getDocumentCategories(),
-        getDocuments(selectedCategory, searchTerm)
-      ]);
-      
-      setCurrentUser(user);
-      setCategories(categoriesData);
-      setDocuments(documentsData);
-      
+      const docs = await getDocuments({
+        organisationId: selectedOrgId,
+        projectId: selectedProjectId,
+        deliverableId: selectedDeliverableId,
+        search: searchTerm,
+      });
+      setDocuments(docs);
     } catch (err) {
       console.error('Error loading documents:', err);
       setError('Failed to load documents. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory, searchTerm]);
+  }, [selectedOrgId, selectedProjectId, selectedDeliverableId, searchTerm]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadDocuments();
+  }, [loadDocuments]);
 
-  // Handle category selection
-  const handleCategorySelect = (categoryId: string) => {
-    setSelectedCategory(categoryId);
-  };
-
-  // Handle search
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(e.target.value);
-  };
-
-  // Handle document view
-  const handleViewDocument = (doc: DrawingDocument) => {
+  const handleViewDocument = (doc: DrawingDocumentResolved) => {
     setSelectedDoc(doc);
     setIsViewerOpen(true);
   };
 
-  // Handle favorite toggle
   const handleToggleFavorite = async (id: number) => {
     try {
       const newStatus = await toggleFavorite(id);
-      // Update local state
-      setDocuments(prev =>
-        prev.map(doc =>
-          doc.id === id ? { ...doc, is_favorite: newStatus } : doc
-        )
+      setDocuments((prev) =>
+        prev.map((doc) => (doc.id === id ? { ...doc, is_favorite: newStatus } : doc))
       );
     } catch (error) {
       console.error('Error toggling favorite:', error);
     }
   };
 
-  // Handle download
-  const handleDownload = async (doc: DrawingDocument) => {
+  const handleDownload = async (doc: DrawingDocumentResolved) => {
     try {
       await downloadDocument(doc);
     } catch (error) {
@@ -105,14 +106,12 @@ export default function DocumentsPage() {
     }
   };
 
-  // Format file size
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / 1048576).toFixed(1) + ' MB';
   };
 
-  // Get file type icon
   const getFileIcon = (fileType: string): string => {
     switch (fileType) {
       case 'pdf':
@@ -124,7 +123,6 @@ export default function DocumentsPage() {
     }
   };
 
-  // Get status badge color
   const getStatusColor = (status: string): string => {
     switch (status) {
       case 'published':
@@ -138,9 +136,21 @@ export default function DocumentsPage() {
     }
   };
 
+  const clearFilters = () => {
+    setSelectedOrgId(undefined);
+    setSelectedProjectId(undefined);
+    setSelectedDeliverableId(undefined);
+    setSearchTerm('');
+  };
+
+  const hasActiveFilters =
+    selectedOrgId !== undefined ||
+    selectedProjectId !== undefined ||
+    selectedDeliverableId !== undefined ||
+    searchTerm.trim() !== '';
+
   return (
     <main className={`${display.variable} ${mono.variable} documents-page`}>
-      {/* Header */}
       <header className="documents-header">
         <div className="documents-brand">
           <span className="documents-brand-icon">
@@ -160,39 +170,22 @@ export default function DocumentsPage() {
         </nav>
       </header>
 
-      {/* Hero */}
       <div className="documents-hero">
         <p className="documents-eyebrow">Document Management</p>
         <h1 className="documents-title">Drawings & Documents</h1>
         <p className="documents-sub">
-          Access and manage all project drawings, schematics, and documentation.
+          Browse drawings by organisation, project, and deliverable — or search across all of them.
         </p>
       </div>
 
-      {/* User Profile Quick View */}
-      {currentUser && (
-        <div className="documents-user-quick">
-          <div className="documents-user-avatar">
-            {currentUser.full_name?.[0] || currentUser.email?.[0] || 'U'}
-          </div>
-          <div className="documents-user-info">
-            <span className="documents-user-name">
-              {currentUser.full_name || currentUser.email || 'User'}
-            </span>
-            <span className="documents-user-email">{currentUser.email}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Search and Filter Bar */}
       <div className="documents-controls">
         <div className="documents-search">
           <i className="ti ti-search" aria-hidden="true" />
           <input
             type="text"
-            placeholder="Search documents by title, description, or tags..."
+            placeholder="Search by title, tags, project, or deliverable..."
             value={searchTerm}
-            onChange={handleSearch}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="documents-search-input"
           />
           {searchTerm && (
@@ -207,24 +200,73 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Categories */}
-      <div className="documents-categories">
-        {categories.map((category) => (
-          <button
-            key={category.id}
-            className={`documents-category-btn ${
-              selectedCategory === category.id ? 'active' : ''
-            }`}
-            onClick={() => handleCategorySelect(category.id)}
+      <div className="documents-filters">
+        <div className="documents-filter-group">
+          <label className="documents-filter-label">
+            <i className="ti ti-building" /> Organisation
+          </label>
+          <select
+            className="documents-filter-select"
+            value={selectedOrgId ?? ''}
+            onChange={(e) => setSelectedOrgId(e.target.value ? Number(e.target.value) : undefined)}
           >
-            <i className={`ti ${category.icon}`} aria-hidden="true" />
-            <span>{category.name}</span>
-            <span className="documents-category-count">{category.count}</span>
+            <option value="">All Organisations</option>
+            {organisations.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="documents-filter-group">
+          <label className="documents-filter-label">
+            <i className="ti ti-briefcase" /> Project
+          </label>
+          <select
+            className="documents-filter-select"
+            value={selectedProjectId ?? ''}
+            onChange={(e) => setSelectedProjectId(e.target.value ? Number(e.target.value) : undefined)}
+            disabled={projects.length === 0}
+          >
+            <option value="">All Projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="documents-filter-group">
+          <label className="documents-filter-label">
+            <i className="ti ti-list-check" /> Deliverable
+          </label>
+          <select
+            className="documents-filter-select"
+            value={selectedDeliverableId ?? ''}
+            onChange={(e) =>
+              setSelectedDeliverableId(e.target.value ? Number(e.target.value) : undefined)
+            }
+            disabled={deliverables.length === 0}
+          >
+            <option value="">All Deliverables</option>
+            {deliverables.map((deliverable) => (
+              <option key={deliverable.id} value={deliverable.id}>
+                {deliverable.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {hasActiveFilters && (
+          <button className="documents-filter-clear" onClick={clearFilters}>
+            <i className="ti ti-x" />
+            Clear filters
           </button>
-        ))}
+        )}
       </div>
 
-      {/* Loading State */}
       {loading ? (
         <div className="documents-loading">
           <i className="ti ti-loader" aria-hidden="true" />
@@ -234,32 +276,43 @@ export default function DocumentsPage() {
         <div className="documents-error">
           <i className="ti ti-alert-circle" aria-hidden="true" />
           <p>{error}</p>
-          <button onClick={loadData} className="documents-retry-btn">
+          <button onClick={loadDocuments} className="documents-retry-btn">
             Retry
           </button>
         </div>
       ) : (
         <>
-          {/* Document Grid */}
           {documents.length > 0 ? (
             <div className="documents-grid">
               {documents.map((doc) => (
                 <div key={doc.id} className="documents-card">
                   <div className="documents-card-thumbnail">
-                    {doc.thumbnail_url ? (
-                      <img
-                        src={doc.thumbnail_url}
-                        alt={doc.title}
-                        className="documents-thumbnail-image"
-                      />
+                    {doc.file_type === 'pdf' ? (
+                      <PdfThumbnail fileUrl={doc.file_url} />
+                    ) : doc.thumbnail_url ? (
+                      <>
+                        <img
+                          src={doc.thumbnail_url}
+                          alt={doc.title}
+                          className="documents-thumbnail-image"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                            const placeholder = e.currentTarget.parentElement?.querySelector(
+                              '.documents-thumbnail-placeholder'
+                            );
+                            placeholder?.classList.remove('documents-thumbnail-hidden');
+                          }}
+                        />
+                        <div className="documents-thumbnail-placeholder documents-thumbnail-hidden">
+                          <i className={`ti ${getFileIcon(doc.file_type)}`} />
+                        </div>
+                      </>
                     ) : (
                       <div className="documents-thumbnail-placeholder">
                         <i className={`ti ${getFileIcon(doc.file_type)}`} />
                       </div>
                     )}
-                    <div className="documents-card-status" style={{
-                      background: getStatusColor(doc.status),
-                    }}>
+                    <div className="documents-card-status" style={{ background: getStatusColor(doc.status) }}>
                       {doc.status}
                     </div>
                     <button
@@ -270,11 +323,15 @@ export default function DocumentsPage() {
                       <i className={`ti ${doc.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
                     </button>
                   </div>
-                  
+
                   <div className="documents-card-content">
+                    <div className="documents-card-breadcrumb">
+                      {doc.organisation_name} <i className="ti ti-chevron-right" /> {doc.project_name}{" "}
+                      <i className="ti ti-chevron-right" /> {doc.deliverable_name}
+                    </div>
                     <h3 className="documents-card-title">{doc.title}</h3>
                     <p className="documents-card-description">{doc.description}</p>
-                    
+
                     <div className="documents-card-meta">
                       <span className="documents-card-meta-item">
                         <i className="ti ti-tag" />
@@ -289,7 +346,7 @@ export default function DocumentsPage() {
                         {doc.uploaded_by}
                       </span>
                     </div>
-                    
+
                     <div className="documents-card-tags">
                       {doc.tags.slice(0, 3).map((tag, idx) => (
                         <span key={idx} className="documents-card-tag">
@@ -297,12 +354,10 @@ export default function DocumentsPage() {
                         </span>
                       ))}
                       {doc.tags.length > 3 && (
-                        <span className="documents-card-tag-more">
-                          +{doc.tags.length - 3} more
-                        </span>
+                        <span className="documents-card-tag-more">+{doc.tags.length - 3} more</span>
                       )}
                     </div>
-                    
+
                     <div className="documents-card-actions">
                       <span className="documents-card-size">
                         <i className="ti ti-database" />
@@ -336,14 +391,13 @@ export default function DocumentsPage() {
               <p>
                 {searchTerm
                   ? `No documents match your search "${searchTerm}"`
-                  : 'No documents available in this category'}
+                  : 'No documents match the selected filters'}
               </p>
             </div>
           )}
         </>
       )}
 
-      {/* Document Viewer Modal */}
       {selectedDoc && (
         <DocumentViewer
           document={selectedDoc}

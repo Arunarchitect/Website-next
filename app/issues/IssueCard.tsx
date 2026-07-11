@@ -18,9 +18,7 @@ import { isUserMatch } from '@/components/utils/userMatching';
 const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 
-// Get image source with fallback
 const getImageSource = (imageData: string | undefined): string => {
-  // ✅ Use test.jpg as the default placeholder
   if (!imageData) {
     return '/images/test.jpg';
   }
@@ -57,8 +55,7 @@ const getImageSource = (imageData: string | undefined): string => {
     }
   }
 
-  console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return '/images/test.jpg'; // ✅ Use test.jpg as fallback
+  return '/images/test.jpg';
 };
 
 const DEFAULT_CAMERA_POSITION = { x: 0, y: 0, z: 0 };
@@ -74,16 +71,14 @@ interface IssueCardProps {
   onResolve: (resolution: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onRemoveSnapshot: () => Promise<void>;
   onRemoveAttachment: (index: number) => Promise<void>;
-  onAddScreenshot: (snapshotData: string, snapshotFormat: "png" | "jpg") => Promise<void>;
+  onAddScreenshot: (text: string, snapshotData: string, snapshotFormat: "png" | "jpg") => Promise<void>;
   onAddComment: (text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg", removeSnapshot?: boolean) => Promise<void>;
   onDeleteIssue: (issueId: string) => Promise<void>;
-  onRestoreIssue?: (issueId: string) => Promise<void>;
-  isAdmin?: boolean;
-  onHardDelete?: (issueId: string) => Promise<void>;
   currentUser: { email: string; fullName: string; username: string; displayName: string };
   isUserCreator: (reportedBy: string, user: any) => boolean;
+  
 }
 
 export function IssueCard({
@@ -99,9 +94,6 @@ export function IssueCard({
   onDeleteComment,
   onEditComment,
   onDeleteIssue,
-  onRestoreIssue,
-  isAdmin = false,
-  onHardDelete,
   currentUser,
   isUserCreator,
 }: IssueCardProps) {
@@ -112,7 +104,6 @@ export function IssueCard({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [newScreenshot, setNewScreenshot] = useState<string | null>(null);
   const [newScreenshotFormat, setNewScreenshotFormat] = useState<"png" | "jpg">("png");
-  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [resolutionScreenshot, setResolutionScreenshot] = useState<string | null>(null);
@@ -132,10 +123,10 @@ export function IssueCard({
   const [commentScreenshotFormat, setCommentScreenshotFormat] = useState<"png" | "jpg">("png");
   const [commentPreview, setCommentPreview] = useState<string | null>(null);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [showHistory, setShowHistory] = useState(false);
   const [showAllComments, setShowAllComments] = useState(false);
-  
+
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentText, setEditingCommentText] = useState("");
   const [editingCommentScreenshot, setEditingCommentScreenshot] = useState<string | null>(null);
@@ -143,6 +134,8 @@ export function IssueCard({
   const [editingCommentPreview, setEditingCommentPreview] = useState<string | null>(null);
   const [editingCommentHasExistingImage, setEditingCommentHasExistingImage] = useState(false);
   const editCommentFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [extraCommentText, setExtraCommentText] = useState("");
 
   const [form, setForm] = useState({
     title: issue.title,
@@ -154,16 +147,14 @@ export function IssueCard({
     dueDate: issue.dueDate ?? "",
   });
 
-  const canResolve = issue.status !== "Resolved" && issue.status !== "Closed" && issue.is_deleted !== true;
+  const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
   const isBim = isBimIssue(issue);
-  
+
   const isCreator = isUserCreator(issue.reportedBy, currentUser);
-  
+
   const isCommentAuthor = (commentAuthor: string): boolean => {
     return isUserMatch(commentAuthor, currentUser);
   };
-
-  console.log(`🔍 Issue #${issue.id}: reportedBy="${issue.reportedBy}", isCreator=${isCreator}, is_deleted=${issue.is_deleted}, organisation=${issue.organisation || 'N/A'}`);
 
   const getCurrentScreenshot = (): string | null => {
     if (isBim) {
@@ -191,7 +182,6 @@ export function IssueCard({
     return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
 
-  // Handle file upload for replacing image
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -208,7 +198,6 @@ export function IssueCard({
       const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
       setNewScreenshot(base64);
       setNewScreenshotFormat(format);
-      setImageLoadError(false);
     };
     reader.onerror = () => {
       setSaveError('Failed to read image file');
@@ -216,7 +205,6 @@ export function IssueCard({
     reader.readAsDataURL(file);
   };
 
-  // Handle comment file upload
   const handleCommentFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -241,7 +229,6 @@ export function IssueCard({
     reader.readAsDataURL(file);
   };
 
-  // Handle edit comment file upload
   const handleEditCommentFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -311,9 +298,14 @@ export function IssueCard({
     if (!extraScreenshot) return;
     try {
       setSaveError(null);
-      await onAddScreenshot(extraScreenshot, extraScreenshotFormat);
+      await onAddScreenshot(
+        extraCommentText.trim() || "Screenshot added",
+        extraScreenshot,
+        extraScreenshotFormat
+      );
       setExtraScreenshot(null);
       setExtraPreview(null);
+      setExtraCommentText("");
       setShowAddScreenshot(false);
     } catch {
       setSaveError('Failed to add screenshot.');
@@ -361,7 +353,7 @@ export function IssueCard({
   };
 
   const handleDeleteComment = async (commentId: string) => {
-    if (!confirm('Are you sure you want to delete this comment?')) return;
+    if (!confirm('Are you sure you want to delete this comment? This cannot be undone.')) return;
     try {
       setSaveError(null);
       await onDeleteComment(commentId);
@@ -387,7 +379,6 @@ export function IssueCard({
         patch.assignedToId = Number(form.assignedTo);
       }
 
-      // Handle image replacement
       if (newScreenshot) {
         if (isBim) {
           patch.domain = 'bim';
@@ -410,7 +401,6 @@ export function IssueCard({
       await onSave(patch);
       setIsEditing(false);
       setNewScreenshot(null);
-      setImageLoadError(false);
     } catch (err: any) {
       console.error('Save error:', err);
       if (err.response?.data) {
@@ -453,14 +443,13 @@ export function IssueCard({
       } else {
         await onRemoveAttachment(0);
       }
-      setImageLoadError(false);
     } catch (err) {
       setSaveError('Failed to remove screenshot. Please try again.');
     }
   };
 
   const handleDeleteIssueClick = async () => {
-    if (!confirm('Are you sure you want to delete this issue? This action can be undone by restoring it.')) {
+    if (!confirm('Are you sure you want to delete this issue? This cannot be undone.')) {
       return;
     }
     try {
@@ -471,60 +460,21 @@ export function IssueCard({
     }
   };
 
-  const handleRestoreIssueClick = async () => {
-    if (!confirm('Are you sure you want to restore this issue?')) {
-      return;
-    }
-    try {
-      setSaveError(null);
-      if (onRestoreIssue) {
-        await onRestoreIssue(issue.id);
-      }
-    } catch (err: any) {
-      setSaveError(err.message || 'Failed to restore issue.');
-    }
-  };
-
-  const handleHardDeleteClick = async () => {
-    if (!confirm('⚠️ PERMANENT DELETE: This will permanently remove this issue from the database. This cannot be undone. Are you sure?')) {
-      return;
-    }
-    // Double confirmation with text input
-    const confirmText = prompt('Type "DELETE" to confirm permanent deletion:');
-    if (confirmText !== 'DELETE') {
-      return;
-    }
-    try {
-      setSaveError(null);
-      if (onHardDelete) {
-        await onHardDelete(issue.id);
-      }
-    } catch (err: any) {
-      setSaveError(err.message || 'Failed to permanently delete issue.');
-    }
-  };
-
-  // Handle image error with fallback - ✅ Updated to use test.jpg
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const img = e.currentTarget;
-    if (!img.src.includes('test.jpg') && !img.src.includes('placeholder-image.png')) {
+    if (!img.src.includes('test.jpg')) {
       img.src = '/images/test.jpg';
     }
-    setImageLoadError(true);
-    console.warn('Failed to load image:', img.src);
   };
 
-  // Start editing a comment
   const startEditComment = (comment: any) => {
     setEditingCommentId(comment.id);
     setEditingCommentText(comment.text);
     setEditingCommentHasExistingImage(!!comment.snapshot);
-    // If there's an existing image, we keep it unless user replaces it
     setEditingCommentScreenshot(null);
     setEditingCommentPreview(null);
   };
 
-  // Remove comment image during edit
   const removeCommentImage = () => {
     setEditingCommentHasExistingImage(false);
     setEditingCommentScreenshot(null);
@@ -532,7 +482,7 @@ export function IssueCard({
   };
 
   return (
-    <div className={`issue-card ${issue.is_deleted ? 'issue-deleted' : ''}`}>
+    <div className="issue-card">
       <div className="issue-left">
         <div className="priority-strip" style={{ background: getPriorityColor(issue.priority) }} />
 
@@ -546,9 +496,7 @@ export function IssueCard({
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
               />
             ) : (
-              <h3 className={`issue-title ${issue.is_deleted ? 'deleted-text' : ''}`}>
-                {issue.title}
-              </h3>
+              <h3 className="issue-title">{issue.title}</h3>
             )}
             <span className={`domain-badge domain-${issue.domain}`}>
               {isBim ? (
@@ -563,9 +511,6 @@ export function IssueCard({
             </span>
             {!isEditing && isCreator && (
               <span className="issue-owner-badge">(You)</span>
-            )}
-            {!isEditing && issue.is_deleted === true && (
-              <span className="issue-deleted-badge">🗑️ Deleted</span>
             )}
             {!isEditing && issue.organisation && (
               <span className="issue-organisation-badge">
@@ -591,12 +536,9 @@ export function IssueCard({
               rows={3}
             />
           ) : (
-            <p className={`issue-description ${issue.is_deleted ? 'deleted-text' : ''}`}>
-              {issue.description}
-            </p>
+            <p className="issue-description">{issue.description}</p>
           )}
 
-          {/* Screenshot Section with Replace functionality */}
           <div className="screenshot-section">
             {!isEditing && hasScreenshot && (
               <div className="screenshot-thumbnail-container">
@@ -608,7 +550,7 @@ export function IssueCard({
                   onError={handleImageError}
                 />
                 <span className="screenshot-hint">Click to enlarge</span>
-                {isCreator && issue.is_deleted !== true && (
+                {isCreator && (
                   <button
                     className="screenshot-delete-btn"
                     onClick={handleRemoveSavedScreenshot}
@@ -620,7 +562,6 @@ export function IssueCard({
               </div>
             )}
 
-            {/* Show screenshot controls in edit mode */}
             {isEditing && (
               <div className="screenshot-edit-area">
                 <div className="screenshot-edit-header">
@@ -628,7 +569,6 @@ export function IssueCard({
                   <span className="screenshot-label">Screenshot</span>
                 </div>
 
-                {/* Show current or preview image */}
                 {hasScreenshot && (
                   <div className="screenshot-preview-container">
                     <img
@@ -643,7 +583,6 @@ export function IssueCard({
                   </div>
                 )}
 
-                {/* Upload button for replacement */}
                 <div className="screenshot-upload-actions">
                   <button
                     className="btn-primary small"
@@ -652,7 +591,7 @@ export function IssueCard({
                     <i className="ti ti-upload" />
                     {newScreenshot ? 'Change New Image' : hasScreenshot ? 'Replace Image' : 'Upload Image'}
                   </button>
-                  
+
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -664,9 +603,7 @@ export function IssueCard({
                   {newScreenshot && (
                     <button
                       className="btn-outline small danger"
-                      onClick={() => {
-                        setNewScreenshot(null);
-                      }}
+                      onClick={() => setNewScreenshot(null)}
                     >
                       <i className="ti ti-x" /> Discard New
                     </button>
@@ -684,7 +621,6 @@ export function IssueCard({
                   <span className="file-hint">Max 5MB (PNG/JPG)</span>
                 </div>
 
-                {/* Show preview of new screenshot */}
                 {newScreenshot && (
                   <div className="screenshot-new-preview">
                     <span className="preview-label">📸 New image (will replace current):</span>
@@ -778,13 +714,6 @@ export function IssueCard({
               </span>
             )}
 
-            {issue.is_deleted && issue.deleted_at && (
-              <span className="meta-item deleted-date">
-                <i className="ti ti-calendar" />
-                Deleted: {issue.deleted_at}
-              </span>
-            )}
-
             {isEditing ? (
               <>
                 <select
@@ -850,8 +779,7 @@ export function IssueCard({
             )}
           </div>
 
-          {/* Comments section - only show if not deleted */}
-          {issue.comments.length > 0 && !isEditing && issue.is_deleted !== true && (
+          {issue.comments.length > 0 && !isEditing && (
             <div className="comments-section">
               <div className="comments-header">
                 <div className="comments-header-left">
@@ -859,7 +787,7 @@ export function IssueCard({
                   <span>{issue.comments.length} comments</span>
                 </div>
                 <div className="comments-header-actions">
-                  <button 
+                  <button
                     className="sort-toggle"
                     onClick={onSortChange}
                     title={commentSortOrder === "desc" ? "Newest first" : "Oldest first"}
@@ -868,7 +796,7 @@ export function IssueCard({
                     {commentSortOrder === "desc" ? "Newest" : "Oldest"}
                   </button>
                   {issue.comments.length > 3 && (
-                    <button 
+                    <button
                       className="comments-toggle"
                       onClick={() => setShowAllComments(!showAllComments)}
                     >
@@ -880,7 +808,7 @@ export function IssueCard({
               <div className="comments-list">
                 {(showAllComments ? sortedComments : sortedComments.slice(0, 3)).map((comment) => {
                   const isAuthor = isCommentAuthor(comment.author);
-                  
+
                   return (
                     <div key={comment.id} className="comment-item">
                       {editingCommentId === comment.id ? (
@@ -891,15 +819,13 @@ export function IssueCard({
                             onChange={(e) => setEditingCommentText(e.target.value)}
                             rows={2}
                           />
-                          
-                          {/* Comment image edit section */}
+
                           <div className="comment-image-edit-section">
                             <div className="comment-image-edit-header">
                               <i className="ti ti-photo" />
                               <span>Comment Image</span>
                             </div>
-                            
-                            {/* Show existing image if no new image uploaded */}
+
                             {editingCommentHasExistingImage && !editingCommentScreenshot && (
                               <div className="comment-existing-image">
                                 <img
@@ -918,8 +844,7 @@ export function IssueCard({
                                 </button>
                               </div>
                             )}
-                            
-                            {/* Show new uploaded image preview */}
+
                             {editingCommentScreenshot && (
                               <div className="comment-new-image-preview">
                                 <img
@@ -939,8 +864,7 @@ export function IssueCard({
                                 </button>
                               </div>
                             )}
-                            
-                            {/* Upload button for comment image */}
+
                             <div className="comment-image-upload-actions">
                               <button
                                 className="btn-outline small"
@@ -959,10 +883,10 @@ export function IssueCard({
                               <span className="file-hint">Max 5MB</span>
                             </div>
                           </div>
-                          
+
                           <div className="comment-edit-actions">
-                            <button 
-                              className="btn-outline small" 
+                            <button
+                              className="btn-outline small"
                               onClick={() => {
                                 setEditingCommentId(null);
                                 setEditingCommentText("");
@@ -973,8 +897,8 @@ export function IssueCard({
                             >
                               Cancel
                             </button>
-                            <button 
-                              className="btn-primary small" 
+                            <button
+                              className="btn-primary small"
                               onClick={() => handleEditComment(comment.id, !!comment.snapshot)}
                               disabled={!editingCommentText.trim()}
                             >
@@ -994,7 +918,7 @@ export function IssueCard({
                           <div className="comment-text">{comment.text}</div>
                           {comment.snapshot && (
                             <div className="comment-snapshot">
-                              <img 
+                              <img
                                 src={getImageSource(comment.snapshot)}
                                 alt="Comment screenshot"
                                 onClick={() => handleImageClick(getImageSource(comment.snapshot))}
@@ -1005,13 +929,13 @@ export function IssueCard({
                           )}
                           {isAuthor && (
                             <div className="comment-actions">
-                              <button 
+                              <button
                                 className="comment-action-btn"
                                 onClick={() => startEditComment(comment)}
                               >
                                 <i className="ti ti-edit" /> Edit
                               </button>
-                              <button 
+                              <button
                                 className="comment-action-btn danger"
                                 onClick={() => handleDeleteComment(comment.id)}
                               >
@@ -1033,19 +957,7 @@ export function IssueCard({
             </div>
           )}
 
-          {/* Comments section for deleted issues - collapsed view */}
-          {issue.comments.length > 0 && !isEditing && issue.is_deleted === true && (
-            <div className="comments-section deleted-comments">
-              <div className="comments-header">
-                <div className="comments-header-left">
-                  <i className="ti ti-message-circle" />
-                  <span>{issue.comments.length} comments (hidden - issue deleted)</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {isResolving && issue.is_deleted !== true && (
+          {isResolving && (
             <div className="resolve-panel">
               <textarea
                 className="field-input"
@@ -1111,7 +1023,6 @@ export function IssueCard({
                 <button className="btn-outline" onClick={() => {
                   setIsEditing(false);
                   setNewScreenshot(null);
-                  setImageLoadError(false);
                 }}>
                   Cancel
                 </button>
@@ -1126,100 +1037,78 @@ export function IssueCard({
                     <button className="btn-outline" onClick={() => setIsEditing(true)}>
                       <i className="ti ti-edit" /> Edit
                     </button>
-                    {issue.is_deleted !== true && (
-                      <button 
-                        className="btn-outline danger" 
-                        onClick={handleDeleteIssueClick}
-                      >
-                        <i className="ti ti-trash" /> Delete
-                      </button>
-                    )}
-                    {issue.is_deleted === true && onRestoreIssue && (
-                      <button 
-                        className="btn-outline" 
-                        onClick={handleRestoreIssueClick}
-                      >
-                        <i className="ti ti-restore" /> Restore
-                      </button>
-                    )}
+                    <button
+                      className="btn-outline danger"
+                      onClick={handleDeleteIssueClick}
+                    >
+                      <i className="ti ti-trash" /> Delete
+                    </button>
                   </>
                 )}
-                
-                {/* Hard Delete button for admins - always visible */}
-                {isAdmin && onHardDelete && (
-                  <button 
-                    className="btn-outline danger" 
-                    onClick={handleHardDeleteClick}
-                    style={{ 
-                      borderColor: '#8B0000', 
-                      color: '#8B0000',
-                      fontWeight: 'bold',
-                    }}
-                    title="Permanently delete this issue (cannot be undone)"
-                  >
-                    <i className="ti ti-trash-x" /> Hard Delete
-                  </button>
-                )}
-                
-                {canResolve && issue.is_deleted !== true && (
+
+                {canResolve && (
                   <button className="btn-outline" onClick={() => setIsResolving((v) => !v)}>
                     <i className="ti ti-check" /> Resolve
                   </button>
                 )}
-                {issue.is_deleted !== true && (
-                  <>
-                    <button 
-                      className="btn-outline" 
-                      onClick={() => setShowAddScreenshot((v) => !v)}
-                    >
-                      <i className="ti ti-photo-plus" /> Add Screenshot
-                    </button>
-                    <button 
-                      className="btn-outline" 
-                      onClick={() => setShowCommentInput((v) => !v)}
-                    >
-                      <i className="ti ti-message-plus" /> Add Comment
-                    </button>
-                  </>
-                )}
+                <button
+                  className="btn-outline"
+                  onClick={() => setShowAddScreenshot((v) => !v)}
+                >
+                  <i className="ti ti-photo-plus" /> Add Screenshot
+                </button>
+                <button
+                  className="btn-outline"
+                  onClick={() => setShowCommentInput((v) => !v)}
+                >
+                  <i className="ti ti-message-plus" /> Add Comment
+                </button>
               </>
             )}
           </div>
 
-          {showAddScreenshot && issue.is_deleted !== true && (
+          {showAddScreenshot && (
             <div className="resolve-screenshot-upload" style={{ marginTop: '12px' }}>
+              <textarea
+                className="field-input"
+                placeholder="Add a note about this screenshot (optional)…"
+                value={extraCommentText}
+                onChange={(e) => setExtraCommentText(e.target.value)}
+                rows={2}
+                style={{ marginBottom: '8px' }}
+              />
               {extraPreview ? (
                 <div className="screenshot-preview">
                   <img src={extraPreview} alt="New screenshot preview" />
-                  <button 
-                    className="remove-btn" 
-                    onClick={() => { 
-                      setExtraScreenshot(null); 
-                      setExtraPreview(null); 
+                  <button
+                    className="remove-btn"
+                    onClick={() => {
+                      setExtraScreenshot(null);
+                      setExtraPreview(null);
                     }}
                   >
                     ✕
                   </button>
                 </div>
               ) : (
-                <button 
-                  className="btn-outline small" 
-                  onClick={() => extraFileInputRef.current?.click()} 
+                <button
+                  className="btn-outline small"
+                  onClick={() => extraFileInputRef.current?.click()}
                   type="button"
                 >
                   <i className="ti ti-camera" /> Choose image
                 </button>
               )}
-              <input 
-                ref={extraFileInputRef} 
-                type="file" 
-                accept="image/png,image/jpeg" 
-                onChange={handleExtraFileUpload} 
-                style={{ display: 'none' }} 
+              <input
+                ref={extraFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg"
+                onChange={handleExtraFileUpload}
+                style={{ display: 'none' }}
               />
               {extraScreenshot && (
-                <button 
-                  className="btn-primary small" 
+                <button
+                  className="btn-primary small"
                   onClick={handleAddScreenshot}
                   style={{ marginTop: '8px' }}
                 >
@@ -1229,7 +1118,7 @@ export function IssueCard({
             </div>
           )}
 
-          {showCommentInput && issue.is_deleted !== true && (
+          {showCommentInput && (
             <div className="comment-input-panel" style={{ marginTop: '12px' }}>
               <textarea
                 className="field-input"
@@ -1238,8 +1127,7 @@ export function IssueCard({
                 onChange={(e) => setCommentText(e.target.value)}
                 rows={2}
               />
-              
-              {/* Comment image upload */}
+
               <div className="comment-image-upload">
                 {commentPreview ? (
                   <div className="comment-image-preview">
@@ -1271,10 +1159,10 @@ export function IssueCard({
                   style={{ display: 'none' }}
                 />
               </div>
-              
+
               <div className="form-actions" style={{ marginTop: '8px' }}>
-                <button 
-                  className="btn-outline" 
+                <button
+                  className="btn-outline"
                   onClick={() => {
                     setShowCommentInput(false);
                     setCommentText('');
@@ -1284,8 +1172,8 @@ export function IssueCard({
                 >
                   Cancel
                 </button>
-                <button 
-                  className="btn-primary" 
+                <button
+                  className="btn-primary"
                   onClick={handleAddComment}
                   disabled={!commentText.trim()}
                 >
@@ -1307,12 +1195,6 @@ export function IssueCard({
             <span className="issue-time updated">
               <i className="ti ti-refresh" />
               {issue.updated}
-            </span>
-          )}
-          {issue.is_deleted && issue.deleted_at && (
-            <span className="issue-time deleted">
-              <i className="ti ti-trash" />
-              Deleted: {issue.deleted_at}
             </span>
           )}
         </div>

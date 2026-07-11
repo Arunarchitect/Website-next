@@ -21,7 +21,6 @@ import {
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
 const API_URL = `${API_BASE_URL}/api`;
 
-// Helper to get auth token with the correct key
 const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') return null;
 
@@ -33,29 +32,20 @@ const getAuthToken = (): string | null => {
     sessionStorage.getItem('access_token') ||
     null;
 
-  if (token) {
-    console.log('🔑 Token found, length:', token.length);
-  } else {
+  if (!token) {
     console.warn('⚠️ No authentication token found in localStorage');
   }
 
   return token;
 };
 
-// Get CSRF token from cookies (if needed)
 const getCsrfToken = (): string | null => {
   if (typeof window === 'undefined') return null;
   const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
   return match ? match[1] : null;
 };
 
-// ✅ UPDATED: Helper to safely get image source with fallback
-// issues/issueApi.ts
-
-// Find the getImageSource function (around line 70-110) and replace it with:
-
 export const getImageSource = (imageData: string | undefined, fallback?: string): string => {
-  // ✅ Use test.jpg as the default placeholder
   if (!imageData) {
     return fallback || '/images/test.jpg';
   }
@@ -92,14 +82,11 @@ export const getImageSource = (imageData: string | undefined, fallback?: string)
     }
   }
 
-  console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return fallback || '/images/test.jpg'; // ✅ Use test.jpg as fallback
+  return fallback || '/images/test.jpg';
 };
 
-// ✅ NEW: Helper to check if an image URL is accessible
 export const checkImageAccessibility = async (url: string): Promise<boolean> => {
   if (!url || url.startsWith('data:')) return true;
-  
   try {
     const response = await fetch(url, { method: 'HEAD' });
     return response.ok;
@@ -108,19 +95,11 @@ export const checkImageAccessibility = async (url: string): Promise<boolean> => 
   }
 };
 
-// ✅ NEW: Helper to validate image URL
 export const validateImageUrl = (url: string): boolean => {
   if (!url) return false;
-  if (url.startsWith('data:')) return true;
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    // Return true for remote URLs, they'll be handled by onError
-    return true;
-  }
-  // For local media paths, return true but they'll be handled by onError
   return true;
 };
 
-// Axios instance
 const apiClient = axios.create({
   baseURL: API_URL,
   headers: {
@@ -130,37 +109,23 @@ const apiClient = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
     const token = getAuthToken();
-
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-      console.log(`📤 ${config.method?.toUpperCase()} ${config.url} - Auth header added`);
-    } else {
-      console.warn(`📤 ${config.method?.toUpperCase()} ${config.url} - No auth token`);
     }
-
     const csrfToken = getCsrfToken();
     if (csrfToken && ['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase() || '')) {
       config.headers['X-CSRFToken'] = csrfToken;
     }
-
     return config;
   },
-  (error) => {
-    console.error('Request interceptor error:', error);
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Response interceptor
 apiClient.interceptors.response.use(
-  (response) => {
-    console.log(`📥 ${response.status} ${response.config.url}`);
-    return response;
-  },
+  (response) => response,
   async (error) => {
     if (error.response) {
       console.error(`❌ API Error ${error.response.status}:`, {
@@ -169,8 +134,6 @@ apiClient.interceptors.response.use(
       });
 
       if (error.response.status === 401) {
-        console.warn('🔒 Unauthorized - token may be expired or invalid');
-
         const refreshToken = localStorage.getItem('refresh');
         if (refreshToken && !error.config._retry) {
           error.config._retry = true;
@@ -178,17 +141,14 @@ apiClient.interceptors.response.use(
             const response = await axios.post(`${API_URL}/auth/refresh/`, {
               refresh: refreshToken
             });
-
             if (response.data.access) {
               localStorage.setItem('access', response.data.access);
               error.config.headers.Authorization = `Bearer ${response.data.access}`;
               return apiClient(error.config);
             }
           } catch (refreshError) {
-            console.error('Token refresh failed:', refreshError);
             localStorage.removeItem('access');
             localStorage.removeItem('refresh');
-
             if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
               window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
             }
@@ -196,99 +156,65 @@ apiClient.interceptors.response.use(
         }
       }
     }
-
     return Promise.reject(error);
   }
 );
 
 // ---------------------------------------------------------------------------
-// Helper to map frontend enums to backend enums
+// Enum mapping helpers
 // ---------------------------------------------------------------------------
 
 const mapStatusToBackend = (status: string): string => {
   const statusMap: {[key: string]: string} = {
-    'Open': 'open',
-    'In Progress': 'in_progress',
-    'Resolved': 'resolved',
-    'Closed': 'closed',
-    'open': 'open',
-    'in_progress': 'in_progress',
-    'resolved': 'resolved',
-    'closed': 'closed'
+    'Open': 'open', 'In Progress': 'in_progress', 'Resolved': 'resolved', 'Closed': 'closed',
+    'open': 'open', 'in_progress': 'in_progress', 'resolved': 'resolved', 'closed': 'closed'
   };
   return statusMap[status] || 'open';
 };
 
 const mapPriorityToBackend = (priority: string): string => {
   const priorityMap: {[key: string]: string} = {
-    'High': 'high',
-    'Medium': 'medium',
-    'Low': 'low',
-    'high': 'high',
-    'medium': 'medium',
-    'low': 'low'
+    'High': 'high', 'Medium': 'medium', 'Low': 'low',
+    'high': 'high', 'medium': 'medium', 'low': 'low'
   };
   return priorityMap[priority] || 'medium';
 };
 
 const mapTopicTypeToBackend = (topicType: string): string => {
   const topicTypeMap: {[key: string]: string} = {
-    'Clash': 'clash',
-    'Coordinate': 'coordinate',
-    'Quality': 'quality',
-    'Safety': 'safety',
-    'General': 'general',
-    'Request': 'request',
-    'Fault': 'fault',
-    'clash': 'clash',
-    'coordinate': 'coordinate',
-    'quality': 'quality',
-    'safety': 'safety',
-    'general': 'general',
-    'request': 'request',
-    'fault': 'fault'
+    'Clash': 'clash', 'Coordinate': 'coordinate', 'Quality': 'quality', 'Safety': 'safety',
+    'General': 'general', 'Request': 'request', 'Fault': 'fault',
+    'clash': 'clash', 'coordinate': 'coordinate', 'quality': 'quality', 'safety': 'safety',
+    'general': 'general', 'request': 'request', 'fault': 'fault'
   };
   return topicTypeMap[topicType] || 'general';
 };
 
 const mapStatusToFrontend = (status: string): string => {
   const statusMap: {[key: string]: string} = {
-    'open': 'Open',
-    'in_progress': 'In Progress',
-    'resolved': 'Resolved',
-    'closed': 'Closed'
+    'open': 'Open', 'in_progress': 'In Progress', 'resolved': 'Resolved', 'closed': 'Closed'
   };
   return statusMap[status] || status;
 };
 
 const mapPriorityToFrontend = (priority: string): string => {
-  const priorityMap: {[key: string]: string} = {
-    'high': 'High',
-    'medium': 'Medium',
-    'low': 'Low'
-  };
+  const priorityMap: {[key: string]: string} = { 'high': 'High', 'medium': 'Medium', 'low': 'Low' };
   return priorityMap[priority] || priority;
 };
 
 const mapTopicTypeToFrontend = (topicType: string): string => {
   const topicTypeMap: {[key: string]: string} = {
-    'clash': 'Clash',
-    'coordinate': 'Coordinate',
-    'quality': 'Quality',
-    'safety': 'Safety',
-    'general': 'General',
-    'request': 'Request',
-    'fault': 'Fault'
+    'clash': 'Clash', 'coordinate': 'Coordinate', 'quality': 'Quality', 'safety': 'Safety',
+    'general': 'General', 'request': 'Request', 'fault': 'Fault'
   };
   return topicTypeMap[topicType] || topicType;
 };
 
 // ---------------------------------------------------------------------------
-// Helper to convert Django issue to frontend Issue type
+// Django <-> frontend converters
 // ---------------------------------------------------------------------------
 
 const convertDjangoIssue = (data: any): Issue => {
-  // Create the base object without specifying domain type explicitly
   const baseIssue = {
     id: String(data.id),
     title: data.title,
@@ -304,9 +230,6 @@ const convertDjangoIssue = (data: any): Issue => {
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
-    is_deleted: data.is_deleted || false,
-    deleted_at: data.deleted_at || null,
-    deleted_by: data.deleted_by || null,
     organisation: data.organisation || data.organisation_details?.name || data.project_details?.organisation_name || null,
     comments: (data.comments || []).map((c: any) => ({
       id: String(c.id),
@@ -318,7 +241,6 @@ const convertDjangoIssue = (data: any): Issue => {
     })),
   };
 
-  // Handle BIM domain
   if (data.domain === 'bim') {
     return {
       ...baseIssue,
@@ -346,21 +268,17 @@ const convertDjangoIssue = (data: any): Issue => {
     };
   }
 
-  // Handle non-BIM domains (design/other)
   return {
     ...baseIssue,
     domain: (data.domain === 'design' ? 'design' : 'other') as const,
     category: data.category || '',
     attachments: (data.attachments || []).map((a: any) => {
-      if (typeof a === 'string') {
-        return getImageSource(a);
-      }
+      if (typeof a === 'string') return getImageSource(a);
       return getImageSource(a?.file || a?.url || a?.data || '');
     }).filter(Boolean),
   };
 };
 
-// Helper to convert frontend issue to Django payload
 const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = true): any => {
   const payload: any = {};
 
@@ -376,15 +294,8 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
 
   if (issue.title !== undefined && issue.title !== '') payload.title = issue.title;
   if (issue.description !== undefined) payload.description = issue.description;
-
-  if (issue.status !== undefined) {
-    payload.status = mapStatusToBackend(issue.status);
-  }
-
-  if (issue.priority !== undefined) {
-    payload.priority = mapPriorityToBackend(issue.priority);
-  }
-
+  if (issue.status !== undefined) payload.status = mapStatusToBackend(issue.status);
+  if (issue.priority !== undefined) payload.priority = mapPriorityToBackend(issue.priority);
   if (issue.module !== undefined && issue.module !== '') payload.module = issue.module;
 
   if (issue.assignedToId !== undefined && issue.assignedToId !== null) {
@@ -421,16 +332,11 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
       const viewpoint = bimIssue.viewpoint;
 
       const viewpointPayload: any = {
-        camera_position:
-          viewpoint.camera_position || viewpoint.cameraPosition || { x: 0, y: 0, z: 0 },
-        camera_direction:
-          viewpoint.camera_direction || viewpoint.cameraDirection || { x: 0, y: 0, z: -1 },
-        camera_up_vector:
-          viewpoint.camera_up_vector || viewpoint.cameraUpVector || { x: 0, y: 1, z: 0 },
-        field_of_view:
-          viewpoint.field_of_view ?? viewpoint.fieldOfView ?? 60,
-        clipping_planes:
-          viewpoint.clipping_planes || viewpoint.clippingPlanes || [],
+        camera_position: viewpoint.camera_position || viewpoint.cameraPosition || { x: 0, y: 0, z: 0 },
+        camera_direction: viewpoint.camera_direction || viewpoint.cameraDirection || { x: 0, y: 0, z: -1 },
+        camera_up_vector: viewpoint.camera_up_vector || viewpoint.cameraUpVector || { x: 0, y: 1, z: 0 },
+        field_of_view: viewpoint.field_of_view ?? viewpoint.fieldOfView ?? 60,
+        clipping_planes: viewpoint.clipping_planes || viewpoint.clippingPlanes || [],
       };
 
       const snapshotData = viewpoint.snapshot_data ?? viewpoint.snapshot?.data;
@@ -469,12 +375,9 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
   }
 
   Object.keys(payload).forEach(key => {
-    if (payload[key] === undefined) {
-      delete payload[key];
-    }
+    if (payload[key] === undefined) delete payload[key];
   });
 
-  console.log('📤 Final payload:', JSON.stringify(payload, null, 2));
   return payload;
 };
 
@@ -482,31 +385,15 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
 // CRUD OPERATIONS
 // ---------------------------------------------------------------------------
 
-/**
- * Get all issues with optional filters
- * @param params - Optional filters including include_deleted
- */
 export async function getIssues(params?: {
   project?: number;
   domain?: string;
   status?: string;
   assigned_to?: number;
   deliverable?: number;
-  include_deleted?: boolean;
 }): Promise<Issue[]> {
   try {
-    console.log('Fetching issues with params:', params);
-    
-    const queryParams: any = { ...params };
-    if (params?.include_deleted !== undefined) {
-      queryParams.include_deleted = params.include_deleted ? 'true' : 'false';
-    }
-    
-    const response = await apiClient.get('/issues/issues/', { 
-      params: queryParams 
-    });
-    
-    console.log('✅ Issues fetched successfully:', response.data?.length || 0, 'items');
+    const response = await apiClient.get('/issues/issues/', { params });
     return response.data.map(convertDjangoIssue);
   } catch (error) {
     console.error('❌ Error fetching issues:', error);
@@ -529,22 +416,15 @@ export async function getIssue(id: string | number): Promise<Issue | undefined> 
 
 export async function createIssue(input: any): Promise<Issue> {
   try {
-    console.log('📤 Creating issue with input:', input);
     const payload = convertToDjangoPayload({
       ...input,
       project: input.project_id || input.project,
     });
-
-    console.log('📤 Image data present (viewpoint):', !!payload.viewpoint?.snapshot_data);
-    console.log('📤 Image data length (viewpoint):', payload.viewpoint?.snapshot_data?.length || 0);
-    console.log('📤 Image data present (attachment):', !!payload.new_attachment_data);
-
     const response = await apiClient.post('/issues/issues/', payload);
     return convertDjangoIssue(response.data);
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
       console.error('❌ Server validation errors:', error.response.data);
-      console.error('❌ Full error response:', JSON.stringify(error.response.data, null, 2));
     }
     console.error('Error creating issue:', error);
     throw error;
@@ -558,10 +438,6 @@ export async function updateIssue(id: string | number, patch: Partial<Issue>): P
       project: patch.project_id || patch.project,
     }, false);
 
-    console.log('📤 Updating issue with payload:', JSON.stringify(payload, null, 2));
-    console.log('📤 Image data present in update (viewpoint):', !!payload.viewpoint?.snapshot_data);
-    console.log('📤 Image data present in update (attachment):', !!payload.new_attachment_data);
-
     const response = await apiClient.patch(`/issues/issues/${id}/`, payload);
     return convertDjangoIssue(response.data);
   } catch (error) {
@@ -570,7 +446,6 @@ export async function updateIssue(id: string | number, patch: Partial<Issue>): P
     }
     if (axios.isAxiosError(error) && error.response) {
       console.error('❌ Error updating issue - Response data:', error.response.data);
-      console.error('❌ Error updating issue - Response status:', error.response.status);
     }
     console.error('Error updating issue:', error);
     throw error;
@@ -585,15 +460,11 @@ export async function resolveIssue(
   snapshotFormat?: "png" | "jpg"
 ): Promise<Issue | undefined> {
   try {
-    const payload: any = {
-      resolution: resolution,
-    };
-    
+    const payload: any = { resolution };
     if (snapshotData) {
       payload.snapshot_data = snapshotData;
       payload.snapshot_format = snapshotFormat || 'png';
     }
-    
     const response = await apiClient.post(`/issues/issues/${id}/resolve/`, payload);
     return convertDjangoIssue(response.data.issue);
   } catch (error) {
@@ -607,37 +478,14 @@ export async function resolveIssue(
 
 export async function deleteIssue(id: string | number): Promise<void> {
   try {
-    console.log(`📤 Deleting issue ${id}`);
     await apiClient.delete(`/issues/issues/${id}/`);
-    console.log('✅ Issue deleted successfully');
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error deleting issue:', error.response.data);
       if (error.response.status === 403) {
         throw new Error('You can only delete issues you created.');
       }
-    } else {
-      console.error('❌ Error deleting issue:', error);
     }
-    throw error;
-  }
-}
-
-export async function restoreIssue(id: string | number): Promise<Issue | undefined> {
-  try {
-    console.log(`📤 Restoring issue ${id}`);
-    const response = await apiClient.post(`/issues/issues/${id}/restore/`);
-    console.log('✅ Issue restored successfully');
-    return convertDjangoIssue(response.data);
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error restoring issue:', error.response.data);
-      if (error.response.status === 403) {
-        throw new Error('You can only restore issues you created.');
-      }
-    } else {
-      console.error('❌ Error restoring issue:', error);
-    }
+    console.error('❌ Error deleting issue:', error);
     throw error;
   }
 }
@@ -668,41 +516,13 @@ export async function addComment(
   snapshotFormat?: "png" | "jpg"
 ): Promise<Issue | undefined> {
   try {
-    console.log(`📤 Adding comment to issue ${id}`);
-    console.log(`📤 Comment text: "${text}"`);
-    console.log(`📤 Has snapshot: ${!!snapshotData}`);
-    
-    const payload: any = {
-      text: text,
-    };
-    
+    const payload: any = { text };
     if (snapshotData) {
       payload.snapshot_data = snapshotData;
       payload.snapshot_format = snapshotFormat || 'png';
-      console.log(`📸 Including snapshot data, format: ${snapshotFormat || 'png'}`);
-      console.log(`📸 Snapshot data length: ${snapshotData.length}`);
     }
-    
-    const response = await apiClient.post(`/issues/issues/${id}/add-comment/`, payload);
-    console.log('✅ Comment added successfully:', response.data);
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const updatedIssue = await getIssue(id);
-    console.log('📥 Fetched updated issue with comments:', updatedIssue?.comments?.length || 0, 'comments');
-    
-    if (updatedIssue && updatedIssue.comments && updatedIssue.comments.length > 0) {
-      const lastComment = updatedIssue.comments[updatedIssue.comments.length - 1];
-      console.log('📝 Last comment:', {
-        id: lastComment.id,
-        author: lastComment.author,
-        text: lastComment.text,
-        hasSnapshot: !!lastComment.snapshot,
-        snapshot: lastComment.snapshot ? lastComment.snapshot.substring(0, 50) + '...' : null,
-      });
-    }
-    
-    return updatedIssue;
+    await apiClient.post(`/issues/issues/${id}/add-comment/`, payload);
+    return await getIssue(id);
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
       console.error('❌ Error adding comment:', error.response.data);
@@ -720,7 +540,6 @@ export async function addCommentWithSnapshot(
   snapshotData?: string,
   snapshotFormat?: "png" | "jpg"
 ): Promise<Issue | undefined> {
-  console.log(`📤 Adding comment with snapshot to issue ${id}`);
   return addComment(id, author, text, snapshotData, snapshotFormat);
 }
 
@@ -746,21 +565,17 @@ export async function deleteComment(
   commentId: string | number
 ): Promise<void> {
   try {
-    console.log(`📤 Deleting comment ${commentId} from issue ${issueId}`);
     await apiClient.delete(`/issues/comments/${commentId}/`);
-    console.log('✅ Comment deleted successfully');
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error deleting comment:', error.response.data);
       if (error.response.status === 403) {
         throw new Error('You can only delete your own comments.');
       }
       if (error.response.status === 404) {
         throw new Error('Comment not found.');
       }
-    } else {
-      console.error('❌ Error deleting comment:', error);
     }
+    console.error('❌ Error deleting comment:', error);
     throw error;
   }
 }
@@ -774,8 +589,6 @@ export async function editComment(
   removeSnapshot?: boolean
 ): Promise<IssueComment> {
   try {
-    console.log(`📤 Editing comment ${commentId} on issue ${issueId}`);
-
     const payload: any = { text };
 
     if (snapshotData) {
@@ -787,68 +600,37 @@ export async function editComment(
     }
 
     const response = await apiClient.patch(`/issues/comments/${commentId}/`, payload);
-    console.log('✅ Comment edited successfully');
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error editing comment:', error.response.data);
       if (error.response.status === 403) {
         throw new Error('You can only edit your own comments.');
       }
       if (error.response.status === 404) {
         throw new Error('Comment not found.');
       }
-    } else {
-      console.error('❌ Error editing comment:', error);
     }
+    console.error('❌ Error editing comment:', error);
     throw error;
   }
 }
+
 // ---------------------------------------------------------------------------
 // LINKED ISSUES
 // ---------------------------------------------------------------------------
 
-export async function linkIssue(
-  id: string | number,
-  linkedIssueId: string | number
-): Promise<void> {
+export async function linkIssue(id: string | number, linkedIssueId: string | number): Promise<void> {
   try {
-    await apiClient.post(`/issues/issues/${id}/link-issue/`, {
-      linked_issue_id: linkedIssueId,
-    });
+    await apiClient.post(`/issues/issues/${id}/link-issue/`, { linked_issue_id: linkedIssueId });
   } catch (error) {
     console.error('Error linking issue:', error);
     throw error;
   }
 }
 
-export async function hardDeleteIssue(id: string | number): Promise<void> {
+export async function unlinkIssue(id: string | number, linkedIssueId: string | number): Promise<void> {
   try {
-    console.log(`📤 Permanently deleting issue ${id}`);
-    const response = await apiClient.delete(`/issues/issues/${id}/hard-delete/`);
-    console.log('✅ Issue permanently deleted:', response.data);
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response) {
-      console.error('❌ Error hard deleting issue:', error.response.data);
-      if (error.response.status === 403) {
-        throw new Error('Only administrators can permanently delete issues.');
-      }
-      throw new Error(error.response.data?.error || 'Failed to permanently delete issue.');
-    } else {
-      console.error('❌ Error hard deleting issue:', error);
-      throw error;
-    }
-  }
-}
-
-export async function unlinkIssue(
-  id: string | number,
-  linkedIssueId: string | number
-): Promise<void> {
-  try {
-    await apiClient.post(`/issues/issues/${id}/unlink-issue/`, {
-      linked_issue_id: linkedIssueId,
-    });
+    await apiClient.post(`/issues/issues/${id}/unlink-issue/`, { linked_issue_id: linkedIssueId });
   } catch (error) {
     console.error('Error unlinking issue:', error);
     throw error;
@@ -888,9 +670,7 @@ export async function toBcfTopic(issue: BimIssue): Promise<any> {
 
 export async function toBcfTopicWithSnapshots(issue: BimIssue): Promise<any> {
   try {
-    const response = await apiClient.get(
-      `/issues/issues/${issue.id}/export-bcf/?include_snapshots=true`
-    );
+    const response = await apiClient.get(`/issues/issues/${issue.id}/export-bcf/?include_snapshots=true`);
     return response.data;
   } catch (error) {
     console.error('Error exporting to BCF with snapshots:', error);
@@ -917,22 +697,22 @@ export async function fromBcfTopic(topic: any, projectId: number): Promise<Issue
 // ---------------------------------------------------------------------------
 
 export const getIssuesByTopicType = async (type: BcfTopicType) => {
-  const issues = await getIssues({ include_deleted: false });
+  const issues = await getIssues();
   return issues.filter(isBimIssue).filter((i) => i.topicType === type);
 };
 
 export const getIssuesByAssignee = async (assignee: string) => {
-  const issues = await getIssues({ include_deleted: false });
+  const issues = await getIssues();
   return issues.filter((i) => i.assignedTo === assignee);
 };
 
 export const getIssuesByDomain = async (domain: IssueDomain) => {
-  const issues = await getIssues({ include_deleted: false });
+  const issues = await getIssues();
   return issues.filter((i) => i.domain === domain);
 };
 
 export const getIssuesByIfcElement = async (ifcGuid: string) => {
-  const issues = await getIssues({ include_deleted: false });
+  const issues = await getIssues();
   return issues.filter(isBimIssue).filter((i) => i.ifcElements?.includes(ifcGuid));
 };
 
@@ -952,31 +732,20 @@ export const getMyIssues = async (): Promise<Issue[]> => {
 
 export const getStatusColor = (status: IssueStatus): string => {
   switch (status) {
-    case 'Resolved':
-      return '#4A8B6B';
-    case 'Closed':
-      return '#6B7280';
-    case 'In Progress':
-      return '#E8A838';
-    default:
-      return '#D43E3E';
+    case 'Resolved': return '#4A8B6B';
+    case 'Closed': return '#6B7280';
+    case 'In Progress': return '#E8A838';
+    default: return '#D43E3E';
   }
 };
 
 export const getPriorityColor = (priority: IssuePriority): string => {
   switch (priority) {
-    case 'High':
-      return '#D43E3E';
-    case 'Medium':
-      return '#E8A838';
-    default:
-      return '#4A8B6B';
+    case 'High': return '#D43E3E';
+    case 'Medium': return '#E8A838';
+    default: return '#4A8B6B';
   }
 };
-
-// ---------------------------------------------------------------------------
-// EXPORT DEFAULTS
-// ---------------------------------------------------------------------------
 
 export default {
   getIssues,
@@ -985,7 +754,6 @@ export default {
   updateIssue,
   resolveIssue,
   deleteIssue,
-  restoreIssue,
   removeSnapshot,
   removeAttachment,
   addComment,
@@ -993,7 +761,6 @@ export default {
   getComments,
   deleteComment,
   editComment,
-  hardDeleteIssue,
   linkIssue,
   unlinkIssue,
   getViewpoint,

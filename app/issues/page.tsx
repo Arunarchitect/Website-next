@@ -17,8 +17,6 @@ import {
   deleteComment,
   editComment,
   deleteIssue,
-  restoreIssue,
-  hardDeleteIssue,
 } from "./issueApi";
 import {
   Issue,
@@ -46,7 +44,6 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
-const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 const TOPIC_TYPE_OPTIONS: BcfTopicType[] = [
   "Clash",
@@ -63,7 +60,6 @@ const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
 const DEFAULT_CAMERA_UP_VECTOR = { x: 0, y: 1, z: 0 };
 const DEFAULT_FIELD_OF_VIEW = 60;
 
-// Interfaces for dropdowns
 interface OrganisationOption {
   id: number;
   name: string;
@@ -81,20 +77,16 @@ export default function IssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
-  const [showDeleted, setShowDeleted] = useState(false);
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
-  const [deletedCount, setDeletedCount] = useState(0); // ✅ New state for deleted count
 
-  // Load user from localStorage into Redux on mount
   useEffect(() => {
     const loadUserFromStorage = () => {
       const userStr = localStorage.getItem('user');
       if (userStr) {
         try {
           const userData = JSON.parse(userStr);
-          console.log('✅ Loading user from localStorage into Redux:', userData);
           dispatch(setUser(userData));
         } catch (e) {
           console.error('Failed to parse user data:', e);
@@ -105,9 +97,6 @@ export default function IssuesPage() {
   }, [dispatch]);
 
   const currentUserData = useCurrentUser();
-  
-  // Check if user is admin
-  const isAdmin = currentUserData?.is_staff || currentUserData?.is_superuser || false;
 
   const currentUser = {
     email: currentUserData?.email || '',
@@ -123,25 +112,7 @@ export default function IssuesPage() {
   const refresh = async () => {
     try {
       setError(null);
-      console.log(`🔄 Refreshing issues with include_deleted=${showDeleted}...`);
-
-      // ✅ Step 1: Always fetch ALL issues to get the deleted count
-      const allIssues = await getIssues({ include_deleted: true });
-      const deleted = allIssues.filter(i => i.is_deleted === true);
-      setDeletedCount(deleted.length);
-      console.log(`📊 Deleted count: ${deleted.length}`);
-
-      // ✅ Step 2: Fetch issues based on showDeleted state
-      const data = await getIssues({ 
-        include_deleted: showDeleted
-      });
-      
-      console.log(`✅ Issues fetched: ${data.length} items`);
-      data.forEach(issue => {
-        const isCreator = isUserCreator(issue.reportedBy, currentUser);
-        console.log(`📋 Issue #${issue.id}: "${issue.title}" - is_deleted: ${issue.is_deleted}, isCreator: ${isCreator}`);
-      });
-
+      const data = await getIssues();
       setIssues(data);
       return data;
     } catch (err: any) {
@@ -151,50 +122,26 @@ export default function IssuesPage() {
     }
   };
 
-  // Initial load - only show non-deleted by default
   useEffect(() => {
-    console.log('📡 Initial load');
     refresh().finally(() => setLoading(false));
   }, []);
 
-  // Re-fetch when showDeleted changes
-  useEffect(() => {
-    console.log(`📡 showDeleted changed to: ${showDeleted}, loading: ${loading}`);
-    if (!loading) {
-      refresh();
-    }
-  }, [showDeleted, loading]);
-
   const visibleIssues = issues.filter((issue) => {
     if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
-    if (!showDeleted && issue.is_deleted === true) return false;
     return true;
   });
 
-  console.log(
-    `🧮 RENDER — showDeleted=${showDeleted}, domainFilter="${domainFilter}", ` +
-    `issues.length=${issues.length}, visibleIssues.length=${visibleIssues.length}, deletedCount=${deletedCount}`
-  );
+  const openIssues = issues.filter((i) => i.status === "Open").length;
+  const inProgressIssues = issues.filter((i) => i.status === "In Progress").length;
+  const resolvedIssues = issues.filter((i) => i.status === "Resolved").length;
+  const bimIssueCount = issues.filter(isBimIssue).length;
+  const clashIssues = issues.filter(i => isBimIssue(i) && i.topicType === "Clash").length;
+  const highPriorityIssues = issues.filter((i) => i.priority === "High").length;
 
-  // ✅ Use the separate deletedCount state, not issues.filter
-  // const deletedIssuesCount = issues.filter(i => i.is_deleted === true).length; // ← REMOVE THIS
-
-  const openIssues = issues.filter((i) => i.status === "Open" && !i.is_deleted).length;
-  const inProgressIssues = issues.filter((i) => i.status === "In Progress" && !i.is_deleted).length;
-  const resolvedIssues = issues.filter((i) => i.status === "Resolved" && !i.is_deleted).length;
-  const bimIssueCount = issues.filter(i => isBimIssue(i) && !i.is_deleted).length;
-  const clashIssues = issues.filter(i => isBimIssue(i) && i.topicType === "Clash" && !i.is_deleted).length;
-  const highPriorityIssues = issues.filter((i) => i.priority === "High" && !i.is_deleted).length;
-
-  const assignees = [...new Set(
-    issues
-      .filter(i => !i.is_deleted)
-      .map((i) => i.assignedTo)
-      .filter(Boolean)
-  )] as string[];
+  const assignees = [...new Set(issues.map((i) => i.assignedTo).filter(Boolean))] as string[];
 
   const handleDeleteIssue = async (issueId: string) => {
-    if (!confirm('Are you sure you want to delete this issue? This action can be undone by restoring it.')) {
+    if (!confirm('Are you sure you want to delete this issue? This cannot be undone.')) {
       return;
     }
     try {
@@ -204,44 +151,6 @@ export default function IssuesPage() {
     } catch (err: any) {
       console.error('Delete issue error:', err);
       setError(err.message || 'Failed to delete issue. Please try again.');
-    }
-  };
-
-  const handleRestoreIssue = async (issueId: string) => {
-    try {
-      setError(null);
-      await restoreIssue(issueId);
-      await refresh();
-    } catch (err: any) {
-      console.error('Restore issue error:', err);
-      setError(err.message || 'Failed to restore issue. Please try again.');
-    }
-  };
-
-  const handleHardDeleteIssue = async (issueId: string) => {
-    if (!confirm('⚠️ PERMANENT DELETE: This will permanently remove this issue from the database. This cannot be undone. Are you sure?')) {
-      return;
-    }
-    const confirmText = prompt('Type "DELETE" to confirm permanent deletion:');
-    if (confirmText !== 'DELETE') {
-      return;
-    }
-    try {
-      setError(null);
-      await hardDeleteIssue(issueId);
-      await refresh();
-    } catch (err: any) {
-      console.error('Hard delete error:', err);
-      setError(err.message || 'Failed to permanently delete issue. Please try again.');
-    }
-  };
-
-  const toggleShowDeleted = () => {
-    const next = !showDeleted;
-    console.log('🔴 DELETED TOGGLE CLICKED! Current:', showDeleted, '->', next);
-    setShowDeleted(next);
-    if (next) {
-      setDomainFilter("all");
     }
   };
 
@@ -275,33 +184,7 @@ export default function IssuesPage() {
               Other
             </button>
           </div>
-          <div className="header-actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            {/* ✅ Always show the button if there are deleted issues (using deletedCount) */}
-            {deletedCount > 0 && (
-              <button
-                type="button"
-                onClick={toggleShowDeleted}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '4px',
-                  border: `2px solid ${showDeleted ? '#D43E3E' : '#6B7280'}`,
-                  backgroundColor: showDeleted ? '#D43E3E' : 'transparent',
-                  color: showDeleted ? 'white' : '#6B7280',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  fontSize: '14px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontFamily: 'system-ui, sans-serif',
-                  position: 'relative',
-                  zIndex: 1,
-                }}
-              >
-                <span style={{ fontSize: '16px' }}>🗑️</span>
-                {showDeleted ? 'Hide Deleted' : `Deleted (${deletedCount})`}
-              </button>
-            )}
+          <div className="header-actions">
             <button className="btn-primary" onClick={() => setShowNewIssueForm((v) => !v)}>
               <i className="ti ti-plus" />
               New Issue
@@ -369,7 +252,7 @@ export default function IssuesPage() {
                 <i className="ti ti-user" />
                 {assignee}
                 <span className="assignee-count">
-                  {issues.filter((i) => i.assignedTo === assignee && !i.is_deleted).length}
+                  {issues.filter((i) => i.assignedTo === assignee).length}
                 </span>
               </div>
             ))}
@@ -380,32 +263,13 @@ export default function IssuesPage() {
       <section>
         <div className="section-title">
           <span>All Issues</span>
-          <span className="issue-count">
-            {visibleIssues.length} shown
-            {deletedCount > 0 && !showDeleted && (
-              <span style={{ color: '#D43E3E', marginLeft: '8px' }}>
-                ({deletedCount} deleted)
-              </span>
-            )}
-            {showDeleted && (
-              <span style={{ color: '#4A8B6B', marginLeft: '8px' }}>
-                (showing deleted)
-              </span>
-            )}
-            {isAdmin && (
-              <span style={{ color: '#6B7280', marginLeft: '8px', fontSize: '12px' }}>
-                (Admin)
-              </span>
-            )}
-          </span>
+          <span className="issue-count">{visibleIssues.length} shown</span>
         </div>
 
         {loading ? (
           <p className="hero-subtitle">Loading issues…</p>
         ) : visibleIssues.length === 0 ? (
-          <p className="hero-subtitle">
-            {showDeleted ? 'No deleted issues found.' : 'No issues found. Create a new issue to get started!'}
-          </p>
+          <p className="hero-subtitle">No issues found. Create a new issue to get started!</p>
         ) : (
           <div className="issues-grid">
             {visibleIssues.map((issue) => (
@@ -417,9 +281,6 @@ export default function IssuesPage() {
                 currentUser={currentUser}
                 isUserCreator={isUserCreator}
                 onDeleteIssue={handleDeleteIssue}
-                onRestoreIssue={issue.is_deleted === true ? handleRestoreIssue : undefined}
-                isAdmin={isAdmin}
-                onHardDelete={handleHardDeleteIssue}
                 onSave={async (patch) => {
                   try {
                     setError(null);
@@ -442,12 +303,7 @@ export default function IssuesPage() {
                     await refresh();
                   } catch (err: any) {
                     console.error('Resolve error:', err);
-                    if (err.response?.data) {
-                      const errors = Object.values(err.response.data).flat().join('\n');
-                      setError(`Validation Error: ${errors}`);
-                    } else {
-                      setError('Failed to resolve issue. Please try again.');
-                    }
+                    setError('Failed to resolve issue. Please try again.');
                   }
                 }}
                 onRemoveSnapshot={async () => {
@@ -470,14 +326,13 @@ export default function IssuesPage() {
                     setError('Failed to remove screenshot. Please try again.');
                   }
                 }}
-                onAddScreenshot={async (snapshotData, snapshotFormat) => {
+                onAddScreenshot={async (text, snapshotData, snapshotFormat) => {
                   try {
                     setError(null);
-                    console.log('📸 Adding screenshot to issue:', issue.id);
                     await addCommentWithSnapshot(
                       issue.id,
                       currentUser.email || currentUser.fullName,
-                      "Screenshot added",
+                      text,
                       snapshotData,
                       snapshotFormat
                     );
@@ -490,7 +345,6 @@ export default function IssuesPage() {
                 onAddComment={async (text) => {
                   try {
                     setError(null);
-                    console.log('💬 Adding comment to issue:', issue.id);
                     await addComment(issue.id, currentUser.email || currentUser.fullName, text);
                     await refresh();
                   } catch (err: any) {
@@ -560,26 +414,20 @@ function NewIssueForm({
   const [error, setError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  
-  // State for dropdowns
+
   const [organisations, setOrganisations] = useState<OrganisationOption[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [filteredProjects, setFilteredProjects] = useState<ProjectOption[]>([]);
   const [loadingOrganisations, setLoadingOrganisations] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currentUserData = useCurrentUser();
-
-  // Fetch user's organisations on mount
   useEffect(() => {
     const fetchOrganisations = async () => {
       setLoadingOrganisations(true);
       try {
         const token = localStorage.getItem('access');
         if (!token) {
-          console.error('No access token found');
           setLoadingOrganisations(false);
           return;
         }
@@ -593,19 +441,14 @@ function NewIssueForm({
 
         if (response.ok) {
           const data = await response.json();
-          console.log('✅ Organisations fetched:', data);
           setOrganisations(data);
-          
-          // Auto-select first organisation if available
           if (data.length > 0) {
             setOrganisationId(data[0].id);
           }
         } else {
-          console.error('Failed to fetch organisations:', response.status);
           setError('Failed to load organisations.');
         }
       } catch (error) {
-        console.error('Error fetching organisations:', error);
         setError('Failed to load organisations.');
       } finally {
         setLoadingOrganisations(false);
@@ -614,7 +457,6 @@ function NewIssueForm({
     fetchOrganisations();
   }, []);
 
-  // Fetch projects when organisation changes
   useEffect(() => {
     if (!organisationId) {
       setFilteredProjects([]);
@@ -627,7 +469,6 @@ function NewIssueForm({
       try {
         const token = localStorage.getItem('access');
         if (!token) {
-          console.error('No access token found');
           setLoadingProjects(false);
           return;
         }
@@ -641,22 +482,17 @@ function NewIssueForm({
 
         if (response.ok) {
           const data = await response.json();
-          console.log(`✅ Projects fetched for organisation ${organisationId}:`, data);
           setFilteredProjects(data);
-          
-          // Auto-select first project if available
           if (data.length > 0) {
             setProjectId(data[0].id);
           } else {
             setProjectId(null);
           }
         } else {
-          console.error('Failed to fetch projects:', response.status);
           setFilteredProjects([]);
           setProjectId(null);
         }
       } catch (error) {
-        console.error('Error fetching projects:', error);
         setFilteredProjects([]);
         setProjectId(null);
       } finally {
@@ -731,7 +567,6 @@ function NewIssueForm({
             } : {})
           }
         };
-        console.log('📤 Creating BIM issue with viewpoint:', bimInput.viewpoint);
         await onCreate(bimInput);
       } else {
         await onCreate({
@@ -774,7 +609,6 @@ function NewIssueForm({
       )}
 
       <div className="form-row">
-        {/* Organisation Dropdown */}
         <div className="form-field">
           <label>Organisation <span style={{ color: '#D43E3E' }}>*</span></label>
           {loadingOrganisations ? (
@@ -800,7 +634,6 @@ function NewIssueForm({
           )}
         </div>
 
-        {/* Project Dropdown */}
         <div className="form-field">
           <label>Project <span style={{ color: '#D43E3E' }}>*</span></label>
           {loadingProjects ? (
@@ -866,7 +699,7 @@ function NewIssueForm({
             />
           </div>
         )}
-        
+
         <div className="form-field">
           <label>Priority</label>
           <select
@@ -946,8 +779,8 @@ function NewIssueForm({
         <button className="btn-outline" onClick={onCancel}>
           Cancel
         </button>
-        <button 
-          className="btn-primary" 
+        <button
+          className="btn-primary"
           onClick={handleSubmit}
           disabled={!projectId || !title.trim() || !organisationId}
         >
