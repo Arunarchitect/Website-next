@@ -18,6 +18,7 @@ import {
   editComment,
   deleteIssue,
   restoreIssue,
+  hardDeleteIssue,
 } from "./issueApi";
 import {
   Issue,
@@ -84,6 +85,7 @@ export default function IssuesPage() {
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
+  const [deletedCount, setDeletedCount] = useState(0); // ✅ New state for deleted count
 
   // Load user from localStorage into Redux on mount
   useEffect(() => {
@@ -103,6 +105,9 @@ export default function IssuesPage() {
   }, [dispatch]);
 
   const currentUserData = useCurrentUser();
+  
+  // Check if user is admin
+  const isAdmin = currentUserData?.is_staff || currentUserData?.is_superuser || false;
 
   const currentUser = {
     email: currentUserData?.email || '',
@@ -118,17 +123,23 @@ export default function IssuesPage() {
   const refresh = async () => {
     try {
       setError(null);
-      console.log('🔄 Refreshing issues...');
+      console.log(`🔄 Refreshing issues with include_deleted=${showDeleted}...`);
 
+      // ✅ Step 1: Always fetch ALL issues to get the deleted count
+      const allIssues = await getIssues({ include_deleted: true });
+      const deleted = allIssues.filter(i => i.is_deleted === true);
+      setDeletedCount(deleted.length);
+      console.log(`📊 Deleted count: ${deleted.length}`);
+
+      // ✅ Step 2: Fetch issues based on showDeleted state
       const data = await getIssues({ 
         include_deleted: showDeleted
       });
       
-      console.log('✅ Issues fetched:', data.length, 'items');
-
+      console.log(`✅ Issues fetched: ${data.length} items`);
       data.forEach(issue => {
         const isCreator = isUserCreator(issue.reportedBy, currentUser);
-        console.log(`📋 Issue #${issue.id}: "${issue.title}" - is_deleted: ${issue.is_deleted}, isCreator: ${isCreator}, domain: ${issue.domain}, organisation: ${issue.organisation || 'N/A'}`);
+        console.log(`📋 Issue #${issue.id}: "${issue.title}" - is_deleted: ${issue.is_deleted}, isCreator: ${isCreator}`);
       });
 
       setIssues(data);
@@ -142,14 +153,17 @@ export default function IssuesPage() {
 
   // Initial load - only show non-deleted by default
   useEffect(() => {
+    console.log('📡 Initial load');
     refresh().finally(() => setLoading(false));
   }, []);
 
+  // Re-fetch when showDeleted changes
   useEffect(() => {
+    console.log(`📡 showDeleted changed to: ${showDeleted}, loading: ${loading}`);
     if (!loading) {
       refresh();
     }
-  }, [showDeleted]);
+  }, [showDeleted, loading]);
 
   const visibleIssues = issues.filter((issue) => {
     if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
@@ -159,10 +173,11 @@ export default function IssuesPage() {
 
   console.log(
     `🧮 RENDER — showDeleted=${showDeleted}, domainFilter="${domainFilter}", ` +
-    `issues.length=${issues.length}, visibleIssues.length=${visibleIssues.length}`
+    `issues.length=${issues.length}, visibleIssues.length=${visibleIssues.length}, deletedCount=${deletedCount}`
   );
 
-  const deletedIssuesCount = issues.filter(i => i.is_deleted === true).length;
+  // ✅ Use the separate deletedCount state, not issues.filter
+  // const deletedIssuesCount = issues.filter(i => i.is_deleted === true).length; // ← REMOVE THIS
 
   const openIssues = issues.filter((i) => i.status === "Open" && !i.is_deleted).length;
   const inProgressIssues = issues.filter((i) => i.status === "In Progress" && !i.is_deleted).length;
@@ -179,7 +194,7 @@ export default function IssuesPage() {
   )] as string[];
 
   const handleDeleteIssue = async (issueId: string) => {
-    if (!confirm('Are you sure you want to delete this issue? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete this issue? This action can be undone by restoring it.')) {
       return;
     }
     try {
@@ -200,6 +215,24 @@ export default function IssuesPage() {
     } catch (err: any) {
       console.error('Restore issue error:', err);
       setError(err.message || 'Failed to restore issue. Please try again.');
+    }
+  };
+
+  const handleHardDeleteIssue = async (issueId: string) => {
+    if (!confirm('⚠️ PERMANENT DELETE: This will permanently remove this issue from the database. This cannot be undone. Are you sure?')) {
+      return;
+    }
+    const confirmText = prompt('Type "DELETE" to confirm permanent deletion:');
+    if (confirmText !== 'DELETE') {
+      return;
+    }
+    try {
+      setError(null);
+      await hardDeleteIssue(issueId);
+      await refresh();
+    } catch (err: any) {
+      console.error('Hard delete error:', err);
+      setError(err.message || 'Failed to permanently delete issue. Please try again.');
     }
   };
 
@@ -243,7 +276,8 @@ export default function IssuesPage() {
             </button>
           </div>
           <div className="header-actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            {deletedIssuesCount > 0 && (
+            {/* ✅ Always show the button if there are deleted issues (using deletedCount) */}
+            {deletedCount > 0 && (
               <button
                 type="button"
                 onClick={toggleShowDeleted}
@@ -265,7 +299,7 @@ export default function IssuesPage() {
                 }}
               >
                 <span style={{ fontSize: '16px' }}>🗑️</span>
-                {showDeleted ? 'Hide Deleted' : `Deleted (${deletedIssuesCount})`}
+                {showDeleted ? 'Hide Deleted' : `Deleted (${deletedCount})`}
               </button>
             )}
             <button className="btn-primary" onClick={() => setShowNewIssueForm((v) => !v)}>
@@ -348,14 +382,19 @@ export default function IssuesPage() {
           <span>All Issues</span>
           <span className="issue-count">
             {visibleIssues.length} shown
-            {deletedIssuesCount > 0 && !showDeleted && (
+            {deletedCount > 0 && !showDeleted && (
               <span style={{ color: '#D43E3E', marginLeft: '8px' }}>
-                ({deletedIssuesCount} deleted)
+                ({deletedCount} deleted)
               </span>
             )}
             {showDeleted && (
               <span style={{ color: '#4A8B6B', marginLeft: '8px' }}>
                 (showing deleted)
+              </span>
+            )}
+            {isAdmin && (
+              <span style={{ color: '#6B7280', marginLeft: '8px', fontSize: '12px' }}>
+                (Admin)
               </span>
             )}
           </span>
@@ -379,6 +418,8 @@ export default function IssuesPage() {
                 isUserCreator={isUserCreator}
                 onDeleteIssue={handleDeleteIssue}
                 onRestoreIssue={issue.is_deleted === true ? handleRestoreIssue : undefined}
+                isAdmin={isAdmin}
+                onHardDelete={handleHardDeleteIssue}
                 onSave={async (patch) => {
                   try {
                     setError(null);
@@ -467,10 +508,10 @@ export default function IssuesPage() {
                     setError('Failed to delete comment. Please try again.');
                   }
                 }}
-                onEditComment={async (commentId, text, snapshotData, snapshotFormat) => {
+                onEditComment={async (commentId, text, snapshotData, snapshotFormat, removeSnapshot) => {
                   try {
                     setError(null);
-                    await editComment(issue.id, commentId, text, snapshotData, snapshotFormat);
+                    await editComment(issue.id, commentId, text, snapshotData, snapshotFormat, removeSnapshot);
                     await refresh();
                   } catch (err: any) {
                     console.error('Edit comment error:', err);

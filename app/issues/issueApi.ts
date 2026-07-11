@@ -50,9 +50,14 @@ const getCsrfToken = (): string | null => {
 };
 
 // ✅ UPDATED: Helper to safely get image source with fallback
+// issues/issueApi.ts
+
+// Find the getImageSource function (around line 70-110) and replace it with:
+
 export const getImageSource = (imageData: string | undefined, fallback?: string): string => {
+  // ✅ Use test.jpg as the default placeholder
   if (!imageData) {
-    return fallback || '/images/placeholder-image.png';
+    return fallback || '/images/test.jpg';
   }
 
   if (imageData.startsWith('data:image')) {
@@ -88,7 +93,7 @@ export const getImageSource = (imageData: string | undefined, fallback?: string)
   }
 
   console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return fallback || '/images/placeholder-image.png';
+  return fallback || '/images/test.jpg'; // ✅ Use test.jpg as fallback
 };
 
 // ✅ NEW: Helper to check if an image URL is accessible
@@ -763,13 +768,25 @@ export async function deleteComment(
 export async function editComment(
   issueId: string | number,
   commentId: string | number,
-  text: string
+  text: string,
+  snapshotData?: string,
+  snapshotFormat?: "png" | "jpg",
+  removeSnapshot?: boolean
 ): Promise<IssueComment> {
   try {
     console.log(`📤 Editing comment ${commentId} on issue ${issueId}`);
-    const response = await apiClient.patch(`/issues/comments/${commentId}/`, {
-      text: text,
-    });
+
+    const payload: any = { text };
+
+    if (snapshotData) {
+      payload.snapshot_data = snapshotData;
+      payload.snapshot_format = snapshotFormat || 'png';
+    } else if (removeSnapshot) {
+      payload.snapshot_data = null;
+      payload.snapshot_format = null;
+    }
+
+    const response = await apiClient.patch(`/issues/comments/${commentId}/`, payload);
     console.log('✅ Comment edited successfully');
     return response.data;
   } catch (error) {
@@ -787,7 +804,6 @@ export async function editComment(
     throw error;
   }
 }
-
 // ---------------------------------------------------------------------------
 // LINKED ISSUES
 // ---------------------------------------------------------------------------
@@ -803,6 +819,25 @@ export async function linkIssue(
   } catch (error) {
     console.error('Error linking issue:', error);
     throw error;
+  }
+}
+
+export async function hardDeleteIssue(id: string | number): Promise<void> {
+  try {
+    console.log(`📤 Permanently deleting issue ${id}`);
+    const response = await apiClient.delete(`/issues/issues/${id}/hard-delete/`);
+    console.log('✅ Issue permanently deleted:', response.data);
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('❌ Error hard deleting issue:', error.response.data);
+      if (error.response.status === 403) {
+        throw new Error('Only administrators can permanently delete issues.');
+      }
+      throw new Error(error.response.data?.error || 'Failed to permanently delete issue.');
+    } else {
+      console.error('❌ Error hard deleting issue:', error);
+      throw error;
+    }
   }
 }
 
@@ -958,6 +993,7 @@ export default {
   getComments,
   deleteComment,
   editComment,
+  hardDeleteIssue,
   linkIssue,
   unlinkIssue,
   getViewpoint,

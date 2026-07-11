@@ -1,4 +1,5 @@
 // app/issues/IssueCard.tsx
+
 "use client";
 
 import { useState, useRef } from "react";
@@ -19,8 +20,9 @@ const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 
 // Get image source with fallback
 const getImageSource = (imageData: string | undefined): string => {
+  // ✅ Use test.jpg as the default placeholder
   if (!imageData) {
-    return '/images/placeholder-image.png';
+    return '/images/test.jpg';
   }
 
   if (imageData.startsWith('data:image')) {
@@ -56,7 +58,7 @@ const getImageSource = (imageData: string | undefined): string => {
   }
 
   console.warn('Unable to process image data:', imageData.substring(0, 50) + '...');
-  return '/images/placeholder-image.png';
+  return '/images/test.jpg'; // ✅ Use test.jpg as fallback
 };
 
 const DEFAULT_CAMERA_POSITION = { x: 0, y: 0, z: 0 };
@@ -75,9 +77,11 @@ interface IssueCardProps {
   onAddScreenshot: (snapshotData: string, snapshotFormat: "png" | "jpg") => Promise<void>;
   onAddComment: (text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
-  onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
+  onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg", removeSnapshot?: boolean) => Promise<void>;
   onDeleteIssue: (issueId: string) => Promise<void>;
   onRestoreIssue?: (issueId: string) => Promise<void>;
+  isAdmin?: boolean;
+  onHardDelete?: (issueId: string) => Promise<void>;
   currentUser: { email: string; fullName: string; username: string; displayName: string };
   isUserCreator: (reportedBy: string, user: any) => boolean;
 }
@@ -96,6 +100,8 @@ export function IssueCard({
   onEditComment,
   onDeleteIssue,
   onRestoreIssue,
+  isAdmin = false,
+  onHardDelete,
   currentUser,
   isUserCreator,
 }: IssueCardProps) {
@@ -332,15 +338,17 @@ export function IssueCard({
     }
   };
 
-  const handleEditComment = async (commentId: string) => {
+  const handleEditComment = async (commentId: string, originalHadSnapshot: boolean) => {
     if (!editingCommentText.trim()) return;
     try {
       setSaveError(null);
+      const removeSnapshot = originalHadSnapshot && !editingCommentHasExistingImage && !editingCommentScreenshot;
       await onEditComment(
         commentId,
         editingCommentText.trim(),
         editingCommentScreenshot || undefined,
-        editingCommentScreenshot ? editingCommentScreenshotFormat : undefined
+        editingCommentScreenshot ? editingCommentScreenshotFormat : undefined,
+        removeSnapshot
       );
       setEditingCommentId(null);
       setEditingCommentText("");
@@ -452,7 +460,7 @@ export function IssueCard({
   };
 
   const handleDeleteIssueClick = async () => {
-    if (!confirm('Are you sure you want to delete this issue? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete this issue? This action can be undone by restoring it.')) {
       return;
     }
     try {
@@ -477,11 +485,30 @@ export function IssueCard({
     }
   };
 
-  // Handle image error with fallback
+  const handleHardDeleteClick = async () => {
+    if (!confirm('⚠️ PERMANENT DELETE: This will permanently remove this issue from the database. This cannot be undone. Are you sure?')) {
+      return;
+    }
+    // Double confirmation with text input
+    const confirmText = prompt('Type "DELETE" to confirm permanent deletion:');
+    if (confirmText !== 'DELETE') {
+      return;
+    }
+    try {
+      setSaveError(null);
+      if (onHardDelete) {
+        await onHardDelete(issue.id);
+      }
+    } catch (err: any) {
+      setSaveError(err.message || 'Failed to permanently delete issue.');
+    }
+  };
+
+  // Handle image error with fallback - ✅ Updated to use test.jpg
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const img = e.currentTarget;
-    if (!img.src.includes('placeholder-image.png')) {
-      img.src = '/images/placeholder-image.png';
+    if (!img.src.includes('test.jpg') && !img.src.includes('placeholder-image.png')) {
+      img.src = '/images/test.jpg';
     }
     setImageLoadError(true);
     console.warn('Failed to load image:', img.src);
@@ -574,7 +601,7 @@ export function IssueCard({
             {!isEditing && hasScreenshot && (
               <div className="screenshot-thumbnail-container">
                 <img
-                  src={displayScreenshot || '/images/placeholder-image.png'}
+                  src={displayScreenshot || '/images/test.jpg'}
                   alt="Issue screenshot"
                   className="screenshot-thumbnail-image"
                   onClick={() => handleImageClick(getImageSource(displayScreenshot!))}
@@ -605,7 +632,7 @@ export function IssueCard({
                 {hasScreenshot && (
                   <div className="screenshot-preview-container">
                     <img
-                      src={displayScreenshot || '/images/placeholder-image.png'}
+                      src={displayScreenshot || '/images/test.jpg'}
                       alt="Screenshot preview"
                       className="screenshot-preview-image"
                       onError={handleImageError}
@@ -665,6 +692,7 @@ export function IssueCard({
                       src={`data:image/${newScreenshotFormat};base64,${newScreenshot}`}
                       alt="New screenshot preview"
                       className="screenshot-preview-image"
+                      onError={handleImageError}
                     />
                     <span className="screenshot-pending-badge">Pending replacement</span>
                   </div>
@@ -864,7 +892,7 @@ export function IssueCard({
                             rows={2}
                           />
                           
-                          {/* ✅ Comment image edit section */}
+                          {/* Comment image edit section */}
                           <div className="comment-image-edit-section">
                             <div className="comment-image-edit-header">
                               <i className="ti ti-photo" />
@@ -875,7 +903,7 @@ export function IssueCard({
                             {editingCommentHasExistingImage && !editingCommentScreenshot && (
                               <div className="comment-existing-image">
                                 <img
-                                  src={comment.snapshot ? getImageSource(comment.snapshot) : '/images/placeholder-image.png'}
+                                  src={comment.snapshot ? getImageSource(comment.snapshot) : '/images/test.jpg'}
                                   alt="Existing comment image"
                                   className="comment-edit-image-preview"
                                   onError={handleImageError}
@@ -947,7 +975,7 @@ export function IssueCard({
                             </button>
                             <button 
                               className="btn-primary small" 
-                              onClick={() => handleEditComment(comment.id)}
+                              onClick={() => handleEditComment(comment.id, !!comment.snapshot)}
                               disabled={!editingCommentText.trim()}
                             >
                               Save
@@ -1116,6 +1144,23 @@ export function IssueCard({
                     )}
                   </>
                 )}
+                
+                {/* Hard Delete button for admins - always visible */}
+                {isAdmin && onHardDelete && (
+                  <button 
+                    className="btn-outline danger" 
+                    onClick={handleHardDeleteClick}
+                    style={{ 
+                      borderColor: '#8B0000', 
+                      color: '#8B0000',
+                      fontWeight: 'bold',
+                    }}
+                    title="Permanently delete this issue (cannot be undone)"
+                  >
+                    <i className="ti ti-trash-x" /> Hard Delete
+                  </button>
+                )}
+                
                 {canResolve && issue.is_deleted !== true && (
                   <button className="btn-outline" onClick={() => setIsResolving((v) => !v)}>
                     <i className="ti ti-check" /> Resolve
