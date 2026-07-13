@@ -1,228 +1,269 @@
 // app/drawing/drawingApi.ts
 
+import axios from 'axios';
 import {
   Organisation,
   Project,
   Deliverable,
   DrawingDocument,
   DrawingDocumentResolved,
+  UserContext,
 } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HARDCODED DATA — mirrors Organisation → Project → Deliverable → Document
+// API CONFIGURATION - Same as issues API
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ORGANISATIONS: Organisation[] = [
-  { id: 1, name: 'Elevate Design Studio' },
-  { id: 2, name: 'Nimbus Architects' },
-];
+const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://127.0.0.1:8000';
+const API_URL = `${API_BASE_URL}/api`;
 
-const PROJECTS: Project[] = [
-  { id: 1, organisation_id: 1, name: 'Main Office Building', client_name: 'Kessler Group', location: 'Thiruvananthapuram' },
-  { id: 2, organisation_id: 1, name: 'Residential Complex', client_name: 'Varma Estates', location: 'Kochi' },
-  { id: 3, organisation_id: 2, name: 'Coastal Resort Phase 1', client_name: 'Blue Horizon Hospitality', location: 'Alappuzha' },
-];
+const getAuthToken = (): string | null => {
+  if (typeof window === 'undefined') return null;
 
-const DELIVERABLES: Deliverable[] = [
-  { id: 1, project_id: 1, name: 'Floor Plans Package', stage: '2', status: 'ready' },
-  { id: 2, project_id: 1, name: 'Electrical Package', stage: '3', status: 'ongoing' },
-  { id: 3, project_id: 1, name: 'HVAC & Mechanical Package', stage: '3', status: 'not_started' },
-  { id: 4, project_id: 1, name: 'Plumbing Package', stage: '3', status: 'passed' },
-  { id: 5, project_id: 2, name: 'Structural Package', stage: '2', status: 'passed' },
-  { id: 6, project_id: 2, name: 'Site Development Package', stage: '1', status: 'ongoing' },
-  { id: 7, project_id: 2, name: 'Fire & Life Safety Package', stage: '4', status: 'discrepancy' },
-  { id: 8, project_id: 3, name: 'Interior Design Package', stage: '2', status: 'ongoing' },
-];
+  const token =
+    localStorage.getItem('access') ||
+    localStorage.getItem('access_token') ||
+    localStorage.getItem('token') ||
+    sessionStorage.getItem('access') ||
+    sessionStorage.getItem('access_token') ||
+    null;
 
-const HARDCODED_DOCUMENTS: DrawingDocument[] = [
-  {
-    id: 1,
-    deliverable_id: 1,
-    title: 'Floor Plan - Level 01',
-    description: 'Architectural floor plan showing room layouts and dimensions for level 01',
-    file_type: 'image',
-    file_url: '/drawing/image/test.jpg',
-    thumbnail_url: '/drawing/image/test.jpg',
-    uploaded_at: '2026-07-10T10:30:00Z',
-    uploaded_by: 'John Architect',
-    category: 'Architectural',
-    size: 2457600,
-    is_favorite: true,
-    tags: ['floor plan', 'architectural', 'level 01'],
-    version: 'v2.1',
-    status: 'published',
-    file_path: '/drawing/image/test.jpg',
+  if (!token) {
+    console.warn('⚠️ No authentication token found in localStorage');
+  }
+
+  return token;
+};
+
+const getCsrfToken = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+  return match ? match[1] : null;
+};
+
+const apiClient = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
   },
-  {
-    id: 2,
-    deliverable_id: 2,
-    title: 'Electrical Schematic - Panel B',
-    description: 'Electrical distribution schematic for panel B, including load calculations',
-    file_type: 'pdf',
-    file_url: '/drawing/doc/test.pdf',
-    uploaded_at: '2026-07-09T14:15:00Z',
-    uploaded_by: 'Sarah Electrical',
-    category: 'Electrical',
-    size: 1254400,
-    is_favorite: false,
-    tags: ['electrical', 'schematic', 'panel B'],
-    version: 'v1.0',
-    status: 'published',
-    file_path: '/drawing/doc/test.pdf',
+  withCredentials: true,
+});
+
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = getAuthToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    const csrfToken = getCsrfToken();
+    if (csrfToken && ['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase() || '')) {
+      config.headers['X-CSRFToken'] = csrfToken;
+    }
+    return config;
   },
-  {
-    id: 3,
-    deliverable_id: 5,
-    title: 'Structural Details - Foundation',
-    description: 'Structural drawings showing foundation details and reinforcement',
-    file_type: 'image',
-    file_url: '/drawing/image/test.jpg',
-    thumbnail_url: '/drawing/image/test.jpg',
-    uploaded_at: '2026-07-08T09:00:00Z',
-    uploaded_by: 'Mike Structural',
-    category: 'Structural',
-    size: 3123200,
-    is_favorite: true,
-    tags: ['structural', 'foundation', 'reinforcement'],
-    version: 'v3.0',
-    status: 'published',
-    file_path: '/drawing/image/test.jpg',
-  },
-  {
-    id: 4,
-    deliverable_id: 3,
-    title: 'HVAC Layout - Floor 02',
-    description: 'HVAC duct layout and equipment placement for second floor',
-    file_type: 'pdf',
-    file_url: '/drawing/doc/test.pdf',
-    uploaded_at: '2026-07-07T16:45:00Z',
-    uploaded_by: 'Tom HVAC',
-    category: 'Mechanical',
-    size: 987600,
-    is_favorite: false,
-    tags: ['hvac', 'duct layout', 'mechanical'],
-    version: 'v1.1',
-    status: 'draft',
-    file_path: '/drawing/doc/test.pdf',
-  },
-  {
-    id: 5,
-    deliverable_id: 6,
-    title: 'Site Plan - Overall',
-    description: 'Comprehensive site plan including buildings, parking, and landscape',
-    file_type: 'image',
-    file_url: '/drawing/image/test.jpg',
-    thumbnail_url: '/drawing/image/test.jpg',
-    uploaded_at: '2026-07-06T11:20:00Z',
-    uploaded_by: 'Lisa Landscape',
-    category: 'Site Plan',
-    size: 4568000,
-    is_favorite: true,
-    tags: ['site plan', 'landscape', 'overall'],
-    version: 'v4.2',
-    status: 'published',
-    file_path: '/drawing/image/test.jpg',
-  },
-  {
-    id: 6,
-    deliverable_id: 4,
-    title: 'Plumbing Riser Diagram',
-    description: 'Vertical plumbing riser diagram showing all fixtures and connections',
-    file_type: 'pdf',
-    file_url: '/drawing/doc/test.pdf',
-    uploaded_at: '2026-07-05T13:30:00Z',
-    uploaded_by: 'Dave Plumbing',
-    category: 'Plumbing',
-    size: 876500,
-    is_favorite: false,
-    tags: ['plumbing', 'riser diagram'],
-    version: 'v1.0',
-    status: 'published',
-    file_path: '/drawing/doc/test.pdf',
-  },
-  {
-    id: 7,
-    deliverable_id: 8,
-    title: 'Interior Elevations - Lobby',
-    description: 'Interior elevation drawings for main lobby area',
-    file_type: 'image',
-    file_url: '/drawing/image/test.jpg',
-    thumbnail_url: '/drawing/image/test.jpg',
-    uploaded_at: '2026-07-04T08:50:00Z',
-    uploaded_by: 'Emma Interior',
-    category: 'Interior',
-    size: 2340000,
-    is_favorite: false,
-    tags: ['interior', 'elevations', 'lobby'],
-    version: 'v2.0',
-    status: 'published',
-    file_path: '/drawing/image/test.jpg',
-  },
-  {
-    id: 8,
-    deliverable_id: 7,
-    title: 'Fire Protection Layout',
-    description: 'Fire sprinkler system layout and alarm device placement',
-    file_type: 'pdf',
-    file_url: '/drawing/doc/test.pdf',
-    uploaded_at: '2026-07-03T15:10:00Z',
-    uploaded_by: 'Frank Safety',
-    category: 'Safety',
-    size: 1120000,
-    is_favorite: false,
-    tags: ['fire protection', 'sprinkler', 'safety'],
-    version: 'v1.2',
-    status: 'archived',
-    file_path: '/drawing/doc/test.pdf',
-  },
-];
+  (error) => Promise.reject(error)
+);
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response) {
+      console.error(`❌ API Error ${error.response.status}:`, {
+        url: error.config?.url,
+        data: error.response.data,
+      });
+
+      if (error.response.status === 401) {
+        const refreshToken = localStorage.getItem('refresh');
+        if (refreshToken && !error.config._retry) {
+          error.config._retry = true;
+          try {
+            const response = await axios.post(`${API_URL}/auth/refresh/`, {
+              refresh: refreshToken
+            });
+            if (response.data.access) {
+              localStorage.setItem('access', response.data.access);
+              error.config.headers.Authorization = `Bearer ${response.data.access}`;
+              return apiClient(error.config);
+            }
+          } catch (refreshError) {
+            localStorage.removeItem('access');
+            localStorage.removeItem('refresh');
+            if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+              window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+            }
+          }
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LOOKUP HELPERS
+// FIXED: HELPER: Get Full File URL - Handles all URL formats
 // ─────────────────────────────────────────────────────────────────────────────
 
-const getProjectById = (id: number) => PROJECTS.find((p) => p.id === id);
-const getOrgById = (id: number) => ORGANISATIONS.find((o) => o.id === id);
-const getDeliverableById = (id: number) => DELIVERABLES.find((d) => d.id === id);
+export const getFullFileUrl = (fileUrl: string | undefined | null): string => {
+  if (!fileUrl) {
+    console.warn('⚠️ getFullFileUrl called with undefined or empty URL');
+    return '';
+  }
 
-/** Joins a raw document up through deliverable → project → organisation */
-const resolveDocument = (doc: DrawingDocument): DrawingDocumentResolved | null => {
-  const deliverable = getDeliverableById(doc.deliverable_id);
-  if (!deliverable) return null;
-  const project = getProjectById(deliverable.project_id);
-  if (!project) return null;
-  const organisation = getOrgById(project.organisation_id);
-  if (!organisation) return null;
+  // If it's already a full URL, return it
+  if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+    return fileUrl;
+  }
 
-  return {
-    ...doc,
-    deliverable_name: deliverable.name,
-    project_id: project.id,
-    project_name: project.name,
-    organisation_id: organisation.id,
-    organisation_name: organisation.name,
-  };
+  // Handle the case where the URL already starts with /media/
+  if (fileUrl.startsWith('/media/')) {
+    return `${API_BASE_URL}${fileUrl}`;
+  }
+
+  // Handle the case where the URL starts with / but not /media/
+  if (fileUrl.startsWith('/')) {
+    return `${API_BASE_URL}${fileUrl}`;
+  }
+
+  // Handle the case where the URL is a relative path
+  // Examples:
+  // - "drawings/organisation_1/project_2/deliverable_32/Array_1783932785_4e8073.png"
+  // - "media/drawings/organisation_1/project_2/deliverable_32/Array_1783932785_4e8073.png"
+  if (!fileUrl.startsWith('/') && !fileUrl.startsWith('http')) {
+    // If it already contains 'drawings/' or 'media/', add /media/ prefix
+    if (fileUrl.includes('drawings/') || fileUrl.includes('media/')) {
+      // Remove any leading 'media/' to avoid double media
+      const cleanUrl = fileUrl.replace(/^media\//, '');
+      return `${API_BASE_URL}/media/${cleanUrl}`;
+    }
+    
+    // Default case: add /media/ prefix
+    return `${API_BASE_URL}/media/${fileUrl}`;
+  }
+
+  // Fallback
+  return `${API_BASE_URL}/${fileUrl}`;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// API FUNCTIONS (hardcoded, no network calls)
+// FIXED: Function to get file URL for display (synchronous)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getDisplayFileUrl = (doc: DrawingDocumentResolved): string => {
+  if (!doc) {
+    console.warn('⚠️ getDisplayFileUrl called with undefined document');
+    return '';
+  }
+
+  console.log(`🔍 Getting display URL for doc ${doc.id} (${doc.file_type}):`, {
+    file_url: doc.file_url,
+    thumbnail_url: doc.thumbnail_url,
+  });
+
+  let urlToUse = '';
+
+  // For images, use file_url directly
+  if (doc.file_type === 'image') {
+    urlToUse = doc.file_url || '';
+    console.log(`🖼️ Image file, using file_url: ${urlToUse}`);
+  } else {
+    // For other file types, try thumbnail_url first, then file_url
+    urlToUse = doc.thumbnail_url || doc.file_url || '';
+    console.log(`📄 Non-image file, using thumbnail_url or file_url: ${urlToUse}`);
+  }
+
+  if (!urlToUse) {
+    console.warn(`⚠️ No URL found for document ${doc.id}`);
+    return '';
+  }
+
+  const fullUrl = getFullFileUrl(urlToUse);
+  console.log(`✅ Full URL for doc ${doc.id}: ${fullUrl}`);
+  return fullUrl;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER CONTEXT - Get from actual authentication (same as issues)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getCurrentUser = async (): Promise<UserContext> => {
+  try {
+    const token = getAuthToken();
+    if (!token) {
+      return {
+        id: 0,
+        name: 'Guest',
+        email: 'guest@example.com',
+        roles: [],
+        hasDrawingPrivateAccess: false,
+      };
+    }
+
+    const response = await apiClient.get('/users/me/');
+    const userData = response.data;
+
+    // Check if user has drawing_private_role
+    const roles = userData.roles || [];
+    const hasDrawingPrivateAccess = roles.includes('drawing_private_role');
+
+    return {
+      id: userData.id,
+      name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email,
+      email: userData.email,
+      roles: roles,
+      hasDrawingPrivateAccess,
+    };
+  } catch (error) {
+    console.error('Error fetching current user:', error);
+    return {
+      id: 0,
+      name: 'Guest',
+      email: 'guest@example.com',
+      roles: [],
+      hasDrawingPrivateAccess: false,
+    };
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API FUNCTIONS - Using apiClient like issues API
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const getOrganisations = async (): Promise<Organisation[]> => {
-  await new Promise((r) => setTimeout(r, 100));
-  return ORGANISATIONS;
+  try {
+    const response = await apiClient.get('/drawings/organisations/');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching organisations:', error);
+    throw new Error('Failed to fetch organisations');
+  }
 };
 
 export const getProjects = async (organisationId?: number): Promise<Project[]> => {
-  await new Promise((r) => setTimeout(r, 100));
-  if (!organisationId) return PROJECTS;
-  return PROJECTS.filter((p) => p.organisation_id === organisationId);
+  try {
+    const url = organisationId 
+      ? `/drawings/projects/?organisation_id=${organisationId}`
+      : '/drawings/projects/';
+    const response = await apiClient.get(url);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching projects:', error);
+    throw new Error('Failed to fetch projects');
+  }
 };
 
 export const getDeliverables = async (projectId?: number): Promise<Deliverable[]> => {
-  await new Promise((r) => setTimeout(r, 100));
-  if (!projectId) return DELIVERABLES;
-  return DELIVERABLES.filter((d) => d.project_id === projectId);
+  try {
+    const url = projectId 
+      ? `/drawings/deliverables/?project_id=${projectId}`
+      : '/drawings/deliverables/';
+    const response = await apiClient.get(url);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching deliverables:', error);
+    throw new Error('Failed to fetch deliverables');
+  }
 };
 
 export interface DocumentFilters {
@@ -230,60 +271,205 @@ export interface DocumentFilters {
   projectId?: number;
   deliverableId?: number;
   search?: string;
+  showPrivate?: boolean;
+  page?: number;
+  pageSize?: number;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIXED: Get Documents with better URL handling
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const getDocuments = async (
   filters: DocumentFilters = {}
 ): Promise<DrawingDocumentResolved[]> => {
-  await new Promise((r) => setTimeout(r, 300));
-
-  const resolved = HARDCODED_DOCUMENTS
-    .map(resolveDocument)
-    .filter((d): d is DrawingDocumentResolved => d !== null);
-
-  return resolved.filter((doc) => {
-    if (filters.organisationId && doc.organisation_id !== filters.organisationId) return false;
-    if (filters.projectId && doc.project_id !== filters.projectId) return false;
-    if (filters.deliverableId && doc.deliverable_id !== filters.deliverableId) return false;
-
-    if (filters.search && filters.search.trim()) {
-      const term = filters.search.toLowerCase().trim();
-      const haystack = [
-        doc.title,
-        doc.description,
-        doc.deliverable_name,
-        doc.project_name,
-        doc.organisation_name,
-        doc.category,
-        ...doc.tags,
-      ]
-        .join(' ')
-        .toLowerCase();
-      if (!haystack.includes(term)) return false;
+  try {
+    const params = new URLSearchParams();
+    
+    if (filters.organisationId) {
+      params.append('organisation_id', filters.organisationId.toString());
     }
-
-    return true;
-  });
+    if (filters.projectId) {
+      params.append('project_id', filters.projectId.toString());
+    }
+    if (filters.deliverableId) {
+      params.append('deliverable_id', filters.deliverableId.toString());
+    }
+    if (filters.search) {
+      params.append('search', filters.search);
+    }
+    if (filters.showPrivate) {
+      params.append('show_private', 'true');
+    }
+    if (filters.page) {
+      params.append('page', filters.page.toString());
+    }
+    if (filters.pageSize) {
+      params.append('page_size', filters.pageSize.toString());
+    }
+    
+    const url = `/drawings/documents/?${params.toString()}`;
+    console.log('📡 Fetching documents from:', url);
+    
+    const response = await apiClient.get(url);
+    
+    console.log('📥 API Response received');
+    
+    // If the API returns paginated data
+    let docs = [];
+    if (response.data.results) {
+      docs = response.data.results;
+    } else {
+      docs = response.data;
+    }
+    
+    // Log first document for debugging
+    if (docs.length > 0) {
+      console.log('🔍 First document from API:', {
+        id: docs[0].id,
+        title: docs[0].title,
+        file_type: docs[0].file_type,
+        file_url: docs[0].file_url,
+        thumbnail_url: docs[0].thumbnail_url,
+      });
+    }
+    
+    return docs;
+  } catch (error) {
+    console.error('Error fetching documents:', error);
+    throw new Error('Failed to fetch documents');
+  }
 };
 
 export const toggleFavorite = async (id: number): Promise<boolean> => {
-  await new Promise((r) => setTimeout(r, 100));
-  const doc = HARDCODED_DOCUMENTS.find((d) => d.id === id);
-  if (doc) {
-    doc.is_favorite = !doc.is_favorite;
-    return doc.is_favorite;
+  try {
+    const response = await apiClient.post(`/drawings/documents/${id}/toggle-favorite/`);
+    return response.data.is_favorite;
+  } catch (error) {
+    console.error('Error toggling favorite:', error);
+    throw new Error('Failed to toggle favorite');
   }
-  return false;
 };
 
-export const downloadDocument = async (doc: DrawingDocument): Promise<void> => {
-  const url = doc.file_path || doc.file_url;
-  if (!url) throw new Error('No file available to download');
+// ─────────────────────────────────────────────────────────────────────────────
+// FIXED: Download Document with better handling
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = doc.title + (doc.file_type === 'pdf' ? '.pdf' : '.png');
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+export const downloadDocument = async (doc: DrawingDocument): Promise<void> => {
+  try {
+    // First check if user has access
+    const currentUser = await getCurrentUser();
+    if (!canAccessDocument(doc, currentUser)) {
+      throw new Error('You do not have permission to download this document');
+    }
+    
+    // Open the download URL in a new window/tab
+    const downloadUrl = `${API_URL}/drawings/documents/${doc.id}/download/`;
+    
+    // Use window.open or create a link with auth header
+    const token = getAuthToken();
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.target = '_blank';
+    if (token) {
+      link.href = `${downloadUrl}?token=${encodeURIComponent(token)}`;
+    }
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (error) {
+    console.error('Error downloading document:', error);
+    throw error;
+  }
+};
+
+// Helper to get file extension based on file type
+const getFileExtension = (fileType: string): string => {
+  switch (fileType) {
+    case 'pdf': return 'pdf';
+    case 'dxf': return 'dxf';
+    case 'image': return 'jpg';
+    default: return '';
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CREATE/UPDATE/DELETE DOCUMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const createDocument = async (formData: FormData): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.post('/drawings/documents/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    console.log('✅ Document created:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating document:', error);
+    throw new Error('Failed to create document');
+  }
+};
+
+export const updateDocument = async (id: number, formData: FormData): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.patch(`/drawings/documents/${id}/`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    console.log('✅ Document updated:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error updating document:', error);
+    throw new Error('Failed to update document');
+  }
+};
+
+export const deleteDocument = async (id: number): Promise<void> => {
+  try {
+    await apiClient.delete(`/drawings/documents/${id}/`);
+    console.log('✅ Document deleted:', id);
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    throw new Error('Failed to delete document');
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIXED: Get a single document by ID with better URL handling
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const getDocument = async (id: number): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.get(`/drawings/documents/${id}/`);
+    console.log(`📄 Document ${id} details retrieved`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching document:', error);
+    throw new Error('Failed to fetch document');
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRIVACY CHECK HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const canAccessDocument = (
+  doc: DrawingDocument,
+  user: UserContext
+): boolean => {
+  // If document is public, anyone can access
+  if (!doc.is_private) return true;
+  
+  // If user has drawing private role, they can access all private documents
+  if (user.hasDrawingPrivateAccess) return true;
+  
+  // Check if user has any of the allowed roles for this document
+  if (doc.allowed_roles && doc.allowed_roles.length > 0) {
+    return doc.allowed_roles.some(role => user.roles.includes(role));
+  }
+  
+  return false;
 };

@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getFullFileUrl } from "../drawingApi";
 
 interface PdfThumbnailProps {
   fileUrl: string;
@@ -19,7 +20,9 @@ export default function PdfThumbnail({ fileUrl }: PdfThumbnailProps) {
         const pdfjsLib = await import('pdfjs-dist');
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
-        const pdf = await pdfjsLib.getDocument(fileUrl).promise;
+        // Use getFullFileUrl to get the correct URL with base URL
+        const fullUrl = getFullFileUrl(fileUrl);
+        const pdf = await pdfjsLib.getDocument(fullUrl).promise;
         const page = await pdf.getPage(1);
 
         const baseViewport = page.getViewport({ scale: 1 });
