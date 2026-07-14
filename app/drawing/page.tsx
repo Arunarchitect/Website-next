@@ -1,7 +1,10 @@
+// app/drawing/page.tsx
+
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import {
   getOrganisations,
@@ -23,6 +26,7 @@ import { Organisation, Project, Deliverable, DrawingDocumentResolved, UserContex
 import DocumentViewer from "./components/DocumentViewer";
 import DocumentForm from "./components/DocumentForm";
 import PdfThumbnail from "./components/PdfThumbnail";
+import GuestAccessGate from "./components/GuestAccessGate";
 import "./styles.css";
 
 const display = Space_Grotesk({
@@ -36,7 +40,29 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
+// The route's actual default export. useSearchParams() requires a Suspense
+// boundary somewhere above it, so this component stays a thin wrapper and
+// all the real page logic lives in DocumentsPageInner below.
 export default function DocumentsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className={`${display.variable} ${mono.variable} documents-page`}>
+          <div className="documents-loading">
+            <i className="ti ti-loader" aria-hidden="true" />
+            <p>Loading...</p>
+          </div>
+        </main>
+      }
+    >
+      <DocumentsPageInner />
+    </Suspense>
+  );
+}
+
+function DocumentsPageInner() {
+  const searchParams = useSearchParams();
+
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
@@ -63,6 +89,10 @@ export default function DocumentsPage() {
   const [privateCount, setPrivateCount] = useState<number>(0);
   const [publicCount, setPublicCount] = useState<number>(0);
 
+  // Guards against re-triggering the auto-open effect (e.g. React strict-mode
+  // double effects in dev, or other state changes re-running the effect).
+  const [hasHandledOpenDoc, setHasHandledOpenDoc] = useState<boolean>(false);
+
   // Load current user
   useEffect(() => {
     const loadUser = async () => {
@@ -76,8 +106,14 @@ export default function DocumentsPage() {
     loadUser();
   }, []);
 
-  // Load organisations
+  // isGuest is true whenever there's no auth token — getCurrentUser() falls
+  // back to id: 0 in that case. Every effect below that hits an
+  // IsAuthenticated-only endpoint is gated on this.
+  const isGuest = currentUser?.id === 0;
+
+  // Load organisations — skip for guests, this endpoint 401s without a token
   useEffect(() => {
+    if (!currentUser || isGuest) return;
     const loadOrganisations = async () => {
       try {
         const data = await getOrganisations();
@@ -88,10 +124,11 @@ export default function DocumentsPage() {
       }
     };
     loadOrganisations();
-  }, []);
+  }, [currentUser, isGuest]);
 
-  // Load projects when organisation changes
+  // Load projects when organisation changes — skip for guests
   useEffect(() => {
+    if (!currentUser || isGuest) return;
     const loadProjects = async () => {
       try {
         const data = await getProjects(selectedOrgId);
@@ -104,10 +141,11 @@ export default function DocumentsPage() {
     loadProjects();
     setSelectedProjectId(undefined);
     setSelectedDeliverableId(undefined);
-  }, [selectedOrgId]);
+  }, [selectedOrgId, currentUser, isGuest]);
 
-  // Load deliverables when project changes
+  // Load deliverables when project changes — skip for guests
   useEffect(() => {
+    if (!currentUser || isGuest) return;
     const loadDeliverables = async () => {
       try {
         const data = await getDeliverables(selectedProjectId);
@@ -119,16 +157,16 @@ export default function DocumentsPage() {
     };
     loadDeliverables();
     setSelectedDeliverableId(undefined);
-  }, [selectedProjectId]);
+  }, [selectedProjectId, currentUser, isGuest]);
 
   // Load documents
   const loadDocuments = useCallback(async () => {
     if (!currentUser) return;
-    
+
     try {
       setLoading(true);
       setError(null);
-      
+
       const docs = await getDocuments({
         organisationId: selectedOrgId,
         projectId: selectedProjectId,
@@ -136,9 +174,9 @@ export default function DocumentsPage() {
         search: searchTerm,
         showPrivate: showPrivateOnly,
       });
-      
+
       setDocuments(docs);
-      
+
       // Count private vs public
       const allDocs = await getDocuments({
         organisationId: selectedOrgId,
@@ -146,7 +184,7 @@ export default function DocumentsPage() {
         deliverableId: selectedDeliverableId,
         search: searchTerm,
       });
-      
+
       const privCount = allDocs.filter(d => d.is_private).length;
       const pubCount = allDocs.filter(d => !d.is_private).length;
       setPrivateCount(privCount);
@@ -159,11 +197,46 @@ export default function DocumentsPage() {
     }
   }, [selectedOrgId, selectedProjectId, selectedDeliverableId, searchTerm, showPrivateOnly, currentUser]);
 
+  // Skip entirely for guests — this endpoint 401s without a token, and
+  // guests land on GuestAccessGate instead of this list.
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && !isGuest) {
       loadDocuments();
+    } else {
+      setLoading(false);
     }
-  }, [loadDocuments, currentUser]);
+  }, [loadDocuments, currentUser, isGuest]);
+
+  // Auto-open a specific document when arriving via ?openDoc=<id>, e.g. a
+  // linked-drawing chip clicked from the Issues page (opens this route in a
+  // new tab). Runs once we know who the user is; uses the same permission
+  // check and full-detail fetch as a normal click on a document card.
+  useEffect(() => {
+    if (hasHandledOpenDoc || !currentUser || isGuest) return;
+
+    const openDocId = searchParams.get('openDoc');
+    if (!openDocId) return;
+
+    const id = Number(openDocId);
+    if (!id) return;
+
+    setHasHandledOpenDoc(true);
+
+    (async () => {
+      try {
+        const fullDoc = await getDocument(id);
+        if (!canAccessDocument(fullDoc, currentUser)) {
+          setError('You do not have permission to view this document.');
+          return;
+        }
+        setSelectedDoc(fullDoc);
+        setIsViewerOpen(true);
+      } catch (err) {
+        console.error('Error auto-opening linked document:', err);
+        setError('Failed to load the linked document.');
+      }
+    })();
+  }, [searchParams, currentUser, isGuest, hasHandledOpenDoc]);
 
   // View and edit both need the FULL document detail (description, allowed_roles,
   // etc.) — the list endpoint only returns a summary, so fetch by id here rather
@@ -205,7 +278,7 @@ export default function DocumentsPage() {
     if (!confirm(`Are you sure you want to delete "${doc.title}"? This action cannot be undone.`)) {
       return;
     }
-    
+
     try {
       setLoading(true);
       await deleteDocument(doc.id);
@@ -251,7 +324,7 @@ export default function DocumentsPage() {
       setError('Please login to download documents');
       return;
     }
-    
+
     try {
       await downloadDocument(doc);
     } catch (error: any) {
@@ -318,6 +391,7 @@ export default function DocumentsPage() {
     selectedDeliverableId !== undefined ||
     searchTerm.trim() !== '';
 
+  // Still resolving who the user is
   if (!currentUser) {
     return (
       <main className={`${display.variable} ${mono.variable} documents-page`}>
@@ -325,6 +399,24 @@ export default function DocumentsPage() {
           <i className="ti ti-loader" aria-hidden="true" />
           <p>Loading user information...</p>
         </div>
+      </main>
+    );
+  }
+
+  // No auth token at all — show the access-code gate instead of the
+  // authenticated document browser (which would just 401 on every call).
+  if (isGuest) {
+    return (
+      <main className={`${display.variable} ${mono.variable} documents-page`}>
+        <header className="documents-header">
+          <div className="documents-brand">
+            <span className="documents-brand-icon">
+              <i className="ti ti-file-text" aria-hidden="true" />
+            </span>
+            <span className="documents-brand-text">Drawings & Documents</span>
+          </div>
+        </header>
+        <GuestAccessGate />
       </main>
     );
   }
@@ -344,7 +436,7 @@ export default function DocumentsPage() {
             <span>Back to Portal</span>
           </Link>
           <div className="documents-header-actions">
-            <button 
+            <button
               className="btn-primary"
               onClick={() => {
                 setFormMode('create');
@@ -357,14 +449,14 @@ export default function DocumentsPage() {
             </button>
             {selectedDoc && (
               <>
-                <button 
+                <button
                   className="btn-secondary"
                   onClick={() => handleEditDocument(selectedDoc)}
                 >
                   <i className="ti ti-edit" />
                   Edit
                 </button>
-                <button 
+                <button
                   className="btn-danger"
                   onClick={() => handleDeleteDocument(selectedDoc)}
                 >
@@ -543,20 +635,11 @@ export default function DocumentsPage() {
           {documents.length > 0 ? (
             <div className="documents-grid">
               {documents.map((doc) => {
-                // Use getDisplayFileUrl which handles different file types correctly
                 const displayUrl = getDisplayFileUrl(doc);
-                
-                // Log the URL for debugging
-                console.log(`📄 Document ${doc.id} (${doc.title}):`, {
-                  file_type: doc.file_type,
-                  file_url: doc.file_url,
-                  thumbnail_url: doc.thumbnail_url,
-                  displayUrl: displayUrl,
-                });
 
                 return (
-                  <div 
-                    key={doc.id} 
+                  <div
+                    key={doc.id}
                     className={`documents-card ${doc.is_private ? 'documents-card-private' : ''} ${selectedDoc?.id === doc.id ? 'documents-card-selected' : ''}`}
                     onClick={() => setSelectedDoc(doc)}
                   >
@@ -571,7 +654,6 @@ export default function DocumentsPage() {
                               alt={doc.title}
                               className="documents-thumbnail-image"
                               onError={(e) => {
-                                console.error(`❌ Failed to load image for doc ${doc.id}: ${displayUrl}`);
                                 (e.currentTarget as HTMLImageElement).style.display = 'none';
                                 const placeholder = e.currentTarget.parentElement?.querySelector(
                                   '.documents-thumbnail-placeholder'
@@ -579,9 +661,6 @@ export default function DocumentsPage() {
                                 if (placeholder) {
                                   placeholder.classList.remove('documents-thumbnail-hidden');
                                 }
-                              }}
-                              onLoad={() => {
-                                console.log(`✅ Successfully loaded image for doc ${doc.id}: ${displayUrl}`);
                               }}
                             />
                           ) : (
@@ -704,11 +783,11 @@ export default function DocumentsPage() {
               <p>
                 {searchTerm
                   ? `No documents match your search "${searchTerm}"`
-                  : showPrivateOnly 
+                  : showPrivateOnly
                     ? 'No private documents match the selected filters'
                     : 'No documents match the selected filters'}
               </p>
-              <button 
+              <button
                 className="btn-primary"
                 onClick={() => {
                   setFormMode('create');

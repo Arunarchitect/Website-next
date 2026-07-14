@@ -63,6 +63,16 @@ const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
 const DEFAULT_CAMERA_UP_VECTOR = { x: 0, y: 1, z: 0 };
 const DEFAULT_FIELD_OF_VIEW = 60;
 
+const getDrawingIcon = (fileType: string): string => {
+  switch (fileType) {
+    case 'pdf': return 'ti-file-pdf';
+    case 'image': return 'ti-photo';
+    case 'dxf': return 'ti-file-code';
+    case 'ifc': return 'ti-building';
+    default: return 'ti-file';
+  }
+};
+
 interface IssueCardProps {
   issue: Issue;
   commentSortOrder: "asc" | "desc";
@@ -76,9 +86,9 @@ interface IssueCardProps {
   onDeleteComment: (commentId: string) => Promise<void>;
   onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg", removeSnapshot?: boolean) => Promise<void>;
   onDeleteIssue: (issueId: string) => Promise<void>;
+  onOpenDrawing: (documentId: number) => void;
   currentUser: { email: string; fullName: string; username: string; displayName: string };
   isUserCreator: (reportedBy: string, user: any) => boolean;
-  
 }
 
 export function IssueCard({
@@ -94,6 +104,7 @@ export function IssueCard({
   onDeleteComment,
   onEditComment,
   onDeleteIssue,
+  onOpenDrawing,
   currentUser,
   isUserCreator,
 }: IssueCardProps) {
@@ -778,6 +789,27 @@ export function IssueCard({
               </>
             )}
           </div>
+
+          {issue.linkedDocuments && issue.linkedDocuments.length > 0 && !isEditing && (
+            <div className="issue-linked-drawings">
+              <span className="issue-linked-drawings-label">
+                <i className="ti ti-paperclip" /> Linked drawings
+              </span>
+              <div className="issue-linked-drawings-list">
+                {issue.linkedDocuments.map((doc) => (
+                  <button
+                    key={doc.id}
+                    className="issue-linked-drawing-chip"
+                    onClick={() => onOpenDrawing(doc.id)}
+                    type="button"
+                  >
+                    <i className={`ti ${getDrawingIcon(doc.file_type)}`} />
+                    {doc.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {issue.comments.length > 0 && !isEditing && (
             <div className="comments-section">

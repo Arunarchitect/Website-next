@@ -2047,3 +2047,37 @@ textarea.field-input {
     align-items: flex-start;
   }
 }
+
+
+.issue-linked-drawings {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #E5E2D9;
+}
+.issue-linked-drawings-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #6E6B62;
+  margin-bottom: 6px;
+}
+.issue-linked-drawings-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.issue-linked-drawing-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #D8D4C7;
+  background: #FAF9F5;
+  font-size: 12px;
+  cursor: pointer;
+}
+.issue-linked-drawing-chip:hover {
+  background: #F0EEE6;
+}

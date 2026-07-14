@@ -68,6 +68,16 @@ export interface IssueComment {
 }
 
 // ---------------------------------------------------------------------------
+// Linked drawing document (from the drawing app's DrawingDocument model)
+// ---------------------------------------------------------------------------
+
+export interface LinkedDocument {
+  id: number;
+  title: string;
+  file_type: string;
+}
+
+// ---------------------------------------------------------------------------
 // Base Issue
 // ---------------------------------------------------------------------------
 
@@ -89,6 +99,10 @@ interface BaseIssue {
   comments: IssueComment[];
   linkedIssues?: string[];
   resolution?: string | null;
+
+  // Documents (drawings) this issue references — populated from
+  // Issue.linked_documents on the backend.
+  linkedDocuments?: LinkedDocument[];
 
   // Django-specific fields
   project?: number;
@@ -383,6 +397,7 @@ export function fromDjangoIssue(data: any): Issue {
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
+    linkedDocuments: data.linked_documents_details || [],
     comments: (data.comments || []).map((c: any) => ({
       id: String(c.id),
       author: c.author?.email || c.author?.full_name || 'Unknown',

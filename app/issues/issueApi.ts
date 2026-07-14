@@ -231,6 +231,12 @@ const convertDjangoIssue = (data: any): Issue => {
     labels: data.labels || [],
     resolution: data.resolution,
     organisation: data.organisation || data.organisation_details?.name || data.project_details?.organisation_name || null,
+    // NEW: drawings linked to this issue, straight from linked_documents_details.
+    linkedDocuments: (data.linked_documents_details || []).map((d: any) => ({
+      id: d.id,
+      title: d.title,
+      file_type: d.file_type,
+    })),
     comments: (data.comments || []).map((c: any) => ({
       id: String(c.id),
       author: c.author?.email || c.author?.full_name || c.author?.username || 'Unknown',

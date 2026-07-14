@@ -11,6 +11,7 @@ interface DocumentViewerProps {
   onClose: () => void;
   onFavoriteToggle: (id: number) => void;
   onDownload: (doc: DrawingDocumentResolved) => void;
+  guestMode?: boolean;
 }
 
 export default function DocumentViewer({
@@ -19,14 +20,69 @@ export default function DocumentViewer({
   onClose,
   onFavoriteToggle,
   onDownload,
+  guestMode = false,
 }: DocumentViewerProps) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+
+  // Blob URL for PDF/image content. Fetched same-origin-safe via JS instead
+  // of pointed at directly — <object>/<img> pointed straight at the Django
+  // media URL can get silently blocked by X-Frame-Options / CSP
+  // frame-ancestors on that response, even though the file itself loads
+  // fine (e.g. opening it in a new tab works, since that's a top-level
+  // navigation, not a framed embed). A blob: URL has no such restriction
+  // because it never leaves the browser as a cross-origin frame load.
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  const isPDF = doc.file_type === 'pdf';
+  const isImage = doc.file_type === 'image';
+  const isDXF = doc.file_type === 'dxf';
 
   useEffect(() => {
     setIsLoading(true);
     setHasError(false);
-  }, [doc.id]);
+    setErrorDetail(null);
+    setBlobUrl(null);
+
+    if (!isPDF && !isImage) {
+      // DXF (and anything else) doesn't go through the blob-preview path.
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const sourceUrl = getFullFileUrl(doc.file_url);
+
+    fetch(sourceUrl, { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Server responded ${res.status} ${res.statusText}`);
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Error fetching document for preview:', err);
+        setErrorDetail(err?.message || 'Unknown error');
+        setHasError(true);
+        setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // Only re-run when the document itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.id, doc.file_url, isPDF, isImage]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -51,10 +107,6 @@ export default function DocumentViewer({
   }, [isOpen]);
 
   if (!isOpen) return null;
-
-  const isPDF = doc.file_type === 'pdf';
-  const isImage = doc.file_type === 'image';
-  const isDXF = doc.file_type === 'dxf';
 
   // For DXF files, we'll show a download prompt since browsers can't render them natively
   const renderDXFContent = () => {
@@ -97,23 +149,29 @@ export default function DocumentViewer({
             </span>
           </div>
           <div className="document-viewer-controls">
-            <button className="document-viewer-btn" onClick={() => onFavoriteToggle(doc.id)} aria-label={doc.is_favorite ? 'Remove from favorites' : 'Add to favorites'}>
-              <i className={`ti ${doc.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
-            </button>
+            {!guestMode && (
+              <button
+                className="document-viewer-btn"
+                onClick={() => onFavoriteToggle(doc.id)}
+                aria-label={doc.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <i className={`ti ${doc.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
+              </button>
+            )}
             <button className="document-viewer-btn" onClick={() => onDownload(doc)} aria-label="Download document">
               <i className="ti ti-download" />
             </button>
-            {isPDF || isDXF ? (
-              <a 
-                className="document-viewer-btn" 
-                href={getFullFileUrl(doc.file_url)} 
-                target="_blank" 
-                rel="noopener noreferrer" 
+            {(isPDF || isDXF) && (
+              <a
+                className="document-viewer-btn"
+                href={getFullFileUrl(doc.file_url)}
+                target="_blank"
+                rel="noopener noreferrer"
                 aria-label="Open in new tab"
               >
                 <i className="ti ti-external-link" />
               </a>
-            ) : null}
+            )}
             <button className="document-viewer-btn document-viewer-close" onClick={onClose} aria-label="Close viewer">
               <i className="ti ti-x" />
             </button>
@@ -137,47 +195,45 @@ export default function DocumentViewer({
           {hasError && (
             <div className="document-viewer-loading document-viewer-error-state">
               <i className="ti ti-alert-triangle" />
-              <p>Couldn&apos;t load this file.</p>
-              <p className="document-viewer-error-path">{getFullFileUrl(doc.file_url)}</p>
-              <p className="document-viewer-error-hint">
-                Check the file exists at <code>{getFullFileUrl(doc.file_url)}</code>
-              </p>
+              <p>Couldn&apos;t load a preview of this file.</p>
+              {errorDetail && <p className="document-viewer-error-hint">{errorDetail}</p>}
+              <a
+                href={getFullFileUrl(doc.file_url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="documents-retry-btn"
+              >
+                Open file in new tab instead
+              </a>
             </div>
           )}
 
           {isDXF && !hasError && renderDXFContent()}
 
-          {isImage && !hasError && (
+          {isImage && !hasError && !isLoading && blobUrl && (
             <div className="document-viewer-image-wrapper">
               <img
-                src={getFullFileUrl(doc.file_url)}
+                src={blobUrl}
                 alt={doc.title}
                 className="document-viewer-image"
-                onLoad={() => setIsLoading(false)}
                 onError={() => {
-                  setIsLoading(false);
                   setHasError(true);
+                  setErrorDetail('Fetched the file but the browser could not render it as an image.');
                 }}
-                style={{ display: isLoading ? 'none' : 'block' }}
               />
             </div>
           )}
 
-          {isPDF && !hasError && (
+          {isPDF && !hasError && !isLoading && blobUrl && (
             <div className="document-viewer-pdf-wrapper">
-              <object 
-                data={`${getFullFileUrl(doc.file_url)}#toolbar=1`} 
-                type="application/pdf" 
-                className="document-viewer-pdf" 
-                onLoad={() => setIsLoading(false)}
-              >
+              <object data={`${blobUrl}#toolbar=1`} type="application/pdf" className="document-viewer-pdf">
                 <div className="document-viewer-loading document-viewer-error-state">
                   <i className="ti ti-file-pdf" />
                   <p>Your browser can&apos;t preview PDFs inline.</p>
-                  <a 
-                    href={getFullFileUrl(doc.file_url)} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
+                  <a
+                    href={getFullFileUrl(doc.file_url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="documents-retry-btn"
                   >
                     Open PDF in new tab

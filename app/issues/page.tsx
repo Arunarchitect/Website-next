@@ -3,6 +3,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./issues.css";
 import {
@@ -74,6 +75,7 @@ interface ProjectOption {
 
 export default function IssuesPage() {
   const dispatch = useAppDispatch();
+  const router = useRouter();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
@@ -107,6 +109,13 @@ export default function IssuesPage() {
 
   const isUserCreator = (reportedBy: string, user: { email: string; fullName: string; username: string; displayName: string }): boolean => {
     return isUserMatch(reportedBy, user);
+  };
+
+  // Open the drawings page in a NEW TAB and ask it to open this document —
+  // the drawing app's own permission checks still apply on the other end.
+  // window.open (not router.push) is what actually gives us a new tab.
+  const handleOpenDrawing = (documentId: number) => {
+    window.open(`/drawing?openDoc=${documentId}`, '_blank', 'noopener,noreferrer');
   };
 
   const refresh = async () => {
@@ -281,6 +290,7 @@ export default function IssuesPage() {
                 currentUser={currentUser}
                 isUserCreator={isUserCreator}
                 onDeleteIssue={handleDeleteIssue}
+                onOpenDrawing={handleOpenDrawing}
                 onSave={async (patch) => {
                   try {
                     setError(null);
