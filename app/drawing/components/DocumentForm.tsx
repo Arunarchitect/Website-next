@@ -1,4 +1,6 @@
 // app/drawing/components/DocumentForm.tsx
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 "use client";
 
 import { useEffect, useState, useRef } from "react";

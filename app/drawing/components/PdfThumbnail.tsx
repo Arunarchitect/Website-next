@@ -38,7 +38,12 @@ export default function PdfThumbnail({ fileUrl }: PdfThumbnailProps) {
         const context = canvas.getContext('2d');
         if (!context) return;
 
-        await page.render({ canvasContext: context, viewport }).promise;
+        // Fix: Pass the canvas element directly instead of just the context
+        await page.render({ 
+          canvasContext: context, 
+          viewport: viewport 
+        }).promise;
+        
         if (!cancelled) setStatus('ready');
       } catch (err) {
         console.error('Error rendering PDF thumbnail:', err);
