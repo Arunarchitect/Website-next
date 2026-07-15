@@ -2,12 +2,16 @@
 
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import axios from "axios";
 import {
   getPriorityColor,
   getStatusColor,
+  getOrganisationMembers,
+  getProjectDrawings,
+  AssigneeOption,
+  DrawingOption,
 } from "./issueApi";
 import {
   Issue,
@@ -17,13 +21,12 @@ import {
   BimIssue,
   isBimIssue,
 } from "./issueTypes";
+import { compressImage } from "./imageUtils";
 import { isUserMatch } from '@/components/utils/userMatching';
 
 const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 
-// The non-BIM ("design"/"other") member of the Issue union. Extract picks it
-// out by its discriminant without needing to know its exported name.
 type NonBimIssue = Extract<Issue, { domain: 'other' | 'design' }>;
 
 interface CurrentUser {
@@ -33,19 +36,6 @@ interface CurrentUser {
   displayName: string;
 }
 
-// Shape of the patch object built in handleSave. Intersects Partial<Issue>
-// with the write-only fields the API accepts for BIM/attachment updates
-// (these aren't part of the read model, so they're not on Issue itself).
-// NOTE: this must be a `type` (&) rather than an `interface ... extends`,
-// because Issue is a union (BimIssue | DesignIssue) — Partial<Issue>
-// distributes over that union, and an interface can only extend a single
-// object type or an intersection of object types, not a union (TS2312).
-//
-// NOTE: `viewpoint` is Omit'd from Partial<Issue> here because BimIssue's
-// own `viewpoint?: BcfViewpoint` (camelCase, read-model) would otherwise
-// be intersected with the write-only snake_case payload below, producing
-// an impossible type that requires both shapes at once (guid, cameraPosition,
-// cameraDirection AND camera_position, snapshot_data, etc. simultaneously).
 type IssuePatch = Omit<Partial<Issue>, 'viewpoint'> & {
   domain?: 'bim' | 'other';
   viewpoint?: {
@@ -59,6 +49,7 @@ type IssuePatch = Omit<Partial<Issue>, 'viewpoint'> & {
   };
   newAttachmentData?: string;
   newAttachmentFormat?: "png" | "jpg";
+  linkedDocumentIds?: number[];
 };
 
 const getImageSource = (imageData: string | undefined): string => {
@@ -158,16 +149,19 @@ export function IssueCard({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [newScreenshot, setNewScreenshot] = useState<string | null>(null);
   const [newScreenshotFormat, setNewScreenshotFormat] = useState<"png" | "jpg">("png");
+  const [processingScreenshot, setProcessingScreenshot] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [resolutionScreenshot, setResolutionScreenshot] = useState<string | null>(null);
   const [resolutionScreenshotFormat, setResolutionScreenshotFormat] = useState<"png" | "jpg">("png");
   const [resolutionPreview, setResolutionPreview] = useState<string | null>(null);
+  const [processingResolutionScreenshot, setProcessingResolutionScreenshot] = useState(false);
   const resolveFileInputRef = useRef<HTMLInputElement>(null);
 
   const [extraScreenshot, setExtraScreenshot] = useState<string | null>(null);
   const [extraScreenshotFormat, setExtraScreenshotFormat] = useState<"png" | "jpg">("png");
   const [extraPreview, setExtraPreview] = useState<string | null>(null);
+  const [processingExtraScreenshot, setProcessingExtraScreenshot] = useState(false);
   const [showAddScreenshot, setShowAddScreenshot] = useState(false);
   const extraFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -176,6 +170,7 @@ export function IssueCard({
   const [commentScreenshot, setCommentScreenshot] = useState<string | null>(null);
   const [commentScreenshotFormat, setCommentScreenshotFormat] = useState<"png" | "jpg">("png");
   const [commentPreview, setCommentPreview] = useState<string | null>(null);
+  const [processingCommentScreenshot, setProcessingCommentScreenshot] = useState(false);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
 
   const [showHistory, setShowHistory] = useState(false);
@@ -187,6 +182,7 @@ export function IssueCard({
   const [editingCommentScreenshotFormat, setEditingCommentScreenshotFormat] = useState<"png" | "jpg">("png");
   const [editingCommentPreview, setEditingCommentPreview] = useState<string | null>(null);
   const [editingCommentHasExistingImage, setEditingCommentHasExistingImage] = useState(false);
+  const [processingEditCommentScreenshot, setProcessingEditCommentScreenshot] = useState(false);
   const editCommentFileInputRef = useRef<HTMLInputElement>(null);
 
   const [extraCommentText, setExtraCommentText] = useState("");
@@ -201,14 +197,51 @@ export function IssueCard({
     dueDate: issue.dueDate ?? "",
   });
 
+  const [assigneeOptions, setAssigneeOptions] = useState<AssigneeOption[]>([]);
+  const [loadingAssignees, setLoadingAssignees] = useState(false);
+
+  const [drawingOptions, setDrawingOptions] = useState<DrawingOption[]>([]);
+  const [loadingDrawings, setLoadingDrawings] = useState(false);
+  const [linkedDocIds, setLinkedDocIds] = useState<number[]>(
+    (issue.linkedDocuments || []).map((d) => d.id)
+  );
+  const [drawingToAdd, setDrawingToAdd] = useState<number | "">("");
+
+  const issueProjectId = issue.project_id ?? issue.project;
+  const issueOrganisationId = issue.organisationId;
+
+  useEffect(() => {
+    if (!isEditing || !issueOrganisationId) return;
+    let cancelled = false;
+    setLoadingAssignees(true);
+    getOrganisationMembers(issueOrganisationId)
+      .then((opts) => { if (!cancelled) setAssigneeOptions(opts); })
+      .finally(() => { if (!cancelled) setLoadingAssignees(false); });
+    return () => { cancelled = true; };
+  }, [isEditing, issueOrganisationId]);
+
+  useEffect(() => {
+    if (!isEditing || !issueProjectId) {
+      setDrawingOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingDrawings(true);
+    getProjectDrawings(issueProjectId)
+      .then((opts) => { if (!cancelled) setDrawingOptions(opts); })
+      .finally(() => { if (!cancelled) setLoadingDrawings(false); });
+    return () => { cancelled = true; };
+  }, [isEditing, issueProjectId]);
+
+  useEffect(() => {
+    if (isEditing) {
+      setLinkedDocIds((issue.linkedDocuments || []).map((d) => d.id));
+    }
+  }, [isEditing, issue.linkedDocuments]);
+
   const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
   const isBim = isBimIssue(issue);
 
-  // Computed once here (rather than repeatedly casting `issue as BimIssue`
-  // inline in JSX) so the optional `ifcElements?: string[]` field is
-  // narrowed safely via the isBimIssue() type guard instead of `as` casts,
-  // which don't carry narrowing across separate expressions and were
-  // causing "Object is possibly 'undefined'" at the `.length` access.
   const ifcElementCount = isBimIssue(issue) ? (issue.ifcElements?.length ?? 0) : 0;
 
   const isCreator = isUserCreator(issue.reportedBy, currentUser);
@@ -243,7 +276,11 @@ export function IssueCard({
     return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- Screenshot upload handlers — all route through compressImage() so
+  // full-resolution phone/screen captures never hit the wire or get stored
+  // as multi-megabyte base64 blobs. ---------------------------------------
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -252,21 +289,19 @@ export function IssueCard({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+    setProcessingScreenshot(true);
+    try {
+      const { base64, format } = await compressImage(file);
       setNewScreenshot(base64);
       setNewScreenshotFormat(format);
-    };
-    reader.onerror = () => {
-      setSaveError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      setSaveError('Failed to process image file');
+    } finally {
+      setProcessingScreenshot(false);
+    }
   };
 
-  const handleCommentFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCommentFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -275,22 +310,20 @@ export function IssueCard({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+    setProcessingCommentScreenshot(true);
+    try {
+      const { base64, format } = await compressImage(file);
       setCommentScreenshot(base64);
       setCommentScreenshotFormat(format);
-      setCommentPreview(dataUrl);
-    };
-    reader.onerror = () => {
-      setSaveError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
+      setCommentPreview(`data:image/${format};base64,${base64}`);
+    } catch {
+      setSaveError('Failed to process image file');
+    } finally {
+      setProcessingCommentScreenshot(false);
+    }
   };
 
-  const handleEditCommentFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleEditCommentFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -299,22 +332,20 @@ export function IssueCard({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+    setProcessingEditCommentScreenshot(true);
+    try {
+      const { base64, format } = await compressImage(file);
       setEditingCommentScreenshot(base64);
       setEditingCommentScreenshotFormat(format);
-      setEditingCommentPreview(dataUrl);
-    };
-    reader.onerror = () => {
-      setSaveError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
+      setEditingCommentPreview(`data:image/${format};base64,${base64}`);
+    } catch {
+      setSaveError('Failed to process image file');
+    } finally {
+      setProcessingEditCommentScreenshot(false);
+    }
   };
 
-  const handleResolutionFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleResolutionFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -323,36 +354,37 @@ export function IssueCard({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+    setProcessingResolutionScreenshot(true);
+    try {
+      const { base64, format } = await compressImage(file);
       setResolutionScreenshot(base64);
       setResolutionScreenshotFormat(format);
-      setResolutionPreview(dataUrl);
-    };
-    reader.onerror = () => {
-      setSaveError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
+      setResolutionPreview(`data:image/${format};base64,${base64}`);
+    } catch {
+      setSaveError('Failed to process image file');
+    } finally {
+      setProcessingResolutionScreenshot(false);
+    }
   };
 
-  const handleExtraFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExtraFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       setSaveError('Image size must be less than 5MB');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setExtraScreenshot(dataUrl.split(',')[1]);
-      setExtraScreenshotFormat(file.type === 'image/jpeg' ? 'jpg' : 'png');
-      setExtraPreview(dataUrl);
-    };
-    reader.readAsDataURL(file);
+    setProcessingExtraScreenshot(true);
+    try {
+      const { base64, format } = await compressImage(file);
+      setExtraScreenshot(base64);
+      setExtraScreenshotFormat(format);
+      setExtraPreview(`data:image/${format};base64,${base64}`);
+    } catch {
+      setSaveError('Failed to process image file');
+    } finally {
+      setProcessingExtraScreenshot(false);
+    }
   };
 
   const handleAddScreenshot = async () => {
@@ -460,13 +492,8 @@ export function IssueCard({
         }
       }
 
-      // IssuePatch is intentionally a superset of Partial<Issue> (it adds
-      // write-only/API-only fields like snake_case `viewpoint`,
-      // `newAttachmentData`, etc. that aren't part of the read model).
-      // Because Issue is a union, Partial<Issue> distributes over it and
-      // won't structurally accept a patch whose `domain` spans both
-      // branches — so we assert here since `patch` was built field-by-field
-      // to match what the API layer actually expects.
+      patch.linkedDocumentIds = linkedDocIds;
+
       await onSave(patch as Partial<Issue>);
       setIsEditing(false);
       setNewScreenshot(null);
@@ -523,9 +550,6 @@ export function IssueCard({
     }
     try {
       setSaveError(null);
-      // issue.id is `string | number` (BaseIssue.id), but onDeleteIssue expects
-      // a string — coerce here so the caller doesn't have to worry about the
-      // widened union type.
       await onDeleteIssue(String(issue.id));
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : 'Failed to delete issue.');
@@ -613,12 +637,13 @@ export function IssueCard({
 
           <div className="screenshot-section">
             {!isEditing && hasScreenshot && (
-              <div className="screenshot-thumbnail-container" style={{ position: 'relative' }}>
+              <div className="screenshot-thumbnail-container" style={{ position: 'relative', width: 150, height: 100 }}>
                 <Image
                   src={displayScreenshot || '/images/test.jpg'}
                   alt="Issue screenshot"
                   fill
                   unoptimized
+                  sizes="150px"
                   className="screenshot-thumbnail-image"
                   style={{ objectFit: 'cover', cursor: 'pointer' }}
                   onClick={() => handleImageClick(getImageSource(displayScreenshot!))}
@@ -645,12 +670,13 @@ export function IssueCard({
                 </div>
 
                 {hasScreenshot && (
-                  <div className="screenshot-preview-container" style={{ position: 'relative' }}>
+                  <div className="screenshot-preview-container" style={{ position: 'relative', width: 200, height: 150 }}>
                     <Image
                       src={displayScreenshot || '/images/test.jpg'}
                       alt="Screenshot preview"
                       fill
                       unoptimized
+                      sizes="200px"
                       className="screenshot-preview-image"
                       style={{ objectFit: 'contain' }}
                       onError={handleImageError}
@@ -665,9 +691,13 @@ export function IssueCard({
                   <button
                     className="btn-primary small"
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={processingScreenshot}
+                    type="button"
                   >
-                    <i className="ti ti-upload" />
-                    {newScreenshot ? 'Change New Image' : hasScreenshot ? 'Replace Image' : 'Upload Image'}
+                    <i className={`ti ${processingScreenshot ? 'ti-loader' : 'ti-upload'}`} />
+                    {processingScreenshot
+                      ? 'Processing…'
+                      : newScreenshot ? 'Change New Image' : hasScreenshot ? 'Replace Image' : 'Upload Image'}
                   </button>
 
                   <input
@@ -682,6 +712,7 @@ export function IssueCard({
                     <button
                       className="btn-outline small danger"
                       onClick={() => setNewScreenshot(null)}
+                      type="button"
                     >
                       <i className="ti ti-x" /> Discard New
                     </button>
@@ -691,23 +722,25 @@ export function IssueCard({
                     <button
                       className="btn-outline small danger"
                       onClick={handleRemoveSavedScreenshot}
+                      type="button"
                     >
                       <i className="ti ti-trash" /> Delete
                     </button>
                   )}
 
-                  <span className="file-hint">Max 5MB (PNG/JPG)</span>
+                  <span className="file-hint">Max 5MB (PNG/JPG) — auto-compressed</span>
                 </div>
 
                 {newScreenshot && (
                   <div className="screenshot-new-preview">
                     <span className="preview-label">📸 New image (will replace current):</span>
-                    <div className="screenshot-preview-image" style={{ position: 'relative' }}>
+                    <div className="screenshot-preview-image" style={{ position: 'relative', width: 200, height: 150 }}>
                       <Image
                         src={`data:image/${newScreenshotFormat};base64,${newScreenshot}`}
                         alt="New screenshot preview"
                         fill
                         unoptimized
+                        sizes="200px"
                         style={{ objectFit: 'contain' }}
                         onError={handleImageError}
                       />
@@ -734,12 +767,13 @@ export function IssueCard({
                 <div className="history-thumbnails">
                   {commentSnapshots.map((c) => (
                     <div key={c.id} className="history-thumbnail-item">
-                      <div style={{ position: 'relative', width: '100%', height: '90px' }}>
+                      <div style={{ position: 'relative', width: '100px', height: '80px' }}>
                         <Image
                           src={getImageSource(c.snapshot!)}
                           alt={`Snapshot from ${c.author}`}
                           fill
                           unoptimized
+                          sizes="100px"
                           style={{ objectFit: 'cover', cursor: 'pointer' }}
                           onClick={() => handleImageClick(getImageSource(c.snapshot!))}
                           onError={handleImageError}
@@ -794,61 +828,22 @@ export function IssueCard({
               </span>
             )}
 
-            {issue.dueDate && (
+            {!isEditing && issue.dueDate && (
               <span className="meta-item due-date">
                 <i className="ti ti-calendar-due" />
                 Due: {issue.dueDate}
               </span>
             )}
 
-            {isEditing ? (
+            {!isEditing && issue.assignedTo && (
+              <span className="meta-item">
+                <i className="ti ti-user-check" />
+                {issue.assignedTo}
+              </span>
+            )}
+
+            {!isEditing && (
               <>
-                <select
-                  className="field-select"
-                  value={form.priority}
-                  onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as IssuePriority }))}
-                >
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="field-select"
-                  value={form.status}
-                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as IssueStatus }))}
-                >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="field-input small"
-                  placeholder="Assigned to ID (number)"
-                  value={form.assignedToId ?? ''}
-                  onChange={(e) => setForm((f) => ({
-                    ...f,
-                    assignedToId: e.target.value ? Number(e.target.value) : null
-                  }))}
-                />
-                <input
-                  className="field-input small"
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
-                />
-              </>
-            ) : (
-              <>
-                {issue.assignedTo && (
-                  <span className="meta-item">
-                    <i className="ti ti-user-check" />
-                    {issue.assignedTo}
-                  </span>
-                )}
                 <span className="priority-badge" style={{ color: getPriorityColor(issue.priority) }}>
                   <i className="ti ti-flag" />
                   {issue.priority}
@@ -865,6 +860,73 @@ export function IssueCard({
               </>
             )}
           </div>
+
+          {isEditing && (
+            <div className="form-row" style={{ marginTop: '10px', marginBottom: '4px' }}>
+              <div className="form-field">
+                <label>Priority</label>
+                <select
+                  className="field-select"
+                  value={form.priority}
+                  onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as IssuePriority }))}
+                >
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-field">
+                <label>Status</label>
+                <select
+                  className="field-select"
+                  value={form.status}
+                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as IssueStatus }))}
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-field">
+                <label>Assigned To</label>
+                <select
+                  className="field-select"
+                  value={form.assignedToId ?? ''}
+                  onChange={(e) => setForm((f) => ({
+                    ...f,
+                    assignedToId: e.target.value ? Number(e.target.value) : null,
+                  }))}
+                >
+                  <option value="">Unassigned</option>
+                  {assigneeOptions.map((a) => (
+                    <option key={a.id} value={a.id}>{a.displayName}</option>
+                  ))}
+                  {form.assignedToId !== null &&
+                    !assigneeOptions.some((a) => a.id === form.assignedToId) && (
+                      <option value={form.assignedToId}>
+                        {issue.assignedTo || `User #${form.assignedToId}`}
+                      </option>
+                  )}
+                </select>
+                {loadingAssignees && <span className="file-hint">Loading people…</span>}
+                {!loadingAssignees && assigneeOptions.length === 0 && issueOrganisationId && (
+                  <span className="file-hint">No members found for this organisation.</span>
+                )}
+              </div>
+
+              <div className="form-field">
+                <label>Due Date</label>
+                <input
+                  className="field-input"
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+                />
+              </div>
+            </div>
+          )}
 
           {issue.linkedDocuments && issue.linkedDocuments.length > 0 && !isEditing && (
             <div className="issue-linked-drawings">
@@ -884,6 +946,73 @@ export function IssueCard({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {isEditing && (
+            <div className="issue-linked-drawings" style={{ marginTop: '12px' }}>
+              <span className="issue-linked-drawings-label">
+                <i className="ti ti-paperclip" /> Linked drawings
+              </span>
+
+              <div className="issue-linked-drawings-list" style={{ marginTop: '8px' }}>
+                {linkedDocIds.map((docId) => {
+                  const doc =
+                    issue.linkedDocuments?.find((d) => d.id === docId) ||
+                    drawingOptions.find((d) => d.id === docId);
+                  return (
+                    <span key={docId} className="issue-linked-drawing-chip">
+                      <i className={`ti ${getDrawingIcon(doc?.file_type || '')}`} />
+                      {doc?.title || `Drawing #${docId}`}
+                      <button
+                        type="button"
+                        onClick={() => setLinkedDocIds((ids) => ids.filter((id) => id !== docId))}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', marginLeft: '6px' }}
+                        title="Unlink"
+                      >
+                        <i className="ti ti-x" />
+                      </button>
+                    </span>
+                  );
+                })}
+                {linkedDocIds.length === 0 && (
+                  <span className="file-hint">No drawings linked yet.</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                <select
+                  className="field-select small"
+                  value={drawingToAdd}
+                  onChange={(e) => setDrawingToAdd(e.target.value ? Number(e.target.value) : "")}
+                  disabled={!issueProjectId}
+                >
+                  <option value="">
+                    {loadingDrawings ? 'Loading drawings…' : 'Select a drawing to link…'}
+                  </option>
+                  {drawingOptions
+                    .filter((d) => !linkedDocIds.includes(d.id))
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>{d.title}</option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn-outline small"
+                  disabled={!drawingToAdd}
+                  onClick={() => {
+                    if (drawingToAdd) {
+                      setLinkedDocIds((ids) => [...ids, Number(drawingToAdd)]);
+                      setDrawingToAdd("");
+                    }
+                  }}
+                >
+                  <i className="ti ti-plus" /> Link
+                </button>
+              </div>
+              {!loadingDrawings && drawingOptions.length === 0 && (
+                <span className="file-hint">No drawings found for this project.</span>
+              )}
             </div>
           )}
 
@@ -936,12 +1065,14 @@ export function IssueCard({
 
                             {editingCommentHasExistingImage && !editingCommentScreenshot && (
                               <div className="comment-existing-image">
-                                <div className="comment-edit-image-preview" style={{ position: 'relative' }}>
+                                <div style={{ position: 'relative', width: 150, height: 100 }}>
                                   <Image
                                     src={comment.snapshot ? getImageSource(comment.snapshot) : '/images/test.jpg'}
                                     alt="Existing comment image"
                                     fill
                                     unoptimized
+                                    sizes="150px"
+                                    className="comment-edit-image-preview"
                                     style={{ objectFit: 'contain' }}
                                     onError={handleImageError}
                                   />
@@ -951,6 +1082,7 @@ export function IssueCard({
                                   className="btn-outline small danger"
                                   onClick={removeCommentImage}
                                   style={{ marginTop: '4px' }}
+                                  type="button"
                                 >
                                   <i className="ti ti-trash" /> Remove image
                                 </button>
@@ -959,12 +1091,14 @@ export function IssueCard({
 
                             {editingCommentScreenshot && (
                               <div className="comment-new-image-preview">
-                                <div className="comment-edit-image-preview" style={{ position: 'relative' }}>
+                                <div style={{ position: 'relative', width: 150, height: 100 }}>
                                   <Image
                                     src={editingCommentPreview || '/images/test.jpg'}
                                     alt="New comment image preview"
                                     fill
                                     unoptimized
+                                    sizes="150px"
+                                    className="comment-edit-image-preview"
                                     style={{ objectFit: 'contain' }}
                                   />
                                 </div>
@@ -975,6 +1109,7 @@ export function IssueCard({
                                     setEditingCommentScreenshot(null);
                                     setEditingCommentPreview(null);
                                   }}
+                                  type="button"
                                 >
                                   <i className="ti ti-x" /> Discard
                                 </button>
@@ -985,9 +1120,13 @@ export function IssueCard({
                               <button
                                 className="btn-outline small"
                                 onClick={() => editCommentFileInputRef.current?.click()}
+                                disabled={processingEditCommentScreenshot}
+                                type="button"
                               >
-                                <i className="ti ti-upload" />
-                                {editingCommentScreenshot ? 'Change Image' : editingCommentHasExistingImage ? 'Replace Image' : 'Add Image'}
+                                <i className={`ti ${processingEditCommentScreenshot ? 'ti-loader' : 'ti-upload'}`} />
+                                {processingEditCommentScreenshot
+                                  ? 'Processing…'
+                                  : editingCommentScreenshot ? 'Change Image' : editingCommentHasExistingImage ? 'Replace Image' : 'Add Image'}
                               </button>
                               <input
                                 ref={editCommentFileInputRef}
@@ -996,7 +1135,7 @@ export function IssueCard({
                                 onChange={handleEditCommentFileUpload}
                                 style={{ display: 'none' }}
                               />
-                              <span className="file-hint">Max 5MB</span>
+                              <span className="file-hint">Max 5MB — auto-compressed</span>
                             </div>
                           </div>
 
@@ -1010,6 +1149,7 @@ export function IssueCard({
                                 setEditingCommentPreview(null);
                                 setEditingCommentHasExistingImage(false);
                               }}
+                              type="button"
                             >
                               Cancel
                             </button>
@@ -1017,6 +1157,7 @@ export function IssueCard({
                               className="btn-primary small"
                               onClick={() => handleEditComment(comment.id, !!comment.snapshot)}
                               disabled={!editingCommentText.trim()}
+                              type="button"
                             >
                               Save
                             </button>
@@ -1033,12 +1174,13 @@ export function IssueCard({
                           </div>
                           <div className="comment-text">{comment.text}</div>
                           {comment.snapshot && (
-                            <div className="comment-snapshot" style={{ position: 'relative' }}>
+                            <div className="comment-snapshot" style={{ position: 'relative', width: 200, height: 150 }}>
                               <Image
                                 src={getImageSource(comment.snapshot)}
                                 alt="Comment screenshot"
                                 fill
                                 unoptimized
+                                sizes="200px"
                                 className="comment-snapshot-thumb"
                                 style={{ objectFit: 'cover', cursor: 'pointer' }}
                                 onClick={() => handleImageClick(getImageSource(comment.snapshot))}
@@ -1088,12 +1230,13 @@ export function IssueCard({
 
               <div className="resolve-screenshot-upload">
                 {resolutionPreview ? (
-                  <div className="screenshot-preview" style={{ position: 'relative' }}>
+                  <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
                     <Image
                       src={resolutionPreview}
                       alt="Resolution screenshot preview"
                       fill
                       unoptimized
+                      sizes="200px"
                       style={{ objectFit: 'contain' }}
                     />
                     <button
@@ -1102,6 +1245,7 @@ export function IssueCard({
                         setResolutionScreenshot(null);
                         setResolutionPreview(null);
                       }}
+                      type="button"
                     >
                       ✕
                     </button>
@@ -1110,9 +1254,11 @@ export function IssueCard({
                   <button
                     className="btn-outline small"
                     onClick={() => resolveFileInputRef.current?.click()}
+                    disabled={processingResolutionScreenshot}
                     type="button"
                   >
-                    <i className="ti ti-camera" /> Attach proof-of-fix screenshot (optional)
+                    <i className={`ti ${processingResolutionScreenshot ? 'ti-loader' : 'ti-camera'}`} />
+                    {processingResolutionScreenshot ? 'Processing…' : 'Attach proof-of-fix screenshot (optional)'}
                   </button>
                 )}
                 <input
@@ -1132,10 +1278,11 @@ export function IssueCard({
                     setResolutionScreenshot(null);
                     setResolutionPreview(null);
                   }}
+                  type="button"
                 >
                   Cancel
                 </button>
-                <button className="btn-primary" onClick={handleResolveConfirm}>
+                <button className="btn-primary" onClick={handleResolveConfirm} type="button">
                   <i className="ti ti-check" /> Confirm Resolve
                 </button>
               </div>
@@ -1203,12 +1350,13 @@ export function IssueCard({
                 style={{ marginBottom: '8px' }}
               />
               {extraPreview ? (
-                <div className="screenshot-preview" style={{ position: 'relative' }}>
+                <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
                   <Image
                     src={extraPreview}
                     alt="New screenshot preview"
                     fill
                     unoptimized
+                    sizes="200px"
                     style={{ objectFit: 'contain' }}
                   />
                   <button
@@ -1217,6 +1365,7 @@ export function IssueCard({
                       setExtraScreenshot(null);
                       setExtraPreview(null);
                     }}
+                    type="button"
                   >
                     ✕
                   </button>
@@ -1225,9 +1374,11 @@ export function IssueCard({
                 <button
                   className="btn-outline small"
                   onClick={() => extraFileInputRef.current?.click()}
+                  disabled={processingExtraScreenshot}
                   type="button"
                 >
-                  <i className="ti ti-camera" /> Choose image
+                  <i className={`ti ${processingExtraScreenshot ? 'ti-loader' : 'ti-camera'}`} />
+                  {processingExtraScreenshot ? 'Processing…' : 'Choose image'}
                 </button>
               )}
               <input
@@ -1242,6 +1393,7 @@ export function IssueCard({
                   className="btn-primary small"
                   onClick={handleAddScreenshot}
                   style={{ marginTop: '8px' }}
+                  type="button"
                 >
                   Add
                 </button>
@@ -1261,12 +1413,13 @@ export function IssueCard({
 
               <div className="comment-image-upload">
                 {commentPreview ? (
-                  <div className="comment-image-preview" style={{ position: 'relative' }}>
+                  <div className="comment-image-preview" style={{ position: 'relative', width: 150, height: 100 }}>
                     <Image
                       src={commentPreview}
                       alt="Comment image preview"
                       fill
                       unoptimized
+                      sizes="150px"
                       style={{ objectFit: 'contain' }}
                     />
                     <button
@@ -1275,6 +1428,7 @@ export function IssueCard({
                         setCommentScreenshot(null);
                         setCommentPreview(null);
                       }}
+                      type="button"
                     >
                       ✕
                     </button>
@@ -1283,9 +1437,11 @@ export function IssueCard({
                   <button
                     className="btn-outline small"
                     onClick={() => commentFileInputRef.current?.click()}
+                    disabled={processingCommentScreenshot}
                     type="button"
                   >
-                    <i className="ti ti-camera" /> Add image (optional)
+                    <i className={`ti ${processingCommentScreenshot ? 'ti-loader' : 'ti-camera'}`} />
+                    {processingCommentScreenshot ? 'Processing…' : 'Add image (optional)'}
                   </button>
                 )}
                 <input
@@ -1306,6 +1462,7 @@ export function IssueCard({
                     setCommentScreenshot(null);
                     setCommentPreview(null);
                   }}
+                  type="button"
                 >
                   Cancel
                 </button>
@@ -1313,6 +1470,7 @@ export function IssueCard({
                   className="btn-primary"
                   onClick={handleAddComment}
                   disabled={!commentText.trim()}
+                  type="button"
                 >
                   <i className="ti ti-send" /> Post Comment
                 </button>
@@ -1355,6 +1513,7 @@ export function IssueCard({
               alt="Full size screenshot"
               fill
               unoptimized
+              sizes="90vw"
               style={{ objectFit: 'contain' }}
               onClick={(e) => e.stopPropagation()}
               onError={handleImageError}

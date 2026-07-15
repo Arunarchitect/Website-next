@@ -134,7 +134,7 @@ export default function MainAdminPage() {
         // Get only the 5 most recent issues
         setRecentIssues(sorted.slice(0, 5));
         
-        // ✅ Calculate stats with normalized values
+        // Calculate stats with normalized values
         setIssueStats(calculateStats(allIssues));
         
       } catch (err) {
@@ -178,6 +178,9 @@ export default function MainAdminPage() {
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
   };
+
+  // Check if there are any open issues
+  const hasOpenIssues = issueStats.open > 0;
 
   return (
     <main className={`${display.variable} ${mono.variable} admin-page`}>
@@ -264,8 +267,15 @@ export default function MainAdminPage() {
                            stat.label === 'In Progress' ? issueStats.inProgress :
                            stat.label === 'Resolved' ? issueStats.resolved :
                            issueStats.highPriority;
+              
+              // Check if this is the Open Issues stat card
+              const isOpenIssuesCard = stat.label === 'Open Issues';
+              
               return (
-                <div key={stat.label} className="stat-card">
+                <div 
+                  key={stat.label} 
+                  className={`stat-card ${isOpenIssuesCard && hasOpenIssues ? 'stat-card-open-issues' : ''}`}
+                >
                   <i className={`ti ${stat.icon} stat-icon`} aria-hidden="true" />
                   <div>
                     <p className="stat-label">{stat.label}</p>

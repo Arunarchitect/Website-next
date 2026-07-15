@@ -786,3 +786,96 @@
     font-size: 18px;
   }
 }
+
+/* Add this to the end of your styles.css file */
+
+/* Blinking animation for open issues */
+@keyframes blinkRed {
+  0% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  }
+  25% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
+  }
+  50% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.15);
+    box-shadow: 0 0 12px 4px rgba(212, 62, 62, 0.25);
+  }
+  75% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
+  }
+  100% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  }
+}
+
+/* Alternative: pulsing red glow animation */
+@keyframes pulseRed {
+  0% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    transform: scale(1);
+  }
+  50% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    transform: scale(1.02);
+    box-shadow: 0 0 20px rgba(212, 62, 62, 0.15);
+  }
+  100% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    transform: scale(1);
+  }
+}
+
+/* Apply blinking to the Open Issues stat card */
+.stat-card-open-issues {
+  animation: blinkRed 2s ease-in-out infinite;
+  border-color: #D43E3E !important;
+  border-width: 2px !important;
+  position: relative;
+}
+
+/* Add a subtle red indicator dot */
+.stat-card-open-issues::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: #D43E3E;
+  border-radius: 50%;
+  animation: pulseRed 1.5s ease-in-out infinite;
+  border: 2px solid white;
+  box-shadow: 0 0 8px rgba(212, 62, 62, 0.4);
+}
+
+/* Make the stat value red and bold when there are open issues */
+.stat-card-open-issues .stat-value {
+  color: #D43E3E !important;
+  font-weight: 700 !important;
+}
+
+/* Optional: Add a blinking icon */
+.stat-card-open-issues .stat-icon {
+  color: #D43E3E !important;
+  animation: pulseRed 1.5s ease-in-out infinite;
+}
+
+/* Hover effect for the stat card */
+.stat-card-open-issues:hover {
+  animation-play-state: paused;
+  border-color: #B83232 !important;
+  background: rgba(212, 62, 62, 0.08) !important;
+}

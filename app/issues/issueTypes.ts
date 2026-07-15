@@ -111,6 +111,7 @@ interface BaseIssue {
   reported_by?: number;
   assigned_to?: number | null;
   organisation: string | null;
+  organisationId: number | null;
 }
 
 export interface BimIssue extends BaseIssue {
@@ -381,6 +382,7 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
     })),
     ifcElements: [],
     organisation: null,
+    organisationId: null,
   };
 }
 
@@ -447,6 +449,7 @@ export interface DjangoIssueData {
   project?: DjangoRef;
   deliverable?: DjangoRef;
   organisation?: string | null;
+  organisation_id?: number;   
   bcf_guid?: string;
   topic_type?: string;
   ifc_elements?: string[];
@@ -505,6 +508,7 @@ export function fromDjangoIssue(data: DjangoIssueData): Issue {
     reported_by: extractId(data.reported_by) ?? undefined,
     assigned_to: extractId(data.assigned_to),
     organisation: data.organisation || null,
+    organisationId: typeof data.organisation_id === 'number' ? data.organisation_id : null, 
   };
 
   if (data.domain === 'bim') {

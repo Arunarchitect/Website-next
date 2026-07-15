@@ -19,7 +19,9 @@ import {
   deleteComment,
   editComment,
   deleteIssue,
-  API_URL,  // ✅ Import API_URL
+  getProjectDrawings,
+  DrawingOption,
+  API_URL,
 } from "./issueApi";
 import {
   Issue,
@@ -30,6 +32,7 @@ import {
   isBimIssue,
 } from "./issueTypes";
 import { IssueCard } from "./IssueCard";
+import { compressImage } from "./imageUtils";
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { isUserMatch } from '@/components/utils/userMatching';
 import { useAppDispatch } from '@/redux/hooks';
@@ -63,6 +66,16 @@ const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
 const DEFAULT_CAMERA_UP_VECTOR = { x: 0, y: 1, z: 0 };
 const DEFAULT_FIELD_OF_VIEW = 60;
 
+const getDrawingIcon = (fileType: string): string => {
+  switch (fileType) {
+    case 'pdf': return 'ti-file-pdf';
+    case 'image': return 'ti-photo';
+    case 'dxf': return 'ti-file-code';
+    case 'ifc': return 'ti-building';
+    default: return 'ti-file';
+  }
+};
+
 interface OrganisationOption {
   id: number;
   name: string;
@@ -75,13 +88,6 @@ interface ProjectOption {
   organisation_name: string;
 }
 
-// ---------------------------------------------------------------------------
-// Shape of the payload built by NewIssueForm and handed to createIssue().
-// Mirrors the two branches of handleSubmit below (BIM vs "other"), using the
-// same camelCase field names (topicType, newAttachmentData, ...) that the
-// rest of this file and IssueCard already use for write payloads.
-// ---------------------------------------------------------------------------
-
 interface NewIssueBase {
   project_id: number;
   title: string;
@@ -89,6 +95,7 @@ interface NewIssueBase {
   status: IssueStatus;
   priority: IssuePriority;
   module: string;
+  linkedDocumentIds?: number[];
 }
 
 interface NewIssueViewpointInput {
@@ -116,9 +123,6 @@ interface NewDesignIssueInput extends NewIssueBase {
 
 type NewIssueInput = NewBimIssueInput | NewDesignIssueInput;
 
-// Narrow an unknown error down to a validation-errors object (as returned by
-// DRF: { field: string[] }) so we can join it into a readable message
-// without resorting to `any`.
 function extractValidationMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err) && err.response?.data) {
     const data = err.response.data as Record<string, unknown>;
@@ -164,9 +168,6 @@ export default function IssuesPage() {
     return isUserMatch(reportedBy, user);
   };
 
-  // Open the drawings page in a NEW TAB and ask it to open this document —
-  // the drawing app's own permission checks still apply on the other end.
-  // window.open (not router.push) is what actually gives us a new tab.
   const handleOpenDrawing = (documentId: number) => {
     window.open(`/drawing?openDoc=${documentId}`, '_blank', 'noopener,noreferrer');
   };
@@ -186,7 +187,6 @@ export default function IssuesPage() {
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
-    
   }, []);
 
   const visibleIssues = issues.filter((issue) => {
@@ -467,12 +467,17 @@ function NewIssueForm({
   const [organisationId, setOrganisationId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const [organisations, setOrganisations] = useState<OrganisationOption[]>([]);
   const [filteredProjects, setFilteredProjects] = useState<ProjectOption[]>([]);
   const [loadingOrganisations, setLoadingOrganisations] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
+
+  const [availableDrawings, setAvailableDrawings] = useState<DrawingOption[]>([]);
+  const [loadingDrawings, setLoadingDrawings] = useState(false);
+  const [linkedDocumentIds, setLinkedDocumentIds] = useState<number[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -486,7 +491,6 @@ function NewIssueForm({
           return;
         }
 
-        // ✅ FIXED: Using API_URL with backticks
         const response = await fetch(`${API_URL}/my-organisations/`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -528,7 +532,6 @@ function NewIssueForm({
           return;
         }
 
-        // ✅ FIXED: Using API_URL with backticks
         const response = await fetch(`${API_URL}/organisations/${organisationId}/projects/`, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -558,7 +561,22 @@ function NewIssueForm({
     fetchProjects();
   }, [organisationId]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    if (!projectId) {
+      setAvailableDrawings([]);
+      setLinkedDocumentIds([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingDrawings(true);
+    getProjectDrawings(projectId)
+      .then((opts) => { if (!cancelled) setAvailableDrawings(opts); })
+      .finally(() => { if (!cancelled) setLoadingDrawings(false); });
+    setLinkedDocumentIds([]);
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -568,19 +586,17 @@ function NewIssueForm({
     }
 
     setUploadError(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const format = file.type === 'image/jpeg' ? 'jpg' : 'png';
+    setUploadingImage(true);
+    try {
+      const { base64, format } = await compressImage(file);
       setScreenshot(base64);
       setScreenshotFormat(format);
-      setPreviewImage(dataUrl);
-    };
-    reader.onerror = () => {
-      setUploadError('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
+      setPreviewImage(`data:image/${format};base64,${base64}`);
+    } catch {
+      setUploadError('Failed to process image file');
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -604,6 +620,7 @@ function NewIssueForm({
         status: "Open",
         priority,
         module: module.trim() || (domain === "bim" ? "Modeling" : "General"),
+        linkedDocumentIds: linkedDocumentIds.length > 0 ? linkedDocumentIds : undefined,
       };
 
       if (domain === "bim") {
@@ -800,8 +817,11 @@ function NewIssueForm({
             className="btn-outline"
             style={{ width: '100%' }}
             onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage}
+            type="button"
           >
-            <i className="ti ti-camera" /> Upload screenshot (max 5MB)
+            <i className={`ti ${uploadingImage ? 'ti-loader' : 'ti-camera'}`} />
+            {uploadingImage ? 'Processing image…' : 'Upload screenshot (max 5MB)'}
           </button>
           <input
             ref={fileInputRef}
@@ -812,12 +832,13 @@ function NewIssueForm({
           />
         </div>
         {previewImage && (
-          <div className="screenshot-preview" style={{ position: 'relative' }}>
+          <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
             <Image
               src={previewImage}
               alt="Preview"
               fill
               unoptimized
+              sizes="200px"
               style={{ objectFit: 'contain' }}
             />
             <button
@@ -826,6 +847,7 @@ function NewIssueForm({
                 setScreenshot(null);
                 setPreviewImage(null);
               }}
+              type="button"
             >
               ✕
             </button>
@@ -833,14 +855,62 @@ function NewIssueForm({
         )}
       </div>
 
+      <div className="form-field">
+        <label>Linked Drawings (optional)</label>
+        {!projectId ? (
+          <div style={{ color: 'var(--slate)', fontSize: '13px', padding: '4px' }}>
+            Select a project to see its drawings.
+          </div>
+        ) : loadingDrawings ? (
+          <div className="loading-indicator">Loading drawings...</div>
+        ) : availableDrawings.length > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              maxHeight: '160px',
+              overflowY: 'auto',
+              border: '1px solid var(--line)',
+              borderRadius: '4px',
+              padding: '8px',
+            }}
+          >
+            {availableDrawings.map((d) => (
+              <label
+                key={d.id}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={linkedDocumentIds.includes(d.id)}
+                  onChange={(e) => {
+                    setLinkedDocumentIds((ids) =>
+                      e.target.checked ? [...ids, d.id] : ids.filter((id) => id !== d.id)
+                    );
+                  }}
+                />
+                <i className={`ti ${getDrawingIcon(d.file_type)}`} />
+                {d.title}
+              </label>
+            ))}
+          </div>
+        ) : (
+          <div style={{ color: 'var(--slate)', fontSize: '13px', padding: '4px' }}>
+            No drawings found for this project.
+          </div>
+        )}
+      </div>
+
       <div className="form-actions">
-        <button className="btn-outline" onClick={onCancel}>
+        <button className="btn-outline" onClick={onCancel} type="button">
           Cancel
         </button>
         <button
           className="btn-primary"
           onClick={handleSubmit}
-          disabled={!projectId || !title.trim() || !organisationId}
+          disabled={!projectId || !title.trim() || !organisationId || uploadingImage}
+          type="button"
         >
           <i className="ti ti-plus" /> Create Issue
         </button>

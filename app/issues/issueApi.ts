@@ -205,9 +205,6 @@ const mapPriorityToFrontend = (priority: string): string => {
   return priorityMap[priority] || priority;
 };
 
-// Fixed: return type is now BcfTopicType (not string), and the map is typed
-// so it can only ever produce a valid member of that union. This removes the
-// need for a cast or `|| 'General'` fallback at every call site.
 const mapTopicTypeToFrontend = (topicType: string): BcfTopicType => {
   const topicTypeMap: {[key: string]: BcfTopicType} = {
     'clash': 'Clash', 'coordinate': 'Coordinate', 'quality': 'Quality', 'safety': 'Safety',
@@ -215,6 +212,109 @@ const mapTopicTypeToFrontend = (topicType: string): BcfTopicType => {
   };
   return topicTypeMap[topicType] || 'General';
 };
+
+// ---------------------------------------------------------------------------
+// Assignee / Drawing option fetchers
+// ---------------------------------------------------------------------------
+
+export interface AssigneeOption {
+  id: number;
+  displayName: string;
+  email: string;
+}
+
+export interface DeliverableOption {
+  id: number;
+  name: string;
+}
+
+export interface DrawingOption {
+  id: number;
+  title: string;
+  file_type: string;
+}
+
+const extractIdSafe = (value: unknown): number | undefined => {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'object' && 'id' in (value as Record<string, unknown>)) {
+    const id = (value as Record<string, unknown>).id;
+    return typeof id === 'number' ? id : undefined;
+  }
+  return undefined;
+};
+
+export async function getOrganisationMembers(organisationId: number | string): Promise<AssigneeOption[]> {
+  try {
+    const response = await apiClient.get(`/organisations/${organisationId}/members/`);
+    return response.data.map((m: any) => {
+      const u = m.user || m;
+      return {
+        id: u.id,
+        displayName:
+          `${u.first_name || ''} ${u.last_name || ''}`.trim() ||
+          u.full_name ||
+          u.email ||
+          `User #${u.id}`,
+        email: u.email || '',
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching organisation members:', error);
+    return [];
+  }
+}
+
+// Retained for any other screen still using the deliverable-scoped picker.
+// The Issues create/edit forms no longer call these directly.
+export async function getDeliverablesForProject(projectId: number | string): Promise<DeliverableOption[]> {
+  try {
+    const response = await apiClient.get('/drawings/deliverables/', {
+      params: { project_id: projectId },
+    });
+    return response.data.map((d: any) => ({
+      id: d.id,
+      name: d.name || d.title || `Deliverable #${d.id}`,
+    }));
+  } catch (error) {
+    console.error('Error fetching deliverables:', error);
+    return [];
+  }
+}
+
+export async function getDeliverableDrawings(deliverableId: number | string): Promise<DrawingOption[]> {
+  try {
+    const response = await apiClient.get('/drawings/documents/', {
+      params: { deliverable_id: deliverableId },
+    });
+    return response.data.map((d: any) => ({
+      id: d.id,
+      title: d.title,
+      file_type: d.file_type,
+    }));
+  } catch (error) {
+    console.error('Error fetching drawings:', error);
+    return [];
+  }
+}
+
+// Drawings scoped directly to a project — used by the Issues create/edit
+// forms now that the deliverable step has been removed from that flow.
+export async function getProjectDrawings(projectId: number | string): Promise<DrawingOption[]> {
+  try {
+    const response = await apiClient.get('/drawings/documents/', {
+      params: { project_id: projectId }, // matches DrawingDocumentViewSet.get_queryset()
+    });
+    return response.data.map((d: any) => ({
+      id: d.id,
+      title: d.title,
+      file_type: d.file_type,
+    }));
+  } catch (error) {
+    console.error('Error fetching project drawings:', error);
+    return [];
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Django <-> frontend converters
@@ -230,14 +330,20 @@ const convertDjangoIssue = (data: any): Issue => {
     module: data.module || '',
     reportedBy: data.reported_by_name || data.reported_by?.email || data.reported_by?.full_name || 'Unknown',
     assignedTo: data.assigned_to_name || data.assigned_to?.email || data.assigned_to?.full_name || null,
-    assignedToId: data.assigned_to?.id || null,
+    assignedToId: extractIdSafe(data.assigned_to) ?? null,
+    project: extractIdSafe(data.project),
+    project_id: extractIdSafe(data.project),
+    deliverable: extractIdSafe(data.deliverable) ?? null,
+    organisationId:
+      typeof data.organisation_id === 'number'
+        ? data.organisation_id
+        : (data.organisation_details?.id ?? null),
     created: data.created,
     updated: data.updated,
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
     organisation: data.organisation || data.organisation_details?.name || data.project_details?.organisation_name || null,
-    // NEW: drawings linked to this issue, straight from linked_documents_details.
     linkedDocuments: (data.linked_documents_details || []).map((d: any) => ({
       id: d.id,
       title: d.title,
@@ -300,6 +406,10 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
     payload.project = typeof issue.project === 'number' ? issue.project : undefined;
   }
 
+  if (issue.deliverable !== undefined) {
+    payload.deliverable = issue.deliverable === null ? null : issue.deliverable;
+  }
+
   if (includeDomain && issue.domain !== undefined) {
     payload.domain = issue.domain === 'bim' ? 'bim' : 'other';
   }
@@ -324,6 +434,11 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
 
   if (issue.labels !== undefined && Array.isArray(issue.labels) && issue.labels.length > 0) {
     payload.labels = issue.labels;
+  }
+
+  const issueAny = issue as any;
+  if (issueAny.linkedDocumentIds !== undefined && Array.isArray(issueAny.linkedDocumentIds)) {
+    payload.linked_documents = issueAny.linkedDocumentIds;
   }
 
   if (issue.resolution !== undefined && issue.resolution !== '') {
@@ -358,8 +473,10 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
         viewpointPayload.snapshot_data = snapshotData;
         viewpointPayload.snapshot_format = snapshotFormat || 'png';
       } else if (viewpoint.clear_snapshot === true) {
-        viewpointPayload.snapshot_data = null;
-        viewpointPayload.snapshot_format = null;
+        // ✅ Fixed: previously sent snapshot_data: null / snapshot_format: null,
+        // which the backend CharField rejected with a 400. The backend now
+        // has an explicit clear_snapshot flag for this case.
+        viewpointPayload.clear_snapshot = true;
       }
 
       payload.viewpoint = viewpointPayload;
@@ -784,6 +901,10 @@ const issueApi = {
   getIssuesByDomain,
   getIssuesByIfcElement,
   getMyIssues,
+  getOrganisationMembers,
+  getDeliverablesForProject,
+  getDeliverableDrawings,
+  getProjectDrawings,
   getStatusColor,
   getPriorityColor,
 };
