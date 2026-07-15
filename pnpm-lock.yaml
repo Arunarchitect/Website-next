@@ -25,7 +25,7 @@ importers:
         specifier: ^0.5.0
         version: 0.5.0
       axios:
-        specifier: ^1.16.1
+        specifier: '>=1.13.5'
         version: 1.16.1
       classnames:
         specifier: ^2.5.1

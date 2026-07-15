@@ -13,7 +13,7 @@
     "@heroicons/react": "^2.2.0",
     "@reduxjs/toolkit": "^2.7.0",
     "async-mutex": "^0.5.0",
-    "axios": "^1.16.1",
+    "axios": ">=1.13.5",
     "classnames": "^2.5.1",
     "date-fns": "^4.1.0",
     "hls.js": "^1.6.16",
