@@ -505,10 +505,13 @@ export async function getLinkedIssues(meetingId: string | number): Promise<Linke
 }
 
 /**
- * Get upcoming meetings
+ * Get upcoming meetings within the given window (defaults to the next 7 days).
  */
 export async function getUpcomingMeetings(days: number = 7): Promise<Meeting[]> {
-  const response = await fetch(`${MEETINGS_BASE}/upcoming/`, {
+  const url = new URL(`${MEETINGS_BASE}/upcoming/`);
+  url.searchParams.append("days", String(days));
+  
+  const response = await fetch(url.toString(), {
     method: "GET",
     headers: authHeaders(),
   });
@@ -621,7 +624,7 @@ export const getPriorityColor = getMeetingPriorityColor;
 // EXPORT DEFAULTS
 // ---------------------------------------------------------------------------
 
-export default {
+const meetingApi = {
   getMeetings,
   getMeeting,
   createMeeting,
@@ -643,3 +646,5 @@ export default {
   getStatusColor,
   getPriorityColor,
 };
+
+export default meetingApi;

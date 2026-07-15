@@ -3,7 +3,8 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import Image from "next/image";
+import axios from "axios";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./issues.css";
 import {
@@ -73,9 +74,60 @@ interface ProjectOption {
   organisation_name: string;
 }
 
+// ---------------------------------------------------------------------------
+// Shape of the payload built by NewIssueForm and handed to createIssue().
+// Mirrors the two branches of handleSubmit below (BIM vs "other"), using the
+// same camelCase field names (topicType, newAttachmentData, ...) that the
+// rest of this file and IssueCard already use for write payloads.
+// ---------------------------------------------------------------------------
+
+interface NewIssueBase {
+  project_id: number;
+  title: string;
+  description: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  module: string;
+}
+
+interface NewIssueViewpointInput {
+  camera_position: { x: number; y: number; z: number };
+  camera_direction: { x: number; y: number; z: number };
+  camera_up_vector: { x: number; y: number; z: number };
+  field_of_view: number;
+  clipping_planes: unknown[];
+  snapshot_data?: string;
+  snapshot_format?: "png" | "jpg";
+}
+
+interface NewBimIssueInput extends NewIssueBase {
+  domain: "bim";
+  topicType: BcfTopicType;
+  viewpoint: NewIssueViewpointInput;
+}
+
+interface NewDesignIssueInput extends NewIssueBase {
+  domain: "other";
+  category?: string;
+  newAttachmentData?: string;
+  newAttachmentFormat?: "png" | "jpg";
+}
+
+type NewIssueInput = NewBimIssueInput | NewDesignIssueInput;
+
+// Narrow an unknown error down to a validation-errors object (as returned by
+// DRF: { field: string[] }) so we can join it into a readable message
+// without resorting to `any`.
+function extractValidationMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err) && err.response?.data) {
+    const data = err.response.data as Record<string, unknown>;
+    return `Validation Error: ${Object.values(data).flat().join('\n')}`;
+  }
+  return fallback;
+}
+
 export default function IssuesPage() {
   const dispatch = useAppDispatch();
-  const router = useRouter();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
@@ -124,7 +176,7 @@ export default function IssuesPage() {
       const data = await getIssues();
       setIssues(data);
       return data;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Refresh error:', err);
       setError('Failed to load issues. Please try again.');
       throw err;
@@ -133,6 +185,7 @@ export default function IssuesPage() {
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
+    
   }, []);
 
   const visibleIssues = issues.filter((issue) => {
@@ -157,9 +210,9 @@ export default function IssuesPage() {
       setError(null);
       await deleteIssue(issueId);
       await refresh();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Delete issue error:', err);
-      setError(err.message || 'Failed to delete issue. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to delete issue. Please try again.');
     }
   };
 
@@ -228,14 +281,9 @@ export default function IssuesPage() {
               await createIssue(input);
               await refresh();
               setShowNewIssueForm(false);
-            } catch (err: any) {
+            } catch (err: unknown) {
               console.error('Create error:', err);
-              if (err.response?.data) {
-                const errors = Object.values(err.response.data).flat().join('\n');
-                setError(`Validation Error: ${errors}`);
-              } else {
-                setError('Failed to create issue. Please try again.');
-              }
+              setError(extractValidationMessage(err, 'Failed to create issue. Please try again.'));
             }
           }}
         />
@@ -296,14 +344,9 @@ export default function IssuesPage() {
                     setError(null);
                     await updateIssue(issue.id, patch);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Update error:', err);
-                    if (err.response?.data) {
-                      const errors = Object.values(err.response.data).flat().join('\n');
-                      setError(`Validation Error: ${errors}`);
-                    } else {
-                      setError('Failed to update issue. Please try again.');
-                    }
+                    setError(extractValidationMessage(err, 'Failed to update issue. Please try again.'));
                   }
                 }}
                 onResolve={async (resolution, snapshotData, snapshotFormat) => {
@@ -311,7 +354,7 @@ export default function IssuesPage() {
                     setError(null);
                     await resolveIssue(issue.id, resolution, currentUser.email, snapshotData, snapshotFormat);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Resolve error:', err);
                     setError('Failed to resolve issue. Please try again.');
                   }
@@ -321,7 +364,7 @@ export default function IssuesPage() {
                     setError(null);
                     await removeSnapshot(issue.id);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Remove snapshot error:', err);
                     setError('Failed to remove screenshot. Please try again.');
                   }
@@ -331,7 +374,7 @@ export default function IssuesPage() {
                     setError(null);
                     await removeAttachment(issue.id, index);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Remove attachment error:', err);
                     setError('Failed to remove screenshot. Please try again.');
                   }
@@ -347,7 +390,7 @@ export default function IssuesPage() {
                       snapshotFormat
                     );
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Add screenshot error:', err);
                     setError('Failed to add screenshot. Please try again.');
                   }
@@ -357,7 +400,7 @@ export default function IssuesPage() {
                     setError(null);
                     await addComment(issue.id, currentUser.email || currentUser.fullName, text);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Add comment error:', err);
                     setError('Failed to add comment. Please try again.');
                   }
@@ -367,7 +410,7 @@ export default function IssuesPage() {
                     setError(null);
                     await deleteComment(issue.id, commentId);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Delete comment error:', err);
                     setError('Failed to delete comment. Please try again.');
                   }
@@ -377,7 +420,7 @@ export default function IssuesPage() {
                     setError(null);
                     await editComment(issue.id, commentId, text, snapshotData, snapshotFormat, removeSnapshot);
                     await refresh();
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error('Edit comment error:', err);
                     setError('Failed to edit comment. Please try again.');
                   }
@@ -407,7 +450,7 @@ function NewIssueForm({
   onCreate,
   onCancel,
 }: {
-  onCreate: (input: any) => Promise<void>;
+  onCreate: (input: NewIssueInput) => Promise<void>;
   onCancel: () => void;
 }) {
   const [domain, setDomain] = useState<IssueDomain>("bim");
@@ -458,7 +501,7 @@ function NewIssueForm({
         } else {
           setError('Failed to load organisations.');
         }
-      } catch (error) {
+      } catch {
         setError('Failed to load organisations.');
       } finally {
         setLoadingOrganisations(false);
@@ -502,7 +545,7 @@ function NewIssueForm({
           setFilteredProjects([]);
           setProjectId(null);
         }
-      } catch (error) {
+      } catch {
         setFilteredProjects([]);
         setProjectId(null);
       } finally {
@@ -551,19 +594,19 @@ function NewIssueForm({
         return;
       }
 
-      const base = {
+      const base: NewIssueBase = {
         project_id: projectId,
         title: title.trim(),
         description: description.trim(),
-        status: "Open" as IssueStatus,
+        status: "Open",
         priority,
         module: module.trim() || (domain === "bim" ? "Modeling" : "General"),
       };
 
       if (domain === "bim") {
-        const bimInput = {
+        const bimInput: NewBimIssueInput = {
           ...base,
-          domain: "bim" as const,
+          domain: "bim",
           topicType,
           viewpoint: {
             camera_position: DEFAULT_CAMERA_POSITION,
@@ -579,24 +622,20 @@ function NewIssueForm({
         };
         await onCreate(bimInput);
       } else {
-        await onCreate({
+        const designInput: NewDesignIssueInput = {
           ...base,
-          domain: "other" as const,
+          domain: "other",
           category: category.trim() || undefined,
           ...(screenshot ? {
             newAttachmentData: screenshot,
             newAttachmentFormat: screenshotFormat,
           } : {})
-        });
+        };
+        await onCreate(designInput);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Submit error:', err);
-      if (err.response?.data) {
-        const errors = Object.values(err.response.data).flat().join('\n');
-        setError(`Validation Error: ${errors}`);
-      } else {
-        setError('Failed to create issue. Please try again.');
-      }
+      setError(extractValidationMessage(err, 'Failed to create issue. Please try again.'));
     }
   };
 
@@ -770,8 +809,14 @@ function NewIssueForm({
           />
         </div>
         {previewImage && (
-          <div className="screenshot-preview">
-            <img src={previewImage} alt="Preview" />
+          <div className="screenshot-preview" style={{ position: 'relative' }}>
+            <Image
+              src={previewImage}
+              alt="Preview"
+              fill
+              unoptimized
+              style={{ objectFit: 'contain' }}
+            />
             <button
               className="remove-btn"
               onClick={() => {

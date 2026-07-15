@@ -9,8 +9,6 @@ import {
   updateMeeting,
   deleteMeeting,
   getAvailableIssues,
-  getStatusColor,
-  getPriorityColor,
 } from "./meetingApi";
 import {
   Meeting,
@@ -38,6 +36,30 @@ const mono = IBM_Plex_Mono({
 });
 
 const CURRENT_USER = "You";
+
+// ---------------------------------------------------------------------------
+// Shape of the payload built by NewMeetingForm and handed to createMeeting().
+// Mirrors exactly what handleSubmit constructs below.
+// ---------------------------------------------------------------------------
+
+interface NewMeetingInput {
+  title: string;
+  description: string;
+  type: MeetingType;
+  priority: MeetingPriority;
+  startTime: string;
+  endTime: string;
+  location: string;
+  isOnline: boolean;
+  meetingLink?: string;
+  agenda: string[];
+  project: number;
+}
+
+// Narrow an unknown error into a readable message without resorting to `any`.
+function getErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 // Helper to format date for display
 const formatDate = (dateStr: string) => {
@@ -90,7 +112,7 @@ export default function MeetingsPage() {
       setError(null);
       const data = await getMeetings();
       setMeetings(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Refresh error:', err);
       setError('Failed to load meetings. Please try again.');
     }
@@ -230,9 +252,9 @@ export default function MeetingsPage() {
               await createMeeting(input);
               await refresh();
               setShowNewMeetingForm(false);
-            } catch (err: any) {
+            } catch (err: unknown) {
               console.error('Create error:', err);
-              setError(err.message || 'Failed to create meeting. Please try again.');
+              setError(getErrorMessage(err, 'Failed to create meeting. Please try again.'));
             }
           }}
         />
@@ -906,7 +928,7 @@ function NewMeetingForm({
   onCreate,
   onCancel,
 }: {
-  onCreate: (input: any) => Promise<void>;
+  onCreate: (input: NewMeetingInput) => Promise<void>;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -944,7 +966,7 @@ function NewMeetingForm({
         return;
       }
 
-      const input = {
+      const input: NewMeetingInput = {
         title: title.trim(),
         description: description.trim(),
         type,
@@ -959,9 +981,9 @@ function NewMeetingForm({
       };
       
       await onCreate(input);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Submit error:', err);
-      setError(err.message || 'Failed to create meeting. Please try again.');
+      setError(getErrorMessage(err, 'Failed to create meeting. Please try again.'));
     }
   };
 

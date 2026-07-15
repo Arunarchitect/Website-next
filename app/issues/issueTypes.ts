@@ -164,7 +164,11 @@ export interface IssueListResponse {
   results: Issue[];
 }
 
-export interface IssueDetailResponse extends Issue {}
+// Fixed: an interface with no members of its own adds nothing over the type
+// it extends, which is what @typescript-eslint/no-empty-object-type flags.
+// A type alias expresses the same "this response IS an Issue" relationship
+// without declaring an empty (and therefore misleading-looking) interface.
+export type IssueDetailResponse = Issue;
 
 export interface IssueCreatePayload {
   project: number;
@@ -380,7 +384,96 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
   };
 }
 
-export function fromDjangoIssue(data: any): Issue {
+// ---------------------------------------------------------------------------
+// Raw Django API shapes consumed by fromDjangoIssue.
+//
+// These are intentionally loose (Django sends related fields as either a
+// bare numeric id or an expanded object depending on the endpoint/serializer)
+// but every field used below is named and typed, so no `any` is needed.
+// ---------------------------------------------------------------------------
+
+type DjangoRef =
+  | { id?: number; email?: string; full_name?: string }
+  | number
+  | null
+  | undefined;
+
+interface DjangoCommentData {
+  id: string | number;
+  author?: DjangoRef;
+  text: string;
+  timestamp: string;
+  snapshot?: string;
+  viewpoint?: { guid?: string };
+}
+
+interface DjangoViewpointComponentData {
+  ifc_guid: string;
+  selection_type?: string;
+  visible?: boolean;
+}
+
+interface DjangoViewpointData {
+  guid: string;
+  camera_position: { x: number; y: number; z: number };
+  camera_direction: { x: number; y: number; z: number };
+  camera_up_vector?: { x: number; y: number; z: number };
+  field_of_view?: number;
+  clipping_planes?: Array<{ x: number; y: number; z: number; d: number }>;
+  snapshot?: string;
+  snapshot_format?: "png" | "jpg";
+  components?: DjangoViewpointComponentData[];
+}
+
+export interface DjangoIssueData {
+  id: string | number;
+  domain: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority: string;
+  module?: string;
+  reported_by_name?: string;
+  reported_by?: DjangoRef;
+  assigned_to_name?: string;
+  assigned_to?: DjangoRef;
+  created: string;
+  updated?: string;
+  due_date?: string | null;
+  labels?: string[];
+  resolution?: string | null;
+  linked_documents_details?: LinkedDocument[];
+  comments?: DjangoCommentData[];
+  project?: DjangoRef;
+  deliverable?: DjangoRef;
+  organisation?: string | null;
+  bcf_guid?: string;
+  topic_type?: string;
+  ifc_elements?: string[];
+  viewpoint?: DjangoViewpointData;
+  category?: string;
+  attachments?: string[];
+}
+
+// Related fields from Django arrive as either a bare id or an expanded
+// { id, ... } object depending on the serializer — this normalizes both
+// to a plain numeric id (or null) without needing an `any` cast at each
+// call site.
+function extractId(value: DjangoRef): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return value;
+  return value.id ?? null;
+}
+
+function extractRefText(
+  value: DjangoRef,
+  key: "email" | "full_name"
+): string | undefined {
+  if (value && typeof value === "object") return value[key];
+  return undefined;
+}
+
+export function fromDjangoIssue(data: DjangoIssueData): Issue {
   const base: BaseIssue = {
     id: String(data.id),
     domain: data.domain as IssueDomain,
@@ -389,28 +482,28 @@ export function fromDjangoIssue(data: any): Issue {
     status: data.status as IssueStatus,
     priority: data.priority as IssuePriority,
     module: data.module || '',
-    reportedBy: data.reported_by_name || data.reported_by?.email || 'Unknown',
-    assignedTo: data.assigned_to_name || data.assigned_to?.email || null,
-    assignedToId: data.assigned_to?.id || null,
+    reportedBy: data.reported_by_name || extractRefText(data.reported_by, 'email') || 'Unknown',
+    assignedTo: data.assigned_to_name || extractRefText(data.assigned_to, 'email') || null,
+    assignedToId: extractId(data.assigned_to),
     created: data.created,
     updated: data.updated,
     dueDate: data.due_date,
     labels: data.labels || [],
     resolution: data.resolution,
     linkedDocuments: data.linked_documents_details || [],
-    comments: (data.comments || []).map((c: any) => ({
+    comments: (data.comments || []).map((c) => ({
       id: String(c.id),
-      author: c.author?.email || c.author?.full_name || 'Unknown',
+      author: extractRefText(c.author, 'email') || extractRefText(c.author, 'full_name') || 'Unknown',
       text: c.text,
       timestamp: c.timestamp,
       snapshot: c.snapshot,
-      viewpointGuid: c.viewpoint?.guid || null,
+      viewpointGuid: c.viewpoint?.guid || undefined,
     })),
-    project: data.project?.id || data.project,
-    project_id: data.project?.id || data.project,
-    deliverable: data.deliverable?.id || data.deliverable || null,
-    reported_by: data.reported_by?.id || null,
-    assigned_to: data.assigned_to?.id || null,
+    project: extractId(data.project) ?? undefined,
+    project_id: extractId(data.project) ?? undefined,
+    deliverable: extractId(data.deliverable),
+    reported_by: extractId(data.reported_by) ?? undefined,
+    assigned_to: extractId(data.assigned_to),
     organisation: data.organisation || null,
   };
 
@@ -418,8 +511,8 @@ export function fromDjangoIssue(data: any): Issue {
     return {
       ...base,
       domain: 'bim',
-      bcfGuid: data.bcf_guid,
-      topicType: data.topic_type || 'General',
+      bcfGuid: data.bcf_guid || '',
+      topicType: (data.topic_type as BcfTopicType) || 'General',
       ifcElements: data.ifc_elements || [],
       viewpoint: data.viewpoint ? {
         guid: data.viewpoint.guid,
@@ -432,9 +525,9 @@ export function fromDjangoIssue(data: any): Issue {
           data: data.viewpoint.snapshot,
           format: data.viewpoint.snapshot_format || 'png',
         } : undefined,
-        components: (data.viewpoint.components || []).map((comp: any) => ({
+        components: (data.viewpoint.components || []).map((comp) => ({
           ifcGuid: comp.ifc_guid,
-          selectionType: comp.selection_type || 'IfcProduct',
+          selectionType: "IfcProduct" as const,
           visible: comp.visible !== false,
         })),
       } : undefined,

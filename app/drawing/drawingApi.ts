@@ -87,7 +87,8 @@ apiClient.interceptors.response.use(
               error.config.headers.Authorization = `Bearer ${response.data.access}`;
               return apiClient(error.config);
             }
-          } catch (refreshError) {
+          } catch {
+            // Refresh failed — clear tokens and bounce to login.
             localStorage.removeItem('access');
             localStorage.removeItem('refresh');
             if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
@@ -380,16 +381,6 @@ export const downloadDocument = async (doc: DrawingDocument): Promise<void> => {
   } catch (error) {
     console.error('Error downloading document:', error);
     throw error;
-  }
-};
-
-// Helper to get file extension based on file type
-const getFileExtension = (fileType: string): string => {
-  switch (fileType) {
-    case 'pdf': return 'pdf';
-    case 'dxf': return 'dxf';
-    case 'image': return 'jpg';
-    default: return '';
   }
 };
 

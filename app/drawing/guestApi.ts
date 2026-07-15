@@ -12,8 +12,6 @@ const guestClient = axios.create({
   headers: { Accept: 'application/json' },
 });
 
-// app/drawing/guestApi.ts (add to the file from before)
-
 export type GuestAccessResult =
   | { type: 'project'; code: string }
   | { type: 'deliverable'; code: string }
@@ -30,19 +28,27 @@ export const resolveGuestAccessCode = async (code: string): Promise<GuestAccessR
   if (!trimmed) throw new Error('Enter an access code.');
 
   try {
-    const docs = await getProjectGuestDocuments(trimmed);
+    // We only care that the request succeeds, not the actual docs
+    await getProjectGuestDocuments(trimmed);
     return { type: 'project', code: trimmed };
-  } catch {}
+  } catch {
+    // Project check failed, continue to next
+  }
 
   try {
-    const docs = await getDeliverableGuestDocuments(trimmed);
+    // We only care that the request succeeds, not the actual docs
+    await getDeliverableGuestDocuments(trimmed);
     return { type: 'deliverable', code: trimmed };
-  } catch {}
+  } catch {
+    // Deliverable check failed, continue to next
+  }
 
   try {
     await getGuestDrawing(trimmed);
     return { type: 'drawing', code: trimmed };
-  } catch {}
+  } catch {
+    // Drawing check failed, all attempts exhausted
+  }
 
   throw new Error('That code doesn\'t match any shared drawings. Double-check the link and try again.');
 };

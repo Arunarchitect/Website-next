@@ -146,7 +146,8 @@ apiClient.interceptors.response.use(
               error.config.headers.Authorization = `Bearer ${response.data.access}`;
               return apiClient(error.config);
             }
-          } catch (refreshError) {
+          } catch {
+            // Refresh failed — clear tokens and bounce to login.
             localStorage.removeItem('access');
             localStorage.removeItem('refresh');
             if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
@@ -202,12 +203,15 @@ const mapPriorityToFrontend = (priority: string): string => {
   return priorityMap[priority] || priority;
 };
 
-const mapTopicTypeToFrontend = (topicType: string): string => {
-  const topicTypeMap: {[key: string]: string} = {
+// Fixed: return type is now BcfTopicType (not string), and the map is typed
+// so it can only ever produce a valid member of that union. This removes the
+// need for a cast or `|| 'General'` fallback at every call site.
+const mapTopicTypeToFrontend = (topicType: string): BcfTopicType => {
+  const topicTypeMap: {[key: string]: BcfTopicType} = {
     'clash': 'Clash', 'coordinate': 'Coordinate', 'quality': 'Quality', 'safety': 'Safety',
     'general': 'General', 'request': 'Request', 'fault': 'Fault'
   };
-  return topicTypeMap[topicType] || topicType;
+  return topicTypeMap[topicType] || 'General';
 };
 
 // ---------------------------------------------------------------------------
@@ -252,7 +256,7 @@ const convertDjangoIssue = (data: any): Issue => {
       ...baseIssue,
       domain: 'bim' as const,
       bcfGuid: data.bcf_guid,
-      topicType: mapTopicTypeToFrontend(data.topic_type) || 'General',
+      topicType: mapTopicTypeToFrontend(data.topic_type),
       ifcElements: data.ifc_elements || [],
       viewpoint: data.viewpoint ? {
         guid: data.viewpoint.guid,
@@ -276,7 +280,7 @@ const convertDjangoIssue = (data: any): Issue => {
 
   return {
     ...baseIssue,
-    domain: (data.domain === 'design' ? 'design' : 'other') as const,
+    domain: data.domain === 'design' ? ('design' as const) : ('other' as const),
     category: data.category || '',
     attachments: (data.attachments || []).map((a: any) => {
       if (typeof a === 'string') return getImageSource(a);
@@ -753,7 +757,7 @@ export const getPriorityColor = (priority: IssuePriority): string => {
   }
 };
 
-export default {
+const issueApi = {
   getIssues,
   getIssue,
   createIssue,
@@ -781,3 +785,5 @@ export default {
   getStatusColor,
   getPriorityColor,
 };
+
+export default issueApi;

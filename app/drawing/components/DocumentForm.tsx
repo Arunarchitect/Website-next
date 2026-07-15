@@ -1,9 +1,9 @@
 // app/drawing/components/DocumentForm.tsx
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Image from "next/image";
 import {
   getOrganisations,
   getProjects,
@@ -92,7 +92,7 @@ export default function DocumentForm({
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
 
   // Helper function
-  const getSafeValue = (value: any, fallback: any = null) => {
+  const getSafeValue = <T,>(value: T | undefined | null, fallback: T | null = null): T | null => {
     return value !== undefined && value !== null ? value : fallback;
   };
 
@@ -107,19 +107,19 @@ export default function DocumentForm({
   useEffect(() => {
     if (document && isOpen) {
       console.log('📄 Editing document:', document);
-      
+
       // Set form data from document
       setFormData({
-        deliverable_id: getSafeValue(document.deliverable_id, 0),
-        title: getSafeValue(document.title, ''),
-        description: getSafeValue(document.description, ''),
-        file_type: getSafeValue(document.file_type, 'pdf'),
-        category: getSafeValue(document.category, ''),
-        version: getSafeValue(document.version, '1.0'),
-        status: getSafeValue(document.status, 'draft'),
-        tags: getSafeValue(document.tags, []),
-        is_private: getSafeValue(document.is_private, false),
-        allowed_roles: getSafeValue(document.allowed_roles, []),
+        deliverable_id: getSafeValue(document.deliverable_id, 0) ?? 0,
+        title: getSafeValue(document.title, '') ?? '',
+        description: getSafeValue(document.description, '') ?? '',
+        file_type: getSafeValue(document.file_type, 'pdf') ?? 'pdf',
+        category: getSafeValue(document.category, '') ?? '',
+        version: getSafeValue(document.version, '1.0') ?? '1.0',
+        status: getSafeValue(document.status, 'draft') ?? 'draft',
+        tags: getSafeValue(document.tags, []) ?? [],
+        is_private: getSafeValue(document.is_private, false) ?? false,
+        allowed_roles: getSafeValue(document.allowed_roles, []) ?? [],
       });
 
       // Set selected deliverable
@@ -141,7 +141,7 @@ export default function DocumentForm({
           setSelectedOrganisationId(document.organisation_id);
           // Load projects for this organisation
           await loadProjects(document.organisation_id);
-          
+
           if (document.project_id) {
             setSelectedProjectId(document.project_id);
             // Load deliverables for this project
@@ -149,7 +149,7 @@ export default function DocumentForm({
           }
         }
       };
-      
+
       loadHierarchy();
     }
   }, [document, isOpen]);
@@ -200,7 +200,7 @@ export default function DocumentForm({
     setProjects([]);
     setDeliverables([]);
     setFormData({ ...formData, deliverable_id: 0 });
-    
+
     if (orgId) {
       await loadProjects(orgId);
     }
@@ -211,7 +211,7 @@ export default function DocumentForm({
     setSelectedDeliverableId(null);
     setDeliverables([]);
     setFormData({ ...formData, deliverable_id: 0 });
-    
+
     if (projectId) {
       await loadDeliverables(projectId);
     }
@@ -273,7 +273,7 @@ export default function DocumentForm({
 
     try {
       const form = new FormData();
-      
+
       // Add all form fields
       form.append('deliverable_id', String(formData.deliverable_id));
       form.append('title', formData.title || '');
@@ -283,31 +283,32 @@ export default function DocumentForm({
       form.append('version', formData.version || '1.0');
       form.append('status', formData.status || 'draft');
       form.append('is_private', String(formData.is_private || false));
-      
+
       // Add tags as JSON
       if (formData.tags && formData.tags.length > 0) {
         form.append('tags', JSON.stringify(formData.tags));
       }
-      
+
       // Add allowed roles as JSON
       if (formData.allowed_roles && formData.allowed_roles.length > 0) {
         form.append('allowed_roles', JSON.stringify(formData.allowed_roles));
       }
-      
+
       // Add file if selected
       if (selectedFile) {
         form.append('file', selectedFile);
       }
-      
+
       // Add thumbnail if selected
       if (selectedThumbnail) {
         form.append('thumbnail', selectedThumbnail);
       }
 
       await onSave(form);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Submit error:', err);
-      setError(err.message || 'Failed to save document');
+      const message = err instanceof Error ? err.message : 'Failed to save document';
+      setError(message);
       throw err;
     } finally {
       setLoading(false);
@@ -435,7 +436,12 @@ export default function DocumentForm({
             <select
               className="form-select"
               value={formData.file_type || 'pdf'}
-              onChange={(e) => setFormData({ ...formData, file_type: e.target.value as any })}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  file_type: e.target.value as DrawingDocumentFormData['file_type'],
+                })
+              }
               required
             >
               {FILE_TYPE_OPTIONS.map((opt) => (
@@ -471,7 +477,15 @@ export default function DocumentForm({
               {filePreview && (
                 <div className="file-preview">
                   {formData.file_type === 'image' ? (
-                    <img src={filePreview} alt="File preview" />
+                    <div className="file-preview-image-wrapper">
+                      <Image
+                        src={filePreview}
+                        alt="File preview"
+                        fill
+                        unoptimized
+                        style={{ objectFit: 'contain' }}
+                      />
+                    </div>
                   ) : (
                     <span>{selectedFile?.name || 'File selected'}</span>
                   )}
@@ -512,7 +526,15 @@ export default function DocumentForm({
               </button>
               {thumbnailPreview && (
                 <div className="file-preview">
-                  <img src={thumbnailPreview} alt="Thumbnail preview" />
+                  <div className="file-preview-image-wrapper">
+                    <Image
+                      src={thumbnailPreview}
+                      alt="Thumbnail preview"
+                      fill
+                      unoptimized
+                      style={{ objectFit: 'contain' }}
+                    />
+                  </div>
                   <button
                     type="button"
                     className="file-remove"
@@ -547,7 +569,12 @@ export default function DocumentForm({
             <select
               className="form-select"
               value={formData.status || 'draft'}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  status: e.target.value as DrawingDocumentFormData['status'],
+                })
+              }
             >
               {STATUS_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>

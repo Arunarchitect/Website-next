@@ -41,7 +41,8 @@ export default function PdfThumbnail({ fileUrl }: PdfThumbnailProps) {
         // Fix: Pass the canvas element directly instead of just the context
         await page.render({ 
           canvasContext: context, 
-          viewport: viewport 
+          viewport: viewport,
+          canvas: canvas,
         }).promise;
         
         if (!cancelled) setStatus('ready');

@@ -3,6 +3,8 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
+import axios from "axios";
 import {
   getPriorityColor,
   getStatusColor,
@@ -11,12 +13,53 @@ import {
   Issue,
   IssueStatus,
   IssuePriority,
+  IssueComment,
+  BimIssue,
   isBimIssue,
 } from "./issueTypes";
 import { isUserMatch } from '@/components/utils/userMatching';
 
 const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
+
+// The non-BIM ("design"/"other") member of the Issue union. Extract picks it
+// out by its discriminant without needing to know its exported name.
+type NonBimIssue = Extract<Issue, { domain: 'other' | 'design' }>;
+
+interface CurrentUser {
+  email: string;
+  fullName: string;
+  username: string;
+  displayName: string;
+}
+
+// Shape of the patch object built in handleSave. Intersects Partial<Issue>
+// with the write-only fields the API accepts for BIM/attachment updates
+// (these aren't part of the read model, so they're not on Issue itself).
+// NOTE: this must be a `type` (&) rather than an `interface ... extends`,
+// because Issue is a union (BimIssue | DesignIssue) — Partial<Issue>
+// distributes over that union, and an interface can only extend a single
+// object type or an intersection of object types, not a union (TS2312).
+//
+// NOTE: `viewpoint` is Omit'd from Partial<Issue> here because BimIssue's
+// own `viewpoint?: BcfViewpoint` (camelCase, read-model) would otherwise
+// be intersected with the write-only snake_case payload below, producing
+// an impossible type that requires both shapes at once (guid, cameraPosition,
+// cameraDirection AND camera_position, snapshot_data, etc. simultaneously).
+type IssuePatch = Omit<Partial<Issue>, 'viewpoint'> & {
+  domain?: 'bim' | 'other';
+  viewpoint?: {
+    camera_position: { x: number; y: number; z: number };
+    camera_direction: { x: number; y: number; z: number };
+    camera_up_vector: { x: number; y: number; z: number };
+    field_of_view: number;
+    clipping_planes: unknown[];
+    snapshot_data: string;
+    snapshot_format: "png" | "jpg";
+  };
+  newAttachmentData?: string;
+  newAttachmentFormat?: "png" | "jpg";
+};
 
 const getImageSource = (imageData: string | undefined): string => {
   if (!imageData) {
@@ -87,8 +130,8 @@ interface IssueCardProps {
   onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg", removeSnapshot?: boolean) => Promise<void>;
   onDeleteIssue: (issueId: string) => Promise<void>;
   onOpenDrawing: (documentId: number) => void;
-  currentUser: { email: string; fullName: string; username: string; displayName: string };
-  isUserCreator: (reportedBy: string, user: any) => boolean;
+  currentUser: CurrentUser;
+  isUserCreator: (reportedBy: string, user: CurrentUser) => boolean;
 }
 
 export function IssueCard({
@@ -161,6 +204,13 @@ export function IssueCard({
   const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
   const isBim = isBimIssue(issue);
 
+  // Computed once here (rather than repeatedly casting `issue as BimIssue`
+  // inline in JSX) so the optional `ifcElements?: string[]` field is
+  // narrowed safely via the isBimIssue() type guard instead of `as` casts,
+  // which don't carry narrowing across separate expressions and were
+  // causing "Object is possibly 'undefined'" at the `.length` access.
+  const ifcElementCount = isBimIssue(issue) ? (issue.ifcElements?.length ?? 0) : 0;
+
   const isCreator = isUserCreator(issue.reportedBy, currentUser);
 
   const isCommentAuthor = (commentAuthor: string): boolean => {
@@ -172,7 +222,7 @@ export function IssueCard({
       if (!isBimIssue(issue) || !issue.viewpoint?.snapshot) return null;
       return getImageSource(issue.viewpoint.snapshot.data);
     }
-    const attachments = (issue as any).attachments as string[] | undefined;
+    const attachments = (issue as NonBimIssue).attachments;
     if (attachments && attachments.length > 0) {
       return getImageSource(attachments[0]);
     }
@@ -376,7 +426,7 @@ export function IssueCard({
   const handleSave = async () => {
     try {
       setSaveError(null);
-      const patch: any = {
+      const patch: IssuePatch = {
         title: form.title,
         description: form.description,
         status: form.status,
@@ -392,13 +442,14 @@ export function IssueCard({
 
       if (newScreenshot) {
         if (isBim) {
+          const bimIssue = issue as BimIssue;
           patch.domain = 'bim';
           patch.viewpoint = {
-            camera_position: (issue as any).viewpoint?.cameraPosition || DEFAULT_CAMERA_POSITION,
-            camera_direction: (issue as any).viewpoint?.cameraDirection || DEFAULT_CAMERA_DIRECTION,
-            camera_up_vector: (issue as any).viewpoint?.cameraUpVector || DEFAULT_CAMERA_UP_VECTOR,
-            field_of_view: (issue as any).viewpoint?.fieldOfView || DEFAULT_FIELD_OF_VIEW,
-            clipping_planes: (issue as any).viewpoint?.clippingPlanes || [],
+            camera_position: bimIssue.viewpoint?.cameraPosition || DEFAULT_CAMERA_POSITION,
+            camera_direction: bimIssue.viewpoint?.cameraDirection || DEFAULT_CAMERA_DIRECTION,
+            camera_up_vector: bimIssue.viewpoint?.cameraUpVector || DEFAULT_CAMERA_UP_VECTOR,
+            field_of_view: bimIssue.viewpoint?.fieldOfView || DEFAULT_FIELD_OF_VIEW,
+            clipping_planes: bimIssue.viewpoint?.clippingPlanes || [],
             snapshot_data: newScreenshot,
             snapshot_format: newScreenshotFormat,
           };
@@ -409,13 +460,20 @@ export function IssueCard({
         }
       }
 
-      await onSave(patch);
+      // IssuePatch is intentionally a superset of Partial<Issue> (it adds
+      // write-only/API-only fields like snake_case `viewpoint`,
+      // `newAttachmentData`, etc. that aren't part of the read model).
+      // Because Issue is a union, Partial<Issue> distributes over it and
+      // won't structurally accept a patch whose `domain` spans both
+      // branches — so we assert here since `patch` was built field-by-field
+      // to match what the API layer actually expects.
+      await onSave(patch as Partial<Issue>);
       setIsEditing(false);
       setNewScreenshot(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Save error:', err);
-      if (err.response?.data) {
-        const errors = Object.values(err.response.data).flat().join('\n');
+      if (axios.isAxiosError(err) && err.response?.data) {
+        const errors = Object.values(err.response.data as Record<string, unknown>).flat().join('\n');
         setSaveError(`Validation Error: ${errors}`);
       } else {
         setSaveError('Failed to save changes. Please try again.');
@@ -436,7 +494,7 @@ export function IssueCard({
       setResolutionScreenshot(null);
       setResolutionPreview(null);
       setIsResolving(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Resolve error:', err);
       setSaveError('Failed to resolve issue. Please try again.');
     }
@@ -454,7 +512,7 @@ export function IssueCard({
       } else {
         await onRemoveAttachment(0);
       }
-    } catch (err) {
+    } catch {
       setSaveError('Failed to remove screenshot. Please try again.');
     }
   };
@@ -465,9 +523,12 @@ export function IssueCard({
     }
     try {
       setSaveError(null);
-      await onDeleteIssue(issue.id);
-    } catch (err: any) {
-      setSaveError(err.message || 'Failed to delete issue.');
+      // issue.id is `string | number` (BaseIssue.id), but onDeleteIssue expects
+      // a string — coerce here so the caller doesn't have to worry about the
+      // widened union type.
+      await onDeleteIssue(String(issue.id));
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to delete issue.');
     }
   };
 
@@ -478,7 +539,7 @@ export function IssueCard({
     }
   };
 
-  const startEditComment = (comment: any) => {
+  const startEditComment = (comment: IssueComment) => {
     setEditingCommentId(comment.id);
     setEditingCommentText(comment.text);
     setEditingCommentHasExistingImage(!!comment.snapshot);
@@ -552,11 +613,14 @@ export function IssueCard({
 
           <div className="screenshot-section">
             {!isEditing && hasScreenshot && (
-              <div className="screenshot-thumbnail-container">
-                <img
+              <div className="screenshot-thumbnail-container" style={{ position: 'relative' }}>
+                <Image
                   src={displayScreenshot || '/images/test.jpg'}
                   alt="Issue screenshot"
+                  fill
+                  unoptimized
                   className="screenshot-thumbnail-image"
+                  style={{ objectFit: 'cover', cursor: 'pointer' }}
                   onClick={() => handleImageClick(getImageSource(displayScreenshot!))}
                   onError={handleImageError}
                 />
@@ -581,11 +645,14 @@ export function IssueCard({
                 </div>
 
                 {hasScreenshot && (
-                  <div className="screenshot-preview-container">
-                    <img
+                  <div className="screenshot-preview-container" style={{ position: 'relative' }}>
+                    <Image
                       src={displayScreenshot || '/images/test.jpg'}
                       alt="Screenshot preview"
+                      fill
+                      unoptimized
                       className="screenshot-preview-image"
+                      style={{ objectFit: 'contain' }}
                       onError={handleImageError}
                     />
                     {!newScreenshot && (
@@ -635,12 +702,16 @@ export function IssueCard({
                 {newScreenshot && (
                   <div className="screenshot-new-preview">
                     <span className="preview-label">📸 New image (will replace current):</span>
-                    <img
-                      src={`data:image/${newScreenshotFormat};base64,${newScreenshot}`}
-                      alt="New screenshot preview"
-                      className="screenshot-preview-image"
-                      onError={handleImageError}
-                    />
+                    <div className="screenshot-preview-image" style={{ position: 'relative' }}>
+                      <Image
+                        src={`data:image/${newScreenshotFormat};base64,${newScreenshot}`}
+                        alt="New screenshot preview"
+                        fill
+                        unoptimized
+                        style={{ objectFit: 'contain' }}
+                        onError={handleImageError}
+                      />
+                    </div>
                     <span className="screenshot-pending-badge">Pending replacement</span>
                   </div>
                 )}
@@ -663,12 +734,17 @@ export function IssueCard({
                 <div className="history-thumbnails">
                   {commentSnapshots.map((c) => (
                     <div key={c.id} className="history-thumbnail-item">
-                      <img
-                        src={getImageSource(c.snapshot!)}
-                        alt={`Snapshot from ${c.author}`}
-                        onClick={() => handleImageClick(getImageSource(c.snapshot!))}
-                        onError={handleImageError}
-                      />
+                      <div style={{ position: 'relative', width: '100%', height: '90px' }}>
+                        <Image
+                          src={getImageSource(c.snapshot!)}
+                          alt={`Snapshot from ${c.author}`}
+                          fill
+                          unoptimized
+                          style={{ objectFit: 'cover', cursor: 'pointer' }}
+                          onClick={() => handleImageClick(getImageSource(c.snapshot!))}
+                          onError={handleImageError}
+                        />
+                      </div>
                       <span className="history-thumbnail-caption">
                         {c.author} · {c.timestamp}
                       </span>
@@ -693,21 +769,21 @@ export function IssueCard({
             {isBim && (
               <span className="meta-item topic-type">
                 <i className="ti ti-tag" />
-                {(issue as any).topicType}
+                {(issue as BimIssue).topicType}
               </span>
             )}
 
-            {isBim && (issue as any).ifcElements && (issue as any).ifcElements.length > 0 && (
+            {ifcElementCount > 0 && (
               <span className="meta-item">
                 <i className="ti ti-cube" />
-                {(issue as any).ifcElements.length} IFC elements
+                {ifcElementCount} IFC elements
               </span>
             )}
 
-            {!isBim && (issue as any).category && (
+            {!isBim && (issue as NonBimIssue).category && (
               <span className="meta-item topic-type">
                 <i className="ti ti-tag" />
-                {(issue as any).category}
+                {(issue as NonBimIssue).category}
               </span>
             )}
 
@@ -860,12 +936,16 @@ export function IssueCard({
 
                             {editingCommentHasExistingImage && !editingCommentScreenshot && (
                               <div className="comment-existing-image">
-                                <img
-                                  src={comment.snapshot ? getImageSource(comment.snapshot) : '/images/test.jpg'}
-                                  alt="Existing comment image"
-                                  className="comment-edit-image-preview"
-                                  onError={handleImageError}
-                                />
+                                <div className="comment-edit-image-preview" style={{ position: 'relative' }}>
+                                  <Image
+                                    src={comment.snapshot ? getImageSource(comment.snapshot) : '/images/test.jpg'}
+                                    alt="Existing comment image"
+                                    fill
+                                    unoptimized
+                                    style={{ objectFit: 'contain' }}
+                                    onError={handleImageError}
+                                  />
+                                </div>
                                 <span className="existing-image-label">Current image</span>
                                 <button
                                   className="btn-outline small danger"
@@ -879,11 +959,15 @@ export function IssueCard({
 
                             {editingCommentScreenshot && (
                               <div className="comment-new-image-preview">
-                                <img
-                                  src={editingCommentPreview || ''}
-                                  alt="New comment image preview"
-                                  className="comment-edit-image-preview"
-                                />
+                                <div className="comment-edit-image-preview" style={{ position: 'relative' }}>
+                                  <Image
+                                    src={editingCommentPreview || '/images/test.jpg'}
+                                    alt="New comment image preview"
+                                    fill
+                                    unoptimized
+                                    style={{ objectFit: 'contain' }}
+                                  />
+                                </div>
                                 <span className="new-image-label">📸 New image (pending)</span>
                                 <button
                                   className="btn-outline small danger"
@@ -949,12 +1033,15 @@ export function IssueCard({
                           </div>
                           <div className="comment-text">{comment.text}</div>
                           {comment.snapshot && (
-                            <div className="comment-snapshot">
-                              <img
+                            <div className="comment-snapshot" style={{ position: 'relative' }}>
+                              <Image
                                 src={getImageSource(comment.snapshot)}
                                 alt="Comment screenshot"
-                                onClick={() => handleImageClick(getImageSource(comment.snapshot))}
+                                fill
+                                unoptimized
                                 className="comment-snapshot-thumb"
+                                style={{ objectFit: 'cover', cursor: 'pointer' }}
+                                onClick={() => handleImageClick(getImageSource(comment.snapshot))}
                                 onError={handleImageError}
                               />
                             </div>
@@ -1001,8 +1088,14 @@ export function IssueCard({
 
               <div className="resolve-screenshot-upload">
                 {resolutionPreview ? (
-                  <div className="screenshot-preview">
-                    <img src={resolutionPreview} alt="Resolution screenshot preview" />
+                  <div className="screenshot-preview" style={{ position: 'relative' }}>
+                    <Image
+                      src={resolutionPreview}
+                      alt="Resolution screenshot preview"
+                      fill
+                      unoptimized
+                      style={{ objectFit: 'contain' }}
+                    />
                     <button
                       className="remove-btn"
                       onClick={() => {
@@ -1110,8 +1203,14 @@ export function IssueCard({
                 style={{ marginBottom: '8px' }}
               />
               {extraPreview ? (
-                <div className="screenshot-preview">
-                  <img src={extraPreview} alt="New screenshot preview" />
+                <div className="screenshot-preview" style={{ position: 'relative' }}>
+                  <Image
+                    src={extraPreview}
+                    alt="New screenshot preview"
+                    fill
+                    unoptimized
+                    style={{ objectFit: 'contain' }}
+                  />
                   <button
                     className="remove-btn"
                     onClick={() => {
@@ -1162,8 +1261,14 @@ export function IssueCard({
 
               <div className="comment-image-upload">
                 {commentPreview ? (
-                  <div className="comment-image-preview">
-                    <img src={commentPreview} alt="Comment image preview" />
+                  <div className="comment-image-preview" style={{ position: 'relative' }}>
+                    <Image
+                      src={commentPreview}
+                      alt="Comment image preview"
+                      fill
+                      unoptimized
+                      style={{ objectFit: 'contain' }}
+                    />
                     <button
                       className="remove-btn"
                       onClick={() => {
@@ -1241,10 +1346,16 @@ export function IssueCard({
           >
             ✕
           </button>
-          <div className="screenshot-modal-content">
-            <img
+          <div
+            className="screenshot-modal-content"
+            style={{ position: 'relative', width: '90vw', height: '85vh' }}
+          >
+            <Image
               src={selectedScreenshot}
               alt="Full size screenshot"
+              fill
+              unoptimized
+              style={{ objectFit: 'contain' }}
               onClick={(e) => e.stopPropagation()}
               onError={handleImageError}
             />

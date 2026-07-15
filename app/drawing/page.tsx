@@ -4,6 +4,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
+import Image from "next/image"; // Add this import
 import { useSearchParams } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import {
@@ -39,6 +40,16 @@ const mono = IBM_Plex_Mono({
   weight: ["400", "500"],
   variable: "--font-mono",
 });
+
+// Custom error type for API errors
+type ApiError = {
+  message?: string;
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+};
 
 // The route's actual default export. useSearchParams() requires a Suspense
 // boundary somewhere above it, so this component stays a thin wrapper and
@@ -92,6 +103,29 @@ function DocumentsPageInner() {
   // Guards against re-triggering the auto-open effect (e.g. React strict-mode
   // double effects in dev, or other state changes re-running the effect).
   const [hasHandledOpenDoc, setHasHandledOpenDoc] = useState<boolean>(false);
+
+  // Helper function to extract error message
+  const getErrorMessage = (err: unknown): string => {
+    if (err instanceof Error) {
+      return err.message;
+    }
+    
+    if (typeof err === 'object' && err !== null) {
+      const apiError = err as ApiError;
+      if (apiError.response?.data?.message) {
+        return apiError.response.data.message;
+      }
+      if (apiError.message) {
+        return apiError.message;
+      }
+    }
+    
+    if (typeof err === 'string') {
+      return err;
+    }
+    
+    return "An unexpected error occurred";
+  };
 
   // Load current user
   useEffect(() => {
@@ -284,9 +318,9 @@ function DocumentsPageInner() {
       await deleteDocument(doc.id);
       await loadDocuments();
       setSelectedDoc(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error deleting document:', err);
-      setError(err.message || 'Failed to delete document');
+      setError(getErrorMessage(err) || 'Failed to delete document');
     } finally {
       setLoading(false);
     }
@@ -302,7 +336,7 @@ function DocumentsPageInner() {
       await loadDocuments();
       setIsFormOpen(false);
       setEditingDocument(null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error saving document:', err);
       throw err;
     }
@@ -327,9 +361,9 @@ function DocumentsPageInner() {
 
     try {
       await downloadDocument(doc);
-    } catch (error: any) {
-      console.error('Error downloading document:', error);
-      setError(error.message || 'Failed to download document');
+    } catch (err: unknown) {
+      console.error('Error downloading document:', err);
+      setError(getErrorMessage(err) || 'Failed to download document');
     }
   };
 
@@ -649,20 +683,29 @@ function DocumentsPageInner() {
                       ) : (
                         <>
                           {displayUrl ? (
-                            <img
-                              src={displayUrl}
-                              alt={doc.title}
-                              className="documents-thumbnail-image"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                const placeholder = e.currentTarget.parentElement?.querySelector(
-                                  '.documents-thumbnail-placeholder'
-                                );
-                                if (placeholder) {
-                                  placeholder.classList.remove('documents-thumbnail-hidden');
-                                }
-                              }}
-                            />
+                            <div className="documents-thumbnail-image-wrapper">
+                              <Image
+                                src={displayUrl}
+                                alt={doc.title}
+                                fill
+                                className="documents-thumbnail-image"
+                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                unoptimized={displayUrl.startsWith('data:')}
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  const parent = target.parentElement;
+                                  if (parent) {
+                                    const placeholder = parent.parentElement?.querySelector(
+                                      '.documents-thumbnail-placeholder'
+                                    );
+                                    if (placeholder) {
+                                      target.style.display = 'none';
+                                      placeholder.classList.remove('documents-thumbnail-hidden');
+                                    }
+                                  }
+                                }}
+                              />
+                            </div>
                           ) : (
                             <div className="documents-thumbnail-placeholder">
                               <i className={`ti ${getFileIcon(doc.file_type)}`} />

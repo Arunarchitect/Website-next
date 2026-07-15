@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { DrawingDocumentResolved } from "../types";
 import { getFullFileUrl } from "../drawingApi";
 
@@ -81,7 +82,6 @@ export default function DocumentViewer({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
     // Only re-run when the document itself changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.id, doc.file_url, isPDF, isImage]);
 
   useEffect(() => {
@@ -212,10 +212,13 @@ export default function DocumentViewer({
 
           {isImage && !hasError && !isLoading && blobUrl && (
             <div className="document-viewer-image-wrapper">
-              <img
+              <Image
                 src={blobUrl}
                 alt={doc.title}
                 className="document-viewer-image"
+                fill
+                unoptimized
+                style={{ objectFit: 'contain' }}
                 onError={() => {
                   setHasError(true);
                   setErrorDetail('Fetched the file but the browser could not render it as an image.');

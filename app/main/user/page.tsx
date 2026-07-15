@@ -17,7 +17,7 @@ import {
   getGreeting,
   getRoleDisplayName,
 } from "./userApi";
-import { userTiles, roleDisplayConfig, areacalcDisplayConfig } from "./constants";
+import { userTiles, areacalcDisplayConfig } from "./constants";
 import { User, OrganisationMembership } from "./types";
 
 const display = Space_Grotesk({
@@ -182,7 +182,7 @@ export default function MainUserPage() {
           <p className="user-role-text">
             <span style={{ color: '#6B7280' }}>
               <i className="ti ti-info-circle" style={{ marginRight: '6px' }} />
-              You don't have any active roles. Please contact your administrator.
+              You don&apos;t have any active roles. Please contact your administrator.
             </span>
           </p>
         )}
@@ -316,7 +316,7 @@ export default function MainUserPage() {
                 <p>No tools available at the moment.</p>
                 <p style={{ fontSize: '13px', marginTop: '4px', color: 'var(--slate)' }}>
                   {!userRole && !hasAreacalc ? (
-                    <>You don't have any active roles. Please contact your administrator for access.</>
+                    <>You don&apos;t have any active roles. Please contact your administrator for access.</>
                   ) : (
                     <>Contact your organisation admin for access.</>
                   )}
@@ -356,7 +356,7 @@ export default function MainUserPage() {
           <div className="help-strip">
             <i className="ti ti-info-circle" aria-hidden="true" />
             {!userRole && !hasAreacalc ? (
-              <>You don't have any active roles. Please contact your administrator to get access.</>
+              <>You don&apos;t have any active roles. Please contact your administrator to get access.</>
             ) : (
               <>Need more access? Contact your organisation admin to update your role.</>
             )}

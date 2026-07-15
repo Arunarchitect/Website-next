@@ -2,6 +2,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image"; // Add this import
 import { DrawingDocumentResolved } from "../types";
 import { getFullFileUrl, getDisplayFileUrl } from "../drawingApi";
 import { guestDownload } from "../guestApi";
@@ -35,22 +36,20 @@ const getUniqueDeliverables = (docs: DrawingDocumentResolved[]) => {
 interface GuestDocumentGridProps {
   documents: DrawingDocumentResolved[];
   heading: string;
-  showDeliverableFilter?: boolean; // Allow parent to control whether filter is shown
+  showDeliverableFilter?: boolean;
 }
 
 export default function GuestDocumentGrid({ 
   documents, 
   heading,
-  showDeliverableFilter = true, // Default to showing filter
+  showDeliverableFilter = true,
 }: GuestDocumentGridProps) {
   const [selectedDoc, setSelectedDoc] = useState<DrawingDocumentResolved | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [selectedDeliverableId, setSelectedDeliverableId] = useState<number | null>(null);
 
-  // Get unique deliverables from documents
   const deliverables = getUniqueDeliverables(documents);
 
-  // Filter documents by selected deliverable
   const filteredDocuments = selectedDeliverableId
     ? documents.filter(doc => doc.deliverable_id === selectedDeliverableId)
     : documents;
@@ -74,7 +73,6 @@ export default function GuestDocumentGrid({
         </span>
       </div>
       
-      {/* Deliverable Filter - only show if enabled and there are multiple deliverables */}
       {showDeliverableFilter && deliverables.length > 1 && (
         <div className="documents-filters" style={{ marginBottom: '24px' }}>
           <div className="documents-filter-group">
@@ -134,7 +132,16 @@ export default function GuestDocumentGrid({
                   {doc.file_type === 'pdf' ? (
                     <PdfThumbnail fileUrl={getFullFileUrl(doc.file_url)} />
                   ) : displayUrl ? (
-                    <img src={displayUrl} alt={doc.title} className="documents-thumbnail-image" />
+                    <div className="documents-thumbnail-image-wrapper">
+                      <Image
+                        src={displayUrl}
+                        alt={doc.title}
+                        fill
+                        className="documents-thumbnail-image"
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                        unoptimized={displayUrl.startsWith('data:')} // Skip optimization for data URLs
+                      />
+                    </div>
                   ) : (
                     <div className="documents-thumbnail-placeholder"><i className="ti ti-file" /></div>
                   )}

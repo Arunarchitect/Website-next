@@ -1,10 +1,20 @@
-// app/drawing/components/GuestAccessGate.tsx (create this file)
+// app/drawing/components/GuestAccessGate.tsx
 "use client";
 
 import { useState } from "react";
 import GuestDocumentGrid from "./GuestDocumentGrid";
 import { resolveGuestAccessCode, getDeliverableGuestDocuments, getProjectGuestDocuments, getGuestDrawing } from "../guestApi";
 import { DrawingDocumentResolved } from "../types";
+
+// Define a custom error type
+type ApiError = {
+  message?: string;
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+};
 
 export default function GuestAccessGate() {
   const [accessCode, setAccessCode] = useState("");
@@ -52,11 +62,38 @@ export default function GuestAccessGate() {
 
       setDocuments(docs);
       setHeading(headingText);
-    } catch (err: any) {
-      setError(err.message || "Invalid access code. Please try again.");
+    } catch (err: unknown) {
+      // Properly type the error
+      const errorMessage = getErrorMessage(err);
+      setError(errorMessage || "Invalid access code. Please try again.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Helper function to extract error message
+  const getErrorMessage = (err: unknown): string => {
+    if (err instanceof Error) {
+      return err.message;
+    }
+    
+    // Handle axios-like error objects
+    if (typeof err === 'object' && err !== null) {
+      const apiError = err as ApiError;
+      if (apiError.response?.data?.message) {
+        return apiError.response.data.message;
+      }
+      if (apiError.message) {
+        return apiError.message;
+      }
+    }
+    
+    // Handle string errors
+    if (typeof err === 'string') {
+      return err;
+    }
+    
+    return "An unexpected error occurred";
   };
 
   // If documents are loaded, show the grid

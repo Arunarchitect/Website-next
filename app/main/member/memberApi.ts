@@ -88,10 +88,10 @@ export const getIssuesByOrganisation = async (organisationId: number): Promise<D
       },
     });
     
-    const allIssues = response.data;
+    const allIssues: DashboardIssue[] = response.data;
     
     if (organisationId) {
-      return allIssues.filter((issue: any) => 
+      return allIssues.filter((issue: DashboardIssue) => 
         issue.organisation_id === organisationId
       );
     }

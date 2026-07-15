@@ -1,4 +1,4 @@
-// app/new/dash/adminApi.ts
+// app/main/admin/adminApi.ts
 
 import axios from 'axios';
 import { Organisation, User, DashboardIssue, DashboardStats } from './types';
@@ -92,7 +92,10 @@ export const getIssuesByOrganisation = async (organisationId: number): Promise<D
     const allIssues = response.data;
     
     if (organisationId) {
-      return allIssues.filter((issue: any) => 
+      // The list endpoint includes `organisation_id` on each issue even
+      // though it isn't (yet) part of the DashboardIssue type — intersect
+      // it in here rather than typing the callback param as `any`.
+      return allIssues.filter((issue: DashboardIssue & { organisation_id?: number }) =>
         issue.organisation_id === organisationId
       );
     }

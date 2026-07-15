@@ -232,7 +232,7 @@ export const getAreacalcRole = async (): Promise<string | null> => {
     }
 
     console.log('🔄 [UserApi] Fetching Areacalc role from API...');
-    const response = await apiClient.get('/areacalc/me/role/');
+    const response = await apiClient.get<AreacalcRoleResponse>('/areacalc/me/role/');
     
     console.log('📥 [UserApi] Areacalc API response:', response.data);
     

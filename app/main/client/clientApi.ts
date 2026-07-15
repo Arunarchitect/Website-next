@@ -1,7 +1,7 @@
 // app/main/client/clientApi.ts
 
 import axios from 'axios';
-import { User, OrganisationMembership, AreacalcRoleResponse, ClientStats } from './types';
+import { User, OrganisationMembership, ClientStats } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
 const API_URL = `${API_BASE_URL}/api`;
