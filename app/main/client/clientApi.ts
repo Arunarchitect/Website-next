@@ -1,7 +1,7 @@
 // app/main/client/clientApi.ts
 
 import axios from 'axios';
-import { User, OrganisationMembership, ClientStats } from './types';
+import { User, OrganisationMembership, ClientStats, ClientProject } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
 const API_URL = `${API_BASE_URL}/api`;
@@ -216,6 +216,34 @@ export const getOrganisationRole = async (): Promise<string | null> => {
   }
 };
 
+
+
+/**
+ * Get projects the current user has project-level membership on
+ */
+export const getClientProjects = async (): Promise<ClientProject[]> => {
+  try {
+    const token = getAuthToken();
+    if (!token) {
+      console.warn('⚠️ [ClientApi] No token, cannot fetch projects');
+      return [];
+    }
+
+    console.log('🔄 [ClientApi] Fetching client projects...');
+    const response = await apiClient.get('/my-projects/', {
+      params: { role: 'client' },
+    });
+
+    if (response.data) {
+      console.log(`✅ [ClientApi] Found ${response.data.length} project(s)`);
+      return response.data;
+    }
+    return [];
+  } catch (error) {
+    console.error('❌ [ClientApi] Error fetching projects:', error);
+    return [];
+  }
+};
 // ─────────────────────────────────────────────────────────────────────────────
 // AREACALC FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,13 +1,11 @@
-// app/main/client/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./styles.css";
-import { getCurrentUser, getAreacalcRole } from "./clientApi";
-import { clientSections } from "./constants";
-import { User } from "./types";
+import { getCurrentUser, getAreacalcRole, getClientProjects } from "./clientApi";
+import { User, ClientProject } from "./types";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -23,19 +21,23 @@ const mono = IBM_Plex_Mono({
 export default function DashClientPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ClientProject[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const [user, role] = await Promise.all([
+        const [user, role, projectList] = await Promise.all([
           getCurrentUser(),
           getAreacalcRole(),
+          getClientProjects(),
         ]);
         setCurrentUser(user);
         setAreacalcRole(role);
+        setProjects(projectList);
         console.log('👤 Client user:', user?.email);
         console.log('📐 Areacalc role:', role);
+        console.log('📁 Client projects:', projectList.length);
       } catch (error) {
         console.error('Error fetching user data:', error);
       } finally {
@@ -45,13 +47,11 @@ export default function DashClientPage() {
     fetchUserData();
   }, []);
 
-  // Get user's display name
   const getDisplayName = (): string => {
     if (!currentUser) return 'Guest';
     return currentUser.full_name || currentUser.email || 'Client';
   };
 
-  // Get user's initials for avatar
   const getInitials = (): string => {
     if (!currentUser) return '?';
     const name = currentUser.full_name || currentUser.email || 'Client';
@@ -62,22 +62,12 @@ export default function DashClientPage() {
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Get greeting based on time of day
   const getGreeting = (): string => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good morning';
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
   };
-
-  // ✅ Filter sections based on Areacalc role
-  const visibleSections = clientSections.filter((section) => {
-    // If section requires Areacalc, check if user has a role
-    if (section.requiresAreacalc) {
-      return areacalcRole !== null && areacalcRole !== 'anonymous';
-    }
-    return true; // Always show sections that don't require Areacalc
-  });
 
   return (
     <main className={`${display.variable} ${mono.variable} client-page`}>
@@ -136,11 +126,7 @@ export default function DashClientPage() {
               Client Access
             </span>
             {areacalcRole && areacalcRole !== 'anonymous' && (
-              <span className="user-role-badge" style={{ 
-                marginLeft: '8px',
-                background: '#E1F5EE',
-                color: '#0F6E56',
-              }}>
+              <span className="user-role-badge-areacalc">
                 <i className="ti ti-calculator" />
                 Areacalc: {areacalcRole}
               </span>
@@ -153,78 +139,35 @@ export default function DashClientPage() {
         <div className="loading-text">Loading your workspace…</div>
       ) : (
         <>
-          {/* Section Label */}
-          <p className="section-label">Available Tools & Resources</p>
-
-          {/* Client Sections */}
-          <div className="client-sections-grid">
-            {visibleSections.length > 0 ? (
-              visibleSections.map((section) => (
-                <div key={section.href + section.label} className="client-section-card">
-                  <div className="client-section-icon-wrapper">
-                    <i className={`ti ${section.icon}`} aria-hidden="true" />
+          {/* Projects */}
+          <p className="section-label">My Projects</p>
+          <div className="client-projects-grid">
+            {projects.length > 0 ? (
+              projects.map((project) => (
+                <Link
+                  key={project.id}
+                  href={`/new/projectdash/${project.id}`}
+                  className="client-project-card"
+                >
+                  <div className="client-project-info">
+                    <p className="client-project-name">{project.name}</p>
+                    <p className="client-project-meta">
+                      {project.location} · {project.project_type}
+                    </p>
+                    <span className="client-project-status">
+                      {project.status_display}
+                    </span>
                   </div>
-                  <div className="client-section-info">
-                    <p className="client-section-label">{section.label}</p>
-                    <p className="client-section-description">{section.description}</p>
-                    {section.requiresAreacalc && (
-                      <span style={{
-                        fontSize: '10px',
-                        padding: '1px 8px',
-                        borderRadius: '2px',
-                        background: '#E1F5EE',
-                        color: '#0F6E56',
-                        fontFamily: 'var(--font-mono), monospace',
-                        letterSpacing: '0.04em',
-                        display: 'inline-block',
-                        marginTop: '4px',
-                      }}>
-                        <i className="ti ti-lock-open" style={{ fontSize: '10px', marginRight: '4px' }} />
-                        Access granted
-                      </span>
-                    )}
-                  </div>
-                  <div className="client-section-actions">
-                    <a
-                      href={section.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="client-section-btn client-section-btn-icon"
-                      aria-label={`Open ${section.label} in new tab`}
-                      title="Open in new tab"
-                    >
-                      <i className="ti ti-external-link" aria-hidden="true" />
-                    </a>
-                    <Link href={section.href} className="client-section-btn client-section-btn-go">
-                      {section.cta}
-                      <i className="ti ti-arrow-right" aria-hidden="true" />
-                    </Link>
-                  </div>
-                </div>
+                  <i className="ti ti-arrow-right" aria-hidden="true" />
+                </Link>
               ))
             ) : (
-              <div style={{
-                padding: '32px',
-                textAlign: 'center',
-                color: 'var(--slate)',
-                background: '#ffffff',
-                border: '1px solid var(--line)',
-                borderRadius: '4px',
-              }}>
-                <i className="ti ti-info-circle" style={{ fontSize: '32px', display: 'block', marginBottom: '8px', color: 'var(--line)' }} />
-                <p>No tools available at the moment.</p>
-                <p style={{ fontSize: '13px', marginTop: '4px' }}>Contact your organisation admin for access.</p>
+              <div className="client-empty-state">
+                <i className="ti ti-folder-off" aria-hidden="true" />
+                <p>No projects assigned to you yet.</p>
+                <p>Contact your organisation admin for access.</p>
               </div>
             )}
-          </div>
-
-          {/* Access Note */}
-          <div className="client-access-note">
-            <i className="ti ti-info-circle" aria-hidden="true" />
-            <span>
-              You have client-level access. Some features may be restricted.
-              Contact your project manager if you need additional permissions.
-            </span>
           </div>
         </>
       )}

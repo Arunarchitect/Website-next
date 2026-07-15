@@ -606,3 +606,51 @@
 .client-border-client {
   border-color: var(--client-red);
 }
+
+
+.client-projects-grid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 32px;
+}
+
+.client-project-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-decoration: none;
+  color: var(--ink);
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.client-project-card:hover {
+  border-color: var(--client-red);
+  transform: translateY(-1px);
+}
+
+.client-project-name {
+  font-weight: 500;
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.client-project-meta {
+  font-size: 13px;
+  color: var(--slate);
+  margin: 0 0 4px;
+}
+
+.client-project-status {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 2px;
+  background: var(--purple-bg);
+  color: var(--purple-text);
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.04em;
+  display: inline-block;
+}

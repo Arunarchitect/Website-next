@@ -38,3 +38,16 @@ export interface ClientStats {
   totalDeliverables: number;
   totalTasks: number;
 }
+
+export interface ClientProject {
+  id: number;
+  name: string;
+  client_name: string;
+  location: string;
+  project_type: string;
+  current_stage: string;
+  status_display: string;
+  is_completed: boolean;
+  delivered_count: number;
+  role: 'admin' | 'manager' | 'member' | 'client' | null;
+}
