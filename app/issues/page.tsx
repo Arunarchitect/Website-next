@@ -19,6 +19,7 @@ import {
   deleteComment,
   editComment,
   deleteIssue,
+  API_URL,  // ✅ Import API_URL
 } from "./issueApi";
 import {
   Issue,
@@ -485,7 +486,8 @@ function NewIssueForm({
           return;
         }
 
-        const response = await fetch('http://localhost:8000/api/my-organisations/', {
+        // ✅ FIXED: Using API_URL with backticks
+        const response = await fetch(`${API_URL}/my-organisations/`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -526,7 +528,8 @@ function NewIssueForm({
           return;
         }
 
-        const response = await fetch(`http://localhost:8000/api/organisations/${organisationId}/projects/`, {
+        // ✅ FIXED: Using API_URL with backticks
+        const response = await fetch(`${API_URL}/organisations/${organisationId}/projects/`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',

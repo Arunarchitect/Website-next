@@ -18,8 +18,10 @@ import {
 // API CONFIGURATION
 // ---------------------------------------------------------------------------
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_HOST;
 const API_URL = `${API_BASE_URL}/api`;
+
+export { API_BASE_URL, API_URL };
 
 const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') return null;
