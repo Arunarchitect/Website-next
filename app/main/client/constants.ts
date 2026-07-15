@@ -7,7 +7,7 @@ export const clientSections: ClientSection[] = [
     icon: "ti-briefcase",
     label: "My Projects",
     description: "View projects shared with you by your organisation.",
-    href: "/new/dash/dashnormal",
+    href: "/new/projectdash",
     cta: "View projects",
     requiresAreacalc: false,
   },
@@ -23,7 +23,7 @@ export const clientSections: ClientSection[] = [
 
 // Quick links for client dashboard
 export const clientQuickLinks = [
-  { label: "Project Overview", href: "/new/dash/dashnormal", icon: "ti-layout-dashboard" },
+  { label: "Project Overview", href: "/new/projectdash", icon: "ti-layout-dashboard" },
   { label: "Area Calculator", href: "/tools/areacalc", icon: "ti-ruler-measure" },
   { label: "Issues", href: "/issues", icon: "ti-bug" },
 ];
@@ -95,7 +95,7 @@ export const defaultSections: ClientSection[] = [
     icon: "ti-briefcase",
     label: "My Projects",
     description: "View projects shared with you by your organisation.",
-    href: "/new/dash/dashnormal",
+    href: "/new/projectdash",
     cta: "View projects",
     requiresAreacalc: false,
   },
@@ -103,7 +103,7 @@ export const defaultSections: ClientSection[] = [
 
 // Navigation items for client header
 export const clientNavItems = [
-  { label: 'Dashboard', href: '/new/dash/dashnormal', icon: 'ti-layout-dashboard' },
+  { label: 'Dashboard', href: '/new/projectdash', icon: 'ti-layout-dashboard' },
   { label: 'Area Calculator', href: '/tools/areacalc', icon: 'ti-ruler-measure' },
   { label: 'Issues', href: '/issues', icon: 'ti-bug' },
 ];
