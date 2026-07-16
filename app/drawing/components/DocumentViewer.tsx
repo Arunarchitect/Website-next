@@ -1,7 +1,7 @@
 // app/drawing/components/DocumentViewer.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -21,6 +21,10 @@ interface DocumentViewerProps {
   guestMode?: boolean;
 }
 
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 6;
+const ZOOM_STEP = 0.25;
+
 export default function DocumentViewer({
   document: doc,
   isOpen,
@@ -38,10 +42,81 @@ export default function DocumentViewer({
   // matching the scroll behavior of the native <object> viewer.
   const [numPages, setNumPages] = useState<number>(0);
   const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [zoom, setZoom] = useState<number>(1);
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const pdfWrapperRef = useRef<HTMLDivElement | null>(null);
+  const panStateRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
+
+  // Editable zoom percentage input — kept as a local string buffer so
+  // typing doesn't fight the displayed zoom on every keystroke.
+  const [zoomInputValue, setZoomInputValue] = useState<string>('100');
 
   const isPDF = doc.file_type === 'pdf';
   const isImage = doc.file_type === 'image';
   const isDXF = doc.file_type === 'dxf';
+
+  const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+  const zoomIn = () => setZoom((z) => clampZoom(+(z + ZOOM_STEP).toFixed(2)));
+  const zoomOut = () => setZoom((z) => clampZoom(+(z - ZOOM_STEP).toFixed(2)));
+  const zoomReset = () => setZoom(1);
+
+  useEffect(() => {
+    setZoomInputValue(String(Math.round(zoom * 100)));
+  }, [zoom]);
+
+  const commitZoomInput = () => {
+    const val = parseInt(zoomInputValue, 10);
+    if (!isNaN(val)) {
+      setZoom(clampZoom(val / 100));
+    } else {
+      setZoomInputValue(String(Math.round(zoom * 100)));
+    }
+  };
+
+  const handleZoomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (/^\d{0,3}$/.test(raw)) setZoomInputValue(raw);
+  };
+
+  const handleZoomInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitZoomInput();
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const handlePrint = () => {
+    if (!blobUrl) return;
+
+    // Print via a hidden iframe so we get the browser's native print dialog
+    // scoped to just this document, instead of printing the whole page.
+    const iframe = window.document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.src = blobUrl;
+
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (err) {
+        console.error('Print failed:', err);
+      }
+    };
+
+    window.document.body.appendChild(iframe);
+
+    // Clean up the iframe a bit after the print dialog would have been
+    // triggered — long enough for the user to interact with it first.
+    setTimeout(() => {
+      iframe.remove();
+    }, 60000);
+  };
 
   useEffect(() => {
     setIsLoading(true);
@@ -49,6 +124,7 @@ export default function DocumentViewer({
     setErrorDetail(null);
     setBlobUrl(null);
     setNumPages(0);
+    setZoom(1);
 
     if (!isPDF && !isImage) {
       setIsLoading(false);
@@ -99,6 +175,75 @@ export default function DocumentViewer({
     observer.observe(el);
     return () => observer.disconnect();
   }, [isPDF, isOpen, blobUrl]);
+
+  // Ctrl/Cmd + scroll to zoom, and +/- keys
+  useEffect(() => {
+    if (!isPDF || !isOpen) return;
+    const el = pdfWrapperRef.current;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      if (e.deltaY < 0) zoomIn();
+      else zoomOut();
+    };
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
+      else if (e.key === '0') { e.preventDefault(); zoomReset(); }
+    };
+
+    el?.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('keydown', handleKeydown);
+    return () => {
+      el?.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('keydown', handleKeydown);
+    };
+  }, [isPDF, isOpen, blobUrl]);
+
+  // Drag-to-pan when zoomed in past 100% (only meaningful once content
+  // overflows the wrapper, but harmless to wire up regardless of zoom level)
+  const handlePanMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = pdfWrapperRef.current;
+    if (!el || zoom <= 1) return;
+    // Ignore drags starting on interactive elements (links, buttons, text selection in the PDF)
+    const target = e.target as HTMLElement;
+    if (target.closest('a, button')) return;
+
+    panStateRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    };
+    setIsPanning(true);
+  };
+
+  useEffect(() => {
+    if (!isPanning) return;
+    const el = pdfWrapperRef.current;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!el || !panStateRef.current) return;
+      const dx = e.clientX - panStateRef.current.startX;
+      const dy = e.clientY - panStateRef.current.startY;
+      el.scrollLeft = panStateRef.current.scrollLeft - dx;
+      el.scrollTop = panStateRef.current.scrollTop - dy;
+    };
+
+    const handleMouseUp = () => {
+      panStateRef.current = null;
+      setIsPanning(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isPanning]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -153,15 +298,62 @@ export default function DocumentViewer({
             </span>
           </div>
           <div className="document-viewer-controls">
+            {isPDF && !hasError && !isLoading && blobUrl && (
+              <div className="document-viewer-zoom-controls">
+                <button
+                  className="document-viewer-btn document-viewer-zoom-glyph"
+                  onClick={zoomOut}
+                  disabled={zoom <= MIN_ZOOM}
+                  title="Zoom out (-)"
+                  aria-label="Zoom out"
+                >
+                  &minus;
+                </button>
+                <div className="document-viewer-zoom-input-wrapper">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="document-viewer-zoom-input"
+                    value={zoomInputValue}
+                    onChange={handleZoomInputChange}
+                    onKeyDown={handleZoomInputKeyDown}
+                    onBlur={commitZoomInput}
+                    onFocus={(e) => e.target.select()}
+                    title="Type a zoom percentage, press Enter"
+                    aria-label="Zoom percentage"
+                  />
+                  <span className="document-viewer-zoom-suffix">%</span>
+                </div>
+                <button
+                  className="document-viewer-btn document-viewer-zoom-glyph"
+                  onClick={zoomIn}
+                  disabled={zoom >= MAX_ZOOM}
+                  title="Zoom in (+)"
+                  aria-label="Zoom in"
+                >
+                  +
+                </button>
+              </div>
+            )}
+            {(isPDF || isImage) && !hasError && !isLoading && blobUrl && (
+              <button
+                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-print"
+                onClick={handlePrint}
+                title="Print document"
+              >
+                <i className="ti ti-printer" />
+                <span className="document-viewer-btn-label">Print</span>
+              </button>
+            )}
             {(isPDF || isDXF) && (
               <a
-                className="document-viewer-btn document-viewer-btn-labeled"
+                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-open"
                 href={getFullFileUrl(doc.file_url)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 <i className="ti ti-external-link" />
-                Open in new tab & download
+                <span className="document-viewer-btn-label">Open in new tab &amp; download</span>
               </a>
             )}
             <button
@@ -169,7 +361,7 @@ export default function DocumentViewer({
               onClick={onClose}
             >
               <i className="ti ti-x" />
-              Close
+              <span className="document-viewer-btn-label">Close</span>
             </button>
           </div>
         </div>
@@ -225,15 +417,19 @@ export default function DocumentViewer({
 
           {isPDF && !hasError && !isLoading && blobUrl && (
             <div
+              ref={pdfWrapperRef}
               className="document-viewer-pdf-wrapper"
+              onMouseDown={handlePanMouseDown}
               style={{
                 width: '100%',
                 height: '100%',
                 overflow: 'auto',
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: 'center',
+                alignItems: zoom > 1 ? 'flex-start' : 'center',
                 gap: '12px',
+                cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default',
+                userSelect: isPanning ? 'none' : 'auto',
               }}
             >
               <Document
@@ -261,7 +457,7 @@ export default function DocumentViewer({
                   >
                     <Page
                       pageNumber={pageNum}
-                      width={containerWidth > 0 ? containerWidth : undefined}
+                      width={containerWidth > 0 ? containerWidth * zoom : undefined}
                       renderTextLayer={true}
                       renderAnnotationLayer={true}
                     />

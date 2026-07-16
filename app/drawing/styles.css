@@ -619,6 +619,8 @@
   white-space: nowrap;
   text-decoration: none; /* needed since one of these is an <a> tag */
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .document-viewer-btn-labeled i {
@@ -1981,4 +1983,234 @@
 
 .documents-thumbnail-image {
   object-fit: cover;
+}
+
+
+/* ============================================
+   DOCUMENT VIEWER - ZOOM CONTROLS
+   ============================================ */
+
+.document-viewer-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px;
+  margin-right: 4px;
+}
+
+.document-viewer-zoom-glyph {
+  font-size: 20px !important;
+  font-weight: 400;
+  line-height: 1;
+  font-family: system-ui, sans-serif !important;
+}
+
+.document-viewer-zoom-controls .document-viewer-btn {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.document-viewer-zoom-controls .document-viewer-btn:hover {
+  border-color: var(--doc-red);
+  color: var(--doc-red);
+  background: rgba(113, 43, 19, 0.08);
+}
+
+.document-viewer-zoom-controls .document-viewer-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  color: var(--slate);
+}
+
+.document-viewer-zoom-controls .document-viewer-btn:disabled:hover {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--slate);
+}
+
+/* Editable zoom-percentage input (replaces the old reset-only button) */
+.document-viewer-zoom-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  height: 32px;
+}
+
+.document-viewer-zoom-input {
+  width: 34px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--font-mono), monospace;
+  color: var(--slate);
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+.document-viewer-zoom-input::-webkit-outer-spin-button,
+.document-viewer-zoom-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.document-viewer-zoom-input:focus {
+  outline: none;
+  color: var(--doc-red);
+}
+
+.document-viewer-zoom-suffix {
+  font-size: 12px;
+  font-family: var(--font-mono), monospace;
+  color: var(--slate);
+}
+
+.document-viewer-pdf-wrapper {
+  touch-action: none;
+}
+
+/* Color-coded identity per action button — carries through to mobile so
+   each control stays identifiable by color even once the text shrinks. */
+.document-viewer-btn-print {
+  color: var(--blue);
+  border-color: rgba(44, 95, 138, 0.35);
+}
+
+.document-viewer-btn-print:hover {
+  color: var(--blue-deep);
+  border-color: var(--blue);
+  background: rgba(44, 95, 138, 0.08);
+}
+
+.document-viewer-btn-open {
+  color: var(--teal-text);
+  border-color: rgba(15, 110, 86, 0.35);
+}
+
+.document-viewer-btn-open:hover {
+  color: var(--teal-text);
+  border-color: var(--teal-text);
+  background: rgba(15, 110, 86, 0.08);
+}
+
+.document-viewer-close {
+  color: #D43E3E;
+  border-color: rgba(212, 62, 62, 0.35);
+}
+
+@media (max-width: 780px) {
+  .document-viewer-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .document-viewer-controls {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .document-viewer-header {
+    padding: 10px 12px;
+  }
+
+  .document-viewer-title-section {
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .document-viewer-title {
+    font-size: 14px;
+    max-width: 100%;
+  }
+
+  .document-viewer-version,
+  .document-viewer-privacy-badge,
+  .document-viewer-file-type-badge {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .document-viewer-controls {
+    order: 3;
+  }
+
+  /* Zoom cluster takes its own full-width row, centered */
+  .document-viewer-zoom-controls {
+    order: 1;
+    width: 100%;
+    justify-content: center;
+    margin-right: 0;
+    margin-bottom: 4px;
+  }
+
+  /* Labeled buttons (Print / Open in new tab / Close) stay identifiable on
+     narrow screens: icon on top, a tiny caption underneath, each tinted
+     with its own accent color so the three are distinguishable at a glance
+     without needing to read full-size text. */
+  .document-viewer-btn-labeled {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 8px 5px;
+    min-width: 56px;
+    border-width: 1.5px;
+    background: #ffffff;
+  }
+
+  .document-viewer-btn-labeled i {
+    font-size: 17px;
+  }
+
+  .document-viewer-btn-labeled .document-viewer-btn-label {
+    display: block;
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.1;
+    white-space: nowrap;
+    color: inherit;
+  }
+
+  .document-viewer-btn-print {
+    background: rgba(44, 95, 138, 0.06);
+  }
+
+  .document-viewer-btn-open {
+    background: rgba(15, 110, 86, 0.06);
+  }
+
+  .document-viewer-close {
+    background: rgba(212, 62, 62, 0.06);
+  }
+
+  .document-viewer-description {
+    padding: 8px 12px;
+  }
+
+  .document-viewer-description p {
+    font-size: 12px;
+  }
+
+  .document-viewer-footer {
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+
+  .document-viewer-meta {
+    font-size: 11px;
+  }
 }
