@@ -1,5 +1,3 @@
-// issues/issueApi.ts
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import axios from 'axios';
@@ -13,10 +11,6 @@ import {
   BcfTopicType,
   isBimIssue,
 } from "./issueTypes";
-
-// ---------------------------------------------------------------------------
-// API CONFIGURATION
-// ---------------------------------------------------------------------------
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST;
 const API_URL = `${API_BASE_URL}/api`;
@@ -149,7 +143,6 @@ apiClient.interceptors.response.use(
               return apiClient(error.config);
             }
           } catch {
-            // Refresh failed — clear tokens and bounce to login.
             localStorage.removeItem('access');
             localStorage.removeItem('refresh');
             if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
@@ -162,10 +155,6 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
-// ---------------------------------------------------------------------------
-// Enum mapping helpers
-// ---------------------------------------------------------------------------
 
 const mapStatusToBackend = (status: string): string => {
   const statusMap: {[key: string]: string} = {
@@ -213,10 +202,6 @@ const mapTopicTypeToFrontend = (topicType: string): BcfTopicType => {
   return topicTypeMap[topicType] || 'General';
 };
 
-// ---------------------------------------------------------------------------
-// Assignee / Drawing option fetchers
-// ---------------------------------------------------------------------------
-
 export interface AssigneeOption {
   id: number;
   displayName: string;
@@ -234,6 +219,23 @@ export interface DrawingOption {
   file_type: string;
 }
 
+// ---------------------------------------------------------------------------
+// Lightweight summaries used to drive the Organisation → Project → Deliverable
+// filter cascade on the issues list page.
+// ---------------------------------------------------------------------------
+
+export interface OrganisationSummary {
+  id: number;
+  name: string;
+}
+
+export interface ProjectSummary {
+  id: number;
+  name: string;
+  organisation_id: number;
+  organisation_name: string;
+}
+
 const extractIdSafe = (value: unknown): number | undefined => {
   if (value === null || value === undefined) return undefined;
   if (typeof value === 'number') return value;
@@ -243,6 +245,26 @@ const extractIdSafe = (value: unknown): number | undefined => {
   }
   return undefined;
 };
+
+export async function getMyOrganisations(): Promise<OrganisationSummary[]> {
+  try {
+    const response = await apiClient.get('/my-organisations/');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching organisations:', error);
+    return [];
+  }
+}
+
+export async function getOrganisationProjects(organisationId: number | string): Promise<ProjectSummary[]> {
+  try {
+    const response = await apiClient.get(`/organisations/${organisationId}/projects/`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching organisation projects:', error);
+    return [];
+  }
+}
 
 export async function getOrganisationMembers(organisationId: number | string): Promise<AssigneeOption[]> {
   try {
@@ -265,8 +287,6 @@ export async function getOrganisationMembers(organisationId: number | string): P
   }
 }
 
-// Retained for any other screen still using the deliverable-scoped picker.
-// The Issues create/edit forms no longer call these directly.
 export async function getDeliverablesForProject(projectId: number | string): Promise<DeliverableOption[]> {
   try {
     const response = await apiClient.get('/drawings/deliverables/', {
@@ -298,12 +318,10 @@ export async function getDeliverableDrawings(deliverableId: number | string): Pr
   }
 }
 
-// Drawings scoped directly to a project — used by the Issues create/edit
-// forms now that the deliverable step has been removed from that flow.
 export async function getProjectDrawings(projectId: number | string): Promise<DrawingOption[]> {
   try {
     const response = await apiClient.get('/drawings/documents/', {
-      params: { project_id: projectId }, // matches DrawingDocumentViewSet.get_queryset()
+      params: { project_id: projectId },
     });
     return response.data.map((d: any) => ({
       id: d.id,
@@ -315,10 +333,6 @@ export async function getProjectDrawings(projectId: number | string): Promise<Dr
     return [];
   }
 }
-
-// ---------------------------------------------------------------------------
-// Django <-> frontend converters
-// ---------------------------------------------------------------------------
 
 const convertDjangoIssue = (data: any): Issue => {
   const baseIssue = {
@@ -473,9 +487,6 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
         viewpointPayload.snapshot_data = snapshotData;
         viewpointPayload.snapshot_format = snapshotFormat || 'png';
       } else if (viewpoint.clear_snapshot === true) {
-        // ✅ Fixed: previously sent snapshot_data: null / snapshot_format: null,
-        // which the backend CharField rejected with a 400. The backend now
-        // has an explicit clear_snapshot flag for this case.
         viewpointPayload.clear_snapshot = true;
       }
 
@@ -509,10 +520,6 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
 
   return payload;
 };
-
-// ---------------------------------------------------------------------------
-// CRUD OPERATIONS
-// ---------------------------------------------------------------------------
 
 export async function getIssues(params?: {
   project?: number;
@@ -633,10 +640,6 @@ export async function removeAttachment(id: string | number, index: number): Prom
   } as any);
 }
 
-// ---------------------------------------------------------------------------
-// COMMENTS
-// ---------------------------------------------------------------------------
-
 export async function addComment(
   id: string | number,
   author: string,
@@ -744,10 +747,6 @@ export async function editComment(
   }
 }
 
-// ---------------------------------------------------------------------------
-// LINKED ISSUES
-// ---------------------------------------------------------------------------
-
 export async function linkIssue(id: string | number, linkedIssueId: string | number): Promise<void> {
   try {
     await apiClient.post(`/issues/issues/${id}/link-issue/`, { linked_issue_id: linkedIssueId });
@@ -766,10 +765,6 @@ export async function unlinkIssue(id: string | number, linkedIssueId: string | n
   }
 }
 
-// ---------------------------------------------------------------------------
-// VIEWPOINTS
-// ---------------------------------------------------------------------------
-
 export async function getViewpoint(id: string | number): Promise<any> {
   try {
     const response = await apiClient.get(`/issues/issues/${id}/viewpoint/`);
@@ -782,10 +777,6 @@ export async function getViewpoint(id: string | number): Promise<any> {
     throw error;
   }
 }
-
-// ---------------------------------------------------------------------------
-// BCF EXPORT/IMPORT
-// ---------------------------------------------------------------------------
 
 export async function toBcfTopic(issue: BimIssue): Promise<any> {
   try {
@@ -821,10 +812,6 @@ export async function fromBcfTopic(topic: any, projectId: number): Promise<Issue
   }
 }
 
-// ---------------------------------------------------------------------------
-// FILTERS / QUERIES
-// ---------------------------------------------------------------------------
-
 export const getIssuesByTopicType = async (type: BcfTopicType) => {
   const issues = await getIssues();
   return issues.filter(isBimIssue).filter((i) => i.topicType === type);
@@ -854,10 +841,6 @@ export const getMyIssues = async (): Promise<Issue[]> => {
     throw error;
   }
 };
-
-// ---------------------------------------------------------------------------
-// DISPLAY HELPERS
-// ---------------------------------------------------------------------------
 
 export const getStatusColor = (status: IssueStatus): string => {
   switch (status) {
@@ -901,6 +884,8 @@ const issueApi = {
   getIssuesByDomain,
   getIssuesByIfcElement,
   getMyIssues,
+  getMyOrganisations,
+  getOrganisationProjects,
   getOrganisationMembers,
   getDeliverablesForProject,
   getDeliverableDrawings,

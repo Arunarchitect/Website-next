@@ -23,10 +23,6 @@ export type BcfTopicType =
   | "Request"
   | "Fault";
 
-// ---------------------------------------------------------------------------
-// BCF Viewpoint - camera + selection state tied to a BIM issue
-// ---------------------------------------------------------------------------
-
 export interface BcfViewpoint {
   guid: string;
   cameraPosition: { x: number; y: number; z: number };
@@ -40,7 +36,7 @@ export interface BcfViewpoint {
     visible?: boolean;
   }>;
   snapshot?: {
-    data: string; // base64 encoded image or URL
+    data: string;
     format: "png" | "jpg";
     width?: number;
     height?: number;
@@ -49,37 +45,25 @@ export interface BcfViewpoint {
 }
 
 export interface BcfSnapshot {
-  guid: string; // viewpoint guid
-  snapshot: string; // base64 or URL
+  guid: string;
+  snapshot: string;
   snapshot_type: "png" | "jpg";
 }
-
-// ---------------------------------------------------------------------------
-// Issue Comment
-// ---------------------------------------------------------------------------
 
 export interface IssueComment {
   id: string;
   author: string;
   text: string;
-  timestamp: string; // ISO 8601
+  timestamp: string;
   viewpointGuid?: string;
-  snapshot?: string; // base64 or URL
+  snapshot?: string;
 }
-
-// ---------------------------------------------------------------------------
-// Linked drawing document (from the drawing app's DrawingDocument model)
-// ---------------------------------------------------------------------------
 
 export interface LinkedDocument {
   id: number;
   title: string;
   file_type: string;
 }
-
-// ---------------------------------------------------------------------------
-// Base Issue
-// ---------------------------------------------------------------------------
 
 interface BaseIssue {
   id: string | number;
@@ -99,12 +83,7 @@ interface BaseIssue {
   comments: IssueComment[];
   linkedIssues?: string[];
   resolution?: string | null;
-
-  // Documents (drawings) this issue references — populated from
-  // Issue.linked_documents on the backend.
   linkedDocuments?: LinkedDocument[];
-
-  // Django-specific fields
   project?: number;
   project_id?: number;
   deliverable?: number | null;
@@ -154,10 +133,6 @@ export function assertDesignIssue(issue: Issue): asserts issue is DesignIssue {
 
 export type Issue = BimIssue | DesignIssue;
 
-// ---------------------------------------------------------------------------
-// API Response Types
-// ---------------------------------------------------------------------------
-
 export interface IssueListResponse {
   count: number;
   next: string | null;
@@ -165,10 +140,6 @@ export interface IssueListResponse {
   results: Issue[];
 }
 
-// Fixed: an interface with no members of its own adds nothing over the type
-// it extends, which is what @typescript-eslint/no-empty-object-type flags.
-// A type alias expresses the same "this response IS an Issue" relationship
-// without declaring an empty (and therefore misleading-looking) interface.
 export type IssueDetailResponse = Issue;
 
 export interface IssueCreatePayload {
@@ -210,10 +181,6 @@ export interface LinkIssuePayload {
   linked_issue_id: string | number;
 }
 
-// ---------------------------------------------------------------------------
-// BCF Import/Export Types
-// ---------------------------------------------------------------------------
-
 export interface BcfTopic {
   guid: string;
   topic_type: string;
@@ -245,10 +212,6 @@ export interface BcfImportPayload {
   module?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 export const STATUS_OPTIONS: IssueStatus[] = ["Open", "In Progress", "Resolved", "Closed"];
 export const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 export const DOMAIN_OPTIONS: IssueDomain[] = ["bim", "design", "other"];
@@ -261,10 +224,6 @@ export const TOPIC_TYPE_OPTIONS: BcfTopicType[] = [
   "Request",
   "Fault",
 ];
-
-// ---------------------------------------------------------------------------
-// Display Helpers
-// ---------------------------------------------------------------------------
 
 export const getStatusColor = (status: IssueStatus): string => {
   const colors: Record<IssueStatus, string> = {
@@ -292,10 +251,6 @@ export const getDomainLabel = (domain: IssueDomain): string => {
 export const getStatusLabel = (status: IssueStatus): string => status;
 export const getPriorityLabel = (priority: IssuePriority): string => priority;
 export const getTopicTypeLabel = (type: BcfTopicType): string => type;
-
-// ---------------------------------------------------------------------------
-// Default Values
-// ---------------------------------------------------------------------------
 
 export const getDefaultIssue = (domain: IssueDomain = "design"): Partial<Issue> => {
   const base = {
@@ -326,10 +281,6 @@ export const getDefaultIssue = (domain: IssueDomain = "design"): Partial<Issue> 
     attachments: [],
   } as Partial<DesignIssue>;
 };
-
-// ---------------------------------------------------------------------------
-// BCF <-> Issue helpers
-// ---------------------------------------------------------------------------
 
 export function toBcfTopic(issue: BimIssue): BcfTopic {
   return {
@@ -385,14 +336,6 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
     organisationId: null,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Raw Django API shapes consumed by fromDjangoIssue.
-//
-// These are intentionally loose (Django sends related fields as either a
-// bare numeric id or an expanded object depending on the endpoint/serializer)
-// but every field used below is named and typed, so no `any` is needed.
-// ---------------------------------------------------------------------------
 
 type DjangoRef =
   | { id?: number; email?: string; full_name?: string }
@@ -458,10 +401,6 @@ export interface DjangoIssueData {
   attachments?: string[];
 }
 
-// Related fields from Django arrive as either a bare id or an expanded
-// { id, ... } object depending on the serializer — this normalizes both
-// to a plain numeric id (or null) without needing an `any` cast at each
-// call site.
 function extractId(value: DjangoRef): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "number") return value;

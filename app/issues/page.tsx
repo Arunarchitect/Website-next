@@ -20,7 +20,13 @@ import {
   editComment,
   deleteIssue,
   getProjectDrawings,
+  getMyOrganisations,
+  getOrganisationProjects,
+  getDeliverablesForProject,
   DrawingOption,
+  DeliverableOption,
+  OrganisationSummary,
+  ProjectSummary,
   API_URL,
 } from "./issueApi";
 import {
@@ -123,6 +129,26 @@ interface NewDesignIssueInput extends NewIssueBase {
 
 type NewIssueInput = NewBimIssueInput | NewDesignIssueInput;
 
+type StatFilterKey = "open" | "inProgress" | "resolved" | "bim" | "clash" | "highPriority" | null;
+
+const STAT_FILTER_PREDICATES: Record<Exclude<StatFilterKey, null>, (issue: Issue) => boolean> = {
+  open: (i) => i.status === "Open",
+  inProgress: (i) => i.status === "In Progress",
+  resolved: (i) => i.status === "Resolved",
+  bim: (i) => isBimIssue(i),
+  clash: (i) => isBimIssue(i) && i.topicType === "Clash",
+  highPriority: (i) => i.priority === "High",
+};
+
+const STAT_FILTER_LABELS: Record<Exclude<StatFilterKey, null>, string> = {
+  open: "Open",
+  inProgress: "In Progress",
+  resolved: "Resolved",
+  bim: "BCF Topics",
+  clash: "Clashes",
+  highPriority: "High Priority",
+};
+
 function extractValidationMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err) && err.response?.data) {
     const data = err.response.data as Record<string, unknown>;
@@ -139,6 +165,23 @@ export default function IssuesPage() {
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
+
+  // --- Organisation / Project / Deliverable filter cascade -----------------
+  const [filterOrgId, setFilterOrgId] = useState<number | "">("");
+  const [filterProjectId, setFilterProjectId] = useState<number | "">("");
+  const [filterDeliverableId, setFilterDeliverableId] = useState<number | "">("");
+
+  const [filterOrganisations, setFilterOrganisations] = useState<OrganisationSummary[]>([]);
+  const [filterProjects, setFilterProjects] = useState<ProjectSummary[]>([]);
+  const [filterDeliverables, setFilterDeliverables] = useState<DeliverableOption[]>([]);
+
+  const [loadingFilterOrgs, setLoadingFilterOrgs] = useState(false);
+  const [loadingFilterProjects, setLoadingFilterProjects] = useState(false);
+  const [loadingFilterDeliverables, setLoadingFilterDeliverables] = useState(false);
+
+  // Which stats-strip card is currently driving the list filter (if any).
+  // Clicking a card toggles it on/off.
+  const [statFilter, setStatFilter] = useState<StatFilterKey>(null);
 
   useEffect(() => {
     const loadUserFromStorage = () => {
@@ -189,8 +232,75 @@ export default function IssuesPage() {
     refresh().finally(() => setLoading(false));
   }, []);
 
+  // Load the organisation list once, for the filter bar.
+  useEffect(() => {
+    setLoadingFilterOrgs(true);
+    getMyOrganisations()
+      .then(setFilterOrganisations)
+      .finally(() => setLoadingFilterOrgs(false));
+  }, []);
+
+  // When the selected organisation changes, load its projects and reset
+  // whatever was selected downstream (project / deliverable).
+  useEffect(() => {
+    if (!filterOrgId) {
+      setFilterProjects([]);
+      setFilterProjectId("");
+      setFilterDeliverables([]);
+      setFilterDeliverableId("");
+      return;
+    }
+    let cancelled = false;
+    setLoadingFilterProjects(true);
+    getOrganisationProjects(filterOrgId)
+      .then((opts) => { if (!cancelled) setFilterProjects(opts); })
+      .finally(() => { if (!cancelled) setLoadingFilterProjects(false); });
+    setFilterProjectId("");
+    setFilterDeliverables([]);
+    setFilterDeliverableId("");
+    return () => { cancelled = true; };
+  }, [filterOrgId]);
+
+  // When the selected project changes, load its deliverables and reset the
+  // deliverable selection.
+  useEffect(() => {
+    if (!filterProjectId) {
+      setFilterDeliverables([]);
+      setFilterDeliverableId("");
+      return;
+    }
+    let cancelled = false;
+    setLoadingFilterDeliverables(true);
+    getDeliverablesForProject(filterProjectId)
+      .then((opts) => { if (!cancelled) setFilterDeliverables(opts); })
+      .finally(() => { if (!cancelled) setLoadingFilterDeliverables(false); });
+    setFilterDeliverableId("");
+    return () => { cancelled = true; };
+  }, [filterProjectId]);
+
+  const hasActiveFilters = !!filterOrgId || !!filterProjectId || !!filterDeliverableId || !!statFilter;
+
+  const clearFilters = () => {
+    setFilterOrgId("");
+    setFilterProjectId("");
+    setFilterDeliverableId("");
+    setStatFilter(null);
+  };
+
+  // Clicking an active stat card again turns the filter off.
+  const handleStatClick = (key: Exclude<StatFilterKey, null>) => {
+    setStatFilter((prev) => (prev === key ? null : key));
+  };
+
   const visibleIssues = issues.filter((issue) => {
     if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
+    if (filterOrgId && issue.organisationId !== filterOrgId) return false;
+    if (filterProjectId) {
+      const issueProjectId = issue.project_id ?? issue.project;
+      if (issueProjectId !== filterProjectId) return false;
+    }
+    if (filterDeliverableId && issue.deliverable !== filterDeliverableId) return false;
+    if (statFilter && !STAT_FILTER_PREDICATES[statFilter](issue)) return false;
     return true;
   });
 
@@ -291,13 +401,65 @@ export default function IssuesPage() {
       )}
 
       <section className="stats-grid">
-        <StatCard icon="ti-alert-circle" label="Open" value={openIssues} />
-        <StatCard icon="ti-loader" label="In Progress" value={inProgressIssues} />
-        <StatCard icon="ti-check" label="Resolved" value={resolvedIssues} />
-        <StatCard icon="ti-files" label="BCF Topics" value={bimIssueCount} />
-        <StatCard icon="ti-cube" label="Clashes" value={clashIssues} />
-        <StatCard icon="ti-flag" label="High Priority" value={highPriorityIssues} />
+        <StatCard
+          icon="ti-alert-circle"
+          label="Open"
+          value={openIssues}
+          active={statFilter === "open"}
+          urgent={openIssues > 0}
+          onClick={() => handleStatClick("open")}
+        />
+        <StatCard
+          icon="ti-loader"
+          label="In Progress"
+          value={inProgressIssues}
+          active={statFilter === "inProgress"}
+          onClick={() => handleStatClick("inProgress")}
+        />
+        <StatCard
+          icon="ti-check"
+          label="Resolved"
+          value={resolvedIssues}
+          active={statFilter === "resolved"}
+          onClick={() => handleStatClick("resolved")}
+        />
+        <StatCard
+          icon="ti-files"
+          label="BCF Topics"
+          value={bimIssueCount}
+          active={statFilter === "bim"}
+          onClick={() => handleStatClick("bim")}
+        />
+        <StatCard
+          icon="ti-cube"
+          label="Clashes"
+          value={clashIssues}
+          active={statFilter === "clash"}
+          onClick={() => handleStatClick("clash")}
+        />
+        <StatCard
+          icon="ti-flag"
+          label="High Priority"
+          value={highPriorityIssues}
+          active={statFilter === "highPriority"}
+          urgent={highPriorityIssues > 0}
+          onClick={() => handleStatClick("highPriority")}
+        />
       </section>
+
+      {statFilter && (
+        <div className="stat-filter-banner">
+          <i className="ti ti-filter" />
+          <span>Showing <strong>{STAT_FILTER_LABELS[statFilter]}</strong> issues only</span>
+          <button
+            type="button"
+            className="stat-filter-banner-clear"
+            onClick={() => setStatFilter(null)}
+          >
+            <i className="ti ti-x" /> Clear
+          </button>
+        </div>
+      )}
 
       {assignees.length > 0 && (
         <section className="assignees-section">
@@ -318,6 +480,73 @@ export default function IssuesPage() {
         </section>
       )}
 
+      <section className="filters-section">
+        <div className="section-title">
+          <span>Filter by Organisation / Project / Deliverable</span>
+          {hasActiveFilters && (
+            <button className="filters-clear-btn" onClick={clearFilters} type="button">
+              Clear filters
+            </button>
+          )}
+        </div>
+        <div className="filters-row">
+          <div className="form-field">
+            <label>Organisation</label>
+            <select
+              className="field-select"
+              value={filterOrgId}
+              onChange={(e) => setFilterOrgId(e.target.value ? Number(e.target.value) : "")}
+              disabled={loadingFilterOrgs}
+            >
+              <option value="">
+                {loadingFilterOrgs ? 'Loading organisations…' : 'All organisations'}
+              </option>
+              {filterOrganisations.map((org) => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-field">
+            <label>Project</label>
+            <select
+              className="field-select"
+              value={filterProjectId}
+              onChange={(e) => setFilterProjectId(e.target.value ? Number(e.target.value) : "")}
+              disabled={!filterOrgId || loadingFilterProjects}
+            >
+              <option value="">
+                {!filterOrgId
+                  ? 'Select an organisation first'
+                  : loadingFilterProjects ? 'Loading projects…' : 'All projects'}
+              </option>
+              {filterProjects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-field">
+            <label>Deliverable</label>
+            <select
+              className="field-select"
+              value={filterDeliverableId}
+              onChange={(e) => setFilterDeliverableId(e.target.value ? Number(e.target.value) : "")}
+              disabled={!filterProjectId || loadingFilterDeliverables}
+            >
+              <option value="">
+                {!filterProjectId
+                  ? 'Select a project first'
+                  : loadingFilterDeliverables ? 'Loading deliverables…' : 'All deliverables'}
+              </option>
+              {filterDeliverables.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </section>
+
       <section>
         <div className="section-title">
           <span>All Issues</span>
@@ -327,7 +556,18 @@ export default function IssuesPage() {
         {loading ? (
           <p className="hero-subtitle">Loading issues…</p>
         ) : visibleIssues.length === 0 ? (
-          <p className="hero-subtitle">No issues found. Create a new issue to get started!</p>
+          <>
+            <p className="hero-subtitle">
+              {hasActiveFilters
+                ? "No issues match the selected filters."
+                : "No issues found. Create a new issue to get started!"}
+            </p>
+            {hasActiveFilters && (
+              <button className="btn-outline" onClick={clearFilters} type="button" style={{ marginTop: '10px' }}>
+                <i className="ti ti-x" /> Clear all filters
+              </button>
+            )}
+          </>
         ) : (
           <div className="issues-grid">
             {visibleIssues.map((issue) => (
@@ -435,15 +675,36 @@ export default function IssuesPage() {
   );
 }
 
-function StatCard({ icon, label, value }: { icon: string; label: string; value: number }) {
+function StatCard({
+  icon,
+  label,
+  value,
+  onClick,
+  active,
+  urgent,
+}: {
+  icon: string;
+  label: string;
+  value: number;
+  onClick?: () => void;
+  active?: boolean;
+  urgent?: boolean;
+}) {
+  const isBlinking = !!urgent && value > 0;
+  const classes = [
+    "stat-card",
+    active ? "stat-card-active" : "",
+    isBlinking ? "stat-card-urgent" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div className="stat-card">
+    <button type="button" className={classes} onClick={onClick} aria-pressed={!!active}>
       <i className={`ti ${icon} stat-icon`} />
       <div>
         <p className="stat-label">{label}</p>
         <p className="stat-value">{value}</p>
       </div>
-    </div>
+    </button>
   );
 }
 
