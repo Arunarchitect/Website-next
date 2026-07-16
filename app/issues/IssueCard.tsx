@@ -19,6 +19,8 @@ import {
   isBimIssue,
 } from "./issueTypes";
 import { isUserMatch } from '@/components/utils/userMatching';
+
+import { ManageAccessPanel, ClassificationBadge } from "./IssueCardAccessParts";
 import {
   getImageSource,
   useScreenshotUpload,
@@ -63,6 +65,11 @@ interface IssueCardProps {
   onOpenDrawing: (documentId: number) => void;
   currentUser: CurrentUser;
   isUserCreator: (reportedBy: string, user: CurrentUser) => boolean;
+  onUpdateAccess: (access: {
+    classification: Issue["classification"];
+    allowedRoles: string[];
+    sharedWith: number[];
+  }) => Promise<void>;
 }
 
 export function IssueCard({
@@ -81,6 +88,7 @@ export function IssueCard({
   onOpenDrawing,
   currentUser,
   isUserCreator,
+  onUpdateAccess,
 }: IssueCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -88,6 +96,9 @@ export function IssueCard({
   const [resolutionText, setResolutionText] = useState("");
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showManageAccess, setShowManageAccess] = useState(false);
+  const [accessOrgMembers, setAccessOrgMembers] = useState<AssigneeOption[]>([]);
+  const [loadingAccessMembers, setLoadingAccessMembers] = useState(false);
 
   // Screenshot upload flows — one hook instance per independent upload site,
   // matching the five separate state blocks in the original component.
@@ -142,6 +153,16 @@ export function IssueCard({
       .finally(() => { if (!cancelled) setLoadingAssignees(false); });
     return () => { cancelled = true; };
   }, [isEditing, issueOrganisationId]);
+
+  useEffect(() => {
+    if (!showManageAccess || !issueOrganisationId) return;
+    let cancelled = false;
+    setLoadingAccessMembers(true);
+    getOrganisationMembers(issueOrganisationId)
+      .then((opts) => { if (!cancelled) setAccessOrgMembers(opts); })
+      .finally(() => { if (!cancelled) setLoadingAccessMembers(false); });
+    return () => { cancelled = true; };
+  }, [showManageAccess, issueOrganisationId]);
 
   useEffect(() => {
     if (!isEditing || !issueProjectId) {
@@ -317,6 +338,15 @@ export function IssueCard({
     }
   };
 
+  const handleSaveAccess = async (access: {
+    classification: Issue["classification"];
+    allowedRoles: string[];
+    sharedWith: number[];
+  }) => {
+    await onUpdateAccess(access);
+    setShowManageAccess(false);
+  };
+
   const handleResolveConfirm = async () => {
     if (!resolutionText.trim()) return;
     try {
@@ -433,6 +463,7 @@ export function IssueCard({
                   <><i className="ti ti-pencil" /> Other</>
                 )}
               </span>
+              <ClassificationBadge classification={issue.classification} />
               {isCreator && <span className="issue-owner-badge">(You)</span>}
             </div>
 
@@ -666,6 +697,7 @@ export function IssueCard({
           <ActionsBar
             isEditing={isEditing}
             isCreator={isCreator}
+            canManageAccess={issue.canManageAccess}
             canResolve={canResolve}
             onCancelEdit={() => {
               setIsEditing(false);
@@ -677,7 +709,21 @@ export function IssueCard({
             onToggleResolve={() => setIsResolving((v) => !v)}
             onToggleAddScreenshot={() => setShowAddScreenshot((v) => !v)}
             onToggleCommentInput={() => setShowCommentInput((v) => !v)}
+            onToggleManageAccess={() => setShowManageAccess((v) => !v)}
           />
+
+          {showManageAccess && (
+            <ManageAccessPanel
+              classification={issue.classification}
+              allowedRoles={issue.allowedRoles}
+              sharedWith={issue.sharedWith}
+              sharedWithDetails={issue.sharedWithDetails}
+              orgMembers={accessOrgMembers}
+              loadingOrgMembers={loadingAccessMembers}
+              onCancel={() => setShowManageAccess(false)}
+              onSave={handleSaveAccess}
+            />
+          )}
 
           {showAddScreenshot && (
             <AddScreenshotPanel

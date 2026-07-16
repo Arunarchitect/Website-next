@@ -1,11 +1,13 @@
 // @/utils/userMatching.ts
 
+
+
 interface UserInfo {
   email: string;
   fullName: string;
   username: string;
   displayName: string;
-  id?: number;
+  id?: number | null;   // was: id?: number
   firstName?: string;
   lastName?: string;
 }

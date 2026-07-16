@@ -3,7 +3,7 @@
 
 import { useRef, useState } from "react";
 import { compressImage } from "./imageUtils";
-import { Issue, IssuePriority, IssueStatus } from "./issueTypes";
+import { Issue, IssueClassification, IssuePriority, IssueStatus } from "./issueTypes";
 
 export type NonBimIssue = Extract<Issue, { domain: 'other' | 'design' }>;
 
@@ -21,9 +21,13 @@ export type IssuePatch = Omit<Partial<Issue>, 'viewpoint'> & {
   newAttachmentData?: string;
   newAttachmentFormat?: "png" | "jpg";
   linkedDocumentIds?: number[];
+  classification?: IssueClassification;
+  allowedRoles?: string[];
+  sharedWith?: number[];
 };
 
 export interface CurrentUser {
+  id?: number | null;
   email: string;
   fullName: string;
   username: string;

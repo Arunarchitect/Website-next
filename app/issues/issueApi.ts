@@ -8,6 +8,7 @@ import {
   IssueStatus,
   IssuePriority,
   IssueDomain,
+  IssueClassification,
   BcfTopicType,
   isBimIssue,
 } from "./issueTypes";
@@ -206,6 +207,7 @@ export interface AssigneeOption {
   id: number;
   displayName: string;
   email: string;
+  role?: string | null;
 }
 
 export interface DeliverableOption {
@@ -279,11 +281,42 @@ export async function getOrganisationMembers(organisationId: number | string): P
           u.email ||
           `User #${u.id}`,
         email: u.email || '',
+        // `role` may live on the membership record (`m.role`) or, in some
+        // backends, directly on the nested user object — check both.
+        role: m.role ?? u.role ?? null,
       };
     });
   } catch (error) {
     console.error('Error fetching organisation members:', error);
     return [];
+  }
+}
+
+/**
+ * Finds the current user's own membership role within an organisation, by
+ * matching against the members list. Used to gate the classification
+ * dropdown (and "share with" control) on the *new issue* form, before any
+ * issue exists for the backend to compute `can_manage_access` on.
+ *
+ * Returns null if the user isn't a member (or the lookup fails) — callers
+ * should treat null as "not privileged".
+ */
+export async function getMyRoleInOrganisation(
+  organisationId: number | string,
+  currentUserId: number | null | undefined,
+  currentUserEmail?: string | null
+): Promise<string | null> {
+  if (!organisationId || (!currentUserId && !currentUserEmail)) return null;
+  try {
+    const members = await getOrganisationMembers(organisationId);
+    const mine = members.find((m) =>
+      (currentUserId && m.id === currentUserId) ||
+      (currentUserEmail && m.email && m.email.toLowerCase() === currentUserEmail.toLowerCase())
+    );
+    return mine?.role ?? null;
+  } catch (error) {
+    console.error('Error resolving current user role in organisation:', error);
+    return null;
   }
 }
 
@@ -371,6 +404,22 @@ const convertDjangoIssue = (data: any): Issue => {
       snapshot: c.snapshot ? getImageSource(c.snapshot) : null,
       viewpointGuid: c.viewpoint?.guid || null,
     })),
+    // --- Access control ---
+    classification: (data.classification || 'general') as IssueClassification,
+    classificationDisplay: data.classification_display,
+    allowedRoles: data.allowed_roles || [],
+    isArchived: !!data.is_archived,
+    sharedWith: (data.shared_with || []).map((v: any) => (typeof v === 'number' ? v : v?.id)).filter(Boolean),
+    sharedWithDetails: (data.shared_with_details || []).map((u: any) => ({
+      id: u.id,
+      email: u.email || '',
+      fullName:
+        `${u.first_name || ''} ${u.last_name || ''}`.trim() ||
+        u.full_name ||
+        u.email ||
+        `User #${u.id}`,
+    })),
+    canManageAccess: !!data.can_manage_access,
   };
 
   if (data.domain === 'bim') {
@@ -459,6 +508,20 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
     payload.resolution = issue.resolution;
   }
 
+  // --- Access control: only included when explicitly set on the patch, so
+  // a plain-member's edit (which never touches these) can't accidentally
+  // clear them, and so the backend's privilege check only fires when the
+  // user actually tried to change something access-related. ---
+  if (issue.classification !== undefined) {
+    payload.classification = issue.classification;
+  }
+  if (issue.allowedRoles !== undefined) {
+    payload.allowed_roles = issue.allowedRoles;
+  }
+  if (issue.sharedWith !== undefined) {
+    payload.shared_with = issue.sharedWith;
+  }
+
   if (issue.domain === 'bim') {
     const bimIssue = issue as any;
 
@@ -527,6 +590,7 @@ export async function getIssues(params?: {
   status?: string;
   assigned_to?: number;
   deliverable?: number;
+  classification?: string;
 }): Promise<Issue[]> {
   try {
     const response = await apiClient.get('/issues/issues/', { params });
@@ -584,6 +648,43 @@ export async function updateIssue(id: string | number, patch: Partial<Issue>): P
       console.error('❌ Error updating issue - Response data:', error.response.data);
     }
     console.error('Error updating issue:', error);
+    throw error;
+  }
+}
+
+/**
+ * Admin-only: update classification / allowedRoles / sharedWith on an issue
+ * the current user did NOT create. Hits the dedicated /access/ endpoint,
+ * which only requires org-admin (or staff/superuser), not "is reporter".
+ *
+ * Sends only these three fields — never title/status/etc — so it can never
+ * accidentally clobber the reporter's content, and so it passes even if the
+ * caller isn't the reporter (which the main PATCH endpoint restricts).
+ */
+export async function updateIssueAccess(
+  id: string | number,
+  access: {
+    classification?: IssueClassification;
+    allowedRoles?: string[];
+    sharedWith?: number[];
+  }
+): Promise<Issue | undefined> {
+  try {
+    const payload: any = {};
+    if (access.classification !== undefined) payload.classification = access.classification;
+    if (access.allowedRoles !== undefined) payload.allowed_roles = access.allowedRoles;
+    if (access.sharedWith !== undefined) payload.shared_with = access.sharedWith;
+
+    const response = await apiClient.patch(`/issues/issues/${id}/access/`, payload);
+    return convertDjangoIssue(response.data);
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 403) {
+      throw new Error('Only organisation admins can manage access for this issue.');
+    }
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('❌ Error updating issue access:', error.response.data);
+    }
+    console.error('Error updating issue access:', error);
     throw error;
   }
 }
@@ -864,6 +965,7 @@ const issueApi = {
   getIssue,
   createIssue,
   updateIssue,
+  updateIssueAccess,
   resolveIssue,
   deleteIssue,
   removeSnapshot,
@@ -887,6 +989,7 @@ const issueApi = {
   getMyOrganisations,
   getOrganisationProjects,
   getOrganisationMembers,
+  getMyRoleInOrganisation,
   getDeliverablesForProject,
   getDeliverableDrawings,
   getProjectDrawings,

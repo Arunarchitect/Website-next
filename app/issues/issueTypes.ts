@@ -23,6 +23,52 @@ export type BcfTopicType =
   | "Request"
   | "Fault";
 
+// ---------------------------------------------------------------------------
+// Access control: classification drives who can see an issue at all;
+// allowedRoles narrows a gated classification to specific org roles;
+// sharedWith is an explicit per-user grant that bypasses both.
+// ---------------------------------------------------------------------------
+
+export type IssueClassification =
+  | "general"
+  | "public"
+  | "internal"
+  | "strategic"
+  | "confidential";
+
+export const CLASSIFICATION_OPTIONS: IssueClassification[] = [
+  "general",
+  "public",
+  "internal",
+  "strategic",
+  "confidential",
+];
+
+// Classifications that require the viewer to be an org admin, hold an
+// allowed role, be the reporter/assignee, or be explicitly shared-with.
+export const GATED_CLASSIFICATIONS: IssueClassification[] = [
+  "internal",
+  "strategic",
+  "confidential",
+];
+
+export const CLASSIFICATION_LABELS: Record<IssueClassification, string> = {
+  general: "General",
+  public: "Public",
+  internal: "Internal",
+  strategic: "Strategic",
+  confidential: "Confidential",
+};
+
+export const isGatedClassification = (c: IssueClassification | string): boolean =>
+  (GATED_CLASSIFICATIONS as string[]).includes(c);
+
+export interface SharedUser {
+  id: number;
+  email: string;
+  fullName: string;
+}
+
 export interface BcfViewpoint {
   guid: string;
   cameraPosition: { x: number; y: number; z: number };
@@ -91,6 +137,18 @@ interface BaseIssue {
   assigned_to?: number | null;
   organisation: string | null;
   organisationId: number | null;
+
+  // --- Access control -------------------------------------------------
+  classification: IssueClassification;
+  classificationDisplay?: string;
+  allowedRoles: string[];
+  isArchived: boolean;
+  sharedWith: number[];
+  sharedWithDetails: SharedUser[];
+  // Whether the CURRENT viewer may change classification/allowedRoles/
+  // sharedWith on this issue — server-computed (Issue.can_manage_access),
+  // true for org admins/staff/superusers regardless of who reported it.
+  canManageAccess: boolean;
 }
 
 export interface BimIssue extends BaseIssue {
@@ -160,6 +218,9 @@ export interface IssueCreatePayload {
   ifc_elements?: string[];
   category?: string;
   attachments?: string[];
+  classification?: IssueClassification;
+  allowed_roles?: string[];
+  shared_with?: number[];
 }
 
 export interface IssueUpdatePayload extends Partial<IssueCreatePayload> {
@@ -244,6 +305,17 @@ export const getPriorityColor = (priority: IssuePriority): string => {
   return colors[priority] || "#6B7280";
 };
 
+export const getClassificationColor = (c: IssueClassification | string): string => {
+  const colors: Record<string, string> = {
+    general: "#6B7280",
+    public: "#4A8B6B",
+    internal: "#3B82F6",
+    strategic: "#8B5CF6",
+    confidential: "#D43E3E",
+  };
+  return colors[c] || "#6B7280";
+};
+
 export const getDomainLabel = (domain: IssueDomain): string => {
   return domain === "bim" ? "BIM Issue" : "Design Issue";
 };
@@ -262,6 +334,12 @@ export const getDefaultIssue = (domain: IssueDomain = "design"): Partial<Issue> 
     labels: [],
     assignedTo: null,
     assignedToId: null,
+    classification: "general" as IssueClassification,
+    allowedRoles: [],
+    isArchived: false,
+    sharedWith: [],
+    sharedWithDetails: [],
+    canManageAccess: false,
   };
 
   if (domain === "bim") {
@@ -334,6 +412,12 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
     ifcElements: [],
     organisation: null,
     organisationId: null,
+    classification: "general",
+    allowedRoles: [],
+    isArchived: false,
+    sharedWith: [],
+    sharedWithDetails: [],
+    canManageAccess: false,
   };
 }
 
@@ -370,6 +454,14 @@ interface DjangoViewpointData {
   components?: DjangoViewpointComponentData[];
 }
 
+interface DjangoSharedUserData {
+  id: number;
+  email?: string;
+  full_name?: string;
+  first_name?: string;
+  last_name?: string;
+}
+
 export interface DjangoIssueData {
   id: string | number;
   domain: string;
@@ -399,6 +491,13 @@ export interface DjangoIssueData {
   viewpoint?: DjangoViewpointData;
   category?: string;
   attachments?: string[];
+  classification?: string;
+  classification_display?: string;
+  allowed_roles?: string[];
+  is_archived?: boolean;
+  shared_with?: number[];
+  shared_with_details?: DjangoSharedUserData[];
+  can_manage_access?: boolean;
 }
 
 function extractId(value: DjangoRef): number | null {
@@ -448,6 +547,17 @@ export function fromDjangoIssue(data: DjangoIssueData): Issue {
     assigned_to: extractId(data.assigned_to),
     organisation: data.organisation || null,
     organisationId: typeof data.organisation_id === 'number' ? data.organisation_id : null, 
+    classification: (data.classification as IssueClassification) || 'general',
+    classificationDisplay: data.classification_display,
+    allowedRoles: data.allowed_roles || [],
+    isArchived: !!data.is_archived,
+    sharedWith: data.shared_with || [],
+    sharedWithDetails: (data.shared_with_details || []).map((u) => ({
+      id: u.id,
+      email: u.email || '',
+      fullName: u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || `User #${u.id}`,
+    })),
+    canManageAccess: !!data.can_manage_access,
   };
 
   if (data.domain === 'bim') {

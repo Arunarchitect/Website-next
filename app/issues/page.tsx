@@ -28,7 +28,9 @@ import {
   OrganisationSummary,
   ProjectSummary,
   API_URL,
+  updateIssueAccess,
 } from "./issueApi";
+
 import {
   Issue,
   IssueStatus,
@@ -598,6 +600,16 @@ export default function IssuesPage() {
                   } catch (err: unknown) {
                     console.error('Resolve error:', err);
                     setError('Failed to resolve issue. Please try again.');
+                  }
+                }}
+                onUpdateAccess={async (access) => {
+                  try {
+                    setError(null);
+                    await updateIssueAccess(issue.id, access);
+                    await refresh();
+                  } catch (err: unknown) {
+                    console.error('Update access error:', err);
+                    setError(err instanceof Error ? err.message : 'Failed to update access.');
                   }
                 }}
                 onRemoveSnapshot={async () => {

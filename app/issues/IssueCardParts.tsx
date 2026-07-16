@@ -15,6 +15,7 @@ import {
   STATUS_OPTIONS,
   PRIORITY_OPTIONS,
 } from "./issueCardHelpers";
+import { ClassificationBadge } from "./IssueCardAccessParts";
 
 // Derived rather than imported: the original component never named this
 // shape explicitly, it just indexed into `issue.linkedDocuments`.
@@ -57,6 +58,7 @@ export function IssueHeader({ issue, isEditing, titleValue, onTitleChange, isBim
           </>
         )}
       </span>
+      {!isEditing && <ClassificationBadge classification={issue.classification} />}
       {!isEditing && isCreator && (
         <span className="issue-owner-badge">(You)</span>
       )}
@@ -1024,6 +1026,7 @@ interface ActionsBarProps {
   isEditing: boolean;
   isCreator: boolean;
   canResolve: boolean;
+  canManageAccess: boolean;
   onCancelEdit: () => void;
   onSave: () => void;
   onEdit: () => void;
@@ -1031,11 +1034,13 @@ interface ActionsBarProps {
   onToggleResolve: () => void;
   onToggleAddScreenshot: () => void;
   onToggleCommentInput: () => void;
+  onToggleManageAccess: () => void;  // NEW
 }
 
 export function ActionsBar({
   isEditing,
   isCreator,
+  canManageAccess,
   canResolve,
   onCancelEdit,
   onSave,
@@ -1044,14 +1049,13 @@ export function ActionsBar({
   onToggleResolve,
   onToggleAddScreenshot,
   onToggleCommentInput,
+  onToggleManageAccess,
 }: ActionsBarProps) {
   return (
     <div className="issue-actions">
       {isEditing ? (
         <>
-          <button className="btn-outline" onClick={onCancelEdit}>
-            Cancel
-          </button>
+          <button className="btn-outline" onClick={onCancelEdit}>Cancel</button>
           <button className="btn-primary" onClick={onSave}>
             <i className="ti ti-device-floppy" /> Save
           </button>
@@ -1063,13 +1067,20 @@ export function ActionsBar({
               <button className="btn-outline" onClick={onEdit}>
                 <i className="ti ti-edit" /> Edit
               </button>
-              <button
-                className="btn-outline danger"
-                onClick={onDeleteIssue}
-              >
+              <button className="btn-outline danger" onClick={onDeleteIssue}>
                 <i className="ti ti-trash" /> Delete
               </button>
             </>
+          )}
+
+          {/* Shown for org admins/staff even when they didn't report the
+              issue — this is the only affordance that reaches the
+              dedicated /access/ endpoint, deliberately decoupled from the
+              creator-only edit form above. */}
+          {canManageAccess && (
+            <button className="btn-outline" onClick={onToggleManageAccess}>
+              <i className="ti ti-shield-lock" /> Manage Access
+            </button>
           )}
 
           {canResolve && (
@@ -1077,16 +1088,10 @@ export function ActionsBar({
               <i className="ti ti-check" /> Resolve
             </button>
           )}
-          <button
-            className="btn-outline"
-            onClick={onToggleAddScreenshot}
-          >
+          <button className="btn-outline" onClick={onToggleAddScreenshot}>
             <i className="ti ti-photo-plus" /> Add Screenshot
           </button>
-          <button
-            className="btn-outline"
-            onClick={onToggleCommentInput}
-          >
+          <button className="btn-outline" onClick={onToggleCommentInput}>
             <i className="ti ti-message-plus" /> Add Comment
           </button>
         </>
