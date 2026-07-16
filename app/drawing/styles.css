@@ -607,6 +607,38 @@
   color: #D43E3E;
 }
 
+/* Labeled header buttons (icon + text), e.g. "Open in new tab", "Close" */
+.document-viewer-btn-labeled {
+  width: auto;
+  height: auto;
+  padding: 8px 14px;
+  gap: 6px;
+  font-size: 13px;
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-decoration: none; /* needed since one of these is an <a> tag */
+  line-height: 1;
+}
+
+.document-viewer-btn-labeled i {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+/* Colorful accent variant for the primary action button (Open in new & download) */
+.document-viewer-btn-accent {
+  background: var(--doc-red);
+  border-color: var(--doc-red);
+  color: #ffffff;
+}
+
+.document-viewer-btn-accent:hover {
+  background: #4a1c0d;
+  border-color: #4a1c0d;
+  color: #ffffff;
+}
+
 .document-viewer-content {
   flex: 1;
   overflow: auto;

@@ -3,8 +3,14 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
 import { DrawingDocumentResolved } from "../types";
 import { getFullFileUrl } from "../drawingApi";
+
+// Point react-pdf's worker at a CDN build matching the installed version.
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface DocumentViewerProps {
   document: DrawingDocumentResolved;
@@ -26,15 +32,12 @@ export default function DocumentViewer({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-
-  // Blob URL for PDF/image content. Fetched same-origin-safe via JS instead
-  // of pointed at directly — <object>/<img> pointed straight at the Django
-  // media URL can get silently blocked by X-Frame-Options / CSP
-  // frame-ancestors on that response, even though the file itself loads
-  // fine (e.g. opening it in a new tab works, since that's a top-level
-  // navigation, not a framed embed). A blob: URL has no such restriction
-  // because it never leaves the browser as a cross-origin frame load.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  // PDF rendering state — all pages render in a continuous scroll,
+  // matching the scroll behavior of the native <object> viewer.
+  const [numPages, setNumPages] = useState<number>(0);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
 
   const isPDF = doc.file_type === 'pdf';
   const isImage = doc.file_type === 'image';
@@ -45,9 +48,9 @@ export default function DocumentViewer({
     setHasError(false);
     setErrorDetail(null);
     setBlobUrl(null);
+    setNumPages(0);
 
     if (!isPDF && !isImage) {
-      // DXF (and anything else) doesn't go through the blob-preview path.
       setIsLoading(false);
       return;
     }
@@ -81,56 +84,57 @@ export default function DocumentViewer({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-    // Only re-run when the document itself changes.
   }, [doc.id, doc.file_url, isPDF, isImage]);
+
+  // Track available width for the PDF page so it scales to fit on mobile
+  useEffect(() => {
+    if (!isPDF || !isOpen) return;
+    const el = document.querySelector('.document-viewer-pdf-wrapper');
+    if (!el) return;
+
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isPDF, isOpen, blobUrl]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
+      if (e.key === 'Escape' && isOpen) onClose();
     };
-
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
+    document.body.style.overflow = isOpen ? 'hidden' : 'unset';
+    return () => { document.body.style.overflow = 'unset'; };
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // For DXF files, we'll show a download prompt since browsers can't render them natively
-  const renderDXFContent = () => {
-    return (
-      <div className="document-viewer-dxf-wrapper">
-        <div className="document-viewer-dxf-content">
-          <i className="ti ti-file-code" />
-          <h3>DXF File</h3>
-          <p>This is a CAD drawing file (DXF format).</p>
-          <p className="document-viewer-dxf-hint">
-            Download and open with CAD software like AutoCAD, DraftSight, or LibreCAD.
-          </p>
-          <button
-            className="documents-card-btn documents-card-btn-view"
-            onClick={() => onDownload(doc)}
-            style={{ marginTop: '12px' }}
-          >
-            <i className="ti ti-download" />
-            Download DXF File
-          </button>
-        </div>
+  const renderDXFContent = () => (
+    <div className="document-viewer-dxf-wrapper">
+      <div className="document-viewer-dxf-content">
+        <i className="ti ti-file-code" />
+        <h3>DXF File</h3>
+        <p>This is a CAD drawing file (DXF format).</p>
+        <p className="document-viewer-dxf-hint">
+          Download and open with CAD software like AutoCAD, DraftSight, or LibreCAD.
+        </p>
+        <button
+          className="documents-card-btn documents-card-btn-view"
+          onClick={() => onDownload(doc)}
+          style={{ marginTop: '12px' }}
+        >
+          <i className="ti ti-download" />
+          Download DXF File
+        </button>
       </div>
-    );
-  };
+    </div>
+  );
 
   return (
     <div className="document-viewer-overlay" onClick={onClose}>
@@ -149,31 +153,23 @@ export default function DocumentViewer({
             </span>
           </div>
           <div className="document-viewer-controls">
-            {!guestMode && (
-              <button
-                className="document-viewer-btn"
-                onClick={() => onFavoriteToggle(doc.id)}
-                aria-label={doc.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-              >
-                <i className={`ti ${doc.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
-              </button>
-            )}
-            <button className="document-viewer-btn" onClick={() => onDownload(doc)} aria-label="Download document">
-              <i className="ti ti-download" />
-            </button>
             {(isPDF || isDXF) && (
               <a
-                className="document-viewer-btn"
+                className="document-viewer-btn document-viewer-btn-labeled"
                 href={getFullFileUrl(doc.file_url)}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Open in new tab"
               >
                 <i className="ti ti-external-link" />
+                Open in new tab & download
               </a>
             )}
-            <button className="document-viewer-btn document-viewer-close" onClick={onClose} aria-label="Close viewer">
+            <button
+              className="document-viewer-btn document-viewer-btn-labeled document-viewer-close"
+              onClick={onClose}
+            >
               <i className="ti ti-x" />
+              Close
             </button>
           </div>
         </div>
@@ -228,21 +224,50 @@ export default function DocumentViewer({
           )}
 
           {isPDF && !hasError && !isLoading && blobUrl && (
-            <div className="document-viewer-pdf-wrapper">
-              <object data={`${blobUrl}#toolbar=1`} type="application/pdf" className="document-viewer-pdf">
-                <div className="document-viewer-loading document-viewer-error-state">
-                  <i className="ti ti-file-pdf" />
-                  <p>Your browser can&apos;t preview PDFs inline.</p>
-                  <a
-                    href={getFullFileUrl(doc.file_url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="documents-retry-btn"
+            <div
+              className="document-viewer-pdf-wrapper"
+              style={{
+                width: '100%',
+                height: '100%',
+                overflow: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <Document
+                file={blobUrl}
+                onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+                onLoadError={(err) => {
+                  console.error('react-pdf load error:', err);
+                  setHasError(true);
+                  setErrorDetail('This PDF could not be rendered.');
+                }}
+                loading={
+                  <div className="document-viewer-loading">
+                    <i className="ti ti-loader" />
+                    <p>Rendering PDF...</p>
+                  </div>
+                }
+              >
+                {/* Render every page stacked vertically so the whole document
+                    scrolls continuously, like the native browser PDF viewer. */}
+                {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
+                  <div
+                    key={pageNum}
+                    className="document-viewer-pdf-page"
+                    style={{ marginBottom: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }}
                   >
-                    Open PDF in new tab
-                  </a>
-                </div>
-              </object>
+                    <Page
+                      pageNumber={pageNum}
+                      width={containerWidth > 0 ? containerWidth : undefined}
+                      renderTextLayer={true}
+                      renderAnnotationLayer={true}
+                    />
+                  </div>
+                ))}
+              </Document>
             </div>
           )}
         </div>

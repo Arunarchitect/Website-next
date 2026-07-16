@@ -26,7 +26,7 @@ export const tools: Tool[] = [
 ];
 
 export const quickLinks: QuickLink[] = [
-  { label: "Survey rates", href: "/tools/areacalc/survey", icon: "ti-clipboard-data" },
+  { label: "Drawings", href: "/drawing", icon: "ti-clipboard-data" },
   { label: "Space templates", href: "/tools/areacalc", icon: "ti-template" },
   { label: "Team members", href: "/new/dash/dashadmin", icon: "ti-users" },
   { label: "Projects", href: "/new/dash/dashadmin", icon: "ti-briefcase" },
