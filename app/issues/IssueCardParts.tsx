@@ -17,6 +17,7 @@ import {
   PRIORITY_OPTIONS,
 } from "./issueCardHelpers";
 import { ClassificationBadge } from "./IssueCardAccessParts";
+import { ExpandableText } from "./ExpandableText";
 
 // Derived rather than imported: the original component never named this
 // shape explicitly, it just indexed into `issue.linkedDocuments`.
@@ -809,7 +810,12 @@ function CommentItem({
           <span className="comment-owner-badge">(You)</span>
         )}
       </div>
-      <div className="comment-text">{linkifyText(comment.text)}</div>
+      <ExpandableText
+        text={comment.text}
+        linkify={linkifyText}
+        className="comment-text"
+        wordLimit={40}
+      />
       {comment.snapshot && (
         <div className="comment-snapshot" style={{ position: 'relative', width: 200, height: 150 }}>
           <Image

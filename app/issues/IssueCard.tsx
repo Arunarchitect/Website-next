@@ -20,6 +20,8 @@ import {
 } from "./issueTypes";
 import { isUserMatch } from '@/components/utils/userMatching';
 
+import { ExpandableText } from "./ExpandableText";
+
 import { ManageAccessPanel, ClassificationBadge } from "./IssueCardAccessParts";
 import {
   getImageSource,
@@ -574,7 +576,12 @@ export function IssueCard({
               rows={3}
             />
           ) : (
-            <p className="issue-description">{linkifyText(issue.description)}</p>
+            <ExpandableText
+              text={issue.description}
+              linkify={linkifyText}
+              className="issue-description"
+              wordLimit={60}
+            />
           )}
 
           <ScreenshotSection

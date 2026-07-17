@@ -2512,3 +2512,22 @@ textarea.field-input {
 .comment-text {
   white-space: pre-wrap;
 }
+
+
+.expandable-text-toggle {
+  display: inline-block;
+  margin-left: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--blue);
+  font-size: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-display), system-ui, sans-serif;
+}
+
+.expandable-text-toggle:hover {
+  text-decoration: underline;
+  color: var(--blue-deep);
+}
