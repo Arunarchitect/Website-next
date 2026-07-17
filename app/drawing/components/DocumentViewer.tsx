@@ -25,6 +25,19 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 6;
 const ZOOM_STEP = 0.25;
 
+// Touch-interaction state shared between touchstart/touchmove/touchend.
+// mode is 'pan' for a single-finger drag (only active once zoomed in past
+// 100%) or 'pinch' for a two-finger pinch-to-zoom gesture.
+interface TouchGestureState {
+  mode: "pan" | "pinch";
+  startX: number;
+  startY: number;
+  scrollLeft: number;
+  scrollTop: number;
+  startDistance: number;
+  startZoom: number;
+}
+
 export default function DocumentViewer({
   document: doc,
   isOpen,
@@ -46,6 +59,11 @@ export default function DocumentViewer({
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const pdfWrapperRef = useRef<HTMLDivElement | null>(null);
   const panStateRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
+
+  // Mirrors panStateRef but for touch gestures (single-finger pan and
+  // two-finger pinch-to-zoom). Kept separate from the mouse pan state so
+  // mouse and touch handling never interfere with each other.
+  const touchStateRef = useRef<TouchGestureState | null>(null);
 
   // Editable zoom percentage input — kept as a local string buffer so
   // typing doesn't fight the displayed zoom on every keystroke.
@@ -193,7 +211,9 @@ export default function DocumentViewer({
     return () => observer.disconnect();
   }, [isPDF, isOpen, blobUrl]);
 
-  // Ctrl/Cmd + scroll to zoom, and +/- keys
+  // Ctrl/Cmd + scroll to zoom, and +/- keys (desktop only — mobile has
+  // neither a wheel nor a physical keyboard, see the touch handlers below
+  // for the mobile equivalent).
   useEffect(() => {
     if (!isPDF || !isOpen) return;
     const el = pdfWrapperRef.current;
@@ -221,6 +241,7 @@ export default function DocumentViewer({
 
   // Drag-to-pan when zoomed in past 100% (only meaningful once content
   // overflows the wrapper, but harmless to wire up regardless of zoom level)
+  // — MOUSE input only. See handleTouchStart/Move/End below for touch.
   const handlePanMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = pdfWrapperRef.current;
     if (!el || zoom <= 1) return;
@@ -261,6 +282,102 @@ export default function DocumentViewer({
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isPanning]);
+
+  // ---- Touch input: single-finger pan + two-finger pinch-to-zoom ----
+  // Mouse events (mousedown/mousemove/mouseup) never fire during a finger
+  // drag on Android/iOS, so pan and zoom need their own touch-event path.
+  // These are registered with { passive: false } (via React's synthetic
+  // touch handlers below, which are non-passive by default in this setup)
+  // so preventDefault() can stop the browser's native scroll/page-zoom
+  // from fighting with our own scrollLeft/scrollTop-driven panning.
+
+  const getTouchDistance = (touches: React.TouchList) => {
+    const t1 = touches[0];
+    const t2 = touches[1];
+    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const el = pdfWrapperRef.current;
+    if (!el) return;
+
+    // Ignore gestures starting on interactive elements (links, buttons).
+    const target = e.target as HTMLElement;
+    if (target.closest('a, button')) return;
+
+    if (e.touches.length === 2) {
+      // Two fingers down — start a pinch-zoom gesture.
+      touchStateRef.current = {
+        mode: 'pinch',
+        startX: 0,
+        startY: 0,
+        scrollLeft: el.scrollLeft,
+        scrollTop: el.scrollTop,
+        startDistance: getTouchDistance(e.touches),
+        startZoom: zoom,
+      };
+    } else if (e.touches.length === 1 && zoom > 1) {
+      // Single finger — only pan once zoomed in (matches mouse behavior,
+      // and avoids hijacking normal single-finger scroll at 100% zoom).
+      touchStateRef.current = {
+        mode: 'pan',
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        scrollLeft: el.scrollLeft,
+        scrollTop: el.scrollTop,
+        startDistance: 0,
+        startZoom: zoom,
+      };
+      setIsPanning(true);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const el = pdfWrapperRef.current;
+    const state = touchStateRef.current;
+    if (!el || !state) return;
+
+    if (state.mode === 'pinch' && e.touches.length === 2) {
+      // Prevent the browser's native pinch-to-zoom-the-whole-page from
+      // fighting with our own zoom state.
+      e.preventDefault();
+      const newDistance = getTouchDistance(e.touches);
+      if (state.startDistance > 0) {
+        const ratio = newDistance / state.startDistance;
+        setZoom(clampZoom(+(state.startZoom * ratio).toFixed(2)));
+      }
+    } else if (state.mode === 'pan' && e.touches.length === 1) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - state.startX;
+      const dy = e.touches[0].clientY - state.startY;
+      el.scrollLeft = state.scrollLeft - dx;
+      el.scrollTop = state.scrollTop - dy;
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    // If a pinch collapses to one remaining finger, hand off to panning
+    // (if zoomed in) instead of just dropping the gesture entirely.
+    const el = pdfWrapperRef.current;
+    if (el && e.touches.length === 1 && zoom > 1) {
+      touchStateRef.current = {
+        mode: 'pan',
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        scrollLeft: el.scrollLeft,
+        scrollTop: el.scrollTop,
+        startDistance: 0,
+        startZoom: zoom,
+      };
+      setIsPanning(true);
+      return;
+    }
+
+    if (e.touches.length === 0) {
+      touchStateRef.current = null;
+      setIsPanning(false);
+    }
+  };
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -448,6 +565,10 @@ export default function DocumentViewer({
               ref={pdfWrapperRef}
               className="document-viewer-pdf-wrapper"
               onMouseDown={handlePanMouseDown}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
               style={{
                 width: '100%',
                 height: '100%',
@@ -458,6 +579,12 @@ export default function DocumentViewer({
                 gap: '12px',
                 cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default',
                 userSelect: isPanning ? 'none' : 'auto',
+                // At 100% zoom, let the browser handle native vertical
+                // touch-scrolling (pan-y). Once zoomed in, we take over
+                // panning/pinching ourselves via JS, so native touch
+                // gestures need to be disabled here or they'll fight our
+                // preventDefault() calls in handleTouchMove.
+                touchAction: zoom > 1 ? 'none' : 'pan-y',
               }}
             >
               <Document
