@@ -11,6 +11,7 @@ import {
 } from "./issueTypes";
 import {
   getDrawingIcon,
+  linkifyText,
   NonBimIssue,
   STATUS_OPTIONS,
   PRIORITY_OPTIONS,
@@ -808,7 +809,7 @@ function CommentItem({
           <span className="comment-owner-badge">(You)</span>
         )}
       </div>
-      <div className="comment-text">{comment.text}</div>
+      <div className="comment-text">{linkifyText(comment.text)}</div>
       {comment.snapshot && (
         <div className="comment-snapshot" style={{ position: 'relative', width: 200, height: 150 }}>
           <Image

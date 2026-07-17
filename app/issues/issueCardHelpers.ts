@@ -1,7 +1,7 @@
 // app/issues/issueCardHelpers.ts
 "use client";
 
-import { useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { compressImage } from "./imageUtils";
 import { Issue, IssueClassification, IssuePriority, IssueStatus } from "./issueTypes";
 
@@ -91,6 +91,88 @@ export const getDrawingIcon = (fileType: string): string => {
     default: return 'ti-file';
   }
 };
+
+// ---------------------------------------------------------------------------
+// linkifyText — turns bare URLs inside plain text (issue descriptions,
+// comments) into clickable <a> tags, and preserves line breaks. Written
+// with React.createElement (not JSX) so this file can stay a plain .ts
+// module rather than needing a .tsx rename.
+//
+// - Matches http(s):// and www. URLs.
+// - Strips trailing sentence punctuation (e.g. "check this out: https://x.com."
+//   won't swallow the period into the link).
+// - www.example.com links get an https:// prefix added to the href only —
+//   the visible text still reads exactly as typed.
+// ---------------------------------------------------------------------------
+
+const URL_PATTERN = /(https?:\/\/[^\s<>"')]+|www\.[^\s<>"')]+)/gi;
+const TRAILING_PUNCT = /[.,;:!?)\]}>"']+$/;
+
+function linkifyLine(line: string, lineKey: string): React.ReactNode {
+  if (!line) return line;
+
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const regex = new RegExp(URL_PATTERN);
+  let key = 0;
+
+  while ((match = regex.exec(line)) !== null) {
+    const rawUrl = match[0];
+    const start = match.index;
+
+    const trailingMatch = rawUrl.match(TRAILING_PUNCT);
+    const trailing = trailingMatch ? trailingMatch[0] : '';
+    const url = trailing ? rawUrl.slice(0, -trailing.length) : rawUrl;
+
+    if (!url) continue;
+
+    if (start > lastIndex) {
+      nodes.push(line.slice(lastIndex, start));
+    }
+
+    const href = url.startsWith('http') ? url : `https://${url}`;
+
+    nodes.push(
+      React.createElement(
+        'a',
+        {
+          key: `${lineKey}-link-${key++}`,
+          href,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          className: 'issue-inline-link',
+          onClick: (e: React.MouseEvent) => e.stopPropagation(),
+        },
+        url
+      )
+    );
+
+    if (trailing) nodes.push(trailing);
+
+    lastIndex = start + rawUrl.length;
+  }
+
+  if (lastIndex < line.length) {
+    nodes.push(line.slice(lastIndex));
+  }
+
+  return nodes;
+}
+
+export function linkifyText(text: string | undefined | null): React.ReactNode {
+  if (!text) return text;
+
+  const lines = text.split('\n');
+  return lines.map((line, i) =>
+    React.createElement(
+      React.Fragment,
+      { key: `line-${i}` },
+      i > 0 ? React.createElement('br') : null,
+      linkifyLine(line, `line-${i}`)
+    )
+  );
+}
 
 export type ScreenshotFormat = "png" | "jpg";
 

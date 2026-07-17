@@ -24,6 +24,7 @@ import { ManageAccessPanel, ClassificationBadge } from "./IssueCardAccessParts";
 import {
   getImageSource,
   useScreenshotUpload,
+  linkifyText,
   DEFAULT_CAMERA_POSITION,
   DEFAULT_CAMERA_DIRECTION,
   DEFAULT_CAMERA_UP_VECTOR,
@@ -573,7 +574,7 @@ export function IssueCard({
               rows={3}
             />
           ) : (
-            <p className="issue-description">{issue.description}</p>
+            <p className="issue-description">{linkifyText(issue.description)}</p>
           )}
 
           <ScreenshotSection

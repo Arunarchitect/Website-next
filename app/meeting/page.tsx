@@ -5,10 +5,13 @@ import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./meetings.css";
 import {
   getMeetings,
+  getMeeting,
   createMeeting,
   updateMeeting,
   deleteMeeting,
   getAvailableIssues,
+  getCurrentUser,
+  updateAttendeeResponse,
 } from "./meetingApi";
 import {
   Meeting,
@@ -22,6 +25,15 @@ import {
   MEETING_PRIORITY_OPTIONS,
   MEETING_TYPE_OPTIONS,
 } from "./meetingTypes";
+
+import {
+  getMyOrganisations,
+  getOrganisationProjects,
+  getOrganisationMembers,
+  OrganisationSummary,
+  ProjectSummary,
+  AssigneeOption,
+} from "@/app/issues/issueApi";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -37,11 +49,6 @@ const mono = IBM_Plex_Mono({
 
 const CURRENT_USER = "You";
 
-// ---------------------------------------------------------------------------
-// Shape of the payload built by NewMeetingForm and handed to createMeeting().
-// Mirrors exactly what handleSubmit constructs below.
-// ---------------------------------------------------------------------------
-
 interface NewMeetingInput {
   title: string;
   description: string;
@@ -54,14 +61,14 @@ interface NewMeetingInput {
   meetingLink?: string;
   agenda: string[];
   project: number;
+  attendee_ids?: number[];
+  linked_issue_ids?: (string | number)[];
 }
 
-// Narrow an unknown error into a readable message without resorting to `any`.
 function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-// Helper to format date for display
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -72,7 +79,6 @@ const formatTime = (dateStr: string) => {
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 };
 
-// Helper to get the date string in local timezone (YYYY-MM-DD)
 const getLocalDateStr = (date: Date): string => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -80,19 +86,16 @@ const getLocalDateStr = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-// Helper to check if two dates are the same day (in local timezone)
 const isSameDay = (date1: Date, date2: Date) => {
   return date1.getFullYear() === date2.getFullYear() &&
     date1.getMonth() === date2.getMonth() &&
     date1.getDate() === date2.getDate();
 };
 
-// Helper to get days in month
 const getDaysInMonth = (year: number, month: number): number => {
   return new Date(year, month + 1, 0).getDate();
 };
 
-// Helper to get first day of month
 const getFirstDayOfMonth = (year: number, month: number): number => {
   return new Date(year, month, 1).getDay();
 };
@@ -106,6 +109,16 @@ export default function MeetingsPage() {
   const [currentMonth, setCurrentMonth] = useState<number>(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState<number>(new Date().getFullYear());
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Current logged-in user, decoded from the JWT (see meetingApi.getCurrentUser).
+  // Used to identify "which attendee row is me" for RSVP controls.
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const { id } = getCurrentUser();
+    setCurrentUserId(id);
+  }, []);
 
   const refresh = async () => {
     try {
@@ -118,6 +131,19 @@ export default function MeetingsPage() {
     }
   };
 
+  const openMeetingDetail = async (meeting: Meeting) => {
+    setLoadingDetail(true);
+    try {
+      const full = await getMeeting(meeting.id);
+      setSelectedMeeting(full ?? meeting);
+    } catch (err) {
+      console.error('Error loading meeting detail:', err);
+      setSelectedMeeting(meeting);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
   useEffect(() => {
     refresh().finally(() => setLoading(false));
   }, []);
@@ -125,27 +151,29 @@ export default function MeetingsPage() {
   const today = new Date();
   const todayStr = getLocalDateStr(today);
 
-  // Get meetings for selected date
   const selectedDateStr = getLocalDateStr(selectedDate);
   const meetingsOnSelectedDate = meetings.filter(m => {
     const mDate = new Date(m.startTime);
     return getLocalDateStr(mDate) === selectedDateStr;
   });
 
-  // TODAY'S meetings
   const todaysMeetings = meetings.filter(m => {
     const mDate = new Date(m.startTime);
     return isSameDay(mDate, today) && m.status !== "Cancelled";
   }).sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
-  // UPCOMING meetings (next 7 days, excluding today)
   const upcomingMeetings = meetings.filter(m => {
     const mDate = new Date(m.startTime);
     const diffDays = Math.ceil((mDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     return diffDays > 0 && diffDays <= 7 && m.status !== "Cancelled";
   }).sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
-  // Check if a date has meetings
+  // Meetings where I'm an attendee with a pending RSVP
+  const myPendingInvites = currentUserId == null ? [] : meetings.filter(m =>
+    m.status !== "Cancelled" &&
+    m.attendees.some(a => a.userId === currentUserId && a.response === "pending")
+  ).sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
   const hasMeetingOnDate = (date: number) => {
     const checkDate = new Date(currentYear, currentMonth, date);
     const dateStr = getLocalDateStr(checkDate);
@@ -155,13 +183,11 @@ export default function MeetingsPage() {
     });
   };
 
-  // Check if date is today
   const isToday = (date: number) => {
     const checkDate = new Date(currentYear, currentMonth, date);
     return getLocalDateStr(checkDate) === todayStr;
   };
 
-  // Render calendar
   const renderCalendar = () => {
     const daysInMonth = getDaysInMonth(currentYear, currentMonth);
     const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
@@ -174,12 +200,12 @@ export default function MeetingsPage() {
     for (let day = 1; day <= daysInMonth; day++) {
       const hasMeeting = hasMeetingOnDate(day);
       const isTodayDate = isToday(day);
-      const isSelected = day === selectedDate.getDate() && 
-                        currentMonth === selectedDate.getMonth() && 
+      const isSelected = day === selectedDate.getDate() &&
+                        currentMonth === selectedDate.getMonth() &&
                         currentYear === selectedDate.getFullYear();
 
       days.push(
-        <div 
+        <div
           key={day}
           className={`calendar-day ${hasMeeting ? 'has-meeting' : ''} ${isTodayDate ? 'today' : ''} ${isSelected ? 'selected' : ''}`}
           onClick={() => {
@@ -206,6 +232,21 @@ export default function MeetingsPage() {
       setCurrentYear(currentYear - 1);
     } else {
       setCurrentMonth(newMonth);
+    }
+  };
+
+  const handleRSVP = async (meetingId: string | number, response: "accepted" | "declined" | "tentative") => {
+    if (currentUserId == null) return;
+    try {
+      await updateAttendeeResponse(meetingId, currentUserId, response);
+      await refresh();
+      if (selectedMeeting && selectedMeeting.id === meetingId) {
+        const full = await getMeeting(meetingId);
+        if (full) setSelectedMeeting(full);
+      }
+    } catch (err) {
+      console.error('RSVP error:', err);
+      setError(getErrorMessage(err, 'Failed to update your response.'));
     }
   };
 
@@ -260,6 +301,41 @@ export default function MeetingsPage() {
         />
       )}
 
+      {/* PENDING INVITES — quick RSVP */}
+      {myPendingInvites.length > 0 && (
+        <section className="upcoming-section" style={{ marginBottom: "1.5rem" }}>
+          <div className="section-title">
+            <span>Awaiting Your Response ({myPendingInvites.length})</span>
+          </div>
+          <div className="upcoming-list">
+            {myPendingInvites.map((meeting) => (
+              <div key={meeting.id} className="upcoming-item" style={{ cursor: "default" }}>
+                <div className="upcoming-time">
+                  <span className="upcoming-date">{formatDate(meeting.startTime)}</span>
+                  <span className="upcoming-time-text">{formatTime(meeting.startTime)}</span>
+                </div>
+                <div className="upcoming-info">
+                  <h4 style={{ cursor: "pointer" }} onClick={() => openMeetingDetail(meeting)}>
+                    {meeting.title}
+                  </h4>
+                  <div className="upcoming-meta">
+                    <button className="btn-primary small" onClick={() => handleRSVP(meeting.id, "accepted")}>
+                      Accept
+                    </button>
+                    <button className="btn-outline small" onClick={() => handleRSVP(meeting.id, "tentative")}>
+                      Tentative
+                    </button>
+                    <button className="btn-outline small danger" onClick={() => handleRSVP(meeting.id, "declined")}>
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className="meetings-layout">
         <div className="meetings-left">
           {/* TODAY'S MEETINGS */}
@@ -273,10 +349,10 @@ export default function MeetingsPage() {
             ) : (
               <div className="upcoming-list">
                 {todaysMeetings.map((meeting) => (
-                  <div 
-                    key={meeting.id} 
+                  <div
+                    key={meeting.id}
                     className="upcoming-item"
-                    onClick={() => setSelectedMeeting(meeting)}
+                    onClick={() => openMeetingDetail(meeting)}
                   >
                     <div className="upcoming-time">
                       <span className="upcoming-time-text">{formatTime(meeting.startTime)}</span>
@@ -318,10 +394,10 @@ export default function MeetingsPage() {
             ) : (
               <div className="upcoming-list">
                 {upcomingMeetings.slice(0, 5).map((meeting) => (
-                  <div 
-                    key={meeting.id} 
+                  <div
+                    key={meeting.id}
                     className="upcoming-item"
-                    onClick={() => setSelectedMeeting(meeting)}
+                    onClick={() => openMeetingDetail(meeting)}
                   >
                     <div className="upcoming-time">
                       <span className="upcoming-date">{formatDate(meeting.startTime)}</span>
@@ -403,7 +479,7 @@ export default function MeetingsPage() {
                   <MeetingCard
                     key={meeting.id}
                     meeting={meeting}
-                    onSelect={() => setSelectedMeeting(meeting)}
+                    onSelect={() => openMeetingDetail(meeting)}
                     onUpdate={async (patch) => {
                       try {
                         await updateMeeting(meeting.id, patch);
@@ -434,17 +510,38 @@ export default function MeetingsPage() {
       {selectedMeeting && (
         <MeetingDetailModal
           meeting={selectedMeeting}
+          currentUserId={currentUserId}
           onClose={() => setSelectedMeeting(null)}
           onUpdate={async (patch) => {
             try {
               await updateMeeting(selectedMeeting.id, patch);
+              const full = await getMeeting(selectedMeeting.id);
+              setSelectedMeeting(full ?? { ...selectedMeeting, ...patch });
               await refresh();
-              setSelectedMeeting({ ...selectedMeeting, ...patch });
             } catch (err) {
               console.error('Update error:', err);
+              throw err;
             }
           }}
+          onDelete={async () => {
+            try {
+              await deleteMeeting(selectedMeeting.id);
+              setSelectedMeeting(null);
+              await refresh();
+            } catch (err) {
+              console.error('Delete error:', err);
+            }
+          }}
+          onRSVP={async (response) => {
+            await handleRSVP(selectedMeeting.id, response);
+          }}
         />
+      )}
+
+      {loadingDetail && (
+        <div className="modal-overlay">
+          <p style={{ color: "#fff" }}>Loading meeting…</p>
+        </div>
       )}
     </main>
   );
@@ -572,13 +669,14 @@ function MeetingCard({
               <span className="attendee-more">+{meeting.attendees.length - 3}</span>
             )}
           </div>
+          {/* Edit/Delete controls only for organizer or org admin */}
           <div className="meeting-card-actions">
             {isEditing ? (
               <>
                 <button className="btn-outline small" onClick={() => setIsEditing(false)}>Cancel</button>
                 <button className="btn-primary small" onClick={handleSave}>Save</button>
               </>
-            ) : (
+            ) : meeting.canManage ? (
               <>
                 <button className="btn-outline small" onClick={() => setIsEditing(true)}>
                   <i className="ti ti-edit" /> Edit
@@ -587,7 +685,7 @@ function MeetingCard({
                   <i className="ti ti-trash" />
                 </button>
               </>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -601,12 +699,18 @@ function MeetingCard({
 
 function MeetingDetailModal({
   meeting,
+  currentUserId,
   onClose,
   onUpdate,
+  onDelete,
+  onRSVP,
 }: {
   meeting: Meeting;
+  currentUserId: number | null;
   onClose: () => void;
-  onUpdate: (patch: Partial<Meeting>) => Promise<void>;
+  onUpdate: (patch: Partial<Meeting> & { attendee_ids?: number[] }) => Promise<void>;
+  onDelete: () => Promise<void>;
+  onRSVP: (response: "accepted" | "declined" | "tentative") => Promise<void>;
 }) {
   const [newComment, setNewComment] = useState("");
   const [addingComment, setAddingComment] = useState(false);
@@ -617,7 +721,14 @@ function MeetingDetailModal({
   const [availableIssues, setAvailableIssues] = useState<LinkedIssue[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(false);
 
-  // Load available issues for linking
+  const [isEditingAttendees, setIsEditingAttendees] = useState(false);
+  const [orgMembers, setOrgMembers] = useState<AssigneeOption[]>([]);
+  const [selectedAttendeeIds, setSelectedAttendeeIds] = useState<number[]>(
+    meeting.attendees.map(a => Number(a.userId)).filter(n => !Number.isNaN(n))
+  );
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [savingAttendees, setSavingAttendees] = useState(false);
+
   useEffect(() => {
     const loadIssues = async () => {
       setLoadingIssues(true);
@@ -630,17 +741,31 @@ function MeetingDetailModal({
         setLoadingIssues(false);
       }
     };
-    if (isEditingIssues) {
-      loadIssues();
-    }
+    if (isEditingIssues) loadIssues();
   }, [isEditingIssues, meeting.projectId]);
+
+  useEffect(() => {
+    const loadMembers = async () => {
+      if (!meeting.organisationId) return;
+      setLoadingMembers(true);
+      try {
+        const members = await getOrganisationMembers(meeting.organisationId);
+        setOrgMembers(members);
+      } catch (err) {
+        console.error('Error loading org members:', err);
+      } finally {
+        setLoadingMembers(false);
+      }
+    };
+    if (isEditingAttendees) loadMembers();
+  }, [isEditingAttendees, meeting.organisationId]);
 
   const handleAddComment = async () => {
     if (!newComment.trim()) return;
     setAddingComment(true);
     try {
       const currentNotes = meeting.notes || "";
-      const updatedNotes = currentNotes 
+      const updatedNotes = currentNotes
         ? `${currentNotes}\n\n${CURRENT_USER}: ${newComment.trim()} (${new Date().toLocaleString()})`
         : `${CURRENT_USER}: ${newComment.trim()} (${new Date().toLocaleString()})`;
       await onUpdate({ notes: updatedNotes });
@@ -654,9 +779,7 @@ function MeetingDetailModal({
 
   const handleSaveIssues = async () => {
     try {
-      await onUpdate({ 
-        linkedIssueIds: selectedIssueIds,
-      });
+      await onUpdate({ linkedIssueIds: selectedIssueIds });
       setIsEditingIssues(false);
     } catch (err) {
       console.error('Error saving issues:', err);
@@ -664,11 +787,32 @@ function MeetingDetailModal({
   };
 
   const toggleIssueSelection = (issueId: string | number) => {
-    setSelectedIssueIds(prev => 
-      prev.includes(issueId) 
-        ? prev.filter(id => id !== issueId)
+    setSelectedIssueIds(prev =>
+      prev.some(id => String(id) === String(issueId))
+        ? prev.filter(id => String(id) !== String(issueId))
         : [...prev, issueId]
     );
+  };
+
+  const isIssueSelected = (issueId: string | number) =>
+    selectedIssueIds.some(id => String(id) === String(issueId));
+
+  const toggleAttendeeSelection = (userId: number) => {
+    setSelectedAttendeeIds(prev =>
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleSaveAttendees = async () => {
+    setSavingAttendees(true);
+    try {
+      await onUpdate({ attendee_ids: selectedAttendeeIds });
+      setIsEditingAttendees(false);
+    } catch (err) {
+      console.error('Error saving attendees:', err);
+    } finally {
+      setSavingAttendees(false);
+    }
   };
 
   const getIssueDomainIcon = (domain: string) => {
@@ -694,11 +838,15 @@ function MeetingDetailModal({
     return colors[priority] || "#6B7280";
   };
 
+  const myAttendeeRow = currentUserId == null
+    ? undefined
+    : meeting.attendees.find(a => a.userId === currentUserId);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
-        
+
         <div className="modal-header">
           <h2>{meeting.title}</h2>
           <span className={`meeting-status-badge status-${meeting.status.toLowerCase()}`}>
@@ -740,6 +888,27 @@ function MeetingDetailModal({
             </div>
           </div>
 
+          {/* MY RSVP — shown if I'm an attendee on this meeting */}
+          {myAttendeeRow && (
+            <div className="modal-section">
+              <h4>Your Response</h4>
+              <div className="rsvp-controls" style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <span className={`attendee-response response-${myAttendeeRow.response}`}>
+                  {myAttendeeRow.response}
+                </span>
+                {myAttendeeRow.response !== "accepted" && (
+                  <button className="btn-primary small" onClick={() => onRSVP("accepted")}>Accept</button>
+                )}
+                {myAttendeeRow.response !== "tentative" && (
+                  <button className="btn-outline small" onClick={() => onRSVP("tentative")}>Tentative</button>
+                )}
+                {myAttendeeRow.response !== "declined" && (
+                  <button className="btn-outline small danger" onClick={() => onRSVP("declined")}>Decline</button>
+                )}
+              </div>
+            </div>
+          )}
+
           {meeting.description && (
             <div className="modal-section">
               <h4>Description</h4>
@@ -754,13 +923,15 @@ function MeetingDetailModal({
                 <i className="ti ti-link" />
                 Linked Issues ({meeting.linkedIssues?.length || 0})
               </h4>
-              <button 
-                className="btn-outline small"
-                onClick={() => setIsEditingIssues(!isEditingIssues)}
-              >
-                <i className={`ti ${isEditingIssues ? 'ti-close' : 'ti-edit'}`} />
-                {isEditingIssues ? 'Cancel' : 'Manage'}
-              </button>
+              {meeting.canManage && (
+                <button
+                  className="btn-outline small"
+                  onClick={() => setIsEditingIssues(!isEditingIssues)}
+                >
+                  <i className={`ti ${isEditingIssues ? 'ti-close' : 'ti-edit'}`} />
+                  {isEditingIssues ? 'Cancel' : 'Manage'}
+                </button>
+              )}
             </div>
 
             {isEditingIssues ? (
@@ -775,7 +946,7 @@ function MeetingDetailModal({
                       <label key={issue.id} className="issue-selector-item">
                         <input
                           type="checkbox"
-                          checked={selectedIssueIds.includes(issue.id)}
+                          checked={isIssueSelected(issue.id)}
                           onChange={() => toggleIssueSelection(issue.id)}
                         />
                         <span className={`domain-badge domain-${issue.domain}`}>
@@ -783,13 +954,13 @@ function MeetingDetailModal({
                           {issue.domain}
                         </span>
                         <span className="issue-title">{issue.title}</span>
-                        <span 
+                        <span
                           className="issue-status-dot"
                           style={{ background: getIssueStatusColor(issue.status) }}
                         />
                         <span className="issue-priority-dot">
-                          <i 
-                            className="ti ti-flag" 
+                          <i
+                            className="ti ti-flag"
                             style={{ color: getIssuePriorityColor(issue.priority) }}
                           />
                         </span>
@@ -798,14 +969,14 @@ function MeetingDetailModal({
                   </div>
                 )}
                 <div className="issue-selector-actions">
-                  <button 
+                  <button
                     className="btn-primary small"
                     onClick={handleSaveIssues}
                     disabled={loadingIssues}
                   >
                     <i className="ti ti-check" /> Save
                   </button>
-                  <button 
+                  <button
                     className="btn-outline small"
                     onClick={() => {
                       setIsEditingIssues(false);
@@ -826,13 +997,13 @@ function MeetingDetailModal({
                         {issue.domain}
                       </span>
                       <span className="issue-title">{issue.title}</span>
-                      <span 
+                      <span
                         className="issue-status-dot"
                         style={{ background: getIssueStatusColor(issue.status) }}
                       />
                       <span className="issue-priority-dot">
-                        <i 
-                          className="ti ti-flag" 
+                        <i
+                          className="ti ti-flag"
                           style={{ color: getIssuePriorityColor(issue.priority) }}
                         />
                       </span>
@@ -859,19 +1030,78 @@ function MeetingDetailModal({
             </div>
           )}
 
+          {/* ATTENDEES SECTION */}
           <div className="modal-section">
-            <h4>Attendees ({meeting.attendees.length})</h4>
-            <div className="attendees-list">
-              {meeting.attendees.map((att) => (
-                <div key={att.id} className="attendee-item">
-                  <span className="attendee-avatar medium">{att.avatar || att.name[0]}</span>
-                  <span className="attendee-name">{att.name}</span>
-                  <span className={`attendee-response response-${att.response}`}>
-                    {att.response}
-                  </span>
-                </div>
-              ))}
+            <div className="section-header">
+              <h4>Attendees ({meeting.attendees.length})</h4>
+              {meeting.canManage && (
+                <button
+                  className="btn-outline small"
+                  onClick={() => setIsEditingAttendees(!isEditingAttendees)}
+                >
+                  <i className={`ti ${isEditingAttendees ? 'ti-close' : 'ti-edit'}`} />
+                  {isEditingAttendees ? 'Cancel' : 'Manage'}
+                </button>
+              )}
             </div>
+
+            {isEditingAttendees ? (
+              <div className="issue-selector">
+                {loadingMembers ? (
+                  <p className="empty-message">Loading members...</p>
+                ) : orgMembers.length === 0 ? (
+                  <p className="empty-message">No members found in this organisation</p>
+                ) : (
+                  <div className="issue-selector-list">
+                    {orgMembers.map((m) => (
+                      <label key={m.id} className="issue-selector-item">
+                        <input
+                          type="checkbox"
+                          checked={selectedAttendeeIds.includes(m.id)}
+                          onChange={() => toggleAttendeeSelection(m.id)}
+                        />
+                        <span className="issue-title">{m.displayName}</span>
+                        <span className="meeting-location">{m.email}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <div className="issue-selector-actions">
+                  <button
+                    className="btn-primary small"
+                    onClick={handleSaveAttendees}
+                    disabled={loadingMembers || savingAttendees}
+                  >
+                    <i className="ti ti-check" /> Save
+                  </button>
+                  <button
+                    className="btn-outline small"
+                    onClick={() => {
+                      setIsEditingAttendees(false);
+                      setSelectedAttendeeIds(
+                        meeting.attendees.map(a => Number(a.userId)).filter(n => !Number.isNaN(n))
+                      );
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : meeting.attendees.length === 0 ? (
+              <p className="empty-message">No attendees added</p>
+            ) : (
+              <div className="attendees-list">
+                {meeting.attendees.map((att) => (
+                  <div key={att.id} className="attendee-item">
+                    <span className="attendee-avatar medium">{att.avatar || att.name[0]}</span>
+                    <span className="attendee-name">{att.name}</span>
+                    <span className={`attendee-response response-${att.response}`}>
+                      {att.response}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="modal-section">
@@ -885,7 +1115,7 @@ function MeetingDetailModal({
             ) : (
               <p className="empty-message">No notes yet</p>
             )}
-            
+
             <div className="comment-input-area">
               <textarea
                 className="field-input"
@@ -894,8 +1124,8 @@ function MeetingDetailModal({
                 onChange={(e) => setNewComment(e.target.value)}
                 rows={2}
               />
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 onClick={handleAddComment}
                 disabled={addingComment || !newComment.trim()}
               >
@@ -912,6 +1142,22 @@ function MeetingDetailModal({
                   <span key={tag} className="tag">{tag}</span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* DANGER ZONE */}
+          {meeting.canManage && (
+            <div className="modal-section">
+              <button
+                className="btn-outline danger"
+                onClick={async () => {
+                  if (confirm('Delete this meeting? This cannot be undone.')) {
+                    await onDelete();
+                  }
+                }}
+              >
+                <i className="ti ti-trash" /> Delete Meeting
+              </button>
             </div>
           )}
         </div>
@@ -941,26 +1187,104 @@ function NewMeetingForm({
   const [isOnline, setIsOnline] = useState(false);
   const [meetingLink, setMeetingLink] = useState("");
   const [agenda, setAgenda] = useState("");
-  const [projectId, setProjectId] = useState<number>(1);
   const [error, setError] = useState<string | null>(null);
+
+  const [organisations, setOrganisations] = useState<OrganisationSummary[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<number | "">("");
+  const [loadingOrgs, setLoadingOrgs] = useState(true);
+
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | "">("");
+  const [loadingProjects, setLoadingProjects] = useState(false);
+
+  const [members, setMembers] = useState<AssigneeOption[]>([]);
+  const [selectedAttendeeIds, setSelectedAttendeeIds] = useState<number[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  const [availableIssues, setAvailableIssues] = useState<LinkedIssue[]>([]);
+  const [selectedIssueIds, setSelectedIssueIds] = useState<(string | number)[]>([]);
+  const [loadingIssues, setLoadingIssues] = useState(false);
+
+  useEffect(() => {
+    getMyOrganisations()
+      .then(setOrganisations)
+      .finally(() => setLoadingOrgs(false));
+  }, []);
+
+  useEffect(() => {
+    setSelectedProjectId("");
+    setSelectedAttendeeIds([]);
+    setAvailableIssues([]);
+    setSelectedIssueIds([]);
+
+    if (!selectedOrgId) {
+      setProjects([]);
+      setMembers([]);
+      return;
+    }
+
+    setLoadingProjects(true);
+    getOrganisationProjects(selectedOrgId)
+      .then(setProjects)
+      .finally(() => setLoadingProjects(false));
+
+    setLoadingMembers(true);
+    getOrganisationMembers(selectedOrgId)
+      .then(setMembers)
+      .finally(() => setLoadingMembers(false));
+  }, [selectedOrgId]);
+
+  useEffect(() => {
+    setSelectedIssueIds([]);
+
+    if (!selectedProjectId) {
+      setAvailableIssues([]);
+      return;
+    }
+
+    setLoadingIssues(true);
+    getAvailableIssues(Number(selectedProjectId))
+      .then(setAvailableIssues)
+      .finally(() => setLoadingIssues(false));
+  }, [selectedProjectId]);
+
+  const toggleAttendee = (id: number) => {
+    setSelectedAttendeeIds((prev) =>
+      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
+    );
+  };
+
+  const toggleIssue = (id: string | number) => {
+    setSelectedIssueIds((prev) =>
+      prev.some(i => String(i) === String(id))
+        ? prev.filter((i) => String(i) !== String(id))
+        : [...prev, id]
+    );
+  };
 
   const handleSubmit = async () => {
     try {
       setError(null);
-      
+
       if (!title.trim()) {
         setError('Title is required');
         return;
       }
-      
+      if (!selectedOrgId) {
+        setError('Please select an organisation');
+        return;
+      }
+      if (!selectedProjectId) {
+        setError('Please select a project');
+        return;
+      }
       if (!startTime || !endTime) {
         setError('Start and end time are required');
         return;
       }
-      
+
       const start = new Date(startTime);
       const end = new Date(endTime);
-      
       if (end <= start) {
         setError('End time must be after start time');
         return;
@@ -977,9 +1301,11 @@ function NewMeetingForm({
         isOnline,
         meetingLink: meetingLink.trim() || undefined,
         agenda: agenda.split('\n').filter(item => item.trim()),
-        project: projectId,
+        project: Number(selectedProjectId),
+        attendee_ids: selectedAttendeeIds,
+        linked_issue_ids: selectedIssueIds,
       };
-      
+
       await onCreate(input);
     } catch (err: unknown) {
       console.error('Submit error:', err);
@@ -987,13 +1313,12 @@ function NewMeetingForm({
     }
   };
 
-  // Set default times
   useEffect(() => {
     if (!startTime) {
       const now = new Date();
       const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
       const inTwoHours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-      
+
       const roundTo30 = (date: Date) => {
         const minutes = date.getMinutes();
         const rounded = Math.ceil(minutes / 30) * 30;
@@ -1002,7 +1327,7 @@ function NewMeetingForm({
         date.setMilliseconds(0);
         return date;
       };
-      
+
       setStartTime(roundTo30(inOneHour).toISOString().slice(0, 16));
       setEndTime(roundTo30(inTwoHours).toISOString().slice(0, 16));
     }
@@ -1032,81 +1357,73 @@ function NewMeetingForm({
 
       <div className="form-row">
         <div className="form-field">
-          <label>Type</label>
+          <label>Organisation *</label>
           <select
             className="field-select"
-            value={type}
-            onChange={(e) => setType(e.target.value as MeetingType)}
+            value={selectedOrgId}
+            onChange={(e) => setSelectedOrgId(e.target.value ? Number(e.target.value) : "")}
+            disabled={loadingOrgs}
           >
-            {MEETING_TYPE_OPTIONS.map((t) => (
-              <option key={t} value={t}>{t}</option>
+            <option value="">{loadingOrgs ? "Loading..." : "Select organisation"}</option>
+            {organisations.map((org) => (
+              <option key={org.id} value={org.id}>{org.name}</option>
             ))}
+          </select>
+        </div>
+        <div className="form-field">
+          <label>Project *</label>
+          <select
+            className="field-select"
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value ? Number(e.target.value) : "")}
+            disabled={!selectedOrgId || loadingProjects}
+          >
+            <option value="">
+              {!selectedOrgId ? "Select organisation first" : loadingProjects ? "Loading..." : "Select project"}
+            </option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="form-row">
+        <div className="form-field">
+          <label>Type</label>
+          <select className="field-select" value={type} onChange={(e) => setType(e.target.value as MeetingType)}>
+            {MEETING_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
         <div className="form-field">
           <label>Priority</label>
-          <select
-            className="field-select"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as MeetingPriority)}
-          >
-            {MEETING_PRIORITY_OPTIONS.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
+          <select className="field-select" value={priority} onChange={(e) => setPriority(e.target.value as MeetingPriority)}>
+            {MEETING_PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-        </div>
-        <div className="form-field">
-          <label>Project ID</label>
-          <input
-            className="field-input"
-            type="number"
-            placeholder="Project ID"
-            value={projectId}
-            onChange={(e) => setProjectId(Number(e.target.value))}
-          />
         </div>
       </div>
 
       <div className="form-row">
         <div className="form-field">
           <label>Start Time *</label>
-          <input
-            className="field-input"
-            type="datetime-local"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-          />
+          <input className="field-input" type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
         </div>
         <div className="form-field">
           <label>End Time *</label>
-          <input
-            className="field-input"
-            type="datetime-local"
-            value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
-          />
+          <input className="field-input" type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
         </div>
       </div>
 
       <div className="form-row">
         <div className="form-field">
           <label>Location</label>
-          <input
-            className="field-input"
-            placeholder="e.g. Conference Room A"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-          />
+          <input className="field-input" placeholder="e.g. Conference Room A" value={location} onChange={(e) => setLocation(e.target.value)} />
         </div>
         <div className="form-field">
           <label>Virtual Meeting</label>
           <div className="toggle-group">
             <label className="toggle-label">
-              <input
-                type="checkbox"
-                checked={isOnline}
-                onChange={(e) => setIsOnline(e.target.checked)}
-              />
+              <input type="checkbox" checked={isOnline} onChange={(e) => setIsOnline(e.target.checked)} />
               <span>Is online meeting</span>
             </label>
           </div>
@@ -1116,41 +1433,72 @@ function NewMeetingForm({
       {isOnline && (
         <div className="form-field">
           <label>Meeting Link</label>
-          <input
-            className="field-input"
-            placeholder="https://meet.google.com/..."
-            value={meetingLink}
-            onChange={(e) => setMeetingLink(e.target.value)}
-          />
+          <input className="field-input" placeholder="https://meet.google.com/..." value={meetingLink} onChange={(e) => setMeetingLink(e.target.value)} />
         </div>
       )}
 
       <div className="form-field">
         <label>Description</label>
-        <textarea
-          className="field-input"
-          rows={3}
-          placeholder="Meeting description..."
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
+        <textarea className="field-input" rows={3} placeholder="Meeting description..." value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
 
       <div className="form-field">
         <label>Agenda (one item per line)</label>
-        <textarea
-          className="field-input"
-          rows={4}
-          placeholder="Item 1&#10;Item 2&#10;Item 3"
-          value={agenda}
-          onChange={(e) => setAgenda(e.target.value)}
-        />
+        <textarea className="field-input" rows={4} placeholder={"Item 1\nItem 2\nItem 3"} value={agenda} onChange={(e) => setAgenda(e.target.value)} />
+      </div>
+
+      <div className="form-field">
+        <label>Attendees {selectedOrgId ? `(${selectedAttendeeIds.length} selected)` : ""}</label>
+        {!selectedOrgId ? (
+          <p className="empty-message">Select an organisation to choose attendees</p>
+        ) : loadingMembers ? (
+          <p className="empty-message">Loading members...</p>
+        ) : members.length === 0 ? (
+          <p className="empty-message">No members found in this organisation</p>
+        ) : (
+          <div className="issue-selector-list">
+            {members.map((m) => (
+              <label key={m.id} className="issue-selector-item">
+                <input
+                  type="checkbox"
+                  checked={selectedAttendeeIds.includes(m.id)}
+                  onChange={() => toggleAttendee(m.id)}
+                />
+                <span className="issue-title">{m.displayName}</span>
+                <span className="meeting-location">{m.email}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="form-field">
+        <label>Linked Issues {selectedProjectId ? `(${selectedIssueIds.length} selected)` : ""}</label>
+        {!selectedProjectId ? (
+          <p className="empty-message">Select a project to link issues</p>
+        ) : loadingIssues ? (
+          <p className="empty-message">Loading issues...</p>
+        ) : availableIssues.length === 0 ? (
+          <p className="empty-message">No issues found for this project</p>
+        ) : (
+          <div className="issue-selector-list">
+            {availableIssues.map((issue) => (
+              <label key={issue.id} className="issue-selector-item">
+                <input
+                  type="checkbox"
+                  checked={selectedIssueIds.some(id => String(id) === String(issue.id))}
+                  onChange={() => toggleIssue(issue.id)}
+                />
+                <span className={`domain-badge domain-${issue.domain}`}>{issue.domain}</span>
+                <span className="issue-title">{issue.title}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="form-actions">
-        <button className="btn-outline" onClick={onCancel}>
-          Cancel
-        </button>
+        <button className="btn-outline" onClick={onCancel}>Cancel</button>
         <button className="btn-primary" onClick={handleSubmit}>
           <i className="ti ti-plus" /> Create Meeting
         </button>

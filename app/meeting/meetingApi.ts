@@ -36,6 +36,40 @@ function authHeaders() {
   return headers;
 }
 
+// ---------------------------------------------------------------------------
+// Current user (decoded from the JWT access token)
+// ---------------------------------------------------------------------------
+// This is a best-effort decode of the SimpleJWT access token payload —
+// it does NOT verify the signature (that's the backend's job), it just
+// reads the claims already sitting in localStorage so the UI knows
+// "which attendee row is me" for RSVP controls.
+//
+// If your token doesn't carry `user_id` / `email` claims under these
+// exact names, adjust the field names below.
+
+export interface CurrentUser {
+  id: number | null;
+  email: string | null;
+}
+
+export function getCurrentUser(): CurrentUser {
+  if (typeof window === "undefined") return { id: null, email: null };
+  const token = localStorage.getItem("access");
+  if (!token) return { id: null, email: null };
+
+  try {
+    const payloadB64 = token.split(".")[1];
+    const payloadJson = atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadJson);
+    return {
+      id: payload.user_id ?? payload.id ?? null,
+      email: payload.email ?? null,
+    };
+  } catch {
+    return { id: null, email: null };
+  }
+}
+
 // Helper to handle API responses
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -55,11 +89,11 @@ async function handleResponse<T>(response: Response): Promise<T> {
     }
     throw new Error(errorMessage);
   }
-  
+
   if (response.status === 204) {
     return {} as T;
   }
-  
+
   return response.json();
 }
 
@@ -74,13 +108,13 @@ function convertBackendMeeting(data: any): Meeting {
     "completed": "Completed",
     "cancelled": "Cancelled",
   };
-  
+
   const priorityMap: Record<string, MeetingPriority> = {
     "high": "High",
     "medium": "Medium",
     "low": "Low",
   };
-  
+
   const typeMap: Record<string, MeetingType> = {
     "internal": "Internal",
     "client": "Client",
@@ -89,25 +123,26 @@ function convertBackendMeeting(data: any): Meeting {
     "standup": "Standup",
     "other": "Other",
   };
-  
+
   const attendees: MeetingAttendee[] = (data.attendees || []).map((att: any) => {
     const user = att.user || att;
     return {
       id: att.id || user?.id,
+      userId: user?.id,
       name: user?.full_name || user?.email || "Unknown",
       email: user?.email,
       avatar: user?.full_name?.[0] || user?.email?.[0] || "?",
       response: att.response || "pending",
     };
   });
-  
+
   const comments: MeetingComment[] = (data.comments || []).map((c: any) => ({
     id: String(c.id),
     author: c.author?.full_name || c.author?.email || "Unknown",
     text: c.text,
     timestamp: c.timestamp,
   }));
-  
+
   const linkedIssues: LinkedIssue[] = (data.linked_issues || []).map((issue: any) => ({
     id: issue.id,
     title: issue.title,
@@ -117,7 +152,7 @@ function convertBackendMeeting(data: any): Meeting {
     topicType: issue.topic_type,
     bcfGuid: issue.bcf_guid,
   }));
-  
+
   return {
     id: data.id,
     title: data.title || "Untitled Meeting",
@@ -143,6 +178,8 @@ function convertBackendMeeting(data: any): Meeting {
     tags: data.tags || [],
     linkedIssues: linkedIssues,
     linkedIssueIds: linkedIssues.map(i => i.id),
+    canManage: !!data.can_manage,
+    organisationId: data.organisation_id ?? null,
   };
 }
 
@@ -153,13 +190,13 @@ function convertToBackendPayload(meeting: Partial<Meeting> | any): any {
     "Completed": "completed",
     "Cancelled": "cancelled",
   };
-  
+
   const priorityMap: Record<string, string> = {
     "High": "high",
     "Medium": "medium",
     "Low": "low",
   };
-  
+
   const typeMap: Record<string, string> = {
     "Internal": "internal",
     "Client": "client",
@@ -168,9 +205,9 @@ function convertToBackendPayload(meeting: Partial<Meeting> | any): any {
     "Standup": "standup",
     "Other": "other",
   };
-  
+
   const payload: any = {};
-  
+
   if (meeting.title !== undefined) payload.title = meeting.title;
   if (meeting.description !== undefined) payload.description = meeting.description;
   if (meeting.type !== undefined) payload.type = typeMap[meeting.type] || "other";
@@ -187,29 +224,29 @@ function convertToBackendPayload(meeting: Partial<Meeting> | any): any {
   if (meeting.deliverable !== undefined) payload.deliverable = meeting.deliverable;
   if (meeting.tags !== undefined) payload.tags = meeting.tags;
   if (meeting.agenda !== undefined) payload.agenda = meeting.agenda;
-  
+
   if (meeting.organizerId !== undefined && meeting.organizerId !== null) {
     payload.organizer_id = meeting.organizerId;
   }
-  
+
   if (meeting.attendee_ids !== undefined) {
     payload.attendee_ids = meeting.attendee_ids;
   } else if (meeting.attendees !== undefined && Array.isArray(meeting.attendees)) {
-    payload.attendee_ids = meeting.attendees.map((a: any) => 
+    payload.attendee_ids = meeting.attendees.map((a: any) =>
       typeof a === 'number' ? a : a.id
     ).filter(Boolean);
   }
-  
+
   if (meeting.linked_issue_ids !== undefined) {
     payload.linked_issue_ids = meeting.linked_issue_ids;
   } else if (meeting.linkedIssueIds !== undefined) {
     payload.linked_issue_ids = meeting.linkedIssueIds;
   } else if (meeting.linkedIssues !== undefined && Array.isArray(meeting.linkedIssues)) {
-    payload.linked_issue_ids = meeting.linkedIssues.map((i: any) => 
+    payload.linked_issue_ids = meeting.linkedIssues.map((i: any) =>
       typeof i === 'number' ? i : i.id
     ).filter(Boolean);
   }
-  
+
   if (meeting.recurrence_frequency !== undefined) {
     payload.recurrence_frequency = meeting.recurrence_frequency;
   }
@@ -219,7 +256,7 @@ function convertToBackendPayload(meeting: Partial<Meeting> | any): any {
   if (meeting.recurrence_end_date !== undefined) {
     payload.recurrence_end_date = meeting.recurrence_end_date;
   }
-  
+
   return payload;
 }
 
@@ -227,14 +264,8 @@ function convertToBackendPayload(meeting: Partial<Meeting> | any): any {
 // API FUNCTIONS
 // ---------------------------------------------------------------------------
 
-// IMPORTANT: Since the router is registered at 'meetings', 
-// the actual endpoint is /api/meetings/meetings/
-
 const MEETINGS_BASE = `${API_URL}/meetings/meetings`;
 
-/**
- * Get all meetings with optional filters
- */
 export async function getMeetings(params?: {
   project?: number;
   status?: MeetingStatus;
@@ -243,24 +274,20 @@ export async function getMeetings(params?: {
   endDate?: string;
 }): Promise<Meeting[]> {
   const url = new URL(`${MEETINGS_BASE}/`);
-  
+
   if (params?.project) url.searchParams.append("project", String(params.project));
   if (params?.status) url.searchParams.append("status", params.status.toLowerCase());
   if (params?.type) url.searchParams.append("type", params.type.toLowerCase());
   if (params?.startDate) url.searchParams.append("start_time__gte", params.startDate);
   if (params?.endDate) url.searchParams.append("start_time__lte", params.endDate);
-  
-  console.log("📤 Fetching meetings from:", url.toString());
-  
+
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any>(response);
-  console.log("📥 Raw API response:", data);
-  
-  // Handle paginated response
+
   let results = data;
   if (data && typeof data === 'object') {
     if (Array.isArray(data.results)) {
@@ -268,102 +295,77 @@ export async function getMeetings(params?: {
     } else if (Array.isArray(data)) {
       results = data;
     } else {
-      console.warn("⚠️ Unexpected data format:", data);
       results = [];
     }
   }
-  
+
   if (!Array.isArray(results)) {
-    console.error("❌ Results is not an array:", results);
     return [];
   }
-  
-  console.log(`📥 Found ${results.length} meetings`);
-  
-  if (results.length > 0) {
-    console.log("📥 First meeting:", results[0]);
-  }
-  
-  const converted = results.map(convertBackendMeeting);
-  console.log(`✅ Converted ${converted.length} meetings`);
-  return converted;
+
+  return results.map(convertBackendMeeting);
 }
 
-/**
- * Get a single meeting by ID
- */
 export async function getMeeting(id: string | number): Promise<Meeting | undefined> {
   const response = await fetch(`${MEETINGS_BASE}/${id}/`, {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   if (response.status === 404) {
     return undefined;
   }
-  
+
   const data = await handleResponse<any>(response);
   return convertBackendMeeting(data);
 }
 
-/**
- * Create a new meeting
- */
 export async function createMeeting(input: any): Promise<Meeting> {
   const payload = convertToBackendPayload(input);
-  
+
   const response = await fetch(`${MEETINGS_BASE}/`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(payload),
   });
-  
+
   const data = await handleResponse<any>(response);
   return convertBackendMeeting(data);
 }
 
-/**
- * Update a meeting
- */
 export async function updateMeeting(
   id: string | number,
   patch: Partial<Meeting>
 ): Promise<Meeting | undefined> {
   const payload = convertToBackendPayload(patch);
-  
+
   const response = await fetch(`${MEETINGS_BASE}/${id}/`, {
     method: "PATCH",
     headers: authHeaders(),
     body: JSON.stringify(payload),
   });
-  
+
   if (response.status === 404) {
     return undefined;
   }
-  
+
   const data = await handleResponse<any>(response);
   return convertBackendMeeting(data);
 }
 
-/**
- * Delete a meeting
- */
 export async function deleteMeeting(id: string | number): Promise<void> {
   const response = await fetch(`${MEETINGS_BASE}/${id}/`, {
     method: "DELETE",
     headers: authHeaders(),
   });
-  
+
   if (response.status === 404) {
     return;
   }
-  
+
   await handleResponse(response);
 }
 
-/**
- * Add a comment to a meeting
- */
 export async function addMeetingComment(
   id: string | number,
   author: string,
@@ -374,24 +376,21 @@ export async function addMeetingComment(
     headers: authHeaders(),
     body: JSON.stringify({ text }),
   });
-  
+
   if (response.status === 404) {
     return undefined;
   }
-  
+
   await handleResponse(response);
   return getMeeting(id);
 }
 
-/**
- * Get comments for a meeting
- */
 export async function getMeetingComments(id: string | number): Promise<MeetingComment[]> {
   const response = await fetch(`${MEETINGS_BASE}/${id}/comments/`, {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any[]>(response);
   return data.map((c: any) => ({
     id: String(c.id),
@@ -401,9 +400,6 @@ export async function getMeetingComments(id: string | number): Promise<MeetingCo
   }));
 }
 
-/**
- * Add an attendee to a meeting
- */
 export async function addMeetingAttendee(
   id: string | number,
   userId: number,
@@ -414,13 +410,10 @@ export async function addMeetingAttendee(
     headers: authHeaders(),
     body: JSON.stringify({ user_id: userId, response }),
   });
-  
+
   await handleResponse(resp);
 }
 
-/**
- * Remove an attendee from a meeting
- */
 export async function removeMeetingAttendee(
   id: string | number,
   userId: number
@@ -430,13 +423,10 @@ export async function removeMeetingAttendee(
     headers: authHeaders(),
     body: JSON.stringify({ user_id: userId }),
   });
-  
+
   await handleResponse(resp);
 }
 
-/**
- * Update an attendee's response
- */
 export async function updateAttendeeResponse(
   id: string | number,
   userId: number,
@@ -447,13 +437,10 @@ export async function updateAttendeeResponse(
     headers: authHeaders(),
     body: JSON.stringify({ user_id: userId, response }),
   });
-  
+
   await handleResponse(resp);
 }
 
-/**
- * Link an issue to a meeting
- */
 export async function linkIssueToMeeting(
   meetingId: string | number,
   issueId: string | number
@@ -463,13 +450,10 @@ export async function linkIssueToMeeting(
     headers: authHeaders(),
     body: JSON.stringify({ issue_id: issueId }),
   });
-  
+
   await handleResponse(response);
 }
 
-/**
- * Unlink an issue from a meeting
- */
 export async function unlinkIssueFromMeeting(
   meetingId: string | number,
   issueId: string | number
@@ -479,19 +463,16 @@ export async function unlinkIssueFromMeeting(
     headers: authHeaders(),
     body: JSON.stringify({ issue_id: issueId }),
   });
-  
+
   await handleResponse(response);
 }
 
-/**
- * Get linked issues for a meeting
- */
 export async function getLinkedIssues(meetingId: string | number): Promise<LinkedIssue[]> {
   const response = await fetch(`${MEETINGS_BASE}/${meetingId}/linked_issues/`, {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any[]>(response);
   return data.map((issue: any) => ({
     id: issue.id,
@@ -504,57 +485,48 @@ export async function getLinkedIssues(meetingId: string | number): Promise<Linke
   }));
 }
 
-/**
- * Get upcoming meetings within the given window (defaults to the next 7 days).
- */
 export async function getUpcomingMeetings(days: number = 7): Promise<Meeting[]> {
   const url = new URL(`${MEETINGS_BASE}/upcoming/`);
   url.searchParams.append("days", String(days));
-  
+
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any>(response);
   const results = data.results || data;
-  
+
   if (Array.isArray(results)) {
     return results.map(convertBackendMeeting);
   }
   return [];
 }
 
-/**
- * Get today's meetings
- */
 export async function getTodaysMeetings(): Promise<Meeting[]> {
   const response = await fetch(`${MEETINGS_BASE}/today/`, {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any>(response);
   const results = data.results || data;
-  
+
   if (Array.isArray(results)) {
     return results.map(convertBackendMeeting);
   }
   return [];
 }
 
-/**
- * Get meetings where the user is organizer or attendee
- */
 export async function getMyMeetings(): Promise<Meeting[]> {
   const response = await fetch(`${MEETINGS_BASE}/my_meetings/`, {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any>(response);
   const results = data.results || data;
-  
+
   if (Array.isArray(results)) {
     return results.map(convertBackendMeeting);
   }
@@ -562,43 +534,55 @@ export async function getMyMeetings(): Promise<Meeting[]> {
 }
 
 /**
- * Get meetings by date
+ * Meetings where the current user has a pending RSVP.
  */
+export async function getMyPendingInvites(): Promise<Meeting[]> {
+  const response = await fetch(`${MEETINGS_BASE}/my_pending_invites/`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  const data = await handleResponse<any>(response);
+  const results = data.results || data;
+
+  if (Array.isArray(results)) {
+    return results.map(convertBackendMeeting);
+  }
+  return [];
+}
+
 export async function getMeetingsByDate(date: string): Promise<Meeting[]> {
   const url = new URL(`${MEETINGS_BASE}/`);
   url.searchParams.append("start_time__date", date);
-  
+
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any>(response);
   const results = data.results || data;
-  
+
   if (Array.isArray(results)) {
     return results.map(convertBackendMeeting);
   }
   return [];
 }
 
-/**
- * Get all available issues (for linking)
- */
 export async function getAvailableIssues(projectId?: number): Promise<LinkedIssue[]> {
   const url = new URL(`${API_URL}/issues/issues/`);
   if (projectId) {
     url.searchParams.append("project", String(projectId));
   }
-  
+
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: authHeaders(),
   });
-  
+
   const data = await handleResponse<any>(response);
   const results = data.results || data;
-  
+
   if (Array.isArray(results)) {
     return results.map((issue: any) => ({
       id: issue.id,
@@ -641,8 +625,10 @@ const meetingApi = {
   getUpcomingMeetings,
   getTodaysMeetings,
   getMyMeetings,
+  getMyPendingInvites,
   getMeetingsByDate,
   getAvailableIssues,
+  getCurrentUser,
   getStatusColor,
   getPriorityColor,
 };

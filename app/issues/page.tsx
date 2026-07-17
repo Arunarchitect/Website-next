@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import Image from "next/image";
 import axios from "axios";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
@@ -159,6 +159,34 @@ function extractValidationMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+// ---------------------------------------------------------------------------
+// Search — builds a lowercased haystack per issue once, then does a plain
+// substring match. Covers title, description, module, organisation, the
+// project name (resolved from whatever project lists we've already loaded
+// for the filter cascade / new-issue form — no extra API calls), reporter,
+// assignee, labels, topic type / category, and the raw issue id.
+// ---------------------------------------------------------------------------
+
+function buildIssueSearchText(issue: Issue, projectNameById: Map<number, string>): string {
+  const projectId = issue.project_id ?? issue.project;
+  const projectName = typeof projectId === 'number' ? projectNameById.get(projectId) : undefined;
+
+  const parts: (string | undefined | null)[] = [
+    issue.title,
+    issue.description,
+    issue.module,
+    issue.organisation,
+    projectName,
+    issue.reportedBy,
+    issue.assignedTo,
+    String(issue.id),
+    isBimIssue(issue) ? issue.topicType : (issue as { category?: string }).category,
+    ...(issue.labels || []),
+  ];
+
+  return parts.filter(Boolean).join(' \u241F ').toLowerCase();
+}
+
 export default function IssuesPage() {
   const dispatch = useAppDispatch();
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -167,6 +195,9 @@ export default function IssuesPage() {
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
+
+  // --- Search ---------------------------------------------------------------
+  const [searchQuery, setSearchQuery] = useState("");
 
   // --- Organisation / Project / Deliverable filter cascade -----------------
   const [filterOrgId, setFilterOrgId] = useState<number | "">("");
@@ -280,19 +311,58 @@ export default function IssuesPage() {
     return () => { cancelled = true; };
   }, [filterProjectId]);
 
-  const hasActiveFilters = !!filterOrgId || !!filterProjectId || !!filterDeliverableId || !!statFilter;
+  // Whenever we load a fresh set of organisations, eagerly pull every
+  // project across all of them (small orgs, cheap calls) so search can
+  // match on project name even before the org/project filter dropdowns
+  // have been touched. Feeds only projectNameById below — never mutates
+  // the filter-cascade state above.
+  const [allProjectsForSearch, setAllProjectsForSearch] = useState<ProjectSummary[]>([]);
+  useEffect(() => {
+    if (filterOrganisations.length === 0) {
+      setAllProjectsForSearch([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(filterOrganisations.map((org) => getOrganisationProjects(org.id)))
+      .then((lists) => {
+        if (cancelled) return;
+        setAllProjectsForSearch(lists.flat());
+      })
+      .catch(() => { if (!cancelled) setAllProjectsForSearch([]); });
+    return () => { cancelled = true; };
+  }, [filterOrganisations]);
+
+  const projectNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of allProjectsForSearch) map.set(p.id, p.name);
+    for (const p of filterProjects) map.set(p.id, p.name);
+    return map;
+  }, [allProjectsForSearch, filterProjects]);
+
+  const issueSearchIndex = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const issue of issues) {
+      map.set(String(issue.id), buildIssueSearchText(issue, projectNameById));
+    }
+    return map;
+  }, [issues, projectNameById]);
+
+  const hasActiveFilters = !!filterOrgId || !!filterProjectId || !!filterDeliverableId || !!statFilter || !!searchQuery.trim();
 
   const clearFilters = () => {
     setFilterOrgId("");
     setFilterProjectId("");
     setFilterDeliverableId("");
     setStatFilter(null);
+    setSearchQuery("");
   };
 
   // Clicking an active stat card again turns the filter off.
   const handleStatClick = (key: Exclude<StatFilterKey, null>) => {
     setStatFilter((prev) => (prev === key ? null : key));
   };
+
+  const trimmedQuery = searchQuery.trim().toLowerCase();
 
   const visibleIssues = issues.filter((issue) => {
     if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
@@ -303,6 +373,10 @@ export default function IssuesPage() {
     }
     if (filterDeliverableId && issue.deliverable !== filterDeliverableId) return false;
     if (statFilter && !STAT_FILTER_PREDICATES[statFilter](issue)) return false;
+    if (trimmedQuery) {
+      const haystack = issueSearchIndex.get(String(issue.id)) || '';
+      if (!haystack.includes(trimmedQuery)) return false;
+    }
     return true;
   });
 
@@ -376,6 +450,8 @@ export default function IssuesPage() {
           issues (BCF-compatible) and general design issues, side by side.
         </p>
       </section>
+
+      
 
       {error && (
         <div className="error-banner">
@@ -546,6 +622,29 @@ export default function IssuesPage() {
               ))}
             </select>
           </div>
+        </div>
+      </section>
+
+      <section className="search-section">
+        <div className="search-bar">
+          <i className="ti ti-search search-bar-icon" />
+          <input
+            type="text"
+            className="search-bar-input"
+            placeholder="Search issues by title, description, project, organisation, assignee…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="search-bar-clear"
+              onClick={() => setSearchQuery("")}
+              title="Clear search"
+            >
+              <i className="ti ti-x" />
+            </button>
+          )}
         </div>
       </section>
 

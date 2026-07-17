@@ -1,7 +1,7 @@
 // app/drawing/components/DocumentViewer.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -55,10 +55,21 @@ export default function DocumentViewer({
   const isImage = doc.file_type === 'image';
   const isDXF = doc.file_type === 'dxf';
 
-  const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
-  const zoomIn = () => setZoom((z) => clampZoom(+(z + ZOOM_STEP).toFixed(2)));
-  const zoomOut = () => setZoom((z) => clampZoom(+(z - ZOOM_STEP).toFixed(2)));
-  const zoomReset = () => setZoom(1);
+  // Memoized so these can safely be listed as effect dependencies without
+  // causing the wheel/keydown effect to re-subscribe on every render.
+  const clampZoom = useCallback(
+    (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value)),
+    []
+  );
+  const zoomIn = useCallback(
+    () => setZoom((z) => clampZoom(+(z + ZOOM_STEP).toFixed(2))),
+    [clampZoom]
+  );
+  const zoomOut = useCallback(
+    () => setZoom((z) => clampZoom(+(z - ZOOM_STEP).toFixed(2))),
+    [clampZoom]
+  );
+  const zoomReset = useCallback(() => setZoom(1), []);
 
   useEffect(() => {
     setZoomInputValue(String(Math.round(zoom * 100)));
@@ -116,6 +127,12 @@ export default function DocumentViewer({
     setTimeout(() => {
       iframe.remove();
     }, 60000);
+  };
+
+  const handleFavoriteClick = () => {
+    // Guests have no account to persist favorites against, so this control
+    // is hidden entirely for them (see guestMode check in the render below).
+    onFavoriteToggle(doc.id);
   };
 
   useEffect(() => {
@@ -200,7 +217,7 @@ export default function DocumentViewer({
       el?.removeEventListener('wheel', handleWheel);
       window.removeEventListener('keydown', handleKeydown);
     };
-  }, [isPDF, isOpen, blobUrl]);
+  }, [isPDF, isOpen, blobUrl, zoomIn, zoomOut, zoomReset]);
 
   // Drag-to-pan when zoomed in past 100% (only meaningful once content
   // overflows the wrapper, but harmless to wire up regardless of zoom level)
@@ -298,6 +315,17 @@ export default function DocumentViewer({
             </span>
           </div>
           <div className="document-viewer-controls">
+            {!guestMode && (
+              <button
+                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-favorite"
+                onClick={handleFavoriteClick}
+                title="Toggle favorite"
+                aria-label="Toggle favorite"
+              >
+                <i className="ti ti-star" />
+                <span className="document-viewer-btn-label">Favorite</span>
+              </button>
+            )}
             {isPDF && !hasError && !isLoading && blobUrl && (
               <div className="document-viewer-zoom-controls">
                 <button

@@ -12,6 +12,7 @@ export type MeetingType = "Internal" | "Client" | "Review" | "Planning" | "Stand
 
 export interface MeetingAttendee {
   id: string | number;
+  userId?: number;        // NEW — the underlying user's id, for "is this me?" checks
   name: string;
   email?: string;
   avatar?: string;
@@ -77,6 +78,8 @@ export interface Meeting {
   tags?: string[];
   linkedIssues?: LinkedIssue[]; // Issues to be discussed in this meeting
   linkedIssueIds?: (string | number)[]; // For API payload
+  canManage?: boolean;        // NEW
+  organisationId?: number | null;  // NEW
 }
 
 // ---------------------------------------------------------------------------

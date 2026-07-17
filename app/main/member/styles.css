@@ -63,32 +63,49 @@
 .member-nav {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .member-nav-link {
   font-size: 13px;
-  color: var(--slate);
+  color: var(--ink);
   text-decoration: none;
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  transition: border-color 0.18s ease, background 0.18s ease;
+  background: #ffffff;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
   font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.member-nav-link i {
+  font-size: 14px;
+  color: var(--slate);
 }
 
 .member-nav-link:hover {
   border-color: var(--blue);
   background: rgba(44, 95, 138, 0.05);
+  color: var(--blue);
+}
+
+.member-nav-link:hover i {
+  color: var(--blue);
 }
 
 .member-nav-link.active {
   border-color: var(--blue);
   background: rgba(44, 95, 138, 0.08);
+  color: var(--blue);
+}
+
+.member-nav-link.active i {
   color: var(--blue);
 }
 
@@ -216,7 +233,245 @@
   letter-spacing: 0.04em;
 }
 
-/* Stats Grid */
+/* ============================================= */
+/* Overview row: Open Issues / Resolved / Meetings */
+/* ============================================= */
+
+.dash-overview {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.dash-overview-left {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+}
+
+.dash-stat-card,
+.dash-meetings-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  min-width: 0;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.dash-stat-card:hover,
+.dash-meetings-card:hover {
+  border-color: var(--blue);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(23, 50, 74, 0.08);
+}
+
+.dash-stat-card .stat-icon,
+.dash-meetings-card .stat-icon {
+  font-size: 20px;
+  color: var(--slate);
+  flex-shrink: 0;
+}
+
+.dash-stat-card > div,
+.dash-meetings-card > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.dash-stat-card .stat-label,
+.dash-meetings-card .stat-label {
+  font-size: 10px;
+  color: var(--slate);
+  margin: 0 0 1px;
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-stat-card .stat-value,
+.dash-meetings-card .stat-value {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 500;
+  font-size: 18px;
+  margin: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Open Issues: red, blinks only when count > 0 ---- */
+@keyframes blinkRed {
+  0% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  }
+  25% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
+  }
+  50% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.15);
+    box-shadow: 0 0 12px 4px rgba(212, 62, 62, 0.25);
+  }
+  75% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
+  }
+  100% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  }
+}
+
+@keyframes pulseRed {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 8px rgba(212, 62, 62, 0.4);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.stat-card-open-issues {
+  animation: blinkRed 2s ease-in-out infinite;
+  border-color: #D43E3E !important;
+  border-width: 2px !important;
+}
+
+.stat-card-open-issues::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: #D43E3E;
+  border-radius: 50%;
+  animation: pulseRed 1.5s ease-in-out infinite;
+  border: 2px solid white;
+  box-shadow: 0 0 8px rgba(212, 62, 62, 0.4);
+}
+
+.stat-card-open-issues .stat-value {
+  color: #D43E3E !important;
+  font-weight: 700 !important;
+}
+
+.stat-card-open-issues .stat-icon {
+  color: #D43E3E !important;
+  animation: pulseRed 1.5s ease-in-out infinite;
+}
+
+.stat-card-open-issues:hover {
+  animation-play-state: paused;
+  border-color: #B83232 !important;
+  background: rgba(212, 62, 62, 0.08) !important;
+}
+
+/* ---- Resolved Issues: light green, static, never blinks ---- */
+.stat-card-resolved-issues {
+  background: rgba(15, 110, 86, 0.06);
+  border-color: rgba(15, 110, 86, 0.35);
+}
+
+.stat-card-resolved-issues .stat-icon,
+.stat-card-resolved-issues .stat-value {
+  color: var(--teal-text) !important;
+}
+
+.stat-card-resolved-issues:hover {
+  border-color: var(--teal-text);
+  background: rgba(15, 110, 86, 0.1);
+}
+
+/* ---- Upcoming Meetings: light blue, blinks only when count > 0 ---- */
+.dash-meetings-card {
+  background: rgba(44, 95, 138, 0.05);
+  border-color: rgba(44, 95, 138, 0.25);
+}
+
+@keyframes blinkBlue {
+  0% {
+    border-color: var(--blue);
+    background: rgba(44, 95, 138, 0.05);
+    box-shadow: 0 0 0 0 rgba(44, 95, 138, 0.3);
+  }
+  50% {
+    border-color: var(--blue);
+    background: rgba(44, 95, 138, 0.15);
+    box-shadow: 0 0 12px 4px rgba(44, 95, 138, 0.25);
+  }
+  100% {
+    border-color: var(--blue);
+    background: rgba(44, 95, 138, 0.05);
+    box-shadow: 0 0 0 0 rgba(44, 95, 138, 0.3);
+  }
+}
+
+@keyframes pulseBlue {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 8px rgba(44, 95, 138, 0.4);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.dash-meetings-card-active {
+  animation: blinkBlue 2s ease-in-out infinite;
+  border-width: 2px !important;
+}
+
+.dash-meetings-card-active::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: var(--blue);
+  border-radius: 50%;
+  animation: pulseBlue 1.5s ease-in-out infinite;
+  border: 2px solid white;
+  box-shadow: 0 0 8px rgba(44, 95, 138, 0.4);
+}
+
+.dash-meetings-card-active .stat-icon,
+.dash-meetings-card-active .stat-value {
+  color: var(--blue) !important;
+  font-weight: 700 !important;
+}
+
+.dash-meetings-card-active:hover {
+  animation-play-state: paused;
+}
+
+/* Secondary Stats Grid (In Progress / High Priority) */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -525,7 +780,7 @@
   letter-spacing: 0.04em;
 }
 
-/* Tools Grid */
+/* Tools Grid (Applications) */
 .tools-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -578,6 +833,7 @@
 
 .tool-info {
   min-width: 0;
+  flex: 1;
 }
 
 .tool-header {
@@ -601,6 +857,8 @@
   font-weight: 500;
   font-family: var(--font-mono), monospace;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tool-tag-teal {
@@ -643,6 +901,7 @@
   font-size: 12px;
   letter-spacing: 0.04em;
   text-decoration: none;
+  flex-shrink: 0;
 }
 
 .tool-btn:hover {
@@ -719,6 +978,38 @@
     padding: 16px;
   }
 
+  .dash-overview {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .dash-overview-left {
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .dash-stat-card,
+  .dash-meetings-card {
+    padding: 10px 10px;
+    gap: 8px;
+  }
+
+  .dash-stat-card .stat-icon,
+  .dash-meetings-card .stat-icon {
+    font-size: 16px;
+  }
+
+  .dash-stat-card .stat-label,
+  .dash-meetings-card .stat-label {
+    font-size: 8px;
+    letter-spacing: 0.02em;
+  }
+
+  .dash-stat-card .stat-value,
+  .dash-meetings-card .stat-value {
+    font-size: 15px;
+  }
+
   .issue-card {
     flex-direction: column;
     align-items: stretch;
@@ -730,15 +1021,43 @@
     justify-content: flex-end;
   }
 
+  /* --- Applications (tool cards): compact for mobile so nothing overflows --- */
   .tool-card {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
-    padding: 16px 18px;
+    padding: 14px 16px;
   }
 
   .tool-left {
     flex: 1;
+    gap: 12px;
+  }
+
+  .tool-icon-wrapper {
+    width: 38px;
+    height: 38px;
+  }
+
+  .tool-icon-wrapper i {
+    font-size: 17px;
+  }
+
+  .tool-label {
+    font-size: 14px;
+  }
+
+  .tool-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .tool-description {
+    font-size: 12px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.4;
   }
 
   .tool-actions {
@@ -776,21 +1095,76 @@
     grid-template-columns: 1fr;
   }
 
-  .tool-description {
-    white-space: normal;
+  /* Nav pills stay compact and readable */
+  .member-nav {
+    gap: 6px;
   }
 
-  .member-nav-link span {
-    display: none;
+  .member-nav-link {
+    padding: 6px 8px;
+    font-size: 10px;
+    gap: 3px;
+    border-radius: 6px;
+  }
+
+  .member-nav-link i {
+    font-size: 12px;
+  }
+
+  /* --- Applications: tighten further for very small screens --- */
+  .tool-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .tool-left {
+    gap: 10px;
+  }
+
+  .tool-icon-wrapper {
+    width: 34px;
+    height: 34px;
+  }
+
+  .tool-icon-wrapper i {
+    font-size: 15px;
+  }
+
+  .tool-header {
+    gap: 6px;
+  }
+
+  .tool-label {
+    font-size: 13px;
+  }
+
+  .tool-tag {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .tool-description {
+    font-size: 11px;
   }
 
   .tool-actions {
+    gap: 6px;
     justify-content: stretch;
+  }
+
+  .tool-btn {
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .tool-btn-icon {
+    width: 30px;
   }
 
   .tool-btn-go {
     flex: 1;
     justify-content: center;
+    padding: 0 10px;
   }
 
   .issue-meta {
@@ -811,5 +1185,30 @@
 
   .user-name {
     font-size: 18px;
+  }
+
+  .dash-overview-left {
+    gap: 6px;
+  }
+
+  .dash-stat-card,
+  .dash-meetings-card {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .dash-stat-card .stat-icon,
+  .dash-meetings-card .stat-icon {
+    font-size: 14px;
+  }
+
+  .dash-stat-card .stat-label,
+  .dash-meetings-card .stat-label {
+    font-size: 7px;
+  }
+
+  .dash-stat-card .stat-value,
+  .dash-meetings-card .stat-value {
+    font-size: 13px;
   }
 }

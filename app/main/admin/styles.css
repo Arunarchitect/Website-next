@@ -203,38 +203,54 @@
   letter-spacing: 0.04em;
 }
 
-/* Stats Grid */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+/* ============================================= */
+/* Overview row: Open Issues / Resolved / Meetings */
+/* ============================================= */
+
+.dash-overview {
+  display: flex;
   gap: 12px;
   margin-bottom: 32px;
 }
 
-.stat-card {
-  background: #ffffff;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 14px 16px;
+.dash-overview-left {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+}
+
+.dash-stat-card,
+.dash-meetings-card {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  transition: border-color 0.18s ease;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 12px; /* curved rectangle corners */
+  padding: 16px 18px;
+  text-decoration: none;
+  color: inherit;
+  position: relative;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.stat-card:hover {
+.dash-stat-card:hover,
+.dash-meetings-card:hover {
   border-color: var(--blue);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(23, 50, 74, 0.08);
 }
 
-.stat-icon {
-  font-size: 18px;
+.dash-stat-card .stat-icon,
+.dash-meetings-card .stat-icon {
+  font-size: 20px;
   color: var(--slate);
-  width: 18px;
-  text-align: center;
   flex-shrink: 0;
 }
 
-.stat-label {
+.dash-stat-card .stat-label,
+.dash-meetings-card .stat-label {
   font-size: 10px;
   color: var(--slate);
   margin: 0 0 1px;
@@ -243,12 +259,173 @@
   text-transform: uppercase;
 }
 
-.stat-value {
+.dash-stat-card .stat-value,
+.dash-meetings-card .stat-value {
   font-family: var(--font-display), sans-serif;
   font-weight: 500;
   font-size: 18px;
   margin: 0;
   color: var(--ink);
+}
+
+/* ---- Open Issues: red, blinks only when count > 0 (class applied conditionally in JSX) ---- */
+@keyframes blinkRed {
+  0% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  }
+  25% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
+  }
+  50% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.15);
+    box-shadow: 0 0 12px 4px rgba(212, 62, 62, 0.25);
+  }
+  75% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.1);
+    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
+  }
+  100% {
+    border-color: #D43E3E;
+    background: rgba(212, 62, 62, 0.05);
+    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  }
+}
+
+@keyframes pulseRed {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 8px rgba(212, 62, 62, 0.4);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.stat-card-open-issues {
+  animation: blinkRed 2s ease-in-out infinite;
+  border-color: #D43E3E !important;
+  border-width: 2px !important;
+}
+
+.stat-card-open-issues::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: #D43E3E;
+  border-radius: 50%;
+  animation: pulseRed 1.5s ease-in-out infinite;
+  border: 2px solid white;
+  box-shadow: 0 0 8px rgba(212, 62, 62, 0.4);
+}
+
+.stat-card-open-issues .stat-value {
+  color: #D43E3E !important;
+  font-weight: 700 !important;
+}
+
+.stat-card-open-issues .stat-icon {
+  color: #D43E3E !important;
+  animation: pulseRed 1.5s ease-in-out infinite;
+}
+
+.stat-card-open-issues:hover {
+  animation-play-state: paused;
+  border-color: #B83232 !important;
+  background: rgba(212, 62, 62, 0.08) !important;
+}
+
+/* ---- Resolved Issues: light green, static, never blinks ---- */
+.stat-card-resolved-issues {
+  background: rgba(15, 110, 86, 0.06);
+  border-color: rgba(15, 110, 86, 0.35);
+}
+
+.stat-card-resolved-issues .stat-icon,
+.stat-card-resolved-issues .stat-value {
+  color: var(--teal-text) !important;
+}
+
+.stat-card-resolved-issues:hover {
+  border-color: var(--teal-text);
+  background: rgba(15, 110, 86, 0.1);
+}
+
+/* ---- Upcoming Meetings: light blue, blinks only when count > 0 (class applied conditionally in JSX) ---- */
+.dash-meetings-card {
+  background: rgba(44, 95, 138, 0.05);
+  border-color: rgba(44, 95, 138, 0.25);
+}
+
+@keyframes blinkBlue {
+  0% {
+    border-color: var(--blue);
+    background: rgba(44, 95, 138, 0.05);
+    box-shadow: 0 0 0 0 rgba(44, 95, 138, 0.3);
+  }
+  50% {
+    border-color: var(--blue);
+    background: rgba(44, 95, 138, 0.15);
+    box-shadow: 0 0 12px 4px rgba(44, 95, 138, 0.25);
+  }
+  100% {
+    border-color: var(--blue);
+    background: rgba(44, 95, 138, 0.05);
+    box-shadow: 0 0 0 0 rgba(44, 95, 138, 0.3);
+  }
+}
+
+@keyframes pulseBlue {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 8px rgba(44, 95, 138, 0.4);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.dash-meetings-card-active {
+  animation: blinkBlue 2s ease-in-out infinite;
+  border-width: 2px !important;
+}
+
+.dash-meetings-card-active::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: var(--blue);
+  border-radius: 50%;
+  animation: pulseBlue 1.5s ease-in-out infinite;
+  border: 2px solid white;
+  box-shadow: 0 0 8px rgba(44, 95, 138, 0.4);
+}
+
+.dash-meetings-card-active .stat-icon,
+.dash-meetings-card-active .stat-value {
+  color: var(--blue) !important;
+  font-weight: 700 !important;
+}
+
+.dash-meetings-card-active:hover {
+  animation-play-state: paused;
 }
 
 /* Section Label */
@@ -692,6 +869,15 @@
     padding: 16px;
   }
 
+  /* Overview: Open + Resolved stay on one row, Meetings drops to its own full-width row */
+  .dash-overview {
+    flex-direction: column;
+  }
+
+  .dash-overview-left {
+    flex-direction: row;
+  }
+
   .issue-card {
     flex-direction: column;
     align-items: stretch;
@@ -718,10 +904,6 @@
     justify-content: flex-end;
   }
 
-  .stats-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
   .quick-links-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -739,10 +921,6 @@
 @media (max-width: 480px) {
   .admin-page {
     padding: 2px 12px 10px;
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
   }
 
   .quick-links-grid {
@@ -785,97 +963,14 @@
   .user-name {
     font-size: 18px;
   }
-}
 
-/* Add this to the end of your styles.css file */
+  /* On very small screens, stack Open/Resolved too if labels get cramped */
+  .dash-overview-left {
+    gap: 8px;
+  }
 
-/* Blinking animation for open issues */
-@keyframes blinkRed {
-  0% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.05);
-    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
+  .dash-stat-card,
+  .dash-meetings-card {
+    padding: 12px 14px;
   }
-  25% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.1);
-    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
-  }
-  50% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.15);
-    box-shadow: 0 0 12px 4px rgba(212, 62, 62, 0.25);
-  }
-  75% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.1);
-    box-shadow: 0 0 8px 2px rgba(212, 62, 62, 0.2);
-  }
-  100% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.05);
-    box-shadow: 0 0 0 0 rgba(212, 62, 62, 0.3);
-  }
-}
-
-/* Alternative: pulsing red glow animation */
-@keyframes pulseRed {
-  0% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.05);
-    transform: scale(1);
-  }
-  50% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.1);
-    transform: scale(1.02);
-    box-shadow: 0 0 20px rgba(212, 62, 62, 0.15);
-  }
-  100% {
-    border-color: #D43E3E;
-    background: rgba(212, 62, 62, 0.05);
-    transform: scale(1);
-  }
-}
-
-/* Apply blinking to the Open Issues stat card */
-.stat-card-open-issues {
-  animation: blinkRed 2s ease-in-out infinite;
-  border-color: #D43E3E !important;
-  border-width: 2px !important;
-  position: relative;
-}
-
-/* Add a subtle red indicator dot */
-.stat-card-open-issues::before {
-  content: '';
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 10px;
-  height: 10px;
-  background: #D43E3E;
-  border-radius: 50%;
-  animation: pulseRed 1.5s ease-in-out infinite;
-  border: 2px solid white;
-  box-shadow: 0 0 8px rgba(212, 62, 62, 0.4);
-}
-
-/* Make the stat value red and bold when there are open issues */
-.stat-card-open-issues .stat-value {
-  color: #D43E3E !important;
-  font-weight: 700 !important;
-}
-
-/* Optional: Add a blinking icon */
-.stat-card-open-issues .stat-icon {
-  color: #D43E3E !important;
-  animation: pulseRed 1.5s ease-in-out infinite;
-}
-
-/* Hover effect for the stat card */
-.stat-card-open-issues:hover {
-  animation-play-state: paused;
-  border-color: #B83232 !important;
-  background: rgba(212, 62, 62, 0.08) !important;
 }

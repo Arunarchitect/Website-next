@@ -11,12 +11,14 @@ import {
   getCurrentUser,
   getUserOrganisations,
   getIssuesByOrganisation,
-  formatTimestamp,
-  getPriorityColor,
-  getStatusColor,
 } from "./adminApi";
-import { tools, quickLinks, issueStatsConfig } from "./constants";
+import { tools, quickLinks } from "./constants";
 import { DashboardIssue, Organisation, User, DashboardStats } from "./types";
+
+// NOTE: adjust this import path to wherever meetingApi.ts actually lives —
+// this is a placeholder based on the file you shared separately.
+import { getUpcomingMeetings } from "@/app/meeting/meetingApi";
+import type { Meeting } from "@/app/meeting/meetingTypes";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -64,7 +66,6 @@ const calculateStats = (issues: DashboardIssue[]): DashboardStats => {
 export default function MainAdminPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [recentIssues, setRecentIssues] = useState<DashboardIssue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
@@ -77,6 +78,10 @@ export default function MainAdminPage() {
     total: 0,
   });
   const [loadingOrganisations, setLoadingOrganisations] = useState(true);
+
+  // --- Upcoming meetings count ----------------------------------------------
+  const [upcomingMeetingsCount, setUpcomingMeetingsCount] = useState(0);
+  const [loadingMeetings, setLoadingMeetings] = useState(true);
 
   // Fetch user info on mount
   useEffect(() => {
@@ -94,7 +99,7 @@ export default function MainAdminPage() {
         setLoadingOrganisations(true);
         const orgs = await getUserOrganisations();
         setOrganisations(orgs);
-        
+
         if (orgs.length > 0) {
           setSelectedOrganisation(orgs[0].id);
         }
@@ -108,35 +113,28 @@ export default function MainAdminPage() {
     fetchOrganisations();
   }, []);
 
-  // Fetch issues when organisation changes
+  // Fetch issue counts when organisation changes. We still need the full
+  // issue list to compute open/resolved counts client-side (normalizing
+  // status casing), but we only keep the derived counts — nothing about
+  // individual issues is stored or rendered here.
   useEffect(() => {
     if (selectedOrganisation === null && organisations.length > 0) {
       setSelectedOrganisation(organisations[0].id);
       return;
     }
 
-    const fetchIssues = async () => {
+    const fetchIssueCounts = async () => {
       try {
         setLoading(true);
         setError(null);
-        
+
         let allIssues: DashboardIssue[] = [];
-        
+
         if (selectedOrganisation) {
           allIssues = await getIssuesByOrganisation(selectedOrganisation);
         }
-        
-        // Sort by created date (newest first)
-        const sorted = [...allIssues].sort(
-          (a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()
-        );
-        
-        // Get only the 5 most recent issues
-        setRecentIssues(sorted.slice(0, 5));
-        
-        // Calculate stats with normalized values
+
         setIssueStats(calculateStats(allIssues));
-        
       } catch (err) {
         console.error('Error fetching issues:', err);
         setError('Failed to load issues');
@@ -146,13 +144,32 @@ export default function MainAdminPage() {
     };
 
     if (!loadingOrganisations) {
-      fetchIssues();
+      fetchIssueCounts();
     }
   }, [selectedOrganisation, organisations, loadingOrganisations]);
 
-  const isBimIssue = (issue: DashboardIssue): boolean => {
-    return issue.domain === 'bim';
-  };
+  // Fetch upcoming meetings count, scoped to the selected organisation.
+  useEffect(() => {
+    if (loadingOrganisations) return;
+
+    const fetchMeetingsCount = async () => {
+      try {
+        setLoadingMeetings(true);
+        const meetings: Meeting[] = await getUpcomingMeetings(7);
+        const scoped = selectedOrganisation
+          ? meetings.filter((m) => m.organisationId === selectedOrganisation)
+          : meetings;
+        setUpcomingMeetingsCount(scoped.length);
+      } catch (err) {
+        console.error('Error fetching upcoming meetings:', err);
+        setUpcomingMeetingsCount(0);
+      } finally {
+        setLoadingMeetings(false);
+      }
+    };
+
+    fetchMeetingsCount();
+  }, [selectedOrganisation, loadingOrganisations]);
 
   // Get user's display name
   const getDisplayName = (): string => {
@@ -260,118 +277,45 @@ export default function MainAdminPage() {
         </div>
       ) : (
         <>
-          {/* Stats */}
-          <div className="stats-grid">
-            {issueStatsConfig.map((stat) => {
-              const value = stat.label === 'Open Issues' ? issueStats.open :
-                           stat.label === 'In Progress' ? issueStats.inProgress :
-                           stat.label === 'Resolved' ? issueStats.resolved :
-                           issueStats.highPriority;
-              
-              // Check if this is the Open Issues stat card
-              const isOpenIssuesCard = stat.label === 'Open Issues';
-              
-              return (
-                <div 
-                  key={stat.label} 
-                  className={`stat-card ${isOpenIssuesCard && hasOpenIssues ? 'stat-card-open-issues' : ''}`}
-                >
-                  <i className={`ti ${stat.icon} stat-icon`} aria-hidden="true" />
-                  <div>
-                    <p className="stat-label">{stat.label}</p>
-                    <p className="stat-value">{value}</p>
-                  </div>
+          {/* Overview: Open / Resolved issue counts + Upcoming Meetings */}
+          <div className="dash-overview">
+            <div className="dash-overview-left">
+              <Link
+                href="/issues"
+                className={`dash-stat-card ${hasOpenIssues ? 'stat-card-open-issues' : ''}`}
+              >
+                <i className="ti ti-alert-circle stat-icon" aria-hidden="true" />
+                <div>
+                  <p className="stat-label">Open Issues</p>
+                  <p className="stat-value">{loading ? '—' : issueStats.open}</p>
                 </div>
-              );
-            })}
-          </div>
+              </Link>
 
-          {/* Issues Section */}
-          <div className="section-label">
-            <span>Recent Issues</span>
-            <Link href="/issues" className="section-label-link">
-              View all →
+              <Link href="/issues" className="dash-stat-card stat-card-resolved-issues">
+                <i className="ti ti-check stat-icon" aria-hidden="true" />
+                <div>
+                  <p className="stat-label">Resolved Issues</p>
+                  <p className="stat-value">{loading ? '—' : issueStats.resolved}</p>
+                </div>
+              </Link>
+            </div>
+
+            <Link
+              href="/meeting"
+              className={`dash-meetings-card ${upcomingMeetingsCount > 0 ? 'dash-meetings-card-active' : ''}`}
+            >
+              <i className="ti ti-calendar-event stat-icon" aria-hidden="true" />
+              <div>
+                <p className="stat-label">Upcoming Meetings</p>
+                <p className="stat-value">{loadingMeetings ? '—' : upcomingMeetingsCount}</p>
+              </div>
             </Link>
           </div>
 
-          {loading ? (
-            <div className="loading-text">Loading issues…</div>
-          ) : error ? (
+          {error && (
             <div className="error-text">
               {error}
               <button onClick={() => window.location.reload()}>Retry</button>
-            </div>
-          ) : recentIssues.length === 0 ? (
-            <div className="no-issues">
-              <i className="ti ti-check" />
-              <p>No issues found in this organisation. Everything is clean!</p>
-            </div>
-          ) : (
-            <div className="issues-grid">
-              {recentIssues.map((issue) => (
-                <Link key={issue.id} href="/issues" className="issue-card">
-                  <div className="issue-left">
-                    <div
-                      className="issue-priority-badge"
-                      style={{ background: getPriorityColor(issue.priority) }}
-                    />
-                    <div className="issue-content">
-                      <div className="issue-header">
-                        <span className="issue-id">#{issue.id}</span>
-                        <h3 className="issue-title">{issue.title}</h3>
-                        <span className={`issue-domain-badge issue-domain-${issue.domain}`}>
-                          {isBimIssue(issue) ? 'BCF' : 'Design'}
-                        </span>
-                        {issue.organisation && (
-                          <span className="organisation-badge">
-                            <i className="ti ti-building" style={{ marginRight: '4px' }} />
-                            {issue.organisation}
-                          </span>
-                        )}
-                      </div>
-                      <p className="issue-description">{issue.description}</p>
-                      <div className="issue-meta">
-                        <span className="issue-meta-item">
-                          <i className="ti ti-user" aria-hidden="true" />
-                          {issue.reportedBy}
-                        </span>
-                        {issue.assignedTo && (
-                          <span className="issue-meta-item">
-                            <i className="ti ti-user-check" aria-hidden="true" />
-                            {issue.assignedTo}
-                          </span>
-                        )}
-                        <span
-                          className="issue-status-badge"
-                          style={{ background: getStatusColor(issue.status) }}
-                        >
-                          {normalizeStatus(issue.status)}
-                        </span>
-                        <span
-                          className="issue-meta-item"
-                          style={{
-                            color: getPriorityColor(issue.priority),
-                            fontWeight: 500,
-                          }}
-                        >
-                          <i className="ti ti-flag" aria-hidden="true" />
-                          {normalizePriority(issue.priority)}
-                        </span>
-                        {isBimIssue(issue) && issue.topicType && (
-                          <span className="issue-meta-item">
-                            <i className="ti ti-tag" aria-hidden="true" />
-                            {issue.topicType}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="issue-right">
-                    <span className="issue-timestamp">{formatTimestamp(issue.created)}</span>
-                    <i className="ti ti-chevron-right issue-arrow" aria-hidden="true" />
-                  </div>
-                </Link>
-              ))}
             </div>
           )}
 
