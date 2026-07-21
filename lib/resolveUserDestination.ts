@@ -55,7 +55,7 @@ export function resolveDestination({ orgRole, areacalcRole }: RoleBundle): strin
   if (isOrgLow && hasAreacalcRole)       return "/main/user";
 
   if (orgRole === "admin" || orgRole === "manager") return "/new/dash/dashadmin";
-  if (orgRole === "member")                          return "/new/dash/dashnormal";
+  if (orgRole === "member")                          return "/main/member";   // ← changed
   if (orgRole === "client")                          return "/main/client";
 
   if (hasAreacalcRole)                               return "/tools/areacalc";

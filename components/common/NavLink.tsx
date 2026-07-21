@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import cn from 'classnames';
-import { ReactNode } from 'react';
+import { ReactNode, MouseEvent } from 'react';
 
 interface Props {
   isSelected?: boolean;
@@ -11,7 +11,8 @@ interface Props {
   href?: string;
   children: ReactNode;
   className?: string;
-  onClick?: () => void;
+  onClick?: (e: MouseEvent<HTMLAnchorElement | HTMLSpanElement>) => void;
+  leadingIcon?: ReactNode;
 }
 
 export default function NavLink({
@@ -22,11 +23,12 @@ export default function NavLink({
   children,
   className,
   onClick,
+  leadingIcon,
   ...rest
 }: Props) {
   const combinedClassName = cn(
     className,
-    'text-white rounded-md px-3 py-2 font-medium',
+    'inline-flex items-center gap-1.5 text-white rounded-md px-3 py-2 font-medium',
     {
       'bg-gray-900': isSelected,
       'text-gray-300 hover:bg-gray-700 hover:text-white': !isSelected && !isBanner,
@@ -36,17 +38,24 @@ export default function NavLink({
     }
   );
 
+  const content = (
+    <>
+      {leadingIcon}
+      {children}
+    </>
+  );
+
   if (!href) {
     return (
       <span className={combinedClassName} role="button" onClick={onClick} {...rest}>
-        {children}
+        {content}
       </span>
     );
   }
 
   return (
     <Link href={href} className={combinedClassName} onClick={onClick} {...rest}>
-      {children}
+      {content}
     </Link>
   );
 }

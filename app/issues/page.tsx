@@ -131,14 +131,14 @@ interface NewDesignIssueInput extends NewIssueBase {
 
 type NewIssueInput = NewBimIssueInput | NewDesignIssueInput;
 
-type StatFilterKey = "open" | "inProgress" | "resolved" | "bim" | "clash" | "highPriority" | null;
+type StatFilterKey = "open" | "inProgress" | "resolved" | "lowPriority" | "mediumPriority" | "highPriority" | null;
 
 const STAT_FILTER_PREDICATES: Record<Exclude<StatFilterKey, null>, (issue: Issue) => boolean> = {
   open: (i) => i.status === "Open",
   inProgress: (i) => i.status === "In Progress",
   resolved: (i) => i.status === "Resolved",
-  bim: (i) => isBimIssue(i),
-  clash: (i) => isBimIssue(i) && i.topicType === "Clash",
+  lowPriority: (i) => i.priority === "Low",
+  mediumPriority: (i) => i.priority === "Medium",
   highPriority: (i) => i.priority === "High",
 };
 
@@ -146,10 +146,35 @@ const STAT_FILTER_LABELS: Record<Exclude<StatFilterKey, null>, string> = {
   open: "Open",
   inProgress: "In Progress",
   resolved: "Resolved",
-  bim: "BCF Topics",
-  clash: "Clashes",
+  lowPriority: "Low Priority",
+  mediumPriority: "Medium Priority",
   highPriority: "High Priority",
 };
+
+// ---------------------------------------------------------------------------
+// Sort — newest/oldest by either the creation date or the last-updated date.
+// Issues without an `updated` timestamp (never edited since creation) fall
+// back to `created` so they sort sensibly instead of collapsing to epoch 0.
+// ---------------------------------------------------------------------------
+
+type SortField = "created" | "updated";
+type SortOrder = "newest" | "oldest";
+
+const SORT_FIELD_OPTIONS: { value: SortField; label: string }[] = [
+  { value: "created", label: "Date Created" },
+  { value: "updated", label: "Last Updated" },
+];
+
+const SORT_ORDER_OPTIONS: { value: SortOrder; label: string }[] = [
+  { value: "newest", label: "Newest First" },
+  { value: "oldest", label: "Oldest First" },
+];
+
+function getSortTimestamp(issue: Issue, field: SortField): number {
+  const raw = field === "updated" ? (issue.updated || issue.created) : issue.created;
+  const t = raw ? new Date(raw).getTime() : 0;
+  return Number.isNaN(t) ? 0 : t;
+}
 
 function extractValidationMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err) && err.response?.data) {
@@ -198,6 +223,10 @@ export default function IssuesPage() {
 
   // --- Search ---------------------------------------------------------------
   const [searchQuery, setSearchQuery] = useState("");
+
+  // --- List sort (created / updated, newest / oldest) -----------------------
+  const [sortField, setSortField] = useState<SortField>("created");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
 
   // --- Organisation / Project / Deliverable filter cascade -----------------
   const [filterOrgId, setFilterOrgId] = useState<number | "">("");
@@ -364,6 +393,24 @@ export default function IssuesPage() {
 
   const trimmedQuery = searchQuery.trim().toLowerCase();
 
+  // Scope for the stats strip: org / project / deliverable only (and the
+  // domain tab, since that's a top-level view switch, not a "filter chip").
+  // Deliberately excludes statFilter and searchQuery — those are driven BY
+  // the stats/search, so folding them back in would make every card's count
+  // shift depending on which card (or search term) is currently active.
+  const scopedIssues = useMemo(() => {
+    return issues.filter((issue) => {
+      if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
+      if (filterOrgId && issue.organisationId !== filterOrgId) return false;
+      if (filterProjectId) {
+        const issueProjectId = issue.project_id ?? issue.project;
+        if (issueProjectId !== filterProjectId) return false;
+      }
+      if (filterDeliverableId && issue.deliverable !== filterDeliverableId) return false;
+      return true;
+    });
+  }, [issues, domainFilter, filterOrgId, filterProjectId, filterDeliverableId]);
+
   const visibleIssues = issues.filter((issue) => {
     if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
     if (filterOrgId && issue.organisationId !== filterOrgId) return false;
@@ -380,12 +427,23 @@ export default function IssuesPage() {
     return true;
   });
 
-  const openIssues = issues.filter((i) => i.status === "Open").length;
-  const inProgressIssues = issues.filter((i) => i.status === "In Progress").length;
-  const resolvedIssues = issues.filter((i) => i.status === "Resolved").length;
-  const bimIssueCount = issues.filter(isBimIssue).length;
-  const clashIssues = issues.filter(i => isBimIssue(i) && i.topicType === "Clash").length;
-  const highPriorityIssues = issues.filter((i) => i.priority === "High").length;
+  // Sorted view of visibleIssues — this is what actually gets rendered.
+  // Kept as a separate derived array so filtering logic above stays untouched.
+  const sortedVisibleIssues = useMemo(() => {
+    const withDates = visibleIssues.map((issue) => ({
+      issue,
+      ts: getSortTimestamp(issue, sortField),
+    }));
+    withDates.sort((a, b) => (sortOrder === "newest" ? b.ts - a.ts : a.ts - b.ts));
+    return withDates.map((entry) => entry.issue);
+  }, [visibleIssues, sortField, sortOrder]);
+
+  const openIssues = scopedIssues.filter((i) => i.status === "Open").length;
+  const inProgressIssues = scopedIssues.filter((i) => i.status === "In Progress").length;
+  const resolvedIssues = scopedIssues.filter((i) => i.status === "Resolved").length;
+  const lowPriorityIssues = scopedIssues.filter((i) => i.priority === "Low").length;
+  const mediumPriorityIssues = scopedIssues.filter((i) => i.priority === "Medium").length;
+  const highPriorityIssues = scopedIssues.filter((i) => i.priority === "High").length;
 
   const assignees = [...new Set(issues.map((i) => i.assignedTo).filter(Boolean))] as string[];
 
@@ -502,18 +560,18 @@ export default function IssuesPage() {
           onClick={() => handleStatClick("resolved")}
         />
         <StatCard
-          icon="ti-files"
-          label="BCF Topics"
-          value={bimIssueCount}
-          active={statFilter === "bim"}
-          onClick={() => handleStatClick("bim")}
+          icon="ti-arrow-down"
+          label="Low Priority"
+          value={lowPriorityIssues}
+          active={statFilter === "lowPriority"}
+          onClick={() => handleStatClick("lowPriority")}
         />
         <StatCard
-          icon="ti-cube"
-          label="Clashes"
-          value={clashIssues}
-          active={statFilter === "clash"}
-          onClick={() => handleStatClick("clash")}
+          icon="ti-minus"
+          label="Medium Priority"
+          value={mediumPriorityIssues}
+          active={statFilter === "mediumPriority"}
+          onClick={() => handleStatClick("mediumPriority")}
         />
         <StatCard
           icon="ti-flag"
@@ -646,17 +704,48 @@ export default function IssuesPage() {
             </button>
           )}
         </div>
+
+        <div
+          className="sort-controls"
+          style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}
+        >
+          <div className="form-field" style={{ flex: '0 0 auto', minWidth: '160px' }}>
+            <label>Sort by</label>
+            <select
+              className="field-select"
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as SortField)}
+            >
+              {SORT_FIELD_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-field" style={{ flex: '0 0 auto', minWidth: '160px' }}>
+            <label>Order</label>
+            <select
+              className="field-select"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+            >
+              {SORT_ORDER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </section>
 
       <section>
         <div className="section-title">
           <span>All Issues</span>
-          <span className="issue-count">{visibleIssues.length} shown</span>
+          <span className="issue-count">{sortedVisibleIssues.length} shown</span>
         </div>
 
         {loading ? (
           <p className="hero-subtitle">Loading issues…</p>
-        ) : visibleIssues.length === 0 ? (
+        ) : sortedVisibleIssues.length === 0 ? (
           <>
             <p className="hero-subtitle">
               {hasActiveFilters
@@ -671,7 +760,7 @@ export default function IssuesPage() {
           </>
         ) : (
           <div className="issues-grid">
-            {visibleIssues.map((issue) => (
+            {sortedVisibleIssues.map((issue) => (
               <IssueCard
                 key={issue.id}
                 issue={issue}

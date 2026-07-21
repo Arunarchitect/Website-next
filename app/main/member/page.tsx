@@ -149,10 +149,17 @@ export default function MemberDashboardPage() {
   useEffect(() => {
     if (loadingOrganisations) return;
 
+    
+
     const fetchMeetingsCount = async () => {
       try {
         setLoadingMeetings(true);
         const meetings: Meeting[] = await getUpcomingMeetings(7);
+
+        console.log("🗓️ raw meetings (member):", meetings);
+        console.log("🗓️ organisationId values:", meetings.map(m => m.organisationId));
+        console.log("🗓️ selectedOrganisation:", selectedOrganisation, typeof selectedOrganisation);
+        
         const scoped = selectedOrganisation
           ? meetings.filter((m) => m.organisationId === selectedOrganisation)
           : meetings;

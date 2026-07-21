@@ -12,7 +12,7 @@ import { useLogoutMutation } from "@/redux/features/authApiSlice";
 import { logout as setLogout } from "@/redux/features/authSlice";
 import { NavLink } from "@/components/common";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, MouseEvent } from "react";
 import {
   fetchOrgRole,
   fetchAreacalcRole,
@@ -74,8 +74,11 @@ export default function Navbar() {
       });
   };
 
-  const handleDashboard = async (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+  const handleDashboard = async (
+    e: MouseEvent<HTMLAnchorElement | HTMLSpanElement>
+  ) => {
+    const mouseEvent = e as MouseEvent<HTMLAnchorElement>;
+    if (mouseEvent.metaKey || mouseEvent.ctrlKey || mouseEvent.button === 1) return;
     e.preventDefault();
 
     if (dashUrl) {
@@ -135,18 +138,14 @@ export default function Navbar() {
   );
 
   const dashboardLink = (isMobile: boolean) => (
-    <a
+    <NavLink
       href={dashUrl ?? "#"}
+      isMobile={isMobile}
       onClick={handleDashboard}
-      className={
-        isMobile
-          ? "flex items-center gap-2 rounded-md px-3 py-2 text-base font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
-          : "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white"
-      }
+      leadingIcon={dashLoading ? <Spinner /> : null}
     >
-      {dashLoading && <Spinner />}
       Dashboard
-    </a>
+    </NavLink>
   );
 
   const authLinks = (isMobile: boolean) => (
