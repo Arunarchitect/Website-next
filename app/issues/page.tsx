@@ -14,7 +14,6 @@ import {
   createIssue,
   removeSnapshot,
   removeAttachment,
-  addCommentWithSnapshot,
   addComment,
   deleteComment,
   editComment,
@@ -40,7 +39,8 @@ import {
   isBimIssue,
 } from "./issueTypes";
 import { IssueCard } from "./IssueCard";
-import { compressImage } from "./imageUtils";
+import { processImageFile, extractImageFromClipboard, extractImageFromDrop } from "./imageUtils";
+import { ScreenshotDropzone } from "./IssueCardParts";
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { isUserMatch } from '@/components/utils/userMatching';
 import { useAppDispatch } from '@/redux/hooks';
@@ -731,26 +731,16 @@ export default function IssuesPage() {
                     setError('Failed to remove screenshot. Please try again.');
                   }
                 }}
-                onAddScreenshot={async (text, snapshotData, snapshotFormat) => {
+                onAddComment={async (text, snapshotData, snapshotFormat) => {
                   try {
                     setError(null);
-                    await addCommentWithSnapshot(
+                    await addComment(
                       issue.id,
                       currentUser.email || currentUser.fullName,
                       text,
                       snapshotData,
                       snapshotFormat
                     );
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Add screenshot error:', err);
-                    setError('Failed to add screenshot. Please try again.');
-                  }
-                }}
-                onAddComment={async (text) => {
-                  try {
-                    setError(null);
-                    await addComment(issue.id, currentUser.email || currentUser.fullName, text);
                     await refresh();
                   } catch (err: unknown) {
                     console.error('Add comment error:', err);
@@ -841,6 +831,7 @@ function NewIssueForm({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isDraggingScreenshot, setIsDraggingScreenshot] = useState(false);
 
   const [organisations, setOrganisations] = useState<OrganisationOption[]>([]);
   const [filteredProjects, setFilteredProjects] = useState<ProjectOption[]>([]);
@@ -948,27 +939,61 @@ function NewIssueForm({
     return () => { cancelled = true; };
   }, [projectId]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError('Image size must be less than 5MB');
-      return;
-    }
-
+  // Shared apply step for the file-picker, drag-drop, and paste flows: runs
+  // the image through the same size/type validation and compression used
+  // everywhere else in the Issues feature (see imageUtils.processImageFile),
+  // so all three entry points behave identically.
+  const applyScreenshotFile = async (file: File) => {
     setUploadError(null);
     setUploadingImage(true);
     try {
-      const { base64, format } = await compressImage(file);
-      setScreenshot(base64);
-      setScreenshotFormat(format);
-      setPreviewImage(`data:image/${format};base64,${base64}`);
-    } catch {
-      setUploadError('Failed to process image file');
+      const result = await processImageFile(file, { onError: setUploadError });
+      if (!result) return;
+      setScreenshot(result.base64);
+      setScreenshotFormat(result.format);
+      setPreviewImage(`data:image/${result.format};base64,${result.base64}`);
     } finally {
       setUploadingImage(false);
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await applyScreenshotFile(file);
+    e.target.value = '';
+  };
+
+  // Lets someone paste a screenshot straight from the clipboard (e.g.
+  // Win+Shift+S / Cmd+Shift+4 then Ctrl/Cmd+V) instead of having to save it
+  // to disk first and go through the file picker. Attached to the
+  // description textarea and the dropzone below.
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const file = extractImageFromClipboard(e);
+    if (!file) return;
+    e.preventDefault();
+    await applyScreenshotFile(file);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingScreenshot(false);
+    const file = extractImageFromDrop(e);
+    if (!file) {
+      setUploadError('Please drop a PNG or JPEG image.');
+      return;
+    }
+    await applyScreenshotFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingScreenshot(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingScreenshot(false);
   };
 
   const handleSubmit = async () => {
@@ -1169,7 +1194,9 @@ function NewIssueForm({
           rows={3}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          onPaste={handlePaste}
         />
+        <span className="file-hint">Tip: you can paste a screenshot (Ctrl/Cmd+V) directly into this box.</span>
       </div>
 
       <div className="form-field">
@@ -1184,26 +1211,7 @@ function NewIssueForm({
 
       <div className="form-field">
         <label>Screenshot (optional)</label>
-        <div className="btn-with-screenshot">
-          <button
-            className="btn-outline"
-            style={{ width: '100%' }}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingImage}
-            type="button"
-          >
-            <i className={`ti ${uploadingImage ? 'ti-loader' : 'ti-camera'}`} />
-            {uploadingImage ? 'Processing image…' : 'Upload screenshot (max 5MB)'}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-          />
-        </div>
-        {previewImage && (
+        {previewImage ? (
           <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
             <Image
               src={previewImage}
@@ -1224,6 +1232,17 @@ function NewIssueForm({
               ✕
             </button>
           </div>
+        ) : (
+          <ScreenshotDropzone
+            fileInputRef={fileInputRef}
+            onFileUpload={handleFileUpload}
+            onPaste={handlePaste}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            isDragging={isDraggingScreenshot}
+            processing={uploadingImage}
+          />
         )}
       </div>
 

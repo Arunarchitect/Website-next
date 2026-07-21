@@ -2,7 +2,13 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { compressImage } from "./imageUtils";
+import {
+  processImageFile,
+  extractImageFromClipboard,
+  extractImageFromDrop,
+  MAX_IMAGE_SIZE_LABEL,
+  SCREENSHOT_SIZE_TIP,
+} from "./imageUtils";
 import { Issue, IssueClassification, IssuePriority, IssueStatus } from "./issueTypes";
 
 export type NonBimIssue = Extract<Issue, { domain: 'other' | 'design' }>;
@@ -41,6 +47,11 @@ export const DEFAULT_CAMERA_POSITION = { x: 0, y: 0, z: 0 };
 export const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
 export const DEFAULT_CAMERA_UP_VECTOR = { x: 0, y: 1, z: 0 };
 export const DEFAULT_FIELD_OF_VIEW = 60;
+
+// Re-exported so any file that only imports from issueCardHelpers (rather
+// than reaching into imageUtils directly) can still show accurate size/tip
+// copy next to an upload control.
+export { MAX_IMAGE_SIZE_LABEL, SCREENSHOT_SIZE_TIP };
 
 export const getImageSource = (imageData: string | undefined): string => {
   if (!imageData) {
@@ -97,12 +108,6 @@ export const getDrawingIcon = (fileType: string): string => {
 // comments) into clickable <a> tags, and preserves line breaks. Written
 // with React.createElement (not JSX) so this file can stay a plain .ts
 // module rather than needing a .tsx rename.
-//
-// - Matches http(s):// and www. URLs.
-// - Strips trailing sentence punctuation (e.g. "check this out: https://x.com."
-//   won't swallow the period into the link).
-// - www.example.com links get an https:// prefix added to the href only —
-//   the visible text still reads exactly as typed.
 // ---------------------------------------------------------------------------
 
 const URL_PATTERN = /(https?:\/\/[^\s<>"')]+|www\.[^\s<>"')]+)/gi;
@@ -181,8 +186,15 @@ export interface UseScreenshotUploadResult {
   format: ScreenshotFormat;
   preview: string | null;
   processing: boolean;
+  isDragging: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
+  /** Wire onto a textarea or the dropzone itself. No-ops on non-image paste. */
+  handlePaste: (e: React.ClipboardEvent) => Promise<void>;
+  /** Wire onto the dropzone element's onDrop. */
+  handleDrop: (e: React.DragEvent) => Promise<void>;
+  handleDragOver: (e: React.DragEvent) => void;
+  handleDragLeave: (e: React.DragEvent) => void;
   setScreenshot: (v: string | null) => void;
   setPreview: (v: string | null) => void;
   reset: () => void;
@@ -190,12 +202,12 @@ export interface UseScreenshotUploadResult {
 
 /**
  * Shared logic behind every "pick an image, compress it, hold it as base64
- * pending a save" flow in IssueCard (main screenshot, resolution screenshot,
- * extra screenshot, comment screenshot, edit-comment screenshot).
+ * pending a save" flow in IssueCard and the new-issue form (main screenshot,
+ * resolution screenshot, comment screenshot, edit-comment screenshot).
  *
- * withPreview mirrors the original components exactly: the main edit-mode
- * screenshot never built a separate data-URL preview string (it derived
- * `displayScreenshot` inline instead), while the other four always did.
+ * All three entry points — file picker, drag-and-drop, clipboard paste —
+ * funnel through the same processImageFile() call, so size/type validation
+ * and error copy are identical no matter how the image arrived.
  */
 export function useScreenshotUpload(
   onError: (msg: string) => void,
@@ -205,30 +217,64 @@ export function useScreenshotUpload(
   const [format, setFormat] = useState<ScreenshotFormat>("png");
   const [preview, setPreview] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const applyFile = async (file: File) => {
+    setProcessing(true);
+    try {
+      const result = await processImageFile(file, { onError });
+      if (!result) return;
+      setScreenshot(result.base64);
+      setFormat(result.format);
+      if (withPreview) {
+        setPreview(`data:image/${result.format};base64,${result.base64}`);
+      }
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    await applyFile(file);
+    // Reset so re-selecting the exact same file (e.g. after Discard) still
+    // fires onChange.
+    e.target.value = '';
+  };
 
-    if (file.size > 5 * 1024 * 1024) {
-      onError('Image size must be less than 5MB');
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const file = extractImageFromClipboard(e);
+    if (!file) return;
+    // Only swallow the event once we know it's an image, so normal text
+    // pasting into the same textarea keeps working.
+    e.preventDefault();
+    await applyFile(file);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = extractImageFromDrop(e);
+    if (!file) {
+      onError('Please drop a PNG or JPEG image.');
       return;
     }
+    await applyFile(file);
+  };
 
-    setProcessing(true);
-    try {
-      const { base64, format: fmt } = await compressImage(file);
-      setScreenshot(base64);
-      setFormat(fmt);
-      if (withPreview) {
-        setPreview(`data:image/${fmt};base64,${base64}`);
-      }
-    } catch {
-      onError('Failed to process image file');
-    } finally {
-      setProcessing(false);
-    }
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
   };
 
   const reset = () => {
@@ -241,8 +287,13 @@ export function useScreenshotUpload(
     format,
     preview,
     processing,
+    isDragging,
     fileInputRef,
     handleFileUpload,
+    handlePaste,
+    handleDrop,
+    handleDragOver,
+    handleDragLeave,
     setScreenshot,
     setPreview,
     reset,

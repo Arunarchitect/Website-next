@@ -46,7 +46,6 @@ import {
   CommentsList,
   ResolvePanel,
   ActionsBar,
-  AddScreenshotPanel,
   AddCommentPanel,
   IssueSidebar,
   ScreenshotModal,
@@ -60,7 +59,6 @@ interface IssueCardProps {
   onResolve: (resolution: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onRemoveSnapshot: () => Promise<void>;
   onRemoveAttachment: (index: number) => Promise<void>;
-  onAddScreenshot: (text: string, snapshotData: string, snapshotFormat: "png" | "jpg") => Promise<void>;
   onAddComment: (text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg") => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onEditComment: (commentId: string, text: string, snapshotData?: string, snapshotFormat?: "png" | "jpg", removeSnapshot?: boolean) => Promise<void>;
@@ -83,7 +81,6 @@ export function IssueCard({
   onResolve,
   onRemoveSnapshot,
   onRemoveAttachment,
-  onAddScreenshot,
   onAddComment,
   onDeleteComment,
   onEditComment,
@@ -103,15 +100,14 @@ export function IssueCard({
   const [accessOrgMembers, setAccessOrgMembers] = useState<AssigneeOption[]>([]);
   const [loadingAccessMembers, setLoadingAccessMembers] = useState(false);
 
-  // Screenshot upload flows — one hook instance per independent upload site,
-  // matching the five separate state blocks in the original component.
+  // Screenshot upload flows — one hook instance per independent upload site.
+  // Each one now exposes click-upload, drag-and-drop, and clipboard-paste
+  // through the same hook (see useScreenshotUpload in issueCardHelpers.ts).
   const mainScreenshot = useScreenshotUpload(setSaveError, false);
   const resolutionScreenshot = useScreenshotUpload(setSaveError, true);
-  const extraScreenshot = useScreenshotUpload(setSaveError, true);
   const commentScreenshot = useScreenshotUpload(setSaveError, true);
   const editingCommentScreenshotUpload = useScreenshotUpload(setSaveError, true);
 
-  const [showAddScreenshot, setShowAddScreenshot] = useState(false);
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentText, setCommentText] = useState("");
 
@@ -121,8 +117,6 @@ export function IssueCard({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentText, setEditingCommentText] = useState("");
   const [editingCommentHasExistingImage, setEditingCommentHasExistingImage] = useState(false);
-
-  const [extraCommentText, setExtraCommentText] = useState("");
 
   const [form, setForm] = useState({
     title: issue.title,
@@ -222,23 +216,6 @@ export function IssueCard({
     const dateB = new Date(b.timestamp).getTime();
     return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
-
-  const handleAddScreenshot = async () => {
-    if (!extraScreenshot.screenshot) return;
-    try {
-      setSaveError(null);
-      await onAddScreenshot(
-        extraCommentText.trim() || "Screenshot added",
-        extraScreenshot.screenshot,
-        extraScreenshot.format
-      );
-      extraScreenshot.reset();
-      setExtraCommentText("");
-      setShowAddScreenshot(false);
-    } catch {
-      setSaveError('Failed to add screenshot.');
-    }
-  };
 
   const handleAddComment = async () => {
     if (!commentText.trim()) return;
@@ -573,6 +550,7 @@ export function IssueCard({
               className="field-input description-input"
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              onPaste={mainScreenshot.handlePaste}
               rows={3}
             />
           ) : (
@@ -592,8 +570,13 @@ export function IssueCard({
             newScreenshot={mainScreenshot.screenshot}
             newScreenshotFormat={mainScreenshot.format}
             processingScreenshot={mainScreenshot.processing}
+            isDragging={mainScreenshot.isDragging}
             fileInputRef={mainScreenshot.fileInputRef}
             onFileUpload={mainScreenshot.handleFileUpload}
+            onPaste={mainScreenshot.handlePaste}
+            onDrop={mainScreenshot.handleDrop}
+            onDragOver={mainScreenshot.handleDragOver}
+            onDragLeave={mainScreenshot.handleDragLeave}
             onDiscardNew={() => mainScreenshot.setScreenshot(null)}
             onRemoveSavedScreenshot={handleRemoveSavedScreenshot}
             onImageClick={handleImageClick}
@@ -671,8 +654,13 @@ export function IssueCard({
               editingCommentScreenshot={editingCommentScreenshotUpload.screenshot}
               editingCommentPreview={editingCommentScreenshotUpload.preview}
               processingEditCommentScreenshot={editingCommentScreenshotUpload.processing}
+              editingCommentIsDragging={editingCommentScreenshotUpload.isDragging}
               editCommentFileInputRef={editingCommentScreenshotUpload.fileInputRef}
               onEditCommentFileUpload={editingCommentScreenshotUpload.handleFileUpload}
+              onEditCommentPaste={editingCommentScreenshotUpload.handlePaste}
+              onEditCommentDrop={editingCommentScreenshotUpload.handleDrop}
+              onEditCommentDragOver={editingCommentScreenshotUpload.handleDragOver}
+              onEditCommentDragLeave={editingCommentScreenshotUpload.handleDragLeave}
               onRemoveCommentImage={removeCommentImage}
               onDiscardNewCommentImage={() => editingCommentScreenshotUpload.reset()}
               onCancelEditComment={() => {
@@ -693,6 +681,11 @@ export function IssueCard({
               onRemoveResolutionScreenshot={() => resolutionScreenshot.reset()}
               resolveFileInputRef={resolutionScreenshot.fileInputRef}
               onResolutionFileUpload={resolutionScreenshot.handleFileUpload}
+              onResolutionPaste={resolutionScreenshot.handlePaste}
+              onResolutionDrop={resolutionScreenshot.handleDrop}
+              onResolutionDragOver={resolutionScreenshot.handleDragOver}
+              onResolutionDragLeave={resolutionScreenshot.handleDragLeave}
+              resolutionIsDragging={resolutionScreenshot.isDragging}
               processingResolutionScreenshot={resolutionScreenshot.processing}
               onCancelResolve={() => {
                 setIsResolving(false);
@@ -715,7 +708,6 @@ export function IssueCard({
             onEdit={() => setIsEditing(true)}
             onDeleteIssue={handleDeleteIssueClick}
             onToggleResolve={() => setIsResolving((v) => !v)}
-            onToggleAddScreenshot={() => setShowAddScreenshot((v) => !v)}
             onToggleCommentInput={() => setShowCommentInput((v) => !v)}
             onToggleManageAccess={() => setShowManageAccess((v) => !v)}
           />
@@ -733,20 +725,6 @@ export function IssueCard({
             />
           )}
 
-          {showAddScreenshot && (
-            <AddScreenshotPanel
-              extraCommentText={extraCommentText}
-              setExtraCommentText={setExtraCommentText}
-              extraPreview={extraScreenshot.preview}
-              onRemoveExtraScreenshot={() => extraScreenshot.reset()}
-              extraFileInputRef={extraScreenshot.fileInputRef}
-              onExtraFileUpload={extraScreenshot.handleFileUpload}
-              processingExtraScreenshot={extraScreenshot.processing}
-              extraScreenshot={extraScreenshot.screenshot}
-              onAddScreenshot={handleAddScreenshot}
-            />
-          )}
-
           {showCommentInput && (
             <AddCommentPanel
               commentText={commentText}
@@ -755,6 +733,11 @@ export function IssueCard({
               onRemoveCommentScreenshot={() => commentScreenshot.reset()}
               commentFileInputRef={commentScreenshot.fileInputRef}
               onCommentFileUpload={commentScreenshot.handleFileUpload}
+              onCommentPaste={commentScreenshot.handlePaste}
+              onCommentDrop={commentScreenshot.handleDrop}
+              onCommentDragOver={commentScreenshot.handleDragOver}
+              onCommentDragLeave={commentScreenshot.handleDragLeave}
+              commentIsDragging={commentScreenshot.isDragging}
               processingCommentScreenshot={commentScreenshot.processing}
               onCancelComment={() => {
                 setShowCommentInput(false);

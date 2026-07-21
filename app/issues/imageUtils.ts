@@ -1,20 +1,24 @@
 // app/issues/imageUtils.ts
 
-// Shared image-compression helper used by every screenshot upload handler
-// across the Issues feature (new issue form, edit screenshot, comment
-// screenshot, edit-comment screenshot, resolution screenshot, add-screenshot).
-//
-// Defaults chosen for screenshots specifically: 1920px keeps UI/text detail
-// readable at full-size modal view, 0.82 JPEG quality is visually
-// near-lossless for screenshots while cutting typical phone-camera-sized
-// files (3-5MB) down to a few hundred KB. PNGs with transparency are kept
-// as PNG since JPEG has no alpha channel; everything else is re-encoded as
-// JPEG since it compresses far better for photos/screenshots.
+import type * as React from "react";
 
 export interface CompressedImage {
   base64: string;
   format: "png" | "jpg";
 }
+
+// Frontend-enforced upload cap, shared by every upload site (file picker,
+// drag-and-drop, clipboard paste) across the Issues feature so the limit
+// can't drift between call sites.
+export const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
+export const MAX_IMAGE_SIZE_LABEL = "2MB";
+
+export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg"];
+
+// Shown near upload controls so people understand *why* a phone photo
+// might get rejected, and what to do instead.
+export const SCREENSHOT_SIZE_TIP =
+  "Tip: a cropped screenshot is usually far smaller than a photo and uploads faster — try Win+Shift+S (Windows) or Cmd+Shift+4 (Mac), then paste it in directly with Ctrl/Cmd+V.";
 
 export function compressImage(
   file: File,
@@ -60,4 +64,58 @@ export function compressImage(
     reader.onerror = () => reject(new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
+}
+
+export interface ProcessImageOptions {
+  onError: (msg: string) => void;
+}
+
+/**
+ * Single validation + compression entry point used by every upload site
+ * (file picker, drag-and-drop, clipboard paste). Keeping it here means the
+ * size cap, accepted types, and error copy can never drift between call
+ * sites the way the old per-component `file.size > 5 * 1024 * 1024` checks
+ * did.
+ */
+export async function processImageFile(
+  file: File,
+  { onError }: ProcessImageOptions
+): Promise<CompressedImage | null> {
+  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+    onError('Only PNG and JPEG images are supported.');
+    return null;
+  }
+  if (file.size > MAX_IMAGE_SIZE_BYTES) {
+    onError(`Image is too large (max ${MAX_IMAGE_SIZE_LABEL}). ${SCREENSHOT_SIZE_TIP}`);
+    return null;
+  }
+  try {
+    return await compressImage(file);
+  } catch {
+    onError('Failed to process image file.');
+    return null;
+  }
+}
+
+export function extractImageFromClipboard(
+  e: React.ClipboardEvent | ClipboardEvent
+): File | null {
+  const items = e.clipboardData?.items;
+  if (!items) return null;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      return item.getAsFile();
+    }
+  }
+  return null;
+}
+
+export function extractImageFromDrop(e: React.DragEvent): File | null {
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return null;
+  for (let i = 0; i < files.length; i++) {
+    if (files[i].type.startsWith('image/')) return files[i];
+  }
+  return null;
 }

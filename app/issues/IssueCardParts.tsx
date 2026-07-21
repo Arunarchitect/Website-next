@@ -15,6 +15,8 @@ import {
   NonBimIssue,
   STATUS_OPTIONS,
   PRIORITY_OPTIONS,
+  MAX_IMAGE_SIZE_LABEL,
+  SCREENSHOT_SIZE_TIP,
 } from "./issueCardHelpers";
 import { ClassificationBadge } from "./IssueCardAccessParts";
 import { ExpandableText } from "./ExpandableText";
@@ -22,6 +24,106 @@ import { ExpandableText } from "./ExpandableText";
 // Derived rather than imported: the original component never named this
 // shape explicitly, it just indexed into `issue.linkedDocuments`.
 type LinkedDocumentRef = NonNullable<Issue['linkedDocuments']>[number];
+
+// ---------------------------------------------------------------------------
+// ScreenshotDropzone — shared click-to-upload / drag-and-drop / paste
+// control. Every screenshot upload site in the Issues feature (main issue
+// screenshot, comment images, resolution proof, edit-comment images, and
+// the new-issue form) renders this instead of a plain button, so people get
+// the same three ways in everywhere: click, drag a file onto it, or paste
+// straight from the clipboard.
+// ---------------------------------------------------------------------------
+
+export interface ScreenshotDropzoneProps {
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onPaste: (e: React.ClipboardEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  isDragging: boolean;
+  processing: boolean;
+  /** Overrides the default idle label, e.g. "Replace image". */
+  label?: string;
+  /** Compact renders a shorter single-line control instead of the full box — used inline in tighter panels. */
+  compact?: boolean;
+}
+
+export function ScreenshotDropzone({
+  fileInputRef,
+  onFileUpload,
+  onPaste,
+  onDrop,
+  onDragOver,
+  onDragLeave,
+  isDragging,
+  processing,
+  label,
+  compact = false,
+}: ScreenshotDropzoneProps) {
+  const idleLabel =
+    label || (isDragging ? 'Drop image to upload' : compact
+      ? 'Click, drag, or paste an image'
+      : 'Click to upload, drag a file here, or paste (Ctrl/Cmd+V)');
+
+  return (
+    <div
+      className={`screenshot-dropzone${isDragging ? ' screenshot-dropzone-active' : ''}${compact ? ' screenshot-dropzone-compact' : ''}`}
+      tabIndex={0}
+      role="button"
+      aria-label="Upload screenshot: click, drag and drop, or paste"
+      onClick={() => !processing && fileInputRef.current?.click()}
+      onKeyDown={(e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && !processing) {
+          e.preventDefault();
+          fileInputRef.current?.click();
+        }
+      }}
+      onPaste={onPaste}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      style={{
+        border: `2px dashed ${isDragging ? '#4A8B6B' : 'var(--line, #D0D5DD)'}`,
+        borderRadius: 8,
+        padding: compact ? '10px 12px' : '18px 12px',
+        textAlign: 'center',
+        cursor: processing ? 'default' : 'pointer',
+        background: isDragging ? 'rgba(74, 139, 107, 0.08)' : 'transparent',
+        transition: 'background 0.15s ease, border-color 0.15s ease',
+        outline: 'none',
+        display: 'flex',
+        flexDirection: compact ? 'row' : 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: compact ? 8 : 4,
+      }}
+    >
+      <i
+        className={`ti ${processing ? 'ti-loader' : 'ti-cloud-upload'}`}
+        style={{ fontSize: compact ? 16 : 22 }}
+      />
+      <div style={{ fontSize: 13, fontWeight: 500 }}>
+        {processing ? 'Processing…' : idleLabel}
+      </div>
+      {!compact && (
+        <div className="file-hint" style={{ marginTop: 2 }}>
+          PNG/JPG, max {MAX_IMAGE_SIZE_LABEL}. {SCREENSHOT_SIZE_TIP}
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        onChange={onFileUpload}
+        style={{ display: 'none' }}
+        // Stop a click on the (hidden) input from re-triggering the parent's
+        // onClick and double-opening the file dialog.
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // IssueHeader — id, title (view/edit), domain badge, owner badge, org badge
@@ -261,7 +363,9 @@ export function IssueEditForm({
 
 // ---------------------------------------------------------------------------
 // ScreenshotSection — current screenshot display (view mode) plus the full
-// upload / replace / discard / delete area (edit mode)
+// upload / replace / discard / delete area (edit mode). Upload now goes
+// through ScreenshotDropzone (click / drag-drop / paste) instead of a
+// single "Upload Image" button.
 // ---------------------------------------------------------------------------
 
 interface ScreenshotSectionProps {
@@ -272,8 +376,13 @@ interface ScreenshotSectionProps {
   newScreenshot: string | null;
   newScreenshotFormat: "png" | "jpg";
   processingScreenshot: boolean;
+  isDragging: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onPaste: (e: React.ClipboardEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: (e: React.DragEvent) => void;
   onDiscardNew: () => void;
   onRemoveSavedScreenshot: () => void;
   onImageClick: (src: string) => void;
@@ -289,8 +398,13 @@ export function ScreenshotSection({
   newScreenshot,
   newScreenshotFormat,
   processingScreenshot,
+  isDragging,
   fileInputRef,
   onFileUpload,
+  onPaste,
+  onDrop,
+  onDragOver,
+  onDragLeave,
   onDiscardNew,
   onRemoveSavedScreenshot,
   onImageClick,
@@ -332,8 +446,8 @@ export function ScreenshotSection({
             <span className="screenshot-label">Screenshot</span>
           </div>
 
-          {hasScreenshot && (
-            <div className="screenshot-preview-container" style={{ position: 'relative', width: 200, height: 150 }}>
+          {hasScreenshot && !newScreenshot && (
+            <div className="screenshot-preview-container" style={{ position: 'relative', width: 200, height: 150, marginBottom: 10 }}>
               <Image
                 src={displayScreenshot || '/images/test.jpg'}
                 alt="Screenshot preview"
@@ -344,33 +458,29 @@ export function ScreenshotSection({
                 style={{ objectFit: 'contain' }}
                 onError={onImageError}
               />
-              {!newScreenshot && (
-                <span className="screenshot-current-label">Current image</span>
-              )}
+              <span className="screenshot-current-label">Current image</span>
             </div>
           )}
 
-          <div className="screenshot-upload-actions">
-            <button
-              className="btn-primary small"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={processingScreenshot}
-              type="button"
-            >
-              <i className={`ti ${processingScreenshot ? 'ti-loader' : 'ti-upload'}`} />
-              {processingScreenshot
-                ? 'Processing…'
-                : newScreenshot ? 'Change New Image' : hasScreenshot ? 'Replace Image' : 'Upload Image'}
-            </button>
+          <ScreenshotDropzone
+            fileInputRef={fileInputRef}
+            onFileUpload={onFileUpload}
+            onPaste={onPaste}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            isDragging={isDragging}
+            processing={processingScreenshot}
+            label={
+              newScreenshot
+                ? 'Click, drag, or paste to change again'
+                : hasScreenshot
+                ? 'Click, drag, or paste to replace'
+                : undefined
+            }
+          />
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg"
-              onChange={onFileUpload}
-              style={{ display: 'none' }}
-            />
-
+          <div className="screenshot-upload-actions" style={{ marginTop: 10 }}>
             {newScreenshot && (
               <button
                 className="btn-outline small danger"
@@ -390,8 +500,6 @@ export function ScreenshotSection({
                 <i className="ti ti-trash" /> Delete
               </button>
             )}
-
-            <span className="file-hint">Max 5MB (PNG/JPG) — auto-compressed</span>
           </div>
 
           {newScreenshot && (
@@ -649,8 +757,13 @@ interface CommentEditState {
   editingCommentScreenshot: string | null;
   editingCommentPreview: string | null;
   processingEditCommentScreenshot: boolean;
+  editingCommentIsDragging: boolean;
   editCommentFileInputRef: React.RefObject<HTMLInputElement | null>;
   onEditCommentFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onEditCommentPaste: (e: React.ClipboardEvent) => void;
+  onEditCommentDrop: (e: React.DragEvent) => void;
+  onEditCommentDragOver: (e: React.DragEvent) => void;
+  onEditCommentDragLeave: (e: React.DragEvent) => void;
   onRemoveCommentImage: () => void;
   onDiscardNewCommentImage: () => void;
   onCancelEditComment: () => void;
@@ -677,8 +790,13 @@ function CommentItem({
   editingCommentScreenshot,
   editingCommentPreview,
   processingEditCommentScreenshot,
+  editingCommentIsDragging,
   editCommentFileInputRef,
   onEditCommentFileUpload,
+  onEditCommentPaste,
+  onEditCommentDrop,
+  onEditCommentDragOver,
+  onEditCommentDragLeave,
   onRemoveCommentImage,
   onDiscardNewCommentImage,
   onCancelEditComment,
@@ -697,6 +815,7 @@ function CommentItem({
             className="field-input"
             value={editingCommentText}
             onChange={(e) => setEditingCommentText(e.target.value)}
+            onPaste={onEditCommentPaste}
             rows={2}
           />
 
@@ -756,27 +875,20 @@ function CommentItem({
               </div>
             )}
 
-            <div className="comment-image-upload-actions">
-              <button
-                className="btn-outline small"
-                onClick={() => editCommentFileInputRef.current?.click()}
-                disabled={processingEditCommentScreenshot}
-                type="button"
-              >
-                <i className={`ti ${processingEditCommentScreenshot ? 'ti-loader' : 'ti-upload'}`} />
-                {processingEditCommentScreenshot
-                  ? 'Processing…'
-                  : editingCommentScreenshot ? 'Change Image' : editingCommentHasExistingImage ? 'Replace Image' : 'Add Image'}
-              </button>
-              <input
-                ref={editCommentFileInputRef}
-                type="file"
-                accept="image/png,image/jpeg"
-                onChange={onEditCommentFileUpload}
-                style={{ display: 'none' }}
+            {!editingCommentScreenshot && (
+              <ScreenshotDropzone
+                fileInputRef={editCommentFileInputRef}
+                onFileUpload={onEditCommentFileUpload}
+                onPaste={onEditCommentPaste}
+                onDrop={onEditCommentDrop}
+                onDragOver={onEditCommentDragOver}
+                onDragLeave={onEditCommentDragLeave}
+                isDragging={editingCommentIsDragging}
+                processing={processingEditCommentScreenshot}
+                compact
+                label={editingCommentHasExistingImage ? 'Click, drag, or paste to replace' : undefined}
               />
-              <span className="file-hint">Max 5MB — auto-compressed</span>
-            </div>
+            )}
           </div>
 
           <div className="comment-edit-actions">
@@ -944,6 +1056,11 @@ interface ResolvePanelProps {
   onRemoveResolutionScreenshot: () => void;
   resolveFileInputRef: React.RefObject<HTMLInputElement | null>;
   onResolutionFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onResolutionPaste: (e: React.ClipboardEvent) => void;
+  onResolutionDrop: (e: React.DragEvent) => void;
+  onResolutionDragOver: (e: React.DragEvent) => void;
+  onResolutionDragLeave: (e: React.DragEvent) => void;
+  resolutionIsDragging: boolean;
   processingResolutionScreenshot: boolean;
   onCancelResolve: () => void;
   onConfirmResolve: () => void;
@@ -956,6 +1073,11 @@ export function ResolvePanel({
   onRemoveResolutionScreenshot,
   resolveFileInputRef,
   onResolutionFileUpload,
+  onResolutionPaste,
+  onResolutionDrop,
+  onResolutionDragOver,
+  onResolutionDragLeave,
+  resolutionIsDragging,
   processingResolutionScreenshot,
   onCancelResolve,
   onConfirmResolve,
@@ -967,10 +1089,11 @@ export function ResolvePanel({
         placeholder="Describe how this was resolved…"
         value={resolutionText}
         onChange={(e) => setResolutionText(e.target.value)}
+        onPaste={onResolutionPaste}
         rows={2}
       />
 
-      <div className="resolve-screenshot-upload">
+      <div className="resolve-screenshot-upload" style={{ marginTop: 8 }}>
         {resolutionPreview ? (
           <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
             <Image
@@ -990,23 +1113,19 @@ export function ResolvePanel({
             </button>
           </div>
         ) : (
-          <button
-            className="btn-outline small"
-            onClick={() => resolveFileInputRef.current?.click()}
-            disabled={processingResolutionScreenshot}
-            type="button"
-          >
-            <i className={`ti ${processingResolutionScreenshot ? 'ti-loader' : 'ti-camera'}`} />
-            {processingResolutionScreenshot ? 'Processing…' : 'Attach proof-of-fix screenshot (optional)'}
-          </button>
+          <ScreenshotDropzone
+            fileInputRef={resolveFileInputRef}
+            onFileUpload={onResolutionFileUpload}
+            onPaste={onResolutionPaste}
+            onDrop={onResolutionDrop}
+            onDragOver={onResolutionDragOver}
+            onDragLeave={onResolutionDragLeave}
+            isDragging={resolutionIsDragging}
+            processing={processingResolutionScreenshot}
+            compact
+            label="Attach proof-of-fix screenshot (optional)"
+          />
         )}
-        <input
-          ref={resolveFileInputRef}
-          type="file"
-          accept="image/png,image/jpeg"
-          onChange={onResolutionFileUpload}
-          style={{ display: 'none' }}
-        />
       </div>
 
       <div className="form-actions">
@@ -1026,7 +1145,7 @@ export function ResolvePanel({
 }
 
 // ---------------------------------------------------------------------------
-// ActionsBar — edit/save/cancel/delete/resolve/add-screenshot/add-comment
+// ActionsBar — edit/save/cancel/delete/resolve/add-comment
 // ---------------------------------------------------------------------------
 
 interface ActionsBarProps {
@@ -1039,9 +1158,8 @@ interface ActionsBarProps {
   onEdit: () => void;
   onDeleteIssue: () => void;
   onToggleResolve: () => void;
-  onToggleAddScreenshot: () => void;
   onToggleCommentInput: () => void;
-  onToggleManageAccess: () => void;  // NEW
+  onToggleManageAccess: () => void;
 }
 
 export function ActionsBar({
@@ -1054,7 +1172,6 @@ export function ActionsBar({
   onEdit,
   onDeleteIssue,
   onToggleResolve,
-  onToggleAddScreenshot,
   onToggleCommentInput,
   onToggleManageAccess,
 }: ActionsBarProps) {
@@ -1095,9 +1212,6 @@ export function ActionsBar({
               <i className="ti ti-check" /> Resolve
             </button>
           )}
-          <button className="btn-outline" onClick={onToggleAddScreenshot}>
-            <i className="ti ti-photo-plus" /> Add Screenshot
-          </button>
           <button className="btn-outline" onClick={onToggleCommentInput}>
             <i className="ti ti-message-plus" /> Add Comment
           </button>
@@ -1108,94 +1222,11 @@ export function ActionsBar({
 }
 
 // ---------------------------------------------------------------------------
-// AddScreenshotPanel
-// ---------------------------------------------------------------------------
-
-interface AddScreenshotPanelProps {
-  extraCommentText: string;
-  setExtraCommentText: (v: string) => void;
-  extraPreview: string | null;
-  onRemoveExtraScreenshot: () => void;
-  extraFileInputRef: React.RefObject<HTMLInputElement | null>;
-  onExtraFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  processingExtraScreenshot: boolean;
-  extraScreenshot: string | null;
-  onAddScreenshot: () => void;
-}
-
-export function AddScreenshotPanel({
-  extraCommentText,
-  setExtraCommentText,
-  extraPreview,
-  onRemoveExtraScreenshot,
-  extraFileInputRef,
-  onExtraFileUpload,
-  processingExtraScreenshot,
-  extraScreenshot,
-  onAddScreenshot,
-}: AddScreenshotPanelProps) {
-  return (
-    <div className="resolve-screenshot-upload" style={{ marginTop: '12px' }}>
-      <textarea
-        className="field-input"
-        placeholder="Add a note about this screenshot (optional)…"
-        value={extraCommentText}
-        onChange={(e) => setExtraCommentText(e.target.value)}
-        rows={2}
-        style={{ marginBottom: '8px' }}
-      />
-      {extraPreview ? (
-        <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
-          <Image
-            src={extraPreview}
-            alt="New screenshot preview"
-            fill
-            unoptimized
-            sizes="200px"
-            style={{ objectFit: 'contain' }}
-          />
-          <button
-            className="remove-btn"
-            onClick={onRemoveExtraScreenshot}
-            type="button"
-          >
-            ✕
-          </button>
-        </div>
-      ) : (
-        <button
-          className="btn-outline small"
-          onClick={() => extraFileInputRef.current?.click()}
-          disabled={processingExtraScreenshot}
-          type="button"
-        >
-          <i className={`ti ${processingExtraScreenshot ? 'ti-loader' : 'ti-camera'}`} />
-          {processingExtraScreenshot ? 'Processing…' : 'Choose image'}
-        </button>
-      )}
-      <input
-        ref={extraFileInputRef}
-        type="file"
-        accept="image/png,image/jpeg"
-        onChange={onExtraFileUpload}
-        style={{ display: 'none' }}
-      />
-      {extraScreenshot && (
-        <button
-          className="btn-primary small"
-          onClick={onAddScreenshot}
-          style={{ marginTop: '8px' }}
-          type="button"
-        >
-          Add
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AddCommentPanel
+// AddCommentPanel — the single "post a comment, optionally with an image"
+// entry point. Both the text and (if provided) the image land on the same
+// IssueComment row / comment.snapshot field on the backend. The textarea
+// itself accepts pasted images too, since that's the most natural place
+// someone hits Ctrl/Cmd+V while writing a comment.
 // ---------------------------------------------------------------------------
 
 interface AddCommentPanelProps {
@@ -1205,6 +1236,11 @@ interface AddCommentPanelProps {
   onRemoveCommentScreenshot: () => void;
   commentFileInputRef: React.RefObject<HTMLInputElement | null>;
   onCommentFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onCommentPaste: (e: React.ClipboardEvent) => void;
+  onCommentDrop: (e: React.DragEvent) => void;
+  onCommentDragOver: (e: React.DragEvent) => void;
+  onCommentDragLeave: (e: React.DragEvent) => void;
+  commentIsDragging: boolean;
   processingCommentScreenshot: boolean;
   onCancelComment: () => void;
   onAddComment: () => void;
@@ -1217,6 +1253,11 @@ export function AddCommentPanel({
   onRemoveCommentScreenshot,
   commentFileInputRef,
   onCommentFileUpload,
+  onCommentPaste,
+  onCommentDrop,
+  onCommentDragOver,
+  onCommentDragLeave,
+  commentIsDragging,
   processingCommentScreenshot,
   onCancelComment,
   onAddComment,
@@ -1225,13 +1266,14 @@ export function AddCommentPanel({
     <div className="comment-input-panel" style={{ marginTop: '12px' }}>
       <textarea
         className="field-input"
-        placeholder="Add a comment…"
+        placeholder="Add a comment… (you can paste an image here too)"
         value={commentText}
         onChange={(e) => setCommentText(e.target.value)}
+        onPaste={onCommentPaste}
         rows={2}
       />
 
-      <div className="comment-image-upload">
+      <div className="comment-image-upload" style={{ marginTop: 8 }}>
         {commentPreview ? (
           <div className="comment-image-preview" style={{ position: 'relative', width: 150, height: 100 }}>
             <Image
@@ -1251,23 +1293,19 @@ export function AddCommentPanel({
             </button>
           </div>
         ) : (
-          <button
-            className="btn-outline small"
-            onClick={() => commentFileInputRef.current?.click()}
-            disabled={processingCommentScreenshot}
-            type="button"
-          >
-            <i className={`ti ${processingCommentScreenshot ? 'ti-loader' : 'ti-camera'}`} />
-            {processingCommentScreenshot ? 'Processing…' : 'Add image (optional)'}
-          </button>
+          <ScreenshotDropzone
+            fileInputRef={commentFileInputRef}
+            onFileUpload={onCommentFileUpload}
+            onPaste={onCommentPaste}
+            onDrop={onCommentDrop}
+            onDragOver={onCommentDragOver}
+            onDragLeave={onCommentDragLeave}
+            isDragging={commentIsDragging}
+            processing={processingCommentScreenshot}
+            compact
+            label="Add image (optional) — click, drag, or paste"
+          />
         )}
-        <input
-          ref={commentFileInputRef}
-          type="file"
-          accept="image/png,image/jpeg"
-          onChange={onCommentFileUpload}
-          style={{ display: 'none' }}
-        />
       </div>
 
       <div className="form-actions" style={{ marginTop: '8px' }}>

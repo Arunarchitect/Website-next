@@ -766,16 +766,6 @@ export async function addComment(
   }
 }
 
-export async function addCommentWithSnapshot(
-  id: string | number,
-  author: string,
-  text: string,
-  snapshotData?: string,
-  snapshotFormat?: "png" | "jpg"
-): Promise<Issue | undefined> {
-  return addComment(id, author, text, snapshotData, snapshotFormat);
-}
-
 export async function getComments(id: string | number): Promise<IssueComment[]> {
   try {
     const response = await apiClient.get(`/issues/issues/${id}/comments/`);
@@ -971,7 +961,6 @@ const issueApi = {
   removeSnapshot,
   removeAttachment,
   addComment,
-  addCommentWithSnapshot,
   getComments,
   deleteComment,
   editComment,
