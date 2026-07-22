@@ -818,8 +818,7 @@ export async function editComment(
       payload.snapshot_data = snapshotData;
       payload.snapshot_format = snapshotFormat || 'png';
     } else if (removeSnapshot) {
-      payload.snapshot_data = null;
-      payload.snapshot_format = null;
+      payload.remove_snapshot = true;
     }
 
     const response = await apiClient.patch(`/issues/comments/${commentId}/`, payload);
@@ -837,6 +836,7 @@ export async function editComment(
     throw error;
   }
 }
+
 
 export async function linkIssue(id: string | number, linkedIssueId: string | number): Promise<void> {
   try {

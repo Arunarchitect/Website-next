@@ -1,5 +1,3 @@
-// app/issues/page.tsx
-
 "use client";
 
 import { useEffect, useState, useRef, useMemo } from "react";
@@ -131,9 +129,23 @@ interface NewDesignIssueInput extends NewIssueBase {
 
 type NewIssueInput = NewBimIssueInput | NewDesignIssueInput;
 
-type StatFilterKey = "open" | "inProgress" | "resolved" | "lowPriority" | "mediumPriority" | "highPriority" | null;
+// ---------------------------------------------------------------------------
+// Stats-strip filter chips — now multi-select. "open"/"inProgress"/"resolved"
+// form the STATUS group; the three priorities form the PRIORITY group.
+// Selections within a group are OR'd together (e.g. High + Low priority
+// selected -> shows issues that are High OR Low). Selections across groups
+// are AND'd together (e.g. Open + High selected -> shows issues that are
+// Open AND High). This is standard facet-filter behaviour: picking two
+// values from the SAME field widens the match, picking values from
+// DIFFERENT fields narrows it.
+// ---------------------------------------------------------------------------
 
-const STAT_FILTER_PREDICATES: Record<Exclude<StatFilterKey, null>, (issue: Issue) => boolean> = {
+type StatFilterKey = "open" | "inProgress" | "resolved" | "lowPriority" | "mediumPriority" | "highPriority";
+
+const STATUS_FILTER_KEYS: StatFilterKey[] = ["open", "inProgress", "resolved"];
+const PRIORITY_FILTER_KEYS: StatFilterKey[] = ["lowPriority", "mediumPriority", "highPriority"];
+
+const STAT_FILTER_PREDICATES: Record<StatFilterKey, (issue: Issue) => boolean> = {
   open: (i) => i.status === "Open",
   inProgress: (i) => i.status === "In Progress",
   resolved: (i) => i.status === "Resolved",
@@ -142,7 +154,7 @@ const STAT_FILTER_PREDICATES: Record<Exclude<StatFilterKey, null>, (issue: Issue
   highPriority: (i) => i.priority === "High",
 };
 
-const STAT_FILTER_LABELS: Record<Exclude<StatFilterKey, null>, string> = {
+const STAT_FILTER_LABELS: Record<StatFilterKey, string> = {
   open: "Open",
   inProgress: "In Progress",
   resolved: "Resolved",
@@ -150,6 +162,25 @@ const STAT_FILTER_LABELS: Record<Exclude<StatFilterKey, null>, string> = {
   mediumPriority: "Medium Priority",
   highPriority: "High Priority",
 };
+
+function matchesStatFilters(issue: Issue, activeFilters: Set<StatFilterKey>): boolean {
+  if (activeFilters.size === 0) return true;
+
+  const activeStatusKeys = STATUS_FILTER_KEYS.filter((k) => activeFilters.has(k));
+  const activePriorityKeys = PRIORITY_FILTER_KEYS.filter((k) => activeFilters.has(k));
+
+  if (activeStatusKeys.length > 0) {
+    const matchesAnyStatus = activeStatusKeys.some((k) => STAT_FILTER_PREDICATES[k](issue));
+    if (!matchesAnyStatus) return false;
+  }
+
+  if (activePriorityKeys.length > 0) {
+    const matchesAnyPriority = activePriorityKeys.some((k) => STAT_FILTER_PREDICATES[k](issue));
+    if (!matchesAnyPriority) return false;
+  }
+
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Sort — newest/oldest by either the creation date or the last-updated date.
@@ -241,9 +272,9 @@ export default function IssuesPage() {
   const [loadingFilterProjects, setLoadingFilterProjects] = useState(false);
   const [loadingFilterDeliverables, setLoadingFilterDeliverables] = useState(false);
 
-  // Which stats-strip card is currently driving the list filter (if any).
-  // Clicking a card toggles it on/off.
-  const [statFilter, setStatFilter] = useState<StatFilterKey>(null);
+  // Which stats-strip cards are currently driving the list filter (if any).
+  // Multi-select: clicking a card toggles it in/out of the active set.
+  const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(new Set());
 
   useEffect(() => {
     const loadUserFromStorage = () => {
@@ -376,28 +407,37 @@ export default function IssuesPage() {
     return map;
   }, [issues, projectNameById]);
 
-  const hasActiveFilters = !!filterOrgId || !!filterProjectId || !!filterDeliverableId || !!statFilter || !!searchQuery.trim();
+  const hasActiveFilters = !!filterOrgId || !!filterProjectId || !!filterDeliverableId || activeStatFilters.size > 0 || !!searchQuery.trim();
 
   const clearFilters = () => {
     setFilterOrgId("");
     setFilterProjectId("");
     setFilterDeliverableId("");
-    setStatFilter(null);
+    setActiveStatFilters(new Set());
     setSearchQuery("");
   };
 
-  // Clicking an active stat card again turns the filter off.
-  const handleStatClick = (key: Exclude<StatFilterKey, null>) => {
-    setStatFilter((prev) => (prev === key ? null : key));
+  // Clicking a stat card toggles it in/out of the active multi-select set.
+  const handleStatClick = (key: StatFilterKey) => {
+    setActiveStatFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
   };
 
   const trimmedQuery = searchQuery.trim().toLowerCase();
 
   // Scope for the stats strip: org / project / deliverable only (and the
   // domain tab, since that's a top-level view switch, not a "filter chip").
-  // Deliberately excludes statFilter and searchQuery — those are driven BY
-  // the stats/search, so folding them back in would make every card's count
-  // shift depending on which card (or search term) is currently active.
+  // Deliberately excludes activeStatFilters and searchQuery — those are
+  // driven BY the stats/search, so folding them back in would make every
+  // card's count shift depending on which cards (or search term) are
+  // currently active.
   const scopedIssues = useMemo(() => {
     return issues.filter((issue) => {
       if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
@@ -419,7 +459,7 @@ export default function IssuesPage() {
       if (issueProjectId !== filterProjectId) return false;
     }
     if (filterDeliverableId && issue.deliverable !== filterDeliverableId) return false;
-    if (statFilter && !STAT_FILTER_PREDICATES[statFilter](issue)) return false;
+    if (!matchesStatFilters(issue, activeStatFilters)) return false;
     if (trimmedQuery) {
       const haystack = issueSearchIndex.get(String(issue.id)) || '';
       if (!haystack.includes(trimmedQuery)) return false;
@@ -541,7 +581,7 @@ export default function IssuesPage() {
           icon="ti-alert-circle"
           label="Open"
           value={openIssues}
-          active={statFilter === "open"}
+          active={activeStatFilters.has("open")}
           urgent={openIssues > 0}
           onClick={() => handleStatClick("open")}
         />
@@ -549,48 +589,54 @@ export default function IssuesPage() {
           icon="ti-loader"
           label="In Progress"
           value={inProgressIssues}
-          active={statFilter === "inProgress"}
+          active={activeStatFilters.has("inProgress")}
           onClick={() => handleStatClick("inProgress")}
         />
         <StatCard
           icon="ti-check"
           label="Resolved"
           value={resolvedIssues}
-          active={statFilter === "resolved"}
+          active={activeStatFilters.has("resolved")}
           onClick={() => handleStatClick("resolved")}
         />
         <StatCard
           icon="ti-arrow-down"
           label="Low Priority"
           value={lowPriorityIssues}
-          active={statFilter === "lowPriority"}
+          active={activeStatFilters.has("lowPriority")}
           onClick={() => handleStatClick("lowPriority")}
         />
         <StatCard
           icon="ti-minus"
           label="Medium Priority"
           value={mediumPriorityIssues}
-          active={statFilter === "mediumPriority"}
+          active={activeStatFilters.has("mediumPriority")}
           onClick={() => handleStatClick("mediumPriority")}
         />
         <StatCard
           icon="ti-flag"
           label="High Priority"
           value={highPriorityIssues}
-          active={statFilter === "highPriority"}
+          active={activeStatFilters.has("highPriority")}
           urgent={highPriorityIssues > 0}
           onClick={() => handleStatClick("highPriority")}
         />
       </section>
 
-      {statFilter && (
+      {activeStatFilters.size > 0 && (
         <div className="stat-filter-banner">
           <i className="ti ti-filter" />
-          <span>Showing <strong>{STAT_FILTER_LABELS[statFilter]}</strong> issues only</span>
+          <span>
+            Showing{' '}
+            <strong>
+              {Array.from(activeStatFilters).map((k) => STAT_FILTER_LABELS[k]).join(', ')}
+            </strong>{' '}
+            issues only
+          </span>
           <button
             type="button"
             className="stat-filter-banner-clear"
-            onClick={() => setStatFilter(null)}
+            onClick={() => setActiveStatFilters(new Set())}
           >
             <i className="ti ti-x" /> Clear
           </button>
