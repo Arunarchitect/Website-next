@@ -558,7 +558,7 @@ export function IssueCard({
               text={issue.description}
               linkify={linkifyText}
               className="issue-description"
-              wordLimit={60}
+              wordLimit={30}
             />
           )}
 

@@ -2508,6 +2508,13 @@ textarea.field-input {
   text-decoration: underline;
 }
 
+.issue-description {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  -webkit-box-orient: unset !important;
+  overflow: visible !important;
+}
+
 .issue-description,
 .comment-text {
   white-space: pre-wrap;

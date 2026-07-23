@@ -1,4 +1,3 @@
-// app/issues/ExpandableText.tsx
 "use client";
 
 import { useState } from "react";
@@ -7,24 +6,32 @@ interface ExpandableTextProps {
   text: string;
   linkify: (text: string) => React.ReactNode;
   wordLimit?: number;
+  charLimit?: number;
   className?: string;
 }
 
 export function ExpandableText({
   text,
   linkify,
-  wordLimit = 60,
+  wordLimit,
+  charLimit = 200,
   className,
 }: ExpandableTextProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const words = text.split(/\s+/).filter(Boolean);
-  const isTruncatable = words.length > wordLimit;
+  let isTruncatable: boolean;
+  let truncated: string;
 
-  const displayText =
-    !isTruncatable || expanded
-      ? text
-      : words.slice(0, wordLimit).join(" ") + "…";
+  if (wordLimit) {
+    const words = text.split(/\s+/).filter(Boolean);
+    isTruncatable = words.length > wordLimit;
+    truncated = words.slice(0, wordLimit).join(" ");
+  } else {
+    isTruncatable = text.length > charLimit;
+    truncated = text.slice(0, charLimit);
+  }
+
+  const displayText = !isTruncatable || expanded ? text : truncated + "…";
 
   return (
     <div className={className}>
