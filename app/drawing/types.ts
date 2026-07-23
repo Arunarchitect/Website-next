@@ -63,6 +63,7 @@ export interface UserContext {
   email: string;
   roles: string[];
   hasDrawingPrivateAccess: boolean;
+  organisationIds: number[]
 }
 
 // Form data for creating/editing documents

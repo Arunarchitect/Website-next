@@ -198,15 +198,26 @@ export const getCurrentUser = async (): Promise<UserContext> => {
         email: 'guest@example.com',
         roles: [],
         hasDrawingPrivateAccess: false,
+        organisationIds: [],
       };
     }
 
     const response = await apiClient.get('/users/me/');
     const userData = response.data;
 
-    // Check if user has drawing_private_role
     const roles = userData.roles || [];
     const hasDrawingPrivateAccess = roles.includes('drawing_private_role');
+
+    // Org membership isn't on /users/me/, so derive it from the
+    // already-scoped organisations endpoint (server-side filtered to
+    // OrganisationMembership rows for this user).
+    let organisationIds: number[] = [];
+    try {
+      const orgs = await getOrganisations();
+      organisationIds = orgs.map((o) => o.id);
+    } catch (err) {
+      console.error('Error loading organisation memberships:', err);
+    }
 
     return {
       id: userData.id,
@@ -214,6 +225,7 @@ export const getCurrentUser = async (): Promise<UserContext> => {
       email: userData.email,
       roles: roles,
       hasDrawingPrivateAccess,
+      organisationIds,
     };
   } catch (error) {
     console.error('Error fetching current user:', error);
@@ -223,6 +235,7 @@ export const getCurrentUser = async (): Promise<UserContext> => {
       email: 'guest@example.com',
       roles: [],
       hasDrawingPrivateAccess: false,
+      organisationIds: [],
     };
   }
 };
@@ -356,7 +369,7 @@ export const toggleFavorite = async (id: number): Promise<boolean> => {
 // FIXED: Download Document with better handling
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const downloadDocument = async (doc: DrawingDocument): Promise<void> => {
+export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<void> => {
   try {
     // First check if user has access
     const currentUser = await getCurrentUser();
@@ -383,40 +396,45 @@ export const downloadDocument = async (doc: DrawingDocument): Promise<void> => {
     throw error;
   }
 };
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE/UPDATE/DELETE DOCUMENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const createDocument = async (formData: FormData): Promise<DrawingDocumentResolved> => {
   try {
-    const response = await apiClient.post('/drawings/documents/', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.post('/drawings/documents/', formData);
     console.log('✅ Document created:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error creating document:', error);
+    if (axios.isAxiosError(error) && error.response?.data) {
+      const detail = typeof error.response.data === 'string'
+        ? error.response.data
+        : JSON.stringify(error.response.data);
+      throw new Error(detail);
+    }
     throw new Error('Failed to create document');
   }
 };
 
 export const updateDocument = async (id: number, formData: FormData): Promise<DrawingDocumentResolved> => {
   try {
-    const response = await apiClient.patch(`/drawings/documents/${id}/`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await apiClient.patch(`/drawings/documents/${id}/`, formData);
     console.log('✅ Document updated:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error updating document:', error);
+    if (axios.isAxiosError(error) && error.response?.data) {
+      const detail = typeof error.response.data === 'string'
+        ? error.response.data
+        : JSON.stringify(error.response.data);
+      throw new Error(detail);
+    }
     throw new Error('Failed to update document');
   }
 };
+
+
 
 export const deleteDocument = async (id: number): Promise<void> => {
   try {
@@ -448,19 +466,18 @@ export const getDocument = async (id: number): Promise<DrawingDocumentResolved> 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const canAccessDocument = (
-  doc: DrawingDocument,
+  doc: DrawingDocumentResolved,
   user: UserContext
 ): boolean => {
-  // If document is public, anyone can access
+  if (!user.organisationIds.includes(doc.organisation_id)) return false;
+
   if (!doc.is_private) return true;
-  
-  // If user has drawing private role, they can access all private documents
+
   if (user.hasDrawingPrivateAccess) return true;
-  
-  // Check if user has any of the allowed roles for this document
+
   if (doc.allowed_roles && doc.allowed_roles.length > 0) {
     return doc.allowed_roles.some(role => user.roles.includes(role));
   }
-  
+
   return false;
 };
