@@ -284,14 +284,17 @@ export default function DocumentForm({
       form.append('status', formData.status || 'draft');
       form.append('is_private', String(formData.is_private || false));
 
-      // Add tags as JSON
+      // Add tags as repeated fields (NOT JSON.stringify — multipart/form-data
+      // sends everything as strings, and DRF's JSONField expects either an
+      // actual list or a JSON string; repeated keys + getlist() on the
+      // backend is the reliable way to send array data through multipart).
       if (formData.tags && formData.tags.length > 0) {
-        form.append('tags', JSON.stringify(formData.tags));
+        formData.tags.forEach((tag) => form.append('tags', tag));
       }
 
-      // Add allowed roles as JSON
+      // Add allowed roles as repeated fields — same reasoning as tags above.
       if (formData.allowed_roles && formData.allowed_roles.length > 0) {
-        form.append('allowed_roles', JSON.stringify(formData.allowed_roles));
+        formData.allowed_roles.forEach((role) => form.append('allowed_roles', role));
       }
 
       // Add file if selected

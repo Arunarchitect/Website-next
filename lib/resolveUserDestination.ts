@@ -50,15 +50,17 @@ export function resolveDestination({ orgRole, areacalcRole }: RoleBundle): strin
   const hasOrgRole      = orgRole !== null;
   const hasAreacalcRole = areacalcRole !== "anonymous";
 
-  if (isOrgPrivileged && isAreacalcPriv) return "/main/admin";
+  // Org admin/manager always land in /main/admin, regardless of areacalc role
+  if (orgRole === "admin" || orgRole === "manager") return "/main/admin";
+
+  if (isOrgPrivileged && isAreacalcPriv) return "/main/admin"; // org member + areacalc priv
   if (hasOrgRole && isAreacalcLow)       return "/main/user";
   if (isOrgLow && hasAreacalcRole)       return "/main/user";
 
-  if (orgRole === "admin" || orgRole === "manager") return "/new/dash/dashadmin";
-  if (orgRole === "member")                          return "/main/member";   // ← changed
-  if (orgRole === "client")                          return "/main/client";
+  if (orgRole === "member")               return "/main/member";
+  if (orgRole === "client")               return "/main/client";
 
-  if (hasAreacalcRole)                               return "/tools/areacalc";
+  if (hasAreacalcRole)                    return "/tools/areacalc";
 
   return "/new/dash/dashnormal";
 }

@@ -5,7 +5,6 @@ import {
   Organisation,
   Project,
   Deliverable,
-  DrawingDocument,
   DrawingDocumentResolved,
   UserContext,
 } from './types';
@@ -44,7 +43,6 @@ const getCsrfToken = (): string | null => {
 const apiClient = axios.create({
   baseURL: API_URL,
   headers: {
-    'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
   withCredentials: true,

@@ -14,6 +14,7 @@ import {
 } from "./adminApi";
 import { tools, quickLinks } from "./constants";
 import { DashboardIssue, Organisation, User, DashboardStats } from "./types";
+import { fetchAreacalcRole } from "@/lib/resolveUserDestination";
 
 // NOTE: adjust this import path to wherever meetingApi.ts actually lives —
 // this is a placeholder based on the file you shared separately.
@@ -34,10 +35,10 @@ const mono = IBM_Plex_Mono({
 // Helper to normalize status
 const normalizeStatus = (status: string): string => {
   const statusMap: { [key: string]: string } = {
-    'open': 'Open',
-    'in_progress': 'In Progress',
-    'resolved': 'Resolved',
-    'closed': 'Closed',
+    open: "Open",
+    in_progress: "In Progress",
+    resolved: "Resolved",
+    closed: "Closed",
   };
   return statusMap[status?.toLowerCase?.()] || status;
 };
@@ -45,9 +46,9 @@ const normalizeStatus = (status: string): string => {
 // Helper to normalize priority
 const normalizePriority = (priority: string): string => {
   const priorityMap: { [key: string]: string } = {
-    'high': 'High',
-    'medium': 'Medium',
-    'low': 'Low',
+    high: "High",
+    medium: "Medium",
+    low: "Low",
   };
   return priorityMap[priority?.toLowerCase?.()] || priority;
 };
@@ -55,10 +56,10 @@ const normalizePriority = (priority: string): string => {
 // Calculate stats from issues
 const calculateStats = (issues: DashboardIssue[]): DashboardStats => {
   return {
-    open: issues.filter(i => normalizeStatus(i.status) === 'Open').length,
-    inProgress: issues.filter(i => normalizeStatus(i.status) === 'In Progress').length,
-    resolved: issues.filter(i => normalizeStatus(i.status) === 'Resolved').length,
-    highPriority: issues.filter(i => normalizePriority(i.priority) === 'High').length,
+    open: issues.filter((i) => normalizeStatus(i.status) === "Open").length,
+    inProgress: issues.filter((i) => normalizeStatus(i.status) === "In Progress").length,
+    resolved: issues.filter((i) => normalizeStatus(i.status) === "Resolved").length,
+    highPriority: issues.filter((i) => normalizePriority(i.priority) === "High").length,
     total: issues.length,
   };
 };
@@ -83,6 +84,10 @@ export default function MainAdminPage() {
   const [upcomingMeetingsCount, setUpcomingMeetingsCount] = useState(0);
   const [loadingMeetings, setLoadingMeetings] = useState(true);
 
+  // --- Areacalc role (controls visibility of areacalc-related links) -------
+  const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
+  const canAccessAreacalc = areacalcRole === "admin" || areacalcRole === "member";
+
   // Fetch user info on mount
   useEffect(() => {
     const fetchUser = async () => {
@@ -90,6 +95,13 @@ export default function MainAdminPage() {
       setCurrentUser(user);
     };
     fetchUser();
+  }, []);
+
+  // Fetch areacalc role on mount
+  useEffect(() => {
+    const token = localStorage.getItem("access");
+    if (!token) return;
+    fetchAreacalcRole(token).then(setAreacalcRole);
   }, []);
 
   // Fetch user's organisations on mount
@@ -104,8 +116,8 @@ export default function MainAdminPage() {
           setSelectedOrganisation(orgs[0].id);
         }
       } catch (err) {
-        console.error('Error fetching organisations:', err);
-        setError('Failed to load organisations');
+        console.error("Error fetching organisations:", err);
+        setError("Failed to load organisations");
       } finally {
         setLoadingOrganisations(false);
       }
@@ -136,8 +148,8 @@ export default function MainAdminPage() {
 
         setIssueStats(calculateStats(allIssues));
       } catch (err) {
-        console.error('Error fetching issues:', err);
-        setError('Failed to load issues');
+        console.error("Error fetching issues:", err);
+        setError("Failed to load issues");
       } finally {
         setLoading(false);
       }
@@ -161,7 +173,7 @@ export default function MainAdminPage() {
           : meetings;
         setUpcomingMeetingsCount(scoped.length);
       } catch (err) {
-        console.error('Error fetching upcoming meetings:', err);
+        console.error("Error fetching upcoming meetings:", err);
         setUpcomingMeetingsCount(0);
       } finally {
         setLoadingMeetings(false);
@@ -173,15 +185,15 @@ export default function MainAdminPage() {
 
   // Get user's display name
   const getDisplayName = (): string => {
-    if (!currentUser) return 'Guest';
-    return currentUser.full_name || currentUser.email || 'User';
+    if (!currentUser) return "Guest";
+    return currentUser.full_name || currentUser.email || "User";
   };
 
   // Get user's initials for avatar
   const getInitials = (): string => {
-    if (!currentUser) return '?';
-    const name = currentUser.full_name || currentUser.email || 'User';
-    const parts = name.split(' ');
+    if (!currentUser) return "?";
+    const name = currentUser.full_name || currentUser.email || "User";
+    const parts = name.split(" ");
     if (parts.length >= 2) {
       return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     }
@@ -191,13 +203,21 @@ export default function MainAdminPage() {
   // Get greeting based on time of day
   const getGreeting = (): string => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
+    if (hour < 12) return "Good morning";
+    if (hour < 17) return "Good afternoon";
+    return "Good evening";
   };
 
   // Check if there are any open issues
   const hasOpenIssues = issueStats.open > 0;
+
+  // Filter out areacalc-related entries for users without areacalc access
+  const visibleTools = tools.filter(
+    (tool) => tool.key !== "areacalc" || canAccessAreacalc
+  );
+  const visibleQuickLinks = quickLinks.filter(
+    (link) => link.href !== "/tools/areacalc" || canAccessAreacalc
+  );
 
   return (
     <main className={`${display.variable} ${mono.variable} admin-page`}>
@@ -213,10 +233,12 @@ export default function MainAdminPage() {
             <i className="ti ti-layout-dashboard" aria-hidden="true" />
             <span>Dashboard</span>
           </Link>
-          <Link href="/tools/areacalc" className="admin-nav-link">
-            <i className="ti ti-ruler-measure" aria-hidden="true" />
-            <span>Areacalc</span>
-          </Link>
+          {canAccessAreacalc && (
+            <Link href="/tools/areacalc" className="admin-nav-link">
+              <i className="ti ti-ruler-measure" aria-hidden="true" />
+              <span>Areacalc</span>
+            </Link>
+          )}
           <Link href="/issues" className="admin-nav-link">
             <i className="ti ti-bug" aria-hidden="true" />
             <span>Issues</span>
@@ -246,11 +268,11 @@ export default function MainAdminPage() {
       {/* Organisation Selector */}
       {organisations.length > 0 && (
         <div className="organisation-selector">
-          <i className="ti ti-building" style={{ color: 'var(--slate)' }} />
+          <i className="ti ti-building" style={{ color: "var(--slate)" }} />
           <label htmlFor="organisation-select">Organisation:</label>
           <select
             id="organisation-select"
-            value={selectedOrganisation || ''}
+            value={selectedOrganisation || ""}
             onChange={(e) => setSelectedOrganisation(Number(e.target.value))}
           >
             {organisations.map((org) => (
@@ -260,7 +282,7 @@ export default function MainAdminPage() {
             ))}
           </select>
           <span className="org-count">
-            {organisations.length} organisation{organisations.length > 1 ? 's' : ''}
+            {organisations.length} organisation{organisations.length > 1 ? "s" : ""}
           </span>
         </div>
       )}
@@ -271,7 +293,7 @@ export default function MainAdminPage() {
         <div className="no-issues">
           <i className="ti ti-building" />
           <p>You are not a member of any organisation.</p>
-          <p style={{ fontSize: '13px', marginTop: '4px', color: 'var(--slate)' }}>
+          <p style={{ fontSize: "13px", marginTop: "4px", color: "var(--slate)" }}>
             Please contact an administrator to be added to an organisation.
           </p>
         </div>
@@ -282,12 +304,12 @@ export default function MainAdminPage() {
             <div className="dash-overview-left">
               <Link
                 href="/issues"
-                className={`dash-stat-card ${hasOpenIssues ? 'stat-card-open-issues' : ''}`}
+                className={`dash-stat-card ${hasOpenIssues ? "stat-card-open-issues" : ""}`}
               >
                 <i className="ti ti-alert-circle stat-icon" aria-hidden="true" />
                 <div>
                   <p className="stat-label">Open Issues</p>
-                  <p className="stat-value">{loading ? '—' : issueStats.open}</p>
+                  <p className="stat-value">{loading ? "—" : issueStats.open}</p>
                 </div>
               </Link>
 
@@ -295,19 +317,21 @@ export default function MainAdminPage() {
                 <i className="ti ti-check stat-icon" aria-hidden="true" />
                 <div>
                   <p className="stat-label">Resolved Issues</p>
-                  <p className="stat-value">{loading ? '—' : issueStats.resolved}</p>
+                  <p className="stat-value">{loading ? "—" : issueStats.resolved}</p>
                 </div>
               </Link>
             </div>
 
             <Link
               href="/meeting"
-              className={`dash-meetings-card ${upcomingMeetingsCount > 0 ? 'dash-meetings-card-active' : ''}`}
+              className={`dash-meetings-card ${
+                upcomingMeetingsCount > 0 ? "dash-meetings-card-active" : ""
+              }`}
             >
               <i className="ti ti-calendar-event stat-icon" aria-hidden="true" />
               <div>
                 <p className="stat-label">Upcoming Meetings</p>
-                <p className="stat-value">{loadingMeetings ? '—' : upcomingMeetingsCount}</p>
+                <p className="stat-value">{loadingMeetings ? "—" : upcomingMeetingsCount}</p>
               </div>
             </Link>
           </div>
@@ -322,7 +346,7 @@ export default function MainAdminPage() {
           {/* Tools */}
           <p className="section-label">Applications</p>
           <div className="tools-grid">
-            {tools.map((tool) => (
+            {visibleTools.map((tool) => (
               <div key={tool.key} className="tool-card">
                 <div className="tool-left">
                   <div className="tool-icon-wrapper">
@@ -362,7 +386,7 @@ export default function MainAdminPage() {
           {/* Quick Links */}
           <p className="section-label">Quick links</p>
           <div className="quick-links-grid">
-            {quickLinks.map((link) => (
+            {visibleQuickLinks.map((link) => (
               <Link key={link.label} href={link.href} className="quick-link">
                 <i className={`ti ${link.icon}`} aria-hidden="true" />
                 {link.label}
