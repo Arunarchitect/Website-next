@@ -490,7 +490,7 @@ export default function DocumentViewer({
                 <span className="document-viewer-btn-label">Print</span>
               </button>
             )}
-            {(isPDF || isDXF) && (
+            {isPDF && (
               <a
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-open"
                 href={getFullFileUrl(doc.file_url)}
@@ -498,7 +498,7 @@ export default function DocumentViewer({
                 rel="noopener noreferrer"
               >
                 <i className="ti ti-external-link" />
-                <span className="document-viewer-btn-label">Open in new tab &amp; download</span>
+                <span className="document-viewer-btn-label">Fast View</span>
               </a>
             )}
             <button

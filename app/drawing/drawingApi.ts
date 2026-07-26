@@ -369,31 +369,80 @@ export const toggleFavorite = async (id: number): Promise<boolean> => {
 
 export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<void> => {
   try {
-    // First check if user has access
     const currentUser = await getCurrentUser();
     if (!canAccessDocument(doc, currentUser)) {
       throw new Error('You do not have permission to download this document');
     }
-    
-    // Open the download URL in a new window/tab
-    const downloadUrl = `${API_URL}/drawings/documents/${doc.id}/download/`;
-    
-    // Use window.open or create a link with auth header
+
     const token = getAuthToken();
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.target = '_blank';
-    if (token) {
-      link.href = `${downloadUrl}?token=${encodeURIComponent(token)}`;
+    if (!token) {
+      throw new Error('Authentication required');
     }
+
+    const downloadUrl = `${API_URL}/drawings/documents/${doc.id}/download/`;
+
+    const response = await fetch(downloadUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Session expired. Please log in again.');
+      if (response.status === 403) throw new Error('You do not have permission to download this document.');
+      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    }
+
+    // ── Parse filename from Content-Disposition header ──
+    const disposition = response.headers.get('Content-Disposition');
+    let filename = '';
+
+    if (disposition) {
+      // Try RFC 5987 filename*=UTF-8''... first
+      const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match) {
+        filename = decodeURIComponent(utf8Match[1]);
+      } else {
+        // Try standard filename="..." or filename=...
+        const match = disposition.match(/filename=["']?([^"';]+)["']?/i);
+        if (match) {
+          filename = match[1].trim();
+        }
+      }
+    }
+
+    // ── Fallback: doc title + extension from file_url ──
+    if (!filename) {
+      // Extract extension from file_url (e.g. .pdf, .dxf)
+      const urlParts = doc.file_url?.split('?')[0].split('.');
+      const ext = urlParts && urlParts.length > 1 ? urlParts.pop()!.toLowerCase() : '';
+      
+      // Clean the title for use as a filename
+      const baseName = doc.title?.trim() || `document_${doc.id}`;
+      
+      filename = ext ? `${baseName}.${ext}` : baseName;
+    }
+
+    // Create blob URL and trigger download
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+
   } catch (error) {
     console.error('Error downloading document:', error);
     throw error;
   }
 };
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE/UPDATE/DELETE DOCUMENTS
 // ─────────────────────────────────────────────────────────────────────────────

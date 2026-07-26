@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image"; // Add this import
+import Image from "next/image";
 import { DrawingDocumentResolved } from "../types";
 import { getFullFileUrl, getDisplayFileUrl } from "../drawingApi";
 import { guestDownload } from "../guestApi";
@@ -10,7 +10,7 @@ import DocumentViewer from "./DocumentViewer";
 import PdfThumbnail from "./PdfThumbnail";
 
 const getFileTypeDisplay = (t: string) =>
-  ({ pdf: 'PDF', dxf: 'DXF', ifc: 'IFC', image: 'Image' } as Record<string, string>)[t] || 'Document';
+  ({ pdf: 'PDF', dxf: 'DXF', ifc: 'IFC', image: 'Image', document: 'Document' } as Record<string, string>)[t] || 'Document';
 
 const formatFileSize = (b: number) =>
   b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`;
@@ -33,26 +33,62 @@ const getUniqueDeliverables = (docs: DrawingDocumentResolved[]) => {
   return Array.from(deliverableMap.values());
 };
 
+// Get unique file types from documents
+const getUniqueFileTypes = (docs: DrawingDocumentResolved[]) => {
+  const typeMap = new Map<string, number>();
+  docs.forEach(doc => {
+    typeMap.set(doc.file_type, (typeMap.get(doc.file_type) || 0) + 1);
+  });
+  return Array.from(typeMap.entries()).map(([type, count]) => ({
+    type,
+    label: getFileTypeDisplay(type),
+    count,
+  }));
+};
+
 interface GuestDocumentGridProps {
   documents: DrawingDocumentResolved[];
   heading: string;
   showDeliverableFilter?: boolean;
+  showFileTypeFilter?: boolean;
 }
 
 export default function GuestDocumentGrid({ 
   documents, 
   heading,
   showDeliverableFilter = true,
+  showFileTypeFilter = true,
 }: GuestDocumentGridProps) {
   const [selectedDoc, setSelectedDoc] = useState<DrawingDocumentResolved | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [selectedDeliverableId, setSelectedDeliverableId] = useState<number | null>(null);
+  const [selectedFileType, setSelectedFileType] = useState<string | null>(null);
 
   const deliverables = getUniqueDeliverables(documents);
+  const fileTypes = getUniqueFileTypes(documents);
 
-  const filteredDocuments = selectedDeliverableId
-    ? documents.filter(doc => doc.deliverable_id === selectedDeliverableId)
-    : documents;
+  const filteredDocuments = documents.filter(doc => {
+    if (selectedDeliverableId && doc.deliverable_id !== selectedDeliverableId) return false;
+    if (selectedFileType && doc.file_type !== selectedFileType) return false;
+    return true;
+  });
+
+  const handleCardClick = (doc: DrawingDocumentResolved) => {
+    // DXF files: download directly, don't open viewer
+    if (doc.file_type === 'dxf') {
+      guestDownload(doc);
+      return;
+    }
+    setSelectedDoc(doc);
+    setIsViewerOpen(true);
+  };
+
+  const clearFilters = () => {
+    setSelectedDeliverableId(null);
+    setSelectedFileType(null);
+  };
+
+  const hasActiveFilters = selectedDeliverableId !== null || selectedFileType !== null;
 
   if (documents.length === 0) {
     return (
@@ -73,33 +109,55 @@ export default function GuestDocumentGrid({
         </span>
       </div>
       
-      {showDeliverableFilter && deliverables.length > 1 && (
-        <div className="documents-filters" style={{ marginBottom: '24px' }}>
-          <div className="documents-filter-group">
-            <label className="documents-filter-label">
-              <i className="ti ti-list-check" /> Filter by Deliverable
-            </label>
-            <select
-              className="documents-filter-select"
-              value={selectedDeliverableId ?? ''}
-              onChange={(e) => setSelectedDeliverableId(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">All Deliverables ({documents.length})</option>
-              {deliverables.map((deliverable) => (
-                <option key={deliverable.id} value={deliverable.id}>
-                  {deliverable.name} ({deliverable.count})
-                </option>
-              ))}
-            </select>
-          </div>
+      {(showDeliverableFilter || showFileTypeFilter) && (deliverables.length > 1 || fileTypes.length > 1) && (
+        <div className="documents-filters" style={{ marginBottom: '24px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'end' }}>
+          {showDeliverableFilter && deliverables.length > 1 && (
+            <div className="documents-filter-group">
+              <label className="documents-filter-label">
+                <i className="ti ti-list-check" /> Filter by Deliverable
+              </label>
+              <select
+                className="documents-filter-select"
+                value={selectedDeliverableId ?? ''}
+                onChange={(e) => setSelectedDeliverableId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">All Deliverables ({documents.length})</option>
+                {deliverables.map((deliverable) => (
+                  <option key={deliverable.id} value={deliverable.id}>
+                    {deliverable.name} ({deliverable.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {showFileTypeFilter && fileTypes.length > 1 && (
+            <div className="documents-filter-group">
+              <label className="documents-filter-label">
+                <i className="ti ti-file" /> Filter by File Type
+              </label>
+              <select
+                className="documents-filter-select"
+                value={selectedFileType ?? ''}
+                onChange={(e) => setSelectedFileType(e.target.value || null)}
+              >
+                <option value="">All Types ({documents.length})</option>
+                {fileTypes.map((ft) => (
+                  <option key={ft.type} value={ft.type}>
+                    {ft.label} ({ft.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           
-          {selectedDeliverableId !== null && (
+          {hasActiveFilters && (
             <button
               className="documents-filter-clear"
-              onClick={() => setSelectedDeliverableId(null)}
+              onClick={clearFilters}
             >
               <i className="ti ti-x" />
-              Clear filter
+              Clear filters
             </button>
           )}
         </div>
@@ -108,11 +166,11 @@ export default function GuestDocumentGrid({
       {filteredDocuments.length === 0 ? (
         <div className="documents-empty">
           <i className="ti ti-folder-open" />
-          <h3>No documents in this deliverable</h3>
-          <p>Try selecting a different deliverable from the filter above.</p>
+          <h3>No documents match your filters</h3>
+          <p>Try adjusting or clearing the filters above.</p>
           <button
             className="documents-retry-btn"
-            onClick={() => setSelectedDeliverableId(null)}
+            onClick={clearFilters}
             style={{ marginTop: '12px' }}
           >
             Show all documents
@@ -122,11 +180,13 @@ export default function GuestDocumentGrid({
         <div className="documents-grid">
           {filteredDocuments.map((doc) => {
             const displayUrl = getDisplayFileUrl(doc);
+            const isDXF = doc.file_type === 'dxf';
             return (
               <div 
                 key={doc.id} 
                 className="documents-card" 
-                onClick={() => { setSelectedDoc(doc); setIsViewerOpen(true); }}
+                onClick={() => handleCardClick(doc)}
+                style={{ cursor: isDXF ? 'pointer' : 'pointer' }}
               >
                 <div className="documents-card-thumbnail">
                   {doc.file_type === 'pdf' ? (
@@ -139,7 +199,7 @@ export default function GuestDocumentGrid({
                         fill
                         className="documents-thumbnail-image"
                         sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                        unoptimized={displayUrl.startsWith('data:')} // Skip optimization for data URLs
+                        unoptimized={displayUrl.startsWith('data:')}
                       />
                     </div>
                   ) : (
@@ -160,7 +220,7 @@ export default function GuestDocumentGrid({
                       className="documents-card-btn documents-card-btn-download"
                       onClick={(e) => { e.stopPropagation(); guestDownload(doc); }}
                     >
-                      <i className="ti ti-download" /> Download
+                      <i className="ti ti-download" /> {isDXF ? 'Download' : 'Fast View'}
                     </button>
                   </div>
                 </div>
