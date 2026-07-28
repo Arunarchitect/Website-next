@@ -1,5 +1,3 @@
-// app/drawing/drawingApi.ts
-
 import axios from 'axios';
 import {
   Organisation,
@@ -7,18 +5,14 @@ import {
   Deliverable,
   DrawingDocumentResolved,
   UserContext,
+  PaginatedDocuments,
 } from './types';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// API CONFIGURATION - Same as issues API
-// ─────────────────────────────────────────────────────────────────────────────
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://127.0.0.1:8000';
 const API_URL = `${API_BASE_URL}/api`;
 
 const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') return null;
-
   const token =
     localStorage.getItem('access') ||
     localStorage.getItem('access_token') ||
@@ -26,11 +20,9 @@ const getAuthToken = (): string | null => {
     sessionStorage.getItem('access') ||
     sessionStorage.getItem('access_token') ||
     null;
-
   if (!token) {
     console.warn('⚠️ No authentication token found in localStorage');
   }
-
   return token;
 };
 
@@ -43,7 +35,7 @@ const getCsrfToken = (): string | null => {
 const apiClient = axios.create({
   baseURL: API_URL,
   headers: {
-    'Accept': 'application/json',
+    Accept: 'application/json',
   },
   withCredentials: true,
 });
@@ -78,7 +70,7 @@ apiClient.interceptors.response.use(
           error.config._retry = true;
           try {
             const response = await axios.post(`${API_URL}/auth/refresh/`, {
-              refresh: refreshToken
+              refresh: refreshToken,
             });
             if (response.data.access) {
               localStorage.setItem('access', response.data.access);
@@ -86,7 +78,6 @@ apiClient.interceptors.response.use(
               return apiClient(error.config);
             }
           } catch {
-            // Refresh failed — clear tokens and bounce to login.
             localStorage.removeItem('access');
             localStorage.removeItem('refresh');
             if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
@@ -100,91 +91,47 @@ apiClient.interceptors.response.use(
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXED: HELPER: Get Full File URL - Handles all URL formats
-// ─────────────────────────────────────────────────────────────────────────────
-
 export const getFullFileUrl = (fileUrl: string | undefined | null): string => {
   if (!fileUrl) {
     console.warn('⚠️ getFullFileUrl called with undefined or empty URL');
     return '';
   }
-
-  // If it's already a full URL, return it
   if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
     return fileUrl;
   }
-
-  // Handle the case where the URL already starts with /media/
   if (fileUrl.startsWith('/media/')) {
     return `${API_BASE_URL}${fileUrl}`;
   }
-
-  // Handle the case where the URL starts with / but not /media/
   if (fileUrl.startsWith('/')) {
     return `${API_BASE_URL}${fileUrl}`;
   }
-
-  // Handle the case where the URL is a relative path
-  // Examples:
-  // - "drawings/organisation_1/project_2/deliverable_32/Array_1783932785_4e8073.png"
-  // - "media/drawings/organisation_1/project_2/deliverable_32/Array_1783932785_4e8073.png"
   if (!fileUrl.startsWith('/') && !fileUrl.startsWith('http')) {
-    // If it already contains 'drawings/' or 'media/', add /media/ prefix
     if (fileUrl.includes('drawings/') || fileUrl.includes('media/')) {
-      // Remove any leading 'media/' to avoid double media
       const cleanUrl = fileUrl.replace(/^media\//, '');
       return `${API_BASE_URL}/media/${cleanUrl}`;
     }
-    
-    // Default case: add /media/ prefix
     return `${API_BASE_URL}/media/${fileUrl}`;
   }
-
-  // Fallback
   return `${API_BASE_URL}/${fileUrl}`;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXED: Function to get file URL for display (synchronous)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const getDisplayFileUrl = (doc: DrawingDocumentResolved): string => {
   if (!doc) {
     console.warn('⚠️ getDisplayFileUrl called with undefined document');
     return '';
   }
-
-  console.log(`🔍 Getting display URL for doc ${doc.id} (${doc.file_type}):`, {
-    file_url: doc.file_url,
-    thumbnail_url: doc.thumbnail_url,
-  });
-
   let urlToUse = '';
-
-  // For images, use file_url directly
   if (doc.file_type === 'image') {
     urlToUse = doc.file_url || '';
-    console.log(`🖼️ Image file, using file_url: ${urlToUse}`);
   } else {
-    // For other file types, try thumbnail_url first, then file_url
     urlToUse = doc.thumbnail_url || doc.file_url || '';
-    console.log(`📄 Non-image file, using thumbnail_url or file_url: ${urlToUse}`);
   }
-
   if (!urlToUse) {
     console.warn(`⚠️ No URL found for document ${doc.id}`);
     return '';
   }
-
-  const fullUrl = getFullFileUrl(urlToUse);
-  console.log(`✅ Full URL for doc ${doc.id}: ${fullUrl}`);
-  return fullUrl;
+  return getFullFileUrl(urlToUse);
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// USER CONTEXT - Get from actual authentication (same as issues)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const getCurrentUser = async (): Promise<UserContext> => {
   try {
@@ -199,16 +146,10 @@ export const getCurrentUser = async (): Promise<UserContext> => {
         organisationIds: [],
       };
     }
-
     const response = await apiClient.get('/users/me/');
     const userData = response.data;
-
     const roles = userData.roles || [];
     const hasDrawingPrivateAccess = roles.includes('drawing_private_role');
-
-    // Org membership isn't on /users/me/, so derive it from the
-    // already-scoped organisations endpoint (server-side filtered to
-    // OrganisationMembership rows for this user).
     let organisationIds: number[] = [];
     try {
       const orgs = await getOrganisations();
@@ -216,12 +157,11 @@ export const getCurrentUser = async (): Promise<UserContext> => {
     } catch (err) {
       console.error('Error loading organisation memberships:', err);
     }
-
     return {
       id: userData.id,
       name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email,
       email: userData.email,
-      roles: roles,
+      roles,
       hasDrawingPrivateAccess,
       organisationIds,
     };
@@ -238,10 +178,6 @@ export const getCurrentUser = async (): Promise<UserContext> => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// API FUNCTIONS - Using apiClient like issues API
-// ─────────────────────────────────────────────────────────────────────────────
-
 export const getOrganisations = async (): Promise<Organisation[]> => {
   try {
     const response = await apiClient.get('/drawings/organisations/');
@@ -254,7 +190,7 @@ export const getOrganisations = async (): Promise<Organisation[]> => {
 
 export const getProjects = async (organisationId?: number): Promise<Project[]> => {
   try {
-    const url = organisationId 
+    const url = organisationId
       ? `/drawings/projects/?organisation_id=${organisationId}`
       : '/drawings/projects/';
     const response = await apiClient.get(url);
@@ -267,7 +203,7 @@ export const getProjects = async (organisationId?: number): Promise<Project[]> =
 
 export const getDeliverables = async (projectId?: number): Promise<Deliverable[]> => {
   try {
-    const url = projectId 
+    const url = projectId
       ? `/drawings/deliverables/?project_id=${projectId}`
       : '/drawings/deliverables/';
     const response = await apiClient.get(url);
@@ -286,18 +222,15 @@ export interface DocumentFilters {
   showPrivate?: boolean;
   page?: number;
   pageSize?: number;
+  ordering?: string; 
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXED: Get Documents with better URL handling
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const getDocuments = async (
   filters: DocumentFilters = {}
-): Promise<DrawingDocumentResolved[]> => {
+): Promise<PaginatedDocuments> => {
   try {
     const params = new URLSearchParams();
-    
+
     if (filters.organisationId) {
       params.append('organisation_id', filters.organisationId.toString());
     }
@@ -313,40 +246,36 @@ export const getDocuments = async (
     if (filters.showPrivate) {
       params.append('show_private', 'true');
     }
-    if (filters.page) {
-      params.append('page', filters.page.toString());
+    if (filters.ordering) {                         // <-- add this block
+      params.append('ordering', filters.ordering);
     }
-    if (filters.pageSize) {
-      params.append('page_size', filters.pageSize.toString());
-    }
-    
+
+    const page = filters.page ?? 1;
+    const pageSize = filters.pageSize ?? 20;
+    params.append('page', page.toString());
+    params.append('page_size', pageSize.toString());
+
     const url = `/drawings/documents/?${params.toString()}`;
     console.log('📡 Fetching documents from:', url);
-    
+
     const response = await apiClient.get(url);
-    
     console.log('📥 API Response received');
-    
-    // If the API returns paginated data
-    let docs = [];
+
     if (response.data.results) {
-      docs = response.data.results;
-    } else {
-      docs = response.data;
+      return {
+        results: response.data.results,
+        count: response.data.count ?? response.data.results.length,
+        next: response.data.next ?? null,
+        previous: response.data.previous ?? null,
+      };
     }
-    
-    // Log first document for debugging
-    if (docs.length > 0) {
-      console.log('🔍 First document from API:', {
-        id: docs[0].id,
-        title: docs[0].title,
-        file_type: docs[0].file_type,
-        file_url: docs[0].file_url,
-        thumbnail_url: docs[0].thumbnail_url,
-      });
-    }
-    
-    return docs;
+
+    return {
+      results: response.data,
+      count: response.data.length,
+      next: null,
+      previous: null,
+    };
   } catch (error) {
     console.error('Error fetching documents:', error);
     throw new Error('Failed to fetch documents');
@@ -362,10 +291,6 @@ export const toggleFavorite = async (id: number): Promise<boolean> => {
     throw new Error('Failed to toggle favorite');
   }
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXED: Download Document with better handling
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<void> => {
   try {
@@ -384,7 +309,7 @@ export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<vo
     const response = await fetch(downloadUrl, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
       },
       credentials: 'include',
     });
@@ -395,17 +320,14 @@ export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<vo
       throw new Error(`Download failed: ${response.status} ${response.statusText}`);
     }
 
-    // ── Parse filename from Content-Disposition header ──
     const disposition = response.headers.get('Content-Disposition');
     let filename = '';
 
     if (disposition) {
-      // Try RFC 5987 filename*=UTF-8''... first
       const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
       if (utf8Match) {
         filename = decodeURIComponent(utf8Match[1]);
       } else {
-        // Try standard filename="..." or filename=...
         const match = disposition.match(/filename=["']?([^"';]+)["']?/i);
         if (match) {
           filename = match[1].trim();
@@ -413,19 +335,13 @@ export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<vo
       }
     }
 
-    // ── Fallback: doc title + extension from file_url ──
     if (!filename) {
-      // Extract extension from file_url (e.g. .pdf, .dxf)
       const urlParts = doc.file_url?.split('?')[0].split('.');
       const ext = urlParts && urlParts.length > 1 ? urlParts.pop()!.toLowerCase() : '';
-      
-      // Clean the title for use as a filename
       const baseName = doc.title?.trim() || `document_${doc.id}`;
-      
       filename = ext ? `${baseName}.${ext}` : baseName;
     }
 
-    // Create blob URL and trigger download
     const blob = await response.blob();
     const blobUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -435,17 +351,11 @@ export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<vo
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(blobUrl);
-
   } catch (error) {
     console.error('Error downloading document:', error);
     throw error;
   }
 };
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CREATE/UPDATE/DELETE DOCUMENTS
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const createDocument = async (formData: FormData): Promise<DrawingDocumentResolved> => {
   try {
@@ -455,9 +365,10 @@ export const createDocument = async (formData: FormData): Promise<DrawingDocumen
   } catch (error) {
     console.error('Error creating document:', error);
     if (axios.isAxiosError(error) && error.response?.data) {
-      const detail = typeof error.response.data === 'string'
-        ? error.response.data
-        : JSON.stringify(error.response.data);
+      const detail =
+        typeof error.response.data === 'string'
+          ? error.response.data
+          : JSON.stringify(error.response.data);
       throw new Error(detail);
     }
     throw new Error('Failed to create document');
@@ -472,16 +383,15 @@ export const updateDocument = async (id: number, formData: FormData): Promise<Dr
   } catch (error) {
     console.error('Error updating document:', error);
     if (axios.isAxiosError(error) && error.response?.data) {
-      const detail = typeof error.response.data === 'string'
-        ? error.response.data
-        : JSON.stringify(error.response.data);
+      const detail =
+        typeof error.response.data === 'string'
+          ? error.response.data
+          : JSON.stringify(error.response.data);
       throw new Error(detail);
     }
     throw new Error('Failed to update document');
   }
 };
-
-
 
 export const deleteDocument = async (id: number): Promise<void> => {
   try {
@@ -492,10 +402,6 @@ export const deleteDocument = async (id: number): Promise<void> => {
     throw new Error('Failed to delete document');
   }
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXED: Get a single document by ID with better URL handling
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const getDocument = async (id: number): Promise<DrawingDocumentResolved> => {
   try {
@@ -508,23 +414,12 @@ export const getDocument = async (id: number): Promise<DrawingDocumentResolved> 
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PRIVACY CHECK HELPER
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const canAccessDocument = (
-  doc: DrawingDocumentResolved,
-  user: UserContext
-): boolean => {
+export const canAccessDocument = (doc: DrawingDocumentResolved, user: UserContext): boolean => {
   if (!user.organisationIds.includes(doc.organisation_id)) return false;
-
   if (!doc.is_private) return true;
-
   if (user.hasDrawingPrivateAccess) return true;
-
   if (doc.allowed_roles && doc.allowed_roles.length > 0) {
-    return doc.allowed_roles.some(role => user.roles.includes(role));
+    return doc.allowed_roles.some((role) => user.roles.includes(role));
   }
-
   return false;
 };

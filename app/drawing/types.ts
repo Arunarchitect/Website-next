@@ -1,5 +1,3 @@
-// app/drawing/types.ts
-
 export interface Organisation {
   id: number;
   name: string;
@@ -32,9 +30,6 @@ export interface DrawingDocument {
   file_url: string;
   thumbnail_url?: string;
   uploaded_at: string;
-  // API returns the uploader's numeric id under `uploaded_by`, and the
-  // display name under `uploaded_by_name`. Components should render
-  // `uploaded_by_name`, not `uploaded_by`.
   uploaded_by?: number | null;
   uploaded_by_name: string;
   category: string;
@@ -63,10 +58,9 @@ export interface UserContext {
   email: string;
   roles: string[];
   hasDrawingPrivateAccess: boolean;
-  organisationIds: number[]
+  organisationIds: number[];
 }
 
-// Form data for creating/editing documents
 export interface DrawingDocumentFormData {
   deliverable_id: number;
   title: string;
@@ -82,7 +76,24 @@ export interface DrawingDocumentFormData {
   allowed_roles: string[];
 }
 
-// Cascading dropdown data
+export interface DocumentFilters {
+  organisationId?: number;
+  projectId?: number;
+  deliverableId?: number;
+  search?: string;
+  showPrivate?: boolean;
+  page?: number;
+  pageSize?: number;
+
+}
+
+export interface PaginatedDocuments {
+  results: DrawingDocumentResolved[];
+  count: number;
+  next: string | null;
+  previous: string | null;
+}
+
 export interface OrganisationOption {
   id: number;
   name: string;

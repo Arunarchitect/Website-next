@@ -1,10 +1,8 @@
-// app/drawing/page.tsx
-
 "use client";
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
-import Image from "next/image"; // Add this import
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import {
@@ -17,13 +15,19 @@ import {
   downloadDocument,
   getCurrentUser,
   canAccessDocument,
-  getFullFileUrl,
   getDisplayFileUrl,
+  getFullFileUrl,
   createDocument,
   updateDocument,
   deleteDocument,
 } from "./drawingApi";
-import { Organisation, Project, Deliverable, DrawingDocumentResolved, UserContext } from "./types";
+import {
+  Organisation,
+  Project,
+  Deliverable,
+  DrawingDocumentResolved,
+  UserContext,
+} from "./types";
 import DocumentViewer from "./components/DocumentViewer";
 import DocumentForm from "./components/DocumentForm";
 import PdfThumbnail from "./components/PdfThumbnail";
@@ -41,7 +45,6 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
-// Custom error type for API errors
 type ApiError = {
   message?: string;
   response?: {
@@ -51,9 +54,6 @@ type ApiError = {
   };
 };
 
-// The route's actual default export. useSearchParams() requires a Suspense
-// boundary somewhere above it, so this component stays a thin wrapper and
-// all the real page logic lives in DocumentsPageInner below.
 export default function DocumentsPage() {
   return (
     <Suspense
@@ -82,8 +82,9 @@ function DocumentsPageInner() {
   const [selectedOrgId, setSelectedOrgId] = useState<number | undefined>(undefined);
   const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
   const [selectedDeliverableId, setSelectedDeliverableId] = useState<number | undefined>(undefined);
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState<string>("");
   const [showPrivateOnly, setShowPrivateOnly] = useState<boolean>(false);
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
   const [selectedDoc, setSelectedDoc] = useState<DrawingDocumentResolved | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState<boolean>(false);
@@ -91,26 +92,26 @@ function DocumentsPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserContext | null>(null);
 
-  // Form state
   const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
-  const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
+  const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingDocument, setEditingDocument] = useState<DrawingDocumentResolved | null>(null);
 
-  // Track document counts for privacy filtering
   const [privateCount, setPrivateCount] = useState<number>(0);
   const [publicCount, setPublicCount] = useState<number>(0);
 
-  // Guards against re-triggering the auto-open effect (e.g. React strict-mode
-  // double effects in dev, or other state changes re-running the effect).
   const [hasHandledOpenDoc, setHasHandledOpenDoc] = useState<boolean>(false);
 
-  // Helper function to extract error message
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [pageSize, setPageSize] = useState<number>(6);
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
+
   const getErrorMessage = (err: unknown): string => {
     if (err instanceof Error) {
       return err.message;
     }
-    
-    if (typeof err === 'object' && err !== null) {
+    if (typeof err === "object" && err !== null) {
       const apiError = err as ApiError;
       if (apiError.response?.data?.message) {
         return apiError.response.data.message;
@@ -119,33 +120,26 @@ function DocumentsPageInner() {
         return apiError.message;
       }
     }
-    
-    if (typeof err === 'string') {
+    if (typeof err === "string") {
       return err;
     }
-    
     return "An unexpected error occurred";
   };
 
-  // Load current user
   useEffect(() => {
     const loadUser = async () => {
       try {
         const user = await getCurrentUser();
         setCurrentUser(user);
       } catch (err) {
-        console.error('Error loading user:', err);
+        console.error("Error loading user:", err);
       }
     };
     loadUser();
   }, []);
 
-  // isGuest is true whenever there's no auth token — getCurrentUser() falls
-  // back to id: 0 in that case. Every effect below that hits an
-  // IsAuthenticated-only endpoint is gated on this.
   const isGuest = currentUser?.id === 0;
 
-  // Load organisations — skip for guests, this endpoint 401s without a token
   useEffect(() => {
     if (!currentUser || isGuest) return;
     const loadOrganisations = async () => {
@@ -153,14 +147,13 @@ function DocumentsPageInner() {
         const data = await getOrganisations();
         setOrganisations(data);
       } catch (err) {
-        console.error('Error loading organisations:', err);
-        setError('Failed to load organisations');
+        console.error("Error loading organisations:", err);
+        setError("Failed to load organisations");
       }
     };
     loadOrganisations();
   }, [currentUser, isGuest]);
 
-  // Load projects when organisation changes — skip for guests
   useEffect(() => {
     if (!currentUser || isGuest) return;
     const loadProjects = async () => {
@@ -168,8 +161,8 @@ function DocumentsPageInner() {
         const data = await getProjects(selectedOrgId);
         setProjects(data);
       } catch (err) {
-        console.error('Error loading projects:', err);
-        setError('Failed to load projects');
+        console.error("Error loading projects:", err);
+        setError("Failed to load projects");
       }
     };
     loadProjects();
@@ -177,7 +170,6 @@ function DocumentsPageInner() {
     setSelectedDeliverableId(undefined);
   }, [selectedOrgId, currentUser, isGuest]);
 
-  // Load deliverables when project changes — skip for guests
   useEffect(() => {
     if (!currentUser || isGuest) return;
     const loadDeliverables = async () => {
@@ -185,54 +177,73 @@ function DocumentsPageInner() {
         const data = await getDeliverables(selectedProjectId);
         setDeliverables(data);
       } catch (err) {
-        console.error('Error loading deliverables:', err);
-        setError('Failed to load deliverables');
+        console.error("Error loading deliverables:", err);
+        setError("Failed to load deliverables");
       }
     };
     loadDeliverables();
     setSelectedDeliverableId(undefined);
   }, [selectedProjectId, currentUser, isGuest]);
 
-  // Load documents
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedOrgId, selectedProjectId, selectedDeliverableId, searchTerm, showPrivateOnly, pageSize, sortOrder]);
+
   const loadDocuments = useCallback(async () => {
-    if (!currentUser) return;
+    if (!currentUser || isGuest) return;
 
     try {
       setLoading(true);
       setError(null);
 
-      const docs = await getDocuments({
+      const data = await getDocuments({
         organisationId: selectedOrgId,
         projectId: selectedProjectId,
         deliverableId: selectedDeliverableId,
         search: searchTerm,
         showPrivate: showPrivateOnly,
+        page: currentPage,
+        pageSize,
+        ordering: sortOrder === "newest" ? "-created_at" : "created_at", 
       });
 
-      setDocuments(docs);
+      setDocuments(data.results);
+      setTotalCount(data.count);
 
-      // Count private vs public
-      const allDocs = await getDocuments({
+      // Optional: exact privacy counts (fetches all; remove if too heavy)
+      const all = await getDocuments({
         organisationId: selectedOrgId,
         projectId: selectedProjectId,
         deliverableId: selectedDeliverableId,
         search: searchTerm,
+        page: 1,
+        pageSize: 1000,
+        ordering: sortOrder === "newest" ? "-created_at" : "created_at",  
       });
-
-      const privCount = allDocs.filter(d => d.is_private).length;
-      const pubCount = allDocs.filter(d => !d.is_private).length;
+      const privCount = all.results.filter((d) => d.is_private).length;
+      const pubCount = all.results.filter((d) => !d.is_private).length;
       setPrivateCount(privCount);
       setPublicCount(pubCount);
     } catch (err) {
-      console.error('Error loading documents:', err);
-      setError('Failed to load documents. Please try again.');
+      console.error("Error loading documents:", err);
+      setError("Failed to load documents. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [selectedOrgId, selectedProjectId, selectedDeliverableId, searchTerm, showPrivateOnly, currentUser]);
+  }, [
+    selectedOrgId,
+    selectedProjectId,
+    selectedDeliverableId,
+    searchTerm,
+    showPrivateOnly,
+    currentPage,
+    pageSize,
+    currentUser,
+    isGuest,
+    sortOrder,
+  ]);
 
-  // Skip entirely for guests — this endpoint 401s without a token, and
-  // guests land on GuestAccessGate instead of this list.
   useEffect(() => {
     if (currentUser && !isGuest) {
       loadDocuments();
@@ -241,14 +252,10 @@ function DocumentsPageInner() {
     }
   }, [loadDocuments, currentUser, isGuest]);
 
-  // Auto-open a specific document when arriving via ?openDoc=<id>, e.g. a
-  // linked-drawing chip clicked from the Issues page (opens this route in a
-  // new tab). Runs once we know who the user is; uses the same permission
-  // check and full-detail fetch as a normal click on a document card.
   useEffect(() => {
     if (hasHandledOpenDoc || !currentUser || isGuest) return;
 
-    const openDocId = searchParams.get('openDoc');
+    const openDocId = searchParams.get("openDoc");
     if (!openDocId) return;
 
     const id = Number(openDocId);
@@ -260,39 +267,34 @@ function DocumentsPageInner() {
       try {
         const fullDoc = await getDocument(id);
         if (!canAccessDocument(fullDoc, currentUser)) {
-          setError('You do not have permission to view this document.');
+          setError("You do not have permission to view this document.");
           return;
         }
         setSelectedDoc(fullDoc);
         setIsViewerOpen(true);
       } catch (err) {
-        console.error('Error auto-opening linked document:', err);
-        setError('Failed to load the linked document.');
+        console.error("Error auto-opening linked document:", err);
+        setError("Failed to load the linked document.");
       }
     })();
   }, [searchParams, currentUser, isGuest, hasHandledOpenDoc]);
 
-  // View and edit both need the FULL document detail (description, allowed_roles,
-  // etc.) — the list endpoint only returns a summary, so fetch by id here rather
-  // than reusing the row from `documents`.
   const handleViewDocument = async (doc: DrawingDocumentResolved) => {
     if (!currentUser) {
-      setError('Please login to view documents');
+      setError("Please login to view documents");
       return;
     }
-
     if (!canAccessDocument(doc, currentUser)) {
-      setError('You do not have permission to view this document.');
+      setError("You do not have permission to view this document.");
       return;
     }
-
     try {
       const fullDoc = await getDocument(doc.id);
       setSelectedDoc(fullDoc);
       setIsViewerOpen(true);
     } catch (err) {
-      console.error('Error loading document details:', err);
-      setError('Failed to load document details');
+      console.error("Error loading document details:", err);
+      setError("Failed to load document details");
     }
   };
 
@@ -300,11 +302,11 @@ function DocumentsPageInner() {
     try {
       const fullDoc = await getDocument(doc.id);
       setEditingDocument(fullDoc);
-      setFormMode('edit');
+      setFormMode("edit");
       setIsFormOpen(true);
     } catch (err) {
-      console.error('Error loading document details:', err);
-      setError('Failed to load document details');
+      console.error("Error loading document details:", err);
+      setError("Failed to load document details");
     }
   };
 
@@ -312,15 +314,14 @@ function DocumentsPageInner() {
     if (!confirm(`Are you sure you want to delete "${doc.title}"? This action cannot be undone.`)) {
       return;
     }
-
     try {
       setLoading(true);
       await deleteDocument(doc.id);
       await loadDocuments();
       setSelectedDoc(null);
     } catch (err: unknown) {
-      console.error('Error deleting document:', err);
-      setError(getErrorMessage(err) || 'Failed to delete document');
+      console.error("Error deleting document:", err);
+      setError(getErrorMessage(err) || "Failed to delete document");
     } finally {
       setLoading(false);
     }
@@ -328,7 +329,7 @@ function DocumentsPageInner() {
 
   const handleFormSave = async (formData: FormData) => {
     try {
-      if (formMode === 'create') {
+      if (formMode === "create") {
         await createDocument(formData);
       } else if (editingDocument) {
         await updateDocument(editingDocument.id, formData);
@@ -337,7 +338,7 @@ function DocumentsPageInner() {
       setIsFormOpen(false);
       setEditingDocument(null);
     } catch (err: unknown) {
-      console.error('Error saving document:', err);
+      console.error("Error saving document:", err);
       throw err;
     }
   };
@@ -349,65 +350,69 @@ function DocumentsPageInner() {
         prev.map((doc) => (doc.id === id ? { ...doc, is_favorite: newStatus } : doc))
       );
     } catch (error) {
-      console.error('Error toggling favorite:', error);
+      console.error("Error toggling favorite:", error);
     }
   };
 
   const handleDownload = async (doc: DrawingDocumentResolved) => {
     if (!currentUser) {
-      setError('Please login to download documents');
+      setError("Please login to download documents");
       return;
     }
-
     try {
       await downloadDocument(doc);
     } catch (err: unknown) {
-      console.error('Error downloading document:', err);
-      setError(getErrorMessage(err) || 'Failed to download document');
+      console.error("Error downloading document:", err);
+      setError(getErrorMessage(err) || "Failed to download document");
     }
   };
 
   const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / 1048576).toFixed(1) + ' MB';
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1048576).toFixed(1) + " MB";
   };
 
   const getFileIcon = (fileType: string): string => {
     switch (fileType) {
-      case 'pdf':
-        return 'ti-file-pdf';
-      case 'image':
-        return 'ti-image';
-      case 'dxf':
-        return 'ti-file-code';
-      case 'ifc':
-        return 'ti-building';
+      case "pdf":
+        return "ti-file-pdf";
+      case "image":
+        return "ti-image";
+      case "dxf":
+        return "ti-file-code";
+      case "ifc":
+        return "ti-building";
       default:
-        return 'ti-file';
+        return "ti-file";
     }
   };
 
   const getFileTypeDisplay = (fileType: string): string => {
     switch (fileType) {
-      case 'pdf': return 'PDF';
-      case 'dxf': return 'DXF';
-      case 'ifc': return 'IFC';
-      case 'image': return 'Image';
-      default: return 'Document';
+      case "pdf":
+        return "PDF";
+      case "dxf":
+        return "DXF";
+      case "ifc":
+        return "IFC";
+      case "image":
+        return "Image";
+      default:
+        return "Document";
     }
   };
 
   const getStatusColor = (status: string): string => {
     switch (status) {
-      case 'published':
-        return '#0F6E56';
-      case 'draft':
-        return '#E67E22';
-      case 'archived':
-        return '#6E6B62';
+      case "published":
+        return "#0F6E56";
+      case "draft":
+        return "#E67E22";
+      case "archived":
+        return "#6E6B62";
       default:
-        return '#6E6B62';
+        return "#6E6B62";
     }
   };
 
@@ -415,17 +420,18 @@ function DocumentsPageInner() {
     setSelectedOrgId(undefined);
     setSelectedProjectId(undefined);
     setSelectedDeliverableId(undefined);
-    setSearchTerm('');
+    setSearchTerm("");
     setShowPrivateOnly(false);
+    setCurrentPage(1);
+    setSortOrder("newest"); 
   };
 
   const hasActiveFilters =
     selectedOrgId !== undefined ||
     selectedProjectId !== undefined ||
     selectedDeliverableId !== undefined ||
-    searchTerm.trim() !== '';
+    searchTerm.trim() !== "";
 
-  // Still resolving who the user is
   if (!currentUser) {
     return (
       <main className={`${display.variable} ${mono.variable} documents-page`}>
@@ -437,8 +443,6 @@ function DocumentsPageInner() {
     );
   }
 
-  // No auth token at all — show the access-code gate instead of the
-  // authenticated document browser (which would just 401 on every call).
   if (isGuest) {
     return (
       <main className={`${display.variable} ${mono.variable} documents-page`}>
@@ -473,7 +477,7 @@ function DocumentsPageInner() {
             <button
               className="btn-primary"
               onClick={() => {
-                setFormMode('create');
+                setFormMode("create");
                 setEditingDocument(null);
                 setIsFormOpen(true);
               }}
@@ -483,17 +487,11 @@ function DocumentsPageInner() {
             </button>
             {selectedDoc && (
               <>
-                <button
-                  className="btn-secondary"
-                  onClick={() => handleEditDocument(selectedDoc)}
-                >
+                <button className="btn-secondary" onClick={() => handleEditDocument(selectedDoc)}>
                   <i className="ti ti-edit" />
                   Edit
                 </button>
-                <button
-                  className="btn-danger"
-                  onClick={() => handleDeleteDocument(selectedDoc)}
-                >
+                <button className="btn-danger" onClick={() => handleDeleteDocument(selectedDoc)}>
                   <i className="ti ti-trash" />
                   Delete
                 </button>
@@ -502,7 +500,7 @@ function DocumentsPageInner() {
           </div>
           <span className="documents-role-badge">
             <i className="ti ti-file" aria-hidden="true" />
-            {documents.length} Documents
+            {totalCount} Documents
           </span>
         </nav>
       </header>
@@ -515,28 +513,42 @@ function DocumentsPageInner() {
         </p>
       </div>
 
-      {/* User Info & Privacy Badge */}
       <div className="documents-user-quick">
-        <div className="documents-user-avatar">
-          {currentUser.name.charAt(0).toUpperCase()}
-        </div>
+        <div className="documents-user-avatar">{currentUser.name.charAt(0).toUpperCase()}</div>
         <div className="documents-user-info">
           <div className="documents-user-name">{currentUser.name}</div>
           <div className="documents-user-email">{currentUser.email}</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            gap: "8px",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           {currentUser.hasDrawingPrivateAccess && (
-            <span className="documents-role-badge" style={{ background: '#EEEDFE', color: '#3C3489' }}>
+            <span
+              className="documents-role-badge"
+              style={{ background: "#EEEDFE", color: "#3C3489" }}
+            >
               <i className="ti ti-lock" />
               Private Access
             </span>
           )}
-          <span className="documents-role-badge" style={{ background: '#E1F5EE', color: '#0F6E56' }}>
+          <span
+            className="documents-role-badge"
+            style={{ background: "#E1F5EE", color: "#0F6E56" }}
+          >
             <i className="ti ti-eye" />
             {publicCount} Public
           </span>
           {privateCount > 0 && (
-            <span className="documents-role-badge" style={{ background: '#FAECE7', color: '#712B13' }}>
+            <span
+              className="documents-role-badge"
+              style={{ background: "#FAECE7", color: "#712B13" }}
+            >
               <i className="ti ti-lock" />
               {privateCount} Private
             </span>
@@ -557,7 +569,7 @@ function DocumentsPageInner() {
           {searchTerm && (
             <button
               className="documents-search-clear"
-              onClick={() => setSearchTerm('')}
+              onClick={() => setSearchTerm("")}
               aria-label="Clear search"
             >
               <i className="ti ti-x" />
@@ -566,17 +578,16 @@ function DocumentsPageInner() {
         </div>
       </div>
 
-      {/* Privacy Filter Toggle */}
       <div className="documents-privacy-filter">
         <button
-          className={`documents-privacy-btn ${!showPrivateOnly ? 'active' : ''}`}
+          className={`documents-privacy-btn ${!showPrivateOnly ? "active" : ""}`}
           onClick={() => setShowPrivateOnly(false)}
         >
           <i className="ti ti-world" />
           All Documents
         </button>
         <button
-          className={`documents-privacy-btn ${showPrivateOnly ? 'active' : ''}`}
+          className={`documents-privacy-btn ${showPrivateOnly ? "active" : ""}`}
           onClick={() => setShowPrivateOnly(true)}
         >
           <i className="ti ti-lock" />
@@ -591,7 +602,7 @@ function DocumentsPageInner() {
           </label>
           <select
             className="documents-filter-select"
-            value={selectedOrgId ?? ''}
+            value={selectedOrgId ?? ""}
             onChange={(e) => setSelectedOrgId(e.target.value ? Number(e.target.value) : undefined)}
           >
             <option value="">All Organisations</option>
@@ -609,7 +620,7 @@ function DocumentsPageInner() {
           </label>
           <select
             className="documents-filter-select"
-            value={selectedProjectId ?? ''}
+            value={selectedProjectId ?? ""}
             onChange={(e) => setSelectedProjectId(e.target.value ? Number(e.target.value) : undefined)}
             disabled={projects.length === 0}
           >
@@ -628,7 +639,7 @@ function DocumentsPageInner() {
           </label>
           <select
             className="documents-filter-select"
-            value={selectedDeliverableId ?? ''}
+            value={selectedDeliverableId ?? ""}
             onChange={(e) =>
               setSelectedDeliverableId(e.target.value ? Number(e.target.value) : undefined)
             }
@@ -642,6 +653,21 @@ function DocumentsPageInner() {
             ))}
           </select>
         </div>
+        <div className="documents-filter-group" style={{ marginLeft: "auto" }}>
+          <label className="documents-filter-label">
+            <i className="ti ti-arrows-sort" /> Sort
+          </label>
+          <select
+            className="documents-filter-select"
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as "newest" | "oldest")}
+          >
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+          </select>
+        </div>
+
+
 
         {hasActiveFilters && (
           <button className="documents-filter-clear" onClick={clearFilters}>
@@ -667,158 +693,220 @@ function DocumentsPageInner() {
       ) : (
         <>
           {documents.length > 0 ? (
-            <div className="documents-grid">
-              {documents.map((doc) => {
-                const displayUrl = getDisplayFileUrl(doc);
-
-                return (
-                  <div
-                    key={doc.id}
-                    className={`documents-card ${doc.is_private ? 'documents-card-private' : ''} ${selectedDoc?.id === doc.id ? 'documents-card-selected' : ''}`}
-                    onClick={() => setSelectedDoc(doc)}
-                  >
-                    <div className="documents-card-thumbnail">
-                      {doc.file_type === 'pdf' ? (
-                        <PdfThumbnail fileUrl={getFullFileUrl(doc.file_url)} />
-                      ) : (
-                        <>
-                          {displayUrl ? (
-                            <div className="documents-thumbnail-image-wrapper">
-                              <Image
-                                src={displayUrl}
-                                alt={doc.title}
-                                fill
-                                className="documents-thumbnail-image"
-                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                unoptimized={displayUrl.startsWith('data:')}
-                                onError={(e) => {
-                                  const target = e.currentTarget;
-                                  const parent = target.parentElement;
-                                  if (parent) {
-                                    const placeholder = parent.parentElement?.querySelector(
-                                      '.documents-thumbnail-placeholder'
-                                    );
-                                    if (placeholder) {
-                                      target.style.display = 'none';
-                                      placeholder.classList.remove('documents-thumbnail-hidden');
+            <>
+              <div className="documents-grid">
+                {documents.map((doc) => {
+                  const displayUrl = getDisplayFileUrl(doc);
+                  return (
+                    <div
+                      key={doc.id}
+                      className={`documents-card ${doc.is_private ? "documents-card-private" : ""} ${
+                        selectedDoc?.id === doc.id ? "documents-card-selected" : ""
+                      }`}
+                      onClick={() => setSelectedDoc(doc)}
+                    >
+                      <div className="documents-card-thumbnail">
+                        {doc.file_type === "pdf" ? (
+                          <PdfThumbnail fileUrl={getFullFileUrl(doc.file_url)} />
+                        ) : (
+                          <>
+                            {displayUrl ? (
+                              <div className="documents-thumbnail-image-wrapper">
+                                <Image
+                                  src={displayUrl}
+                                  alt={doc.title}
+                                  fill
+                                  className="documents-thumbnail-image"
+                                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                  unoptimized={displayUrl.startsWith("data:")}
+                                  onError={(e) => {
+                                    const target = e.currentTarget;
+                                    const parent = target.parentElement;
+                                    if (parent) {
+                                      const placeholder = parent.parentElement?.querySelector(
+                                        ".documents-thumbnail-placeholder"
+                                      );
+                                      if (placeholder) {
+                                        target.style.display = "none";
+                                        placeholder.classList.remove("documents-thumbnail-hidden");
+                                      }
                                     }
-                                  }
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <div className="documents-thumbnail-placeholder">
+                                  }}
+                                />
+                              </div>
+                            ) : (
+                              <div className="documents-thumbnail-placeholder">
+                                <i className={`ti ${getFileIcon(doc.file_type)}`} />
+                              </div>
+                            )}
+                            <div className="documents-thumbnail-placeholder documents-thumbnail-hidden">
                               <i className={`ti ${getFileIcon(doc.file_type)}`} />
                             </div>
-                          )}
-                          <div className="documents-thumbnail-placeholder documents-thumbnail-hidden">
-                            <i className={`ti ${getFileIcon(doc.file_type)}`} />
-                          </div>
-                        </>
-                      )}
-                      <div className="documents-card-status" style={{ background: getStatusColor(doc.status) }}>
-                        {doc.status}
-                      </div>
-                      {doc.is_private && (
-                        <div className="documents-card-privacy-badge">
-                          <i className="ti ti-lock" />
+                          </>
+                        )}
+                        <div
+                          className="documents-card-status"
+                          style={{ background: getStatusColor(doc.status) }}
+                        >
+                          {doc.status}
                         </div>
-                      )}
-                      <button
-                        className="documents-card-favorite"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleFavorite(doc.id);
-                        }}
-                        aria-label={doc.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-                      >
-                        <i className={`ti ${doc.is_favorite ? 'ti-star-filled' : 'ti-star'}`} />
-                      </button>
-                      <div className="documents-card-file-type">
-                        {getFileTypeDisplay(doc.file_type)}
-                      </div>
-                    </div>
-
-                    <div className="documents-card-content">
-                      <div className="documents-card-breadcrumb">
-                        {doc.organisation_name} <i className="ti ti-chevron-right" /> {doc.project_name}{" "}
-                        <i className="ti ti-chevron-right" /> {doc.deliverable_name}
-                      </div>
-                      <h3 className="documents-card-title">
-                        {doc.title}
                         {doc.is_private && (
-                          <span className="documents-card-private-label">
-                            <i className="ti ti-lock" /> Private
-                          </span>
+                          <div className="documents-card-privacy-badge">
+                            <i className="ti ti-lock" />
+                          </div>
                         )}
-                      </h3>
-                      <p className="documents-card-description">{doc.description}</p>
-
-                      <div className="documents-card-meta">
-                        <span className="documents-card-meta-item">
-                          <i className="ti ti-tag" />
-                          {doc.category}
-                        </span>
-                        <span className="documents-card-meta-item">
-                          <i className="ti ti-calendar" />
-                          {new Date(doc.uploaded_at).toLocaleDateString()}
-                        </span>
-                        <span className="documents-card-meta-item">
-                          <i className="ti ti-user" />
-                          {doc.uploaded_by_name}
-                        </span>
-                        <span className="documents-card-meta-item">
-                          <i className="ti ti-file" />
+                        <button
+                          className="documents-card-favorite"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleFavorite(doc.id);
+                          }}
+                          aria-label={doc.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                        >
+                          <i className={`ti ${doc.is_favorite ? "ti-star-filled" : "ti-star"}`} />
+                        </button>
+                        <div className="documents-card-file-type">
                           {getFileTypeDisplay(doc.file_type)}
-                        </span>
+                        </div>
                       </div>
 
-                      <div className="documents-card-tags">
-                        {doc.tags.slice(0, 3).map((tag, idx) => (
-                          <span key={idx} className="documents-card-tag">
-                            #{tag}
+                      <div className="documents-card-content">
+                        <div className="documents-card-breadcrumb">
+                          {doc.organisation_name} <i className="ti ti-chevron-right" />{" "}
+                          {doc.project_name} <i className="ti ti-chevron-right" />{" "}
+                          {doc.deliverable_name}
+                        </div>
+                        <h3 className="documents-card-title">
+                          {doc.title}
+                          {doc.is_private && (
+                            <span className="documents-card-private-label">
+                              <i className="ti ti-lock" /> Private
+                            </span>
+                          )}
+                        </h3>
+                        <p className="documents-card-description">{doc.description}</p>
+
+                        <div className="documents-card-meta">
+                          <span className="documents-card-meta-item">
+                            <i className="ti ti-tag" />
+                            {doc.category}
                           </span>
-                        ))}
-                        {doc.tags.length > 3 && (
-                          <span className="documents-card-tag-more">+{doc.tags.length - 3} more</span>
-                        )}
-                      </div>
+                          <span className="documents-card-meta-item">
+                            <i className="ti ti-calendar" />
+                            {new Date(doc.uploaded_at).toLocaleDateString()}
+                          </span>
+                          <span className="documents-card-meta-item">
+                            <i className="ti ti-user" />
+                            {doc.uploaded_by_name}
+                          </span>
+                          <span className="documents-card-meta-item">
+                            <i className="ti ti-file" />
+                            {getFileTypeDisplay(doc.file_type)}
+                          </span>
+                        </div>
 
-                      <div className="documents-card-actions">
-                        <span className="documents-card-size">
-                          <i className="ti ti-database" />
-                          {formatFileSize(doc.size)}
-                        </span>
-                        <div className="documents-card-buttons">
-                          <button
-                            className="documents-card-btn documents-card-btn-view"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewDocument(doc);
-                            }}
-                            disabled={!canAccessDocument(doc, currentUser)}
-                          >
-                            <i className="ti ti-eye" />
-                            View
-                          </button>
-                          <button
-                            className="documents-card-btn documents-card-btn-download"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownload(doc);
-                            }}
-                            disabled={!canAccessDocument(doc, currentUser)}
-                          >
-                            <i className="ti ti-download" />
-                            Download
-                          </button>
+                        <div className="documents-card-tags">
+                          {doc.tags.slice(0, 3).map((tag, idx) => (
+                            <span key={idx} className="documents-card-tag">
+                              #{tag}
+                            </span>
+                          ))}
+                          {doc.tags.length > 3 && (
+                            <span className="documents-card-tag-more">
+                              +{doc.tags.length - 3} more
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="documents-card-actions">
+                          <span className="documents-card-size">
+                            <i className="ti ti-database" />
+                            {formatFileSize(doc.size)}
+                          </span>
+                          <div className="documents-card-buttons">
+                            <button
+                              className="documents-card-btn documents-card-btn-view"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewDocument(doc);
+                              }}
+                              disabled={!canAccessDocument(doc, currentUser)}
+                            >
+                              <i className="ti ti-eye" />
+                              View
+                            </button>
+                            <button
+                              className="documents-card-btn documents-card-btn-download"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(doc);
+                              }}
+                              disabled={!canAccessDocument(doc, currentUser)}
+                            >
+                              <i className="ti ti-download" />
+                              Download
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="documents-pagination">
+                  <div className="documents-pagination-info">
+                    Showing {(currentPage - 1) * pageSize + 1}–
+                    {Math.min(currentPage * pageSize, totalCount)} of {totalCount}
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="documents-pagination-buttons">
+                    <button
+                      className="documents-pagination-btn"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <i className="ti ti-chevron-left" /> Prev
+                    </button>
+
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                      <button
+                        key={page}
+                        className={`documents-pagination-btn ${
+                          page === currentPage ? "active" : ""
+                        }`}
+                        onClick={() => setCurrentPage(page)}
+                      >
+                        {page}
+                      </button>
+                    ))}
+
+                    <button
+                      className="documents-pagination-btn"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next <i className="ti ti-chevron-right" />
+                    </button>
+                  </div>
+
+                  <select
+                    className="documents-page-size"
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <option value={10}>10 / page</option>
+                    <option value={20}>20 / page</option>
+                    <option value={50}>50 / page</option>
+                  </select>
+                </div>
+              )}
+            </>
           ) : (
             <div className="documents-empty">
               <i className="ti ti-folder-open" />
@@ -827,17 +915,17 @@ function DocumentsPageInner() {
                 {searchTerm
                   ? `No documents match your search "${searchTerm}"`
                   : showPrivateOnly
-                    ? 'No private documents match the selected filters'
-                    : 'No documents match the selected filters'}
+                  ? "No private documents match the selected filters"
+                  : "No documents match the selected filters"}
               </p>
               <button
                 className="btn-primary"
                 onClick={() => {
-                  setFormMode('create');
+                  setFormMode("create");
                   setEditingDocument(null);
                   setIsFormOpen(true);
                 }}
-                style={{ marginTop: '16px' }}
+                style={{ marginTop: "16px" }}
               >
                 <i className="ti ti-plus" />
                 Create your first document
@@ -857,7 +945,6 @@ function DocumentsPageInner() {
         />
       )}
 
-      {/* Document Form Modal */}
       <DocumentForm
         isOpen={isFormOpen}
         onClose={() => {
@@ -866,8 +953,8 @@ function DocumentsPageInner() {
         }}
         onSave={handleFormSave}
         document={editingDocument}
-        title={formMode === 'create' ? 'Create New Document' : 'Edit Document'}
-        submitLabel={formMode === 'create' ? 'Create Document' : 'Update Document'}
+        title={formMode === "create" ? "Create New Document" : "Edit Document"}
+        submitLabel={formMode === "create" ? "Create Document" : "Update Document"}
       />
     </main>
   );
