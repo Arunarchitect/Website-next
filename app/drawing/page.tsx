@@ -104,7 +104,7 @@ function DocumentsPageInner() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalCount, setTotalCount] = useState<number>(0);
-  const [pageSize, setPageSize] = useState<number>(6);
+  const [pageSize, setPageSize] = useState<number>(10);
   const totalPages = Math.ceil(totalCount / pageSize) || 1;
 
   const getErrorMessage = (err: unknown): string => {
