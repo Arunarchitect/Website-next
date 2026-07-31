@@ -10,10 +10,10 @@ import "./styles.css";
 import {
   getCurrentUser,
   getUserOrganisations,
-  getIssuesByOrganisation,
+  getDashboardStats,
 } from "./adminApi";
 import { tools, quickLinks } from "./constants";
-import { DashboardIssue, Organisation, User, DashboardStats } from "./types";
+import {  Organisation, User, DashboardStats } from "./types";
 import { fetchAreacalcRole } from "@/lib/resolveUserDestination";
 
 // NOTE: adjust this import path to wherever meetingApi.ts actually lives —
@@ -32,37 +32,9 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
+
+
 // Helper to normalize status
-const normalizeStatus = (status: string): string => {
-  const statusMap: { [key: string]: string } = {
-    open: "Open",
-    in_progress: "In Progress",
-    resolved: "Resolved",
-    closed: "Closed",
-  };
-  return statusMap[status?.toLowerCase?.()] || status;
-};
-
-// Helper to normalize priority
-const normalizePriority = (priority: string): string => {
-  const priorityMap: { [key: string]: string } = {
-    high: "High",
-    medium: "Medium",
-    low: "Low",
-  };
-  return priorityMap[priority?.toLowerCase?.()] || priority;
-};
-
-// Calculate stats from issues
-const calculateStats = (issues: DashboardIssue[]): DashboardStats => {
-  return {
-    open: issues.filter((i) => normalizeStatus(i.status) === "Open").length,
-    inProgress: issues.filter((i) => normalizeStatus(i.status) === "In Progress").length,
-    resolved: issues.filter((i) => normalizeStatus(i.status) === "Resolved").length,
-    highPriority: issues.filter((i) => normalizePriority(i.priority) === "High").length,
-    total: issues.length,
-  };
-};
 
 export default function MainAdminPage() {
   const router = useRouter();
@@ -125,30 +97,26 @@ export default function MainAdminPage() {
     fetchOrganisations();
   }, []);
 
-  // Fetch issue counts when organisation changes. We still need the full
-  // issue list to compute open/resolved counts client-side (normalizing
-  // status casing), but we only keep the derived counts — nothing about
-  // individual issues is stored or rendered here.
+  // Fetch issue stats when organisation changes. This now hits the dedicated
+  // /stats/ endpoint (via getDashboardStats), which aggregates over the whole
+  // filtered set in the database — not a client-side page of issues — so
+  // Open / Resolved / High Priority are accurate regardless of how many
+  // issues exist.
   useEffect(() => {
     if (selectedOrganisation === null && organisations.length > 0) {
       setSelectedOrganisation(organisations[0].id);
       return;
     }
 
-    const fetchIssueCounts = async () => {
+    const fetchIssueStats = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        let allIssues: DashboardIssue[] = [];
-
-        if (selectedOrganisation) {
-          allIssues = await getIssuesByOrganisation(selectedOrganisation);
-        }
-
-        setIssueStats(calculateStats(allIssues));
+        const stats = await getDashboardStats(selectedOrganisation ?? undefined);
+        setIssueStats(stats);
       } catch (err) {
-        console.error("Error fetching issues:", err);
+        console.error("Error fetching issue stats:", err);
         setError("Failed to load issues");
       } finally {
         setLoading(false);
@@ -156,9 +124,10 @@ export default function MainAdminPage() {
     };
 
     if (!loadingOrganisations) {
-      fetchIssueCounts();
+      fetchIssueStats();
     }
   }, [selectedOrganisation, organisations, loadingOrganisations]);
+
 
   // Fetch upcoming meetings count, scoped to the selected organisation.
   useEffect(() => {

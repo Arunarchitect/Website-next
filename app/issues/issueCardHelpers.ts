@@ -181,6 +181,19 @@ export function linkifyText(text: string | undefined | null): React.ReactNode {
 
 export type ScreenshotFormat = "png" | "jpg";
 
+
+export interface CurrentUser {
+  id?: number | null;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  fullName: string;
+  username: string;
+  displayName: string;
+}
+
+
+
 export interface UseScreenshotUploadResult {
   screenshot: string | null;
   format: ScreenshotFormat;

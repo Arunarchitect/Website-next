@@ -22,7 +22,6 @@ const apiClient = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
     const token = getAuthToken();
@@ -34,7 +33,6 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -80,53 +78,76 @@ export const getUserOrganisations = async (): Promise<Organisation[]> => {
   }
 };
 
-// Fetch issues for a specific organisation
+// Unwraps either a bare array or a DRF-paginated {count, next, previous,
+// results} envelope, so callers that still want the raw issue list (e.g.
+// for anything beyond simple counts) don't crash against the paginated
+// /issues/issues/ endpoint.
+function unwrapListResponse<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (
+    data &&
+    typeof data === 'object' &&
+    Array.isArray((data as { results?: unknown }).results)
+  ) {
+    return (data as { results: T[] }).results;
+  }
+  console.warn('⚠️ Unexpected list response shape from /issues/issues/:', data);
+  return [];
+}
+
+// Fetch issues for a specific organisation.
+// NOTE: /issues/issues/ is paginated (page_size ~20), so this only ever
+// returns ONE PAGE of issues — it is NOT a reliable source for counts
+// across the whole organisation. Use getIssueStatsByOrganisation() below
+// for accurate open/resolved/priority counts. Kept here only for callers
+// that genuinely just want a page of recent issues to list.
 export const getIssuesByOrganisation = async (organisationId: number): Promise<DashboardIssue[]> => {
   try {
     const response = await apiClient.get('/issues/issues/', {
       params: {
-        include_deleted: false,
+        organisation: organisationId || undefined,
       },
     });
-    
-    const allIssues = response.data;
-    
-    if (organisationId) {
-      // The list endpoint includes `organisation_id` on each issue even
-      // though it isn't (yet) part of the DashboardIssue type — intersect
-      // it in here rather than typing the callback param as `any`.
-      return allIssues.filter((issue: DashboardIssue & { organisation_id?: number }) =>
-        issue.organisation_id === organisationId
-      );
-    }
-    
-    return allIssues;
+
+    return unwrapListResponse<DashboardIssue>(response.data);
   } catch (error) {
     console.error('Error fetching issues:', error);
     return [];
   }
 };
 
-// Get dashboard stats
+// Backend shape returned by /issues/issues/stats/
+interface RawIssueStats {
+  open: number;
+  in_progress: number;
+  resolved: number;
+  closed: number;
+  low: number;
+  medium: number;
+  high: number;
+  total: number;
+}
+
+// Get dashboard stats — now backed by the dedicated stats endpoint, which
+// aggregates over the FULL filtered queryset in the database rather than
+// whatever page of issues happens to be loaded client-side. This is what
+// fixes "Resolved Issues" (and Open / High Priority) being wrong on the
+// admin dashboard.
 export const getDashboardStats = async (organisationId?: number): Promise<DashboardStats> => {
   try {
-    let issues: DashboardIssue[] = [];
-    
-    if (organisationId) {
-      issues = await getIssuesByOrganisation(organisationId);
-    } else {
-      const response = await apiClient.get('/issues/issues/', {
-        params: { include_deleted: false },
-      });
-      issues = response.data;
-    }
-    
+    const response = await apiClient.get('/issues/issues/stats/', {
+      params: {
+        organisation: organisationId || undefined,
+      },
+    });
+    const raw = response.data as RawIssueStats;
+
     return {
-      open: issues.filter(i => i.status === 'Open').length,
-      inProgress: issues.filter(i => i.status === 'In Progress').length,
-      resolved: issues.filter(i => i.status === 'Resolved').length,
-      highPriority: issues.filter(i => i.priority === 'High').length,
-      total: issues.length,
+      open: raw.open ?? 0,
+      inProgress: raw.in_progress ?? 0,
+      resolved: raw.resolved ?? 0,
+      highPriority: raw.high ?? 0,
+      total: raw.total ?? 0,
     };
   } catch (error) {
     console.error('Error fetching stats:', error);

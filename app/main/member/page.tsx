@@ -10,11 +10,13 @@ import "./styles.css";
 import {
   getCurrentUser,
   getUserOrganisations,
-  getIssuesByOrganisation,
+  getMyAssignedIssues,
+  getDashboardStats,
   formatTimestamp,
   getPriorityColor,
   getStatusColor,
 } from "./memberApi";
+
 import { tools, quickLinks } from "./constants";
 import { DashboardIssue, Organisation, User, DashboardStats } from "./types";
 
@@ -52,15 +54,7 @@ const normalizePriority = (priority: string): string => {
   return priorityMap[priority?.toLowerCase?.()] || priority;
 };
 
-const calculateStats = (issues: DashboardIssue[]): DashboardStats => {
-  return {
-    open: issues.filter((i) => normalizeStatus(i.status) === "Open").length,
-    inProgress: issues.filter((i) => normalizeStatus(i.status) === "In Progress").length,
-    resolved: issues.filter((i) => normalizeStatus(i.status) === "Resolved").length,
-    highPriority: issues.filter((i) => normalizePriority(i.priority) === "High").length,
-    total: issues.length,
-  };
-};
+
 
 export default function MemberDashboardPage() {
   const router = useRouter();
@@ -108,43 +102,58 @@ export default function MemberDashboardPage() {
     fetchOrganisations();
   }, []);
 
+  // Stats for the top cards — hits the dedicated /stats/ endpoint, which
+  // aggregates over the full filtered set in the database rather than a
+  // client-side page of issues.
   useEffect(() => {
     if (selectedOrganisation === null && organisations.length > 0) {
       setSelectedOrganisation(organisations[0].id);
       return;
     }
 
-    const fetchIssues = async () => {
+    const fetchIssueStats = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        let allIssues: DashboardIssue[] = [];
-        if (selectedOrganisation) {
-          allIssues = await getIssuesByOrganisation(selectedOrganisation);
-        }
-
-        const userEmail = currentUser?.email?.toLowerCase() || "";
-        const assignedToMeFiltered = allIssues.filter(
-          (issue) =>
-            issue.assignedTo?.toLowerCase() === userEmail ||
-            issue.assignedTo?.toLowerCase() === currentUser?.full_name?.toLowerCase()
-        );
-        setAssignedToMe(assignedToMeFiltered);
-
-        setIssueStats(calculateStats(allIssues));
+        const stats = await getDashboardStats(selectedOrganisation ?? undefined);
+        setIssueStats(stats);
       } catch (err) {
-        console.error("Error fetching issues:", err);
+        console.error("Error fetching issue stats:", err);
         setError("Failed to load issues");
       } finally {
         setLoading(false);
       }
     };
 
-    if (!loadingOrganisations && currentUser) {
-      fetchIssues();
+    if (!loadingOrganisations) {
+      fetchIssueStats();
     }
-  }, [selectedOrganisation, organisations, loadingOrganisations, currentUser]);
+  }, [selectedOrganisation, organisations, loadingOrganisations]);
+
+  // "Assigned to Me" preview list — filtered server-side by the user's id,
+  // so it no longer depends on matching name/email strings against whatever
+  // page of issues happened to load, and won't miss assigned issues that
+  // simply live on a later page.
+  useEffect(() => {
+    if (!currentUser || loadingOrganisations) return;
+
+    const fetchAssignedToMe = async () => {
+      try {
+        const issues = await getMyAssignedIssues(
+          selectedOrganisation ?? undefined,
+          currentUser.id
+        );
+        setAssignedToMe(issues);
+      } catch (err) {
+        console.error("Error fetching assigned issues:", err);
+        setAssignedToMe([]);
+      }
+    };
+
+    fetchAssignedToMe();
+  }, [selectedOrganisation, loadingOrganisations, currentUser]);
+
 
   useEffect(() => {
     if (loadingOrganisations) return;

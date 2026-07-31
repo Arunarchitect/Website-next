@@ -695,7 +695,11 @@ export function LinkedDrawingsEdit({
               <button
                 type="button"
                 className="linked-drawing-unlink-btn"
-                onClick={() => setLinkedDocIds((ids) => ids.filter((id) => id !== docId))}
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to unlink this drawing?')) {
+                    setLinkedDocIds((ids) => ids.filter((id) => id !== docId));
+                  }
+                }}
                 title="Unlink"
               >
                 <i className="ti ti-x" />

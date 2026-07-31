@@ -82,6 +82,86 @@ export const getImageSource = (imageData: string | undefined, fallback?: string)
   return fallback || '/images/test.jpg';
 };
 
+
+
+
+// --- Pagination / stats support ---------------------------------------
+
+export interface IssueStats {
+  open: number;
+  in_progress: number;
+  resolved: number;
+  closed: number;
+  low: number;
+  medium: number;
+  high: number;
+  total: number;
+}
+
+export interface PaginatedIssues {
+  results: Issue[];
+  count: number;
+  next: string | null;
+  previous: string | null;
+}
+
+export interface GetIssuesParams {
+  organisation?: number;
+  project?: number;
+  domain?: string;
+  deliverable?: number;
+  classification?: string;
+  status_in?: string;   // comma-separated backend status codes
+  priority_in?: string; // comma-separated backend priority codes
+  assigned_to?: number;
+  search?: string;
+  ordering?: string;    // e.g. '-created', 'updated'
+  page?: number;
+  page_size?: number;
+}
+
+export async function getIssuesPaginated(params?: GetIssuesParams): Promise<PaginatedIssues> {
+  try {
+    const response = await apiClient.get('/issues/issues/', { params });
+    const data = response.data;
+
+    if (Array.isArray(data)) {
+      // Defensive fallback if pagination is ever disabled server-side.
+      return { results: data.map(convertDjangoIssue), count: data.length, next: null, previous: null };
+    }
+
+    return {
+      results: (data.results || []).map(convertDjangoIssue),
+      count: data.count ?? 0,
+      next: data.next ?? null,
+      previous: data.previous ?? null,
+    };
+  } catch (error) {
+    console.error('❌ Error fetching issues (paginated):', error);
+    throw error;
+  }
+}
+
+export async function getIssueStats(params?: {
+  organisation?: number;
+  project?: number;
+  domain?: string;
+  deliverable?: number;
+  classification?: string;
+}): Promise<IssueStats> {
+  try {
+    const response = await apiClient.get('/issues/issues/stats/', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching issue stats:', error);
+    return { open: 0, in_progress: 0, resolved: 0, closed: 0, low: 0, medium: 0, high: 0, total: 0 };
+  }
+}
+
+
+
+
+
 export const checkImageAccessibility = async (url: string): Promise<boolean> => {
   if (!url || url.startsWith('data:')) return true;
   try {
@@ -271,7 +351,7 @@ export async function getOrganisationProjects(organisationId: number | string): 
 export async function getOrganisationMembers(organisationId: number | string): Promise<AssigneeOption[]> {
   try {
     const response = await apiClient.get(`/organisations/${organisationId}/members/`);
-    return response.data.map((m: any) => {
+    return unwrapListResponse<any>(response.data).map((m: any) => {
       const u = m.user || m;
       return {
         id: u.id,
@@ -281,8 +361,6 @@ export async function getOrganisationMembers(organisationId: number | string): P
           u.email ||
           `User #${u.id}`,
         email: u.email || '',
-        // `role` may live on the membership record (`m.role`) or, in some
-        // backends, directly on the nested user object — check both.
         role: m.role ?? u.role ?? null,
       };
     });
@@ -340,7 +418,7 @@ export async function getDeliverableDrawings(deliverableId: number | string): Pr
     const response = await apiClient.get('/drawings/documents/', {
       params: { deliverable_id: deliverableId },
     });
-    return response.data.map((d: any) => ({
+    return unwrapListResponse<any>(response.data).map((d: any) => ({
       id: d.id,
       title: d.title,
       file_type: d.file_type,
@@ -356,7 +434,7 @@ export async function getProjectDrawings(projectId: number | string): Promise<Dr
     const response = await apiClient.get('/drawings/documents/', {
       params: { project_id: projectId },
     });
-    return response.data.map((d: any) => ({
+    return unwrapListResponse<any>(response.data).map((d: any) => ({
       id: d.id,
       title: d.title,
       file_type: d.file_type,
@@ -376,6 +454,7 @@ const convertDjangoIssue = (data: any): Issue => {
     priority: mapPriorityToFrontend(data.priority) as IssuePriority,
     module: data.module || '',
     reportedBy: data.reported_by_name || data.reported_by?.email || data.reported_by?.full_name || 'Unknown',
+    reportedById: extractIdSafe(data.reported_by) ?? null,
     assignedTo: data.assigned_to_name || data.assigned_to?.email || data.assigned_to?.full_name || null,
     assignedToId: extractIdSafe(data.assigned_to) ?? null,
     project: extractIdSafe(data.project),
@@ -584,6 +663,16 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
   return payload;
 };
 
+// Unwraps either a bare array or a DRF-paginated {count, next, previous,
+// results} envelope. Added after IssuePagination was applied to
+// IssueViewSet — /issues/issues/ now returns an object, not an array.
+function unwrapListResponse<T>(data: any): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results;
+  console.warn('⚠️ Unexpected list response shape, expected array or {results: []}:', data);
+  return [];
+}
+
 export async function getIssues(params?: {
   project?: number;
   domain?: string;
@@ -594,7 +683,7 @@ export async function getIssues(params?: {
 }): Promise<Issue[]> {
   try {
     const response = await apiClient.get('/issues/issues/', { params });
-    return response.data.map(convertDjangoIssue);
+    return unwrapListResponse<any>(response.data).map(convertDjangoIssue);
   } catch (error) {
     console.error('❌ Error fetching issues:', error);
     throw error;
@@ -926,7 +1015,7 @@ export const getIssuesByIfcElement = async (ifcGuid: string) => {
 export const getMyIssues = async (): Promise<Issue[]> => {
   try {
     const response = await apiClient.get('/issues/my-issues/');
-    return response.data.map(convertDjangoIssue);
+    return unwrapListResponse<any>(response.data).map(convertDjangoIssue);
   } catch (error) {
     console.error('Error fetching my issues:', error);
     throw error;

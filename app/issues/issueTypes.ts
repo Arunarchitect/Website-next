@@ -120,6 +120,7 @@ interface BaseIssue {
   priority: IssuePriority;
   module: string;
   reportedBy: string;
+  reportedById?: number | null;
   assignedTo: string | null;
   assignedToId: number | null;
   created: string;

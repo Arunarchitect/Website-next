@@ -1,21 +1,13 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
-import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./issues.css";
 import {
-  getIssues,
-  updateIssue,
-  resolveIssue,
   createIssue,
-  removeSnapshot,
-  removeAttachment,
-  addComment,
-  deleteComment,
-  editComment,
-  deleteIssue,
+  getIssuesPaginated,
+  getIssueStats,
   getProjectDrawings,
   getMyOrganisations,
   getOrganisationProjects,
@@ -24,18 +16,11 @@ import {
   DeliverableOption,
   OrganisationSummary,
   ProjectSummary,
+  IssueStats,
   API_URL,
-  updateIssueAccess,
 } from "./issueApi";
 
-import {
-  Issue,
-  IssueStatus,
-  IssuePriority,
-  IssueDomain,
-  BcfTopicType,
-  isBimIssue,
-} from "./issueTypes";
+import { Issue, IssueStatus, IssuePriority, IssueDomain, BcfTopicType } from "./issueTypes";
 import { IssueCard } from "./IssueCard";
 import { processImageFile, extractImageFromClipboard, extractImageFromDrop } from "./imageUtils";
 import { ScreenshotDropzone } from "./IssueCardParts";
@@ -44,28 +29,11 @@ import { isUserMatch } from '@/components/utils/userMatching';
 import { useAppDispatch } from '@/redux/hooks';
 import { setUser } from '@/redux/features/authSlice';
 
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
+const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
+const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
-const TOPIC_TYPE_OPTIONS: BcfTopicType[] = [
-  "Clash",
-  "Coordinate",
-  "Quality",
-  "Safety",
-  "General",
-  "Request",
-  "Fault",
-];
+const TOPIC_TYPE_OPTIONS: BcfTopicType[] = ["Clash", "Coordinate", "Quality", "Safety", "General", "Request", "Fault"];
 
 const DEFAULT_CAMERA_POSITION = { x: 0, y: 0, z: 0 };
 const DEFAULT_CAMERA_DIRECTION = { x: 0, y: 0, z: -1 };
@@ -82,17 +50,8 @@ const getDrawingIcon = (fileType: string): string => {
   }
 };
 
-interface OrganisationOption {
-  id: number;
-  name: string;
-}
-
-interface ProjectOption {
-  id: number;
-  name: string;
-  organisation_id: number;
-  organisation_name: string;
-}
+interface OrganisationOption { id: number; name: string; }
+interface ProjectOption { id: number; name: string; organisation_id: number; organisation_name: string; }
 
 interface NewIssueBase {
   project_id: number;
@@ -130,14 +89,10 @@ interface NewDesignIssueInput extends NewIssueBase {
 type NewIssueInput = NewBimIssueInput | NewDesignIssueInput;
 
 // ---------------------------------------------------------------------------
-// Stats-strip filter chips — now multi-select. "open"/"inProgress"/"resolved"
-// form the STATUS group; the three priorities form the PRIORITY group.
-// Selections within a group are OR'd together (e.g. High + Low priority
-// selected -> shows issues that are High OR Low). Selections across groups
-// are AND'd together (e.g. Open + High selected -> shows issues that are
-// Open AND High). This is standard facet-filter behaviour: picking two
-// values from the SAME field widens the match, picking values from
-// DIFFERENT fields narrows it.
+// Stats-strip filter chips — multi-select, OR'd within a group (status vs.
+// priority), AND'd across groups. These now drive SERVER-side filtering
+// (status_in / priority_in) instead of filtering an in-memory array, so they
+// stay correct across pages.
 // ---------------------------------------------------------------------------
 
 type StatFilterKey = "open" | "inProgress" | "resolved" | "lowPriority" | "mediumPriority" | "highPriority";
@@ -145,13 +100,13 @@ type StatFilterKey = "open" | "inProgress" | "resolved" | "lowPriority" | "mediu
 const STATUS_FILTER_KEYS: StatFilterKey[] = ["open", "inProgress", "resolved"];
 const PRIORITY_FILTER_KEYS: StatFilterKey[] = ["lowPriority", "mediumPriority", "highPriority"];
 
-const STAT_FILTER_PREDICATES: Record<StatFilterKey, (issue: Issue) => boolean> = {
-  open: (i) => i.status === "Open",
-  inProgress: (i) => i.status === "In Progress",
-  resolved: (i) => i.status === "Resolved",
-  lowPriority: (i) => i.priority === "Low",
-  mediumPriority: (i) => i.priority === "Medium",
-  highPriority: (i) => i.priority === "High",
+const STAT_FILTER_BACKEND_CODE: Record<StatFilterKey, string> = {
+  open: "open",
+  inProgress: "in_progress",
+  resolved: "resolved",
+  lowPriority: "low",
+  mediumPriority: "medium",
+  highPriority: "high",
 };
 
 const STAT_FILTER_LABELS: Record<StatFilterKey, string> = {
@@ -163,29 +118,18 @@ const STAT_FILTER_LABELS: Record<StatFilterKey, string> = {
   highPriority: "High Priority",
 };
 
-function matchesStatFilters(issue: Issue, activeFilters: Set<StatFilterKey>): boolean {
-  if (activeFilters.size === 0) return true;
+function buildStatusInParam(active: Set<StatFilterKey>): string | undefined {
+  const codes = STATUS_FILTER_KEYS.filter((k) => active.has(k)).map((k) => STAT_FILTER_BACKEND_CODE[k]);
+  return codes.length > 0 ? codes.join(",") : undefined;
+}
 
-  const activeStatusKeys = STATUS_FILTER_KEYS.filter((k) => activeFilters.has(k));
-  const activePriorityKeys = PRIORITY_FILTER_KEYS.filter((k) => activeFilters.has(k));
-
-  if (activeStatusKeys.length > 0) {
-    const matchesAnyStatus = activeStatusKeys.some((k) => STAT_FILTER_PREDICATES[k](issue));
-    if (!matchesAnyStatus) return false;
-  }
-
-  if (activePriorityKeys.length > 0) {
-    const matchesAnyPriority = activePriorityKeys.some((k) => STAT_FILTER_PREDICATES[k](issue));
-    if (!matchesAnyPriority) return false;
-  }
-
-  return true;
+function buildPriorityInParam(active: Set<StatFilterKey>): string | undefined {
+  const codes = PRIORITY_FILTER_KEYS.filter((k) => active.has(k)).map((k) => STAT_FILTER_BACKEND_CODE[k]);
+  return codes.length > 0 ? codes.join(",") : undefined;
 }
 
 // ---------------------------------------------------------------------------
-// Sort — newest/oldest by either the creation date or the last-updated date.
-// Issues without an `updated` timestamp (never edited since creation) fall
-// back to `created` so they sort sensibly instead of collapsing to epoch 0.
+// Sort — server-side via `ordering`. Newest = descending.
 // ---------------------------------------------------------------------------
 
 type SortField = "created" | "updated";
@@ -201,10 +145,8 @@ const SORT_ORDER_OPTIONS: { value: SortOrder; label: string }[] = [
   { value: "oldest", label: "Oldest First" },
 ];
 
-function getSortTimestamp(issue: Issue, field: SortField): number {
-  const raw = field === "updated" ? (issue.updated || issue.created) : issue.created;
-  const t = raw ? new Date(raw).getTime() : 0;
-  return Number.isNaN(t) ? 0 : t;
+function buildOrderingParam(field: SortField, order: SortOrder): string {
+  return order === "newest" ? `-${field}` : field;
 }
 
 function extractValidationMessage(err: unknown, fallback: string): string {
@@ -215,47 +157,39 @@ function extractValidationMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-// ---------------------------------------------------------------------------
-// Search — builds a lowercased haystack per issue once, then does a plain
-// substring match. Covers title, description, module, organisation, the
-// project name (resolved from whatever project lists we've already loaded
-// for the filter cascade / new-issue form — no extra API calls), reporter,
-// assignee, labels, topic type / category, and the raw issue id.
-// ---------------------------------------------------------------------------
-
-function buildIssueSearchText(issue: Issue, projectNameById: Map<number, string>): string {
-  const projectId = issue.project_id ?? issue.project;
-  const projectName = typeof projectId === 'number' ? projectNameById.get(projectId) : undefined;
-
-  const parts: (string | undefined | null)[] = [
-    issue.title,
-    issue.description,
-    issue.module,
-    issue.organisation,
-    projectName,
-    issue.reportedBy,
-    issue.assignedTo,
-    String(issue.id),
-    isBimIssue(issue) ? issue.topicType : (issue as { category?: string }).category,
-    ...(issue.labels || []),
-  ];
-
-  return parts.filter(Boolean).join(' \u241F ').toLowerCase();
-}
+const PAGE_SIZE = 10;
+const EMPTY_STATS: IssueStats = { open: 0, in_progress: 0, resolved: 0, closed: 0, low: 0, medium: 0, high: 0, total: 0 };
 
 export default function IssuesPage() {
   const dispatch = useAppDispatch();
+
+  // --- List (current page only, from the server) ---------------------------
   const [issues, setIssues] = useState<Issue[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrevious, setHasPrevious] = useState(false);
+  const [page, setPage] = useState(1);
+
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // --- Stats (from the dedicated /stats/ endpoint, covers the WHOLE DB
+  // within the current org/project/domain/deliverable scope) --------------
+  const [stats, setStats] = useState<IssueStats>(EMPTY_STATS);
+
   const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
 
   // --- Search ---------------------------------------------------------------
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  // --- List sort (created / updated, newest / oldest) -----------------------
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // --- Sort -------------------------------------------------------------
   const [sortField, setSortField] = useState<SortField>("created");
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
 
@@ -272,8 +206,6 @@ export default function IssuesPage() {
   const [loadingFilterProjects, setLoadingFilterProjects] = useState(false);
   const [loadingFilterDeliverables, setLoadingFilterDeliverables] = useState(false);
 
-  // Which stats-strip cards are currently driving the list filter (if any).
-  // Multi-select: clicking a card toggles it in/out of the active set.
   const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(new Set());
 
   useEffect(() => {
@@ -281,8 +213,7 @@ export default function IssuesPage() {
       const userStr = localStorage.getItem('user');
       if (userStr) {
         try {
-          const userData = JSON.parse(userStr);
-          dispatch(setUser(userData));
+          dispatch(setUser(JSON.parse(userStr)));
         } catch (e) {
           console.error('Failed to parse user data:', e);
         }
@@ -292,7 +223,6 @@ export default function IssuesPage() {
   }, [dispatch]);
 
   const currentUserData = useCurrentUser();
-
   const currentUser = {
     email: currentUserData?.email || '',
     fullName: currentUserData?.full_name || currentUserData?.display_name || '',
@@ -300,41 +230,98 @@ export default function IssuesPage() {
     displayName: currentUserData?.display_name || currentUserData?.full_name || currentUserData?.email || '',
   };
 
-  const isUserCreator = (reportedBy: string, user: { email: string; fullName: string; username: string; displayName: string }): boolean => {
-    return isUserMatch(reportedBy, user);
+  const isUserCreator = (reportedBy: string, user: typeof currentUser): boolean => isUserMatch(reportedBy, user);
+
+  // --- Scope params shared by the list request and the stats request -------
+  const scopeParams = {
+    organisation: filterOrgId || undefined,
+    project: filterProjectId || undefined,
+    domain: domainFilter !== "all" ? domainFilter : undefined,
+    deliverable: filterDeliverableId || undefined,
   };
 
-  const handleOpenDrawing = (documentId: number) => {
-    window.open(`/drawing?openDoc=${documentId}`, '_blank', 'noopener,noreferrer');
+  const hasActiveFilters =
+    !!filterOrgId || !!filterProjectId || !!filterDeliverableId ||
+    activeStatFilters.size > 0 || !!debouncedSearch;
+
+  const clearFilters = () => {
+    setFilterOrgId("");
+    setFilterProjectId("");
+    setFilterDeliverableId("");
+    setActiveStatFilters(new Set());
+    setSearchQuery("");
   };
 
-  const refresh = async () => {
+  const handleStatClick = (key: StatFilterKey) => {
+    setActiveStatFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  // --- Fetch the current page of issues -------------------------------------
+  const refreshList = async (targetPage: number) => {
     try {
       setError(null);
-      const data = await getIssues();
-      setIssues(data);
-      return data;
-    } catch (err: unknown) {
+      setLoading(true);
+      const data = await getIssuesPaginated({
+        ...scopeParams,
+        status_in: buildStatusInParam(activeStatFilters),
+        priority_in: buildPriorityInParam(activeStatFilters),
+        search: debouncedSearch || undefined,
+        ordering: buildOrderingParam(sortField, sortOrder),
+        page: targetPage,
+        page_size: PAGE_SIZE,
+      });
+      setIssues(data.results);
+      setTotalCount(data.count);
+      setHasNext(!!data.next);
+      setHasPrevious(!!data.previous);
+    } catch (err) {
       console.error('Refresh error:', err);
       setError('Failed to load issues. Please try again.');
-      throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
+  // --- Fetch stats (scope only — NOT status_in/priority_in/search, so chip
+  // counts don't collapse to just the active chip) --------------------------
+  const refreshStats = async () => {
+    try {
+      const s = await getIssueStats(scopeParams);
+      setStats(s);
+    } catch (err) {
+      console.error('Stats fetch error:', err);
+    }
+  };
+
+  // Scope/search/sort/chip changes reset to page 1 and refetch everything.
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
-  }, []);
+    setPage(1);
+    refreshList(1);
+    refreshStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterOrgId, filterProjectId, filterDeliverableId, domainFilter, activeStatFilters, debouncedSearch, sortField, sortOrder]);
+
+  // Page changes only refetch the list.
+  useEffect(() => {
+    if (page === 1) return; // already covered by the effect above on first load
+    refreshList(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   // Load the organisation list once, for the filter bar.
   useEffect(() => {
     setLoadingFilterOrgs(true);
-    getMyOrganisations()
-      .then(setFilterOrganisations)
-      .finally(() => setLoadingFilterOrgs(false));
+    getMyOrganisations().then(setFilterOrganisations).finally(() => setLoadingFilterOrgs(false));
   }, []);
 
-  // When the selected organisation changes, load its projects and reset
-  // whatever was selected downstream (project / deliverable).
   useEffect(() => {
     if (!filterOrgId) {
       setFilterProjects([]);
@@ -354,8 +341,6 @@ export default function IssuesPage() {
     return () => { cancelled = true; };
   }, [filterOrgId]);
 
-  // When the selected project changes, load its deliverables and reset the
-  // deliverable selection.
   useEffect(() => {
     if (!filterProjectId) {
       setFilterDeliverables([]);
@@ -371,170 +356,28 @@ export default function IssuesPage() {
     return () => { cancelled = true; };
   }, [filterProjectId]);
 
-  // Whenever we load a fresh set of organisations, eagerly pull every
-  // project across all of them (small orgs, cheap calls) so search can
-  // match on project name even before the org/project filter dropdowns
-  // have been touched. Feeds only projectNameById below — never mutates
-  // the filter-cascade state above.
-  const [allProjectsForSearch, setAllProjectsForSearch] = useState<ProjectSummary[]>([]);
-  useEffect(() => {
-    if (filterOrganisations.length === 0) {
-      setAllProjectsForSearch([]);
-      return;
-    }
-    let cancelled = false;
-    Promise.all(filterOrganisations.map((org) => getOrganisationProjects(org.id)))
-      .then((lists) => {
-        if (cancelled) return;
-        setAllProjectsForSearch(lists.flat());
-      })
-      .catch(() => { if (!cancelled) setAllProjectsForSearch([]); });
-    return () => { cancelled = true; };
-  }, [filterOrganisations]);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, totalCount);
 
-  const projectNameById = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const p of allProjectsForSearch) map.set(p.id, p.name);
-    for (const p of filterProjects) map.set(p.id, p.name);
-    return map;
-  }, [allProjectsForSearch, filterProjects]);
 
-  const issueSearchIndex = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const issue of issues) {
-      map.set(String(issue.id), buildIssueSearchText(issue, projectNameById));
-    }
-    return map;
-  }, [issues, projectNameById]);
-
-  const hasActiveFilters = !!filterOrgId || !!filterProjectId || !!filterDeliverableId || activeStatFilters.size > 0 || !!searchQuery.trim();
-
-  const clearFilters = () => {
-    setFilterOrgId("");
-    setFilterProjectId("");
-    setFilterDeliverableId("");
-    setActiveStatFilters(new Set());
-    setSearchQuery("");
-  };
-
-  // Clicking a stat card toggles it in/out of the active multi-select set.
-  const handleStatClick = (key: StatFilterKey) => {
-    setActiveStatFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  };
-
-  const trimmedQuery = searchQuery.trim().toLowerCase();
-
-  // Scope for the stats strip: org / project / deliverable only (and the
-  // domain tab, since that's a top-level view switch, not a "filter chip").
-  // Deliberately excludes activeStatFilters and searchQuery — those are
-  // driven BY the stats/search, so folding them back in would make every
-  // card's count shift depending on which cards (or search term) are
-  // currently active.
-  const scopedIssues = useMemo(() => {
-    return issues.filter((issue) => {
-      if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
-      if (filterOrgId && issue.organisationId !== filterOrgId) return false;
-      if (filterProjectId) {
-        const issueProjectId = issue.project_id ?? issue.project;
-        if (issueProjectId !== filterProjectId) return false;
-      }
-      if (filterDeliverableId && issue.deliverable !== filterDeliverableId) return false;
-      return true;
-    });
-  }, [issues, domainFilter, filterOrgId, filterProjectId, filterDeliverableId]);
-
-  const visibleIssues = issues.filter((issue) => {
-    if (domainFilter !== "all" && issue.domain !== domainFilter) return false;
-    if (filterOrgId && issue.organisationId !== filterOrgId) return false;
-    if (filterProjectId) {
-      const issueProjectId = issue.project_id ?? issue.project;
-      if (issueProjectId !== filterProjectId) return false;
-    }
-    if (filterDeliverableId && issue.deliverable !== filterDeliverableId) return false;
-    if (!matchesStatFilters(issue, activeStatFilters)) return false;
-    if (trimmedQuery) {
-      const haystack = issueSearchIndex.get(String(issue.id)) || '';
-      if (!haystack.includes(trimmedQuery)) return false;
-    }
-    return true;
-  });
-
-  // Sorted view of visibleIssues — this is what actually gets rendered.
-  // Kept as a separate derived array so filtering logic above stays untouched.
-  const sortedVisibleIssues = useMemo(() => {
-    const withDates = visibleIssues.map((issue) => ({
-      issue,
-      ts: getSortTimestamp(issue, sortField),
-    }));
-    withDates.sort((a, b) => (sortOrder === "newest" ? b.ts - a.ts : a.ts - b.ts));
-    return withDates.map((entry) => entry.issue);
-  }, [visibleIssues, sortField, sortOrder]);
-
-  const openIssues = scopedIssues.filter((i) => i.status === "Open").length;
-  const inProgressIssues = scopedIssues.filter((i) => i.status === "In Progress").length;
-  const resolvedIssues = scopedIssues.filter((i) => i.status === "Resolved").length;
-  const lowPriorityIssues = scopedIssues.filter((i) => i.priority === "Low").length;
-  const mediumPriorityIssues = scopedIssues.filter((i) => i.priority === "Medium").length;
-  const highPriorityIssues = scopedIssues.filter((i) => i.priority === "High").length;
-
-  const assignees = [...new Set(issues.map((i) => i.assignedTo).filter(Boolean))] as string[];
-
-  const handleDeleteIssue = async (issueId: string) => {
-    if (!confirm('Are you sure you want to delete this issue? This cannot be undone.')) {
-      return;
-    }
-    try {
-      setError(null);
-      await deleteIssue(issueId);
-      await refresh();
-    } catch (err: unknown) {
-      console.error('Delete issue error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete issue. Please try again.');
-    }
-  };
 
   return (
     <main className={`${display.variable} ${mono.variable} issues-page`}>
       <header className="issues-header">
         <div className="issues-brand">
-          <span className="issues-brand-icon">
-            <i className="ti ti-bug" />
-          </span>
+          <span className="issues-brand-icon"><i className="ti ti-bug" /></span>
           <span className="issues-brand-text">Issue Tracker</span>
         </div>
         <div className="issues-header-actions">
           <div className="domain-tabs">
-            <button
-              className={`tab ${domainFilter === "all" ? "active" : ""}`}
-              onClick={() => setDomainFilter("all")}
-            >
-              All
-            </button>
-            <button
-              className={`tab ${domainFilter === "bim" ? "active" : ""}`}
-              onClick={() => setDomainFilter("bim")}
-            >
-              BIM
-            </button>
-            <button
-              className={`tab ${domainFilter === "other" ? "active" : ""}`}
-              onClick={() => setDomainFilter("other")}
-            >
-              Other
-            </button>
+            <button className={`tab ${domainFilter === "all" ? "active" : ""}`} onClick={() => setDomainFilter("all")}>All</button>
+            <button className={`tab ${domainFilter === "bim" ? "active" : ""}`} onClick={() => setDomainFilter("bim")}>BIM</button>
+            <button className={`tab ${domainFilter === "other" ? "active" : ""}`} onClick={() => setDomainFilter("other")}>Other</button>
           </div>
           <div className="header-actions">
             <button className="btn-primary" onClick={() => setShowNewIssueForm((v) => !v)}>
-              <i className="ti ti-plus" />
-              New Issue
+              <i className="ti ti-plus" /> New Issue
             </button>
           </div>
         </div>
@@ -548,8 +391,6 @@ export default function IssuesPage() {
           issues (BCF-compatible) and general design issues, side by side.
         </p>
       </section>
-
-      
 
       {error && (
         <div className="error-banner">
@@ -566,7 +407,9 @@ export default function IssuesPage() {
             try {
               setError(null);
               await createIssue(input);
-              await refresh();
+              await refreshList(1);
+              await refreshStats();
+              setPage(1);
               setShowNewIssueForm(false);
             } catch (err: unknown) {
               console.error('Create error:', err);
@@ -577,98 +420,31 @@ export default function IssuesPage() {
       )}
 
       <section className="stats-grid">
-        <StatCard
-          icon="ti-alert-circle"
-          label="Open"
-          value={openIssues}
-          active={activeStatFilters.has("open")}
-          urgent={openIssues > 0}
-          onClick={() => handleStatClick("open")}
-        />
-        <StatCard
-          icon="ti-loader"
-          label="In Progress"
-          value={inProgressIssues}
-          active={activeStatFilters.has("inProgress")}
-          onClick={() => handleStatClick("inProgress")}
-        />
-        <StatCard
-          icon="ti-check"
-          label="Resolved"
-          value={resolvedIssues}
-          active={activeStatFilters.has("resolved")}
-          onClick={() => handleStatClick("resolved")}
-        />
-        <StatCard
-          icon="ti-arrow-down"
-          label="Low Priority"
-          value={lowPriorityIssues}
-          active={activeStatFilters.has("lowPriority")}
-          onClick={() => handleStatClick("lowPriority")}
-        />
-        <StatCard
-          icon="ti-minus"
-          label="Medium Priority"
-          value={mediumPriorityIssues}
-          active={activeStatFilters.has("mediumPriority")}
-          onClick={() => handleStatClick("mediumPriority")}
-        />
-        <StatCard
-          icon="ti-flag"
-          label="High Priority"
-          value={highPriorityIssues}
-          active={activeStatFilters.has("highPriority")}
-          urgent={highPriorityIssues > 0}
-          onClick={() => handleStatClick("highPriority")}
-        />
+        <StatCard icon="ti-alert-circle" label="Open" value={stats.open} active={activeStatFilters.has("open")} urgent={stats.open > 0} onClick={() => handleStatClick("open")} />
+        <StatCard icon="ti-loader" label="In Progress" value={stats.in_progress} active={activeStatFilters.has("inProgress")} onClick={() => handleStatClick("inProgress")} />
+        <StatCard icon="ti-check" label="Resolved" value={stats.resolved} active={activeStatFilters.has("resolved")} onClick={() => handleStatClick("resolved")} />
+        <StatCard icon="ti-arrow-down" label="Low Priority" value={stats.low} active={activeStatFilters.has("lowPriority")} onClick={() => handleStatClick("lowPriority")} />
+        <StatCard icon="ti-minus" label="Medium Priority" value={stats.medium} active={activeStatFilters.has("mediumPriority")} onClick={() => handleStatClick("mediumPriority")} />
+        <StatCard icon="ti-flag" label="High Priority" value={stats.high} active={activeStatFilters.has("highPriority")} urgent={stats.high > 0} onClick={() => handleStatClick("highPriority")} />
       </section>
 
       {activeStatFilters.size > 0 && (
         <div className="stat-filter-banner">
           <i className="ti ti-filter" />
           <span>
-            Showing{' '}
-            <strong>
-              {Array.from(activeStatFilters).map((k) => STAT_FILTER_LABELS[k]).join(', ')}
-            </strong>{' '}
-            issues only
+            Showing <strong>{Array.from(activeStatFilters).map((k) => STAT_FILTER_LABELS[k]).join(', ')}</strong> issues only
           </span>
-          <button
-            type="button"
-            className="stat-filter-banner-clear"
-            onClick={() => setActiveStatFilters(new Set())}
-          >
+          <button type="button" className="stat-filter-banner-clear" onClick={() => setActiveStatFilters(new Set())}>
             <i className="ti ti-x" /> Clear
           </button>
         </div>
-      )}
-
-      {assignees.length > 0 && (
-        <section className="assignees-section">
-          <div className="section-title">
-            <span>Assigned To</span>
-          </div>
-          <div className="assignees-grid">
-            {assignees.map((assignee) => (
-              <div key={assignee} className="assignee-chip">
-                <i className="ti ti-user" />
-                {assignee}
-                <span className="assignee-count">
-                  {issues.filter((i) => i.assignedTo === assignee).length}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
       )}
 
       <section className="filters-section">
         <div className="section-title">
           <span>Filter by Organisation / Project / Deliverable</span>
           {hasActiveFilters && (
-            <button className="filters-clear-btn" onClick={clearFilters} type="button">
-              Clear filters
-            </button>
+            <button className="filters-clear-btn" onClick={clearFilters} type="button">Clear filters</button>
           )}
         </div>
         <div className="filters-row">
@@ -680,12 +456,8 @@ export default function IssuesPage() {
               onChange={(e) => setFilterOrgId(e.target.value ? Number(e.target.value) : "")}
               disabled={loadingFilterOrgs}
             >
-              <option value="">
-                {loadingFilterOrgs ? 'Loading organisations…' : 'All organisations'}
-              </option>
-              {filterOrganisations.map((org) => (
-                <option key={org.id} value={org.id}>{org.name}</option>
-              ))}
+              <option value="">{loadingFilterOrgs ? 'Loading organisations…' : 'All organisations'}</option>
+              {filterOrganisations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
             </select>
           </div>
 
@@ -698,13 +470,9 @@ export default function IssuesPage() {
               disabled={!filterOrgId || loadingFilterProjects}
             >
               <option value="">
-                {!filterOrgId
-                  ? 'Select an organisation first'
-                  : loadingFilterProjects ? 'Loading projects…' : 'All projects'}
+                {!filterOrgId ? 'Select an organisation first' : loadingFilterProjects ? 'Loading projects…' : 'All projects'}
               </option>
-              {filterProjects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
+              {filterProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
           </div>
 
@@ -717,13 +485,9 @@ export default function IssuesPage() {
               disabled={!filterProjectId || loadingFilterDeliverables}
             >
               <option value="">
-                {!filterProjectId
-                  ? 'Select a project first'
-                  : loadingFilterDeliverables ? 'Loading deliverables…' : 'All deliverables'}
+                {!filterProjectId ? 'Select a project first' : loadingFilterDeliverables ? 'Loading deliverables…' : 'All deliverables'}
               </option>
-              {filterDeliverables.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
+              {filterDeliverables.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </div>
         </div>
@@ -735,49 +499,28 @@ export default function IssuesPage() {
           <input
             type="text"
             className="search-bar-input"
-            placeholder="Search issues by title, description, project, organisation, assignee…"
+            placeholder="Search issues by title, description, module, category…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           {searchQuery && (
-            <button
-              type="button"
-              className="search-bar-clear"
-              onClick={() => setSearchQuery("")}
-              title="Clear search"
-            >
+            <button type="button" className="search-bar-clear" onClick={() => setSearchQuery("")} title="Clear search">
               <i className="ti ti-x" />
             </button>
           )}
         </div>
 
-        <div
-          className="sort-controls"
-          style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}
-        >
+        <div className="sort-controls" style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}>
           <div className="form-field" style={{ flex: '0 0 auto', minWidth: '160px' }}>
             <label>Sort by</label>
-            <select
-              className="field-select"
-              value={sortField}
-              onChange={(e) => setSortField(e.target.value as SortField)}
-            >
-              {SORT_FIELD_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
+            <select className="field-select" value={sortField} onChange={(e) => setSortField(e.target.value as SortField)}>
+              {SORT_FIELD_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </select>
           </div>
-
           <div className="form-field" style={{ flex: '0 0 auto', minWidth: '160px' }}>
             <label>Order</label>
-            <select
-              className="field-select"
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as SortOrder)}
-            >
-              {SORT_ORDER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
+            <select className="field-select" value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
+              {SORT_ORDER_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
             </select>
           </div>
         </div>
@@ -786,17 +529,17 @@ export default function IssuesPage() {
       <section>
         <div className="section-title">
           <span>All Issues</span>
-          <span className="issue-count">{sortedVisibleIssues.length} shown</span>
+          <span className="issue-count">
+            {totalCount === 0 ? '0 shown' : `${rangeStart}–${rangeEnd} of ${totalCount}`}
+          </span>
         </div>
 
         {loading ? (
           <p className="hero-subtitle">Loading issues…</p>
-        ) : sortedVisibleIssues.length === 0 ? (
+        ) : issues.length === 0 ? (
           <>
             <p className="hero-subtitle">
-              {hasActiveFilters
-                ? "No issues match the selected filters."
-                : "No issues found. Create a new issue to get started!"}
+              {hasActiveFilters ? "No issues match the selected filters." : "No issues found. Create a new issue to get started!"}
             </p>
             {hasActiveFilters && (
               <button className="btn-outline" onClick={clearFilters} type="button" style={{ marginTop: '10px' }}>
@@ -805,134 +548,54 @@ export default function IssuesPage() {
             )}
           </>
         ) : (
-          <div className="issues-grid">
-            {sortedVisibleIssues.map((issue) => (
-              <IssueCard
-                key={issue.id}
-                issue={issue}
-                commentSortOrder={commentSortOrder}
-                onSortChange={() => setCommentSortOrder(commentSortOrder === "desc" ? "asc" : "desc")}
-                currentUser={currentUser}
-                isUserCreator={isUserCreator}
-                onDeleteIssue={handleDeleteIssue}
-                onOpenDrawing={handleOpenDrawing}
-                onSave={async (patch) => {
-                  try {
-                    setError(null);
-                    await updateIssue(issue.id, patch);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Update error:', err);
-                    setError(extractValidationMessage(err, 'Failed to update issue. Please try again.'));
-                  }
-                }}
-                onResolve={async (resolution, snapshotData, snapshotFormat) => {
-                  try {
-                    setError(null);
-                    await resolveIssue(issue.id, resolution, currentUser.email, snapshotData, snapshotFormat);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Resolve error:', err);
-                    setError('Failed to resolve issue. Please try again.');
-                  }
-                }}
-                onUpdateAccess={async (access) => {
-                  try {
-                    setError(null);
-                    await updateIssueAccess(issue.id, access);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Update access error:', err);
-                    setError(err instanceof Error ? err.message : 'Failed to update access.');
-                  }
-                }}
-                onRemoveSnapshot={async () => {
-                  try {
-                    setError(null);
-                    await removeSnapshot(issue.id);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Remove snapshot error:', err);
-                    setError('Failed to remove screenshot. Please try again.');
-                  }
-                }}
-                onRemoveAttachment={async (index) => {
-                  try {
-                    setError(null);
-                    await removeAttachment(issue.id, index);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Remove attachment error:', err);
-                    setError('Failed to remove screenshot. Please try again.');
-                  }
-                }}
-                onAddComment={async (text, snapshotData, snapshotFormat) => {
-                  try {
-                    setError(null);
-                    await addComment(
-                      issue.id,
-                      currentUser.email || currentUser.fullName,
-                      text,
-                      snapshotData,
-                      snapshotFormat
-                    );
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Add comment error:', err);
-                    setError('Failed to add comment. Please try again.');
-                  }
-                }}
-                onDeleteComment={async (commentId) => {
-                  try {
-                    setError(null);
-                    await deleteComment(issue.id, commentId);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Delete comment error:', err);
-                    setError('Failed to delete comment. Please try again.');
-                  }
-                }}
-                onEditComment={async (commentId, text, snapshotData, snapshotFormat, removeSnapshot) => {
-                  try {
-                    setError(null);
-                    await editComment(issue.id, commentId, text, snapshotData, snapshotFormat, removeSnapshot);
-                    await refresh();
-                  } catch (err: unknown) {
-                    console.error('Edit comment error:', err);
-                    setError('Failed to edit comment. Please try again.');
-                  }
-                }}
-              />
-            ))}
-          </div>
+          <>
+            <div className="issues-grid">
+              {issues.map((issue) => (
+                <IssueCard
+                  key={issue.id}
+                  issue={issue}
+                  currentUser={currentUser}
+                  isUserCreator={isUserCreator}
+                />
+              ))}
+            </div>
+
+            <div
+              className="pagination-controls"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px', marginTop: '20px' }}
+            >
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={!hasPrevious || loading}
+              >
+                <i className="ti ti-chevron-left" /> Previous
+              </button>
+              <span style={{ fontSize: '13px', color: 'var(--slate)' }}>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={!hasNext || loading}
+              >
+                Next <i className="ti ti-chevron-right" />
+              </button>
+            </div>
+          </>
         )}
       </section>
     </main>
   );
 }
 
-function StatCard({
-  icon,
-  label,
-  value,
-  onClick,
-  active,
-  urgent,
-}: {
-  icon: string;
-  label: string;
-  value: number;
-  onClick?: () => void;
-  active?: boolean;
-  urgent?: boolean;
+function StatCard({ icon, label, value, onClick, active, urgent }: {
+  icon: string; label: string; value: number; onClick?: () => void; active?: boolean; urgent?: boolean;
 }) {
   const isBlinking = !!urgent && value > 0;
-  const classes = [
-    "stat-card",
-    active ? "stat-card-active" : "",
-    isBlinking ? "stat-card-urgent" : "",
-  ].filter(Boolean).join(" ");
-
+  const classes = ["stat-card", active ? "stat-card-active" : "", isBlinking ? "stat-card-urgent" : ""].filter(Boolean).join(" ");
   return (
     <button type="button" className={classes} onClick={onClick} aria-pressed={!!active}>
       <i className={`ti ${icon} stat-icon`} />
@@ -944,14 +607,12 @@ function StatCard({
   );
 }
 
-function NewIssueForm({
-  onCreate,
-  onCancel,
-}: {
+function NewIssueForm({ onCreate, onCancel }: {
   onCreate: (input: NewIssueInput) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [domain, setDomain] = useState<IssueDomain>("bim");
+  // --- unchanged from your original file ---
+  const [domain, setDomain] = useState<IssueDomain>("other");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [module, setModule] = useState("");
@@ -984,24 +645,14 @@ function NewIssueForm({
       setLoadingOrganisations(true);
       try {
         const token = localStorage.getItem('access');
-        if (!token) {
-          setLoadingOrganisations(false);
-          return;
-        }
-
+        if (!token) { setLoadingOrganisations(false); return; }
         const response = await fetch(`${API_URL}/my-organisations/`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         });
-
         if (response.ok) {
           const data = await response.json();
           setOrganisations(data);
-          if (data.length > 0) {
-            setOrganisationId(data[0].id);
-          }
+          if (data.length > 0) setOrganisationId(data[0].id);
         } else {
           setError('Failed to load organisations.');
         }
@@ -1015,36 +666,19 @@ function NewIssueForm({
   }, []);
 
   useEffect(() => {
-    if (!organisationId) {
-      setFilteredProjects([]);
-      setProjectId(null);
-      return;
-    }
-
+    if (!organisationId) { setFilteredProjects([]); setProjectId(null); return; }
     const fetchProjects = async () => {
       setLoadingProjects(true);
       try {
         const token = localStorage.getItem('access');
-        if (!token) {
-          setLoadingProjects(false);
-          return;
-        }
-
+        if (!token) { setLoadingProjects(false); return; }
         const response = await fetch(`${API_URL}/organisations/${organisationId}/projects/`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         });
-
         if (response.ok) {
           const data = await response.json();
           setFilteredProjects(data);
-          if (data.length > 0) {
-            setProjectId(data[0].id);
-          } else {
-            setProjectId(null);
-          }
+          setProjectId(data.length > 0 ? data[0].id : null);
         } else {
           setFilteredProjects([]);
           setProjectId(null);
@@ -1060,11 +694,7 @@ function NewIssueForm({
   }, [organisationId]);
 
   useEffect(() => {
-    if (!projectId) {
-      setAvailableDrawings([]);
-      setLinkedDocumentIds([]);
-      return;
-    }
+    if (!projectId) { setAvailableDrawings([]); setLinkedDocumentIds([]); return; }
     let cancelled = false;
     setLoadingDrawings(true);
     getProjectDrawings(projectId)
@@ -1074,10 +704,6 @@ function NewIssueForm({
     return () => { cancelled = true; };
   }, [projectId]);
 
-  // Shared apply step for the file-picker, drag-drop, and paste flows: runs
-  // the image through the same size/type validation and compression used
-  // everywhere else in the Issues feature (see imageUtils.processImageFile),
-  // so all three entry points behave identically.
   const applyScreenshotFile = async (file: File) => {
     setUploadError(null);
     setUploadingImage(true);
@@ -1099,10 +725,6 @@ function NewIssueForm({
     e.target.value = '';
   };
 
-  // Lets someone paste a screenshot straight from the clipboard (e.g.
-  // Win+Shift+S / Cmd+Shift+4 then Ctrl/Cmd+V) instead of having to save it
-  // to disk first and go through the file picker. Attached to the
-  // description textarea and the dropzone below.
   const handlePaste = async (e: React.ClipboardEvent) => {
     const file = extractImageFromClipboard(e);
     if (!file) return;
@@ -1114,36 +736,18 @@ function NewIssueForm({
     e.preventDefault();
     setIsDraggingScreenshot(false);
     const file = extractImageFromDrop(e);
-    if (!file) {
-      setUploadError('Please drop a PNG or JPEG image.');
-      return;
-    }
+    if (!file) { setUploadError('Please drop a PNG or JPEG image.'); return; }
     await applyScreenshotFile(file);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingScreenshot(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingScreenshot(false);
-  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDraggingScreenshot(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDraggingScreenshot(false); };
 
   const handleSubmit = async () => {
     try {
       setError(null);
-
-      if (!title.trim()) {
-        setError('Title is required');
-        return;
-      }
-
-      if (!projectId) {
-        setError('Please select a project');
-        return;
-      }
+      if (!title.trim()) { setError('Title is required'); return; }
+      if (!projectId) { setError('Please select a project'); return; }
 
       const base: NewIssueBase = {
         project_id: projectId,
@@ -1166,10 +770,7 @@ function NewIssueForm({
             camera_up_vector: DEFAULT_CAMERA_UP_VECTOR,
             field_of_view: DEFAULT_FIELD_OF_VIEW,
             clipping_planes: [],
-            ...(screenshot ? {
-              snapshot_data: screenshot,
-              snapshot_format: screenshotFormat,
-            } : {})
+            ...(screenshot ? { snapshot_data: screenshot, snapshot_format: screenshotFormat } : {})
           }
         };
         await onCreate(bimInput);
@@ -1178,10 +779,7 @@ function NewIssueForm({
           ...base,
           domain: "other",
           category: category.trim() || undefined,
-          ...(screenshot ? {
-            newAttachmentData: screenshot,
-            newAttachmentFormat: screenshotFormat,
-          } : {})
+          ...(screenshot ? { newAttachmentData: screenshot, newAttachmentFormat: screenshotFormat } : {})
         };
         await onCreate(designInput);
       }
@@ -1200,7 +798,6 @@ function NewIssueForm({
           <button onClick={() => setError(null)}>✕</button>
         </div>
       )}
-
       {uploadError && (
         <div className="error-banner small">
           <i className="ti ti-alert-circle" />
@@ -1215,23 +812,12 @@ function NewIssueForm({
           {loadingOrganisations ? (
             <div className="loading-indicator">Loading organisations...</div>
           ) : organisations.length > 0 ? (
-            <select
-              className="field-select"
-              value={organisationId || ''}
-              onChange={(e) => setOrganisationId(Number(e.target.value))}
-              required
-            >
+            <select className="field-select" value={organisationId || ''} onChange={(e) => setOrganisationId(Number(e.target.value))} required>
               <option value="">Select an organisation...</option>
-              {organisations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
+              {organisations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
             </select>
           ) : (
-            <div style={{ color: '#D43E3E', fontSize: '14px', padding: '8px' }}>
-              You are not a member of any organisation.
-            </div>
+            <div style={{ color: '#D43E3E', fontSize: '14px', padding: '8px' }}>You are not a member of any organisation.</div>
           )}
         </div>
 
@@ -1240,29 +826,15 @@ function NewIssueForm({
           {loadingProjects ? (
             <div className="loading-indicator">Loading projects...</div>
           ) : organisationId ? (
-            <select
-              className="field-select"
-              value={projectId || ''}
-              onChange={(e) => setProjectId(Number(e.target.value))}
-              required
-              disabled={filteredProjects.length === 0}
-            >
+            <select className="field-select" value={projectId || ''} onChange={(e) => setProjectId(Number(e.target.value))} required disabled={filteredProjects.length === 0}>
               <option value="">Select a project...</option>
-              {filteredProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
+              {filteredProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
           ) : (
-            <div style={{ color: '#6B7280', fontSize: '14px', padding: '8px' }}>
-              Please select an organisation first
-            </div>
+            <div style={{ color: '#6B7280', fontSize: '14px', padding: '8px' }}>Please select an organisation first</div>
           )}
           {filteredProjects.length === 0 && organisationId && !loadingProjects && (
-            <div style={{ color: '#D43E3E', fontSize: '12px', marginTop: '4px' }}>
-              No projects available in this organisation.
-            </div>
+            <div style={{ color: '#D43E3E', fontSize: '12px', marginTop: '4px' }}>No projects available in this organisation.</div>
           )}
         </div>
 
@@ -1277,42 +849,21 @@ function NewIssueForm({
         {domain === "bim" ? (
           <div className="form-field">
             <label>Topic type</label>
-            <select
-              className="field-select"
-              value={topicType}
-              onChange={(e) => setTopicType(e.target.value as BcfTopicType)}
-            >
-              {TOPIC_TYPE_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
+            <select className="field-select" value={topicType} onChange={(e) => setTopicType(e.target.value as BcfTopicType)}>
+              {TOPIC_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
         ) : (
           <div className="form-field">
             <label>Category</label>
-            <input
-              className="field-input"
-              placeholder="e.g. Documentation"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            />
+            <input className="field-input" placeholder="e.g. Documentation" value={category} onChange={(e) => setCategory(e.target.value)} />
           </div>
         )}
 
         <div className="form-field">
           <label>Priority</label>
-          <select
-            className="field-select"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as IssuePriority)}
-          >
-            {PRIORITY_OPTIONS.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
+          <select className="field-select" value={priority} onChange={(e) => setPriority(e.target.value as IssuePriority)}>
+            {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
       </div>
@@ -1324,48 +875,22 @@ function NewIssueForm({
 
       <div className="form-field">
         <label>Description</label>
-        <textarea
-          className="field-input"
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onPaste={handlePaste}
-        />
+        <textarea className="field-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} onPaste={handlePaste} />
         <span className="file-hint">Tip: you can paste a screenshot (Ctrl/Cmd+V) directly into this box.</span>
       </div>
 
       <div className="form-field">
         <label>Module</label>
-        <input
-          className="field-input"
-          placeholder={domain === "bim" ? "e.g. Modeling" : "e.g. Documentation"}
-          value={module}
-          onChange={(e) => setModule(e.target.value)}
-        />
+        <input className="field-input" placeholder={domain === "bim" ? "e.g. Modeling" : "e.g. Documentation"} value={module} onChange={(e) => setModule(e.target.value)} />
       </div>
 
       <div className="form-field">
         <label>Screenshot (optional)</label>
         {previewImage ? (
           <div className="screenshot-preview" style={{ position: 'relative', width: 200, height: 150 }}>
-            <Image
-              src={previewImage}
-              alt="Preview"
-              fill
-              unoptimized
-              sizes="200px"
-              style={{ objectFit: 'contain' }}
-            />
-            <button
-              className="remove-btn"
-              onClick={() => {
-                setScreenshot(null);
-                setPreviewImage(null);
-              }}
-              type="button"
-            >
-              ✕
-            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={previewImage} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            <button className="remove-btn" onClick={() => { setScreenshot(null); setPreviewImage(null); }} type="button">✕</button>
           </div>
         ) : (
           <ScreenshotDropzone
@@ -1384,37 +909,17 @@ function NewIssueForm({
       <div className="form-field">
         <label>Linked Drawings (optional)</label>
         {!projectId ? (
-          <div style={{ color: 'var(--slate)', fontSize: '13px', padding: '4px' }}>
-            Select a project to see its drawings.
-          </div>
+          <div style={{ color: 'var(--slate)', fontSize: '13px', padding: '4px' }}>Select a project to see its drawings.</div>
         ) : loadingDrawings ? (
           <div className="loading-indicator">Loading drawings...</div>
         ) : availableDrawings.length > 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '4px',
-              maxHeight: '160px',
-              overflowY: 'auto',
-              border: '1px solid var(--line)',
-              borderRadius: '4px',
-              padding: '8px',
-            }}
-          >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '160px', overflowY: 'auto', border: '1px solid var(--line)', borderRadius: '4px', padding: '8px' }}>
             {availableDrawings.map((d) => (
-              <label
-                key={d.id}
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}
-              >
+              <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={linkedDocumentIds.includes(d.id)}
-                  onChange={(e) => {
-                    setLinkedDocumentIds((ids) =>
-                      e.target.checked ? [...ids, d.id] : ids.filter((id) => id !== d.id)
-                    );
-                  }}
+                  onChange={(e) => setLinkedDocumentIds((ids) => e.target.checked ? [...ids, d.id] : ids.filter((id) => id !== d.id))}
                 />
                 <i className={`ti ${getDrawingIcon(d.file_type)}`} />
                 {d.title}
@@ -1422,22 +927,13 @@ function NewIssueForm({
             ))}
           </div>
         ) : (
-          <div style={{ color: 'var(--slate)', fontSize: '13px', padding: '4px' }}>
-            No drawings found for this project.
-          </div>
+          <div style={{ color: 'var(--slate)', fontSize: '13px', padding: '4px' }}>No drawings found for this project.</div>
         )}
       </div>
 
       <div className="form-actions">
-        <button className="btn-outline" onClick={onCancel} type="button">
-          Cancel
-        </button>
-        <button
-          className="btn-primary"
-          onClick={handleSubmit}
-          disabled={!projectId || !title.trim() || !organisationId || uploadingImage}
-          type="button"
-        >
+        <button className="btn-outline" onClick={onCancel} type="button">Cancel</button>
+        <button className="btn-primary" onClick={handleSubmit} disabled={!projectId || !title.trim() || !organisationId || uploadingImage} type="button">
           <i className="ti ti-plus" /> Create Issue
         </button>
       </div>

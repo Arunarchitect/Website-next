@@ -21,7 +21,6 @@ const apiClient = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
     const token = getAuthToken();
@@ -33,7 +32,6 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -79,50 +77,99 @@ export const getUserOrganisations = async (): Promise<Organisation[]> => {
   }
 };
 
-// Fetch issues for a specific organisation
-export const getIssuesByOrganisation = async (organisationId: number): Promise<DashboardIssue[]> => {
+interface PaginatedList<T> {
+  results?: T[];
+  count?: number;
+  next?: string | null;
+  previous?: string | null;
+}
+
+function unwrapListResponse<T>(data: T[] | PaginatedList<T>): T[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results;
+  console.warn('⚠️ Unexpected list response shape from /issues/issues/:', data);
+  return [];
+}
+
+// Fetch issues for a specific organisation.
+// NOTE: /issues/issues/ is paginated — this returns ONE PAGE only, so it's
+// NOT reliable for counts (use getDashboardStats for that) and not reliable
+// for "give me everything assigned to me" either (use getMyAssignedIssues,
+// which filters server-side by assigned_to so it doesn't depend on paging
+// through everything to find a match).
+export const getIssuesByOrganisation = async (
+  organisationId: number,
+  extraParams?: { page_size?: number }
+): Promise<DashboardIssue[]> => {
   try {
     const response = await apiClient.get('/issues/issues/', {
       params: {
-        include_deleted: false,
+        organisation: organisationId || undefined,
+        ...extraParams,
       },
     });
-    
-    const allIssues: DashboardIssue[] = response.data;
-    
-    if (organisationId) {
-      return allIssues.filter((issue: DashboardIssue) => 
-        issue.organisation_id === organisationId
-      );
-    }
-    
-    return allIssues;
+    return unwrapListResponse<DashboardIssue>(response.data);
   } catch (error) {
     console.error('Error fetching issues:', error);
     return [];
   }
 };
 
-// Get dashboard stats
+// Issues assigned to the given user, scoped to an organisation. Filters
+// server-side by assigned_to (user id) — no client-side name/email
+// string-matching needed, and no dependency on which page a matching
+// issue happens to land on.
+export const getMyAssignedIssues = async (
+  organisationId: number | undefined,
+  userId: number | undefined,
+  limit: number = 50
+): Promise<DashboardIssue[]> => {
+  if (!userId) return [];
+  try {
+    const response = await apiClient.get('/issues/issues/', {
+      params: {
+        organisation: organisationId || undefined,
+        assigned_to: userId,
+        page_size: limit,
+      },
+    });
+    return unwrapListResponse<DashboardIssue>(response.data);
+  } catch (error) {
+    console.error('Error fetching assigned issues:', error);
+    return [];
+  }
+};
+
+// Backend shape returned by /issues/issues/stats/
+interface RawIssueStats {
+  open: number;
+  in_progress: number;
+  resolved: number;
+  closed: number;
+  low: number;
+  medium: number;
+  high: number;
+  total: number;
+}
+
+// Get dashboard stats — backed by the dedicated stats endpoint, which
+// aggregates over the FULL filtered queryset in the database rather than
+// whatever page of issues happens to be loaded client-side.
 export const getDashboardStats = async (organisationId?: number): Promise<DashboardStats> => {
   try {
-    let issues: DashboardIssue[] = [];
-    
-    if (organisationId) {
-      issues = await getIssuesByOrganisation(organisationId);
-    } else {
-      const response = await apiClient.get('/issues/issues/', {
-        params: { include_deleted: false },
-      });
-      issues = response.data;
-    }
-    
+    const response = await apiClient.get('/issues/issues/stats/', {
+      params: {
+        organisation: organisationId || undefined,
+      },
+    });
+    const raw = response.data as RawIssueStats;
+
     return {
-      open: issues.filter(i => i.status === 'Open').length,
-      inProgress: issues.filter(i => i.status === 'In Progress').length,
-      resolved: issues.filter(i => i.status === 'Resolved').length,
-      highPriority: issues.filter(i => i.priority === 'High').length,
-      total: issues.length,
+      open: raw.open ?? 0,
+      inProgress: raw.in_progress ?? 0,
+      resolved: raw.resolved ?? 0,
+      highPriority: raw.high ?? 0,
+      total: raw.total ?? 0,
     };
   } catch (error) {
     console.error('Error fetching stats:', error);
