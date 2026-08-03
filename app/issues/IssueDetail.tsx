@@ -378,6 +378,9 @@ export function IssueDetail({
   };
 
   const handleRemoveSavedScreenshot = async () => {
+    if (!window.confirm('Are you sure you want to delete this screenshot? This cannot be undone.')) {
+      return;
+    }
     try {
       setSaveError(null);
       if (isBim) {

@@ -61,27 +61,53 @@
 .admin-nav {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
+/* Fixed: nav pills now have a solid white background so they're visible
+   against the paper page background (border-color alone was too close
+   to --paper to read as a button). Matches member-nav-link styling. */
 .admin-nav-link {
   font-size: 13px;
-  color: var(--slate);
+  color: var(--ink);
   text-decoration: none;
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  transition: border-color 0.18s ease, background 0.18s ease;
+  background: #ffffff;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
   font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.admin-nav-link i {
+  font-size: 14px;
+  color: var(--slate);
 }
 
 .admin-nav-link:hover {
   border-color: var(--blue);
   background: rgba(44, 95, 138, 0.05);
+  color: var(--blue);
+}
+
+.admin-nav-link:hover i {
+  color: var(--blue);
+}
+
+.admin-nav-link.active {
+  border-color: var(--blue);
+  background: rgba(44, 95, 138, 0.08);
+  color: var(--blue);
+}
+
+.admin-nav-link.active i {
+  color: var(--blue);
 }
 
 /* User Profile */
@@ -227,11 +253,12 @@
   gap: 12px;
   background: #ffffff;
   border: 1px solid var(--line);
-  border-radius: 12px; /* curved rectangle corners */
+  border-radius: 12px;
   padding: 16px 18px;
   text-decoration: none;
   color: inherit;
   position: relative;
+  min-width: 0;
   transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -249,14 +276,23 @@
   flex-shrink: 0;
 }
 
+.dash-stat-card > div,
+.dash-meetings-card > div {
+  min-width: 0;
+  flex: 1;
+}
+
 .dash-stat-card .stat-label,
 .dash-meetings-card .stat-label {
   font-size: 10px;
   color: var(--slate);
   margin: 0 0 1px;
   font-family: var(--font-mono), monospace;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dash-stat-card .stat-value,
@@ -266,9 +302,12 @@
   font-size: 18px;
   margin: 0;
   color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ---- Open Issues: red, blinks only when count > 0 (class applied conditionally in JSX) ---- */
+/* ---- Open Issues: red, blinks only when count > 0 ---- */
 @keyframes blinkRed {
   0% {
     border-color: #D43E3E;
@@ -362,7 +401,7 @@
   background: rgba(15, 110, 86, 0.1);
 }
 
-/* ---- Upcoming Meetings: light blue, blinks only when count > 0 (class applied conditionally in JSX) ---- */
+/* ---- Upcoming Meetings: light blue, blinks only when count > 0 ---- */
 .dash-meetings-card {
   background: rgba(44, 95, 138, 0.05);
   border-color: rgba(44, 95, 138, 0.25);
@@ -728,6 +767,7 @@
 
 .tool-info {
   min-width: 0;
+  flex: 1;
 }
 
 .tool-header {
@@ -751,6 +791,8 @@
   font-weight: 500;
   font-family: var(--font-mono), monospace;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tool-tag-teal {
@@ -778,6 +820,7 @@
   flex-shrink: 0;
 }
 
+/* tool-btn-icon is the "open in new tab" button — external-link icon */
 .tool-btn {
   height: 34px;
   border-radius: 4px;
@@ -793,6 +836,7 @@
   font-size: 12px;
   letter-spacing: 0.04em;
   text-decoration: none;
+  flex-shrink: 0;
 }
 
 .tool-btn:hover {
@@ -804,6 +848,10 @@
 .tool-btn-icon {
   width: 34px;
   padding: 0;
+}
+
+.tool-btn-icon i {
+  font-size: 15px;
 }
 
 .tool-btn-go {
@@ -869,13 +917,36 @@
     padding: 16px;
   }
 
-  /* Overview: Open + Resolved stay on one row, Meetings drops to its own full-width row */
   .dash-overview {
     flex-direction: column;
+    gap: 8px;
   }
 
   .dash-overview-left {
     flex-direction: row;
+    gap: 8px;
+  }
+
+  .dash-stat-card,
+  .dash-meetings-card {
+    padding: 10px 10px;
+    gap: 8px;
+  }
+
+  .dash-stat-card .stat-icon,
+  .dash-meetings-card .stat-icon {
+    font-size: 16px;
+  }
+
+  .dash-stat-card .stat-label,
+  .dash-meetings-card .stat-label {
+    font-size: 8px;
+    letter-spacing: 0.02em;
+  }
+
+  .dash-stat-card .stat-value,
+  .dash-meetings-card .stat-value {
+    font-size: 15px;
   }
 
   .issue-card {
@@ -893,11 +964,38 @@
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
-    padding: 16px 18px;
+    padding: 14px 16px;
   }
 
   .tool-left {
     flex: 1;
+    gap: 12px;
+  }
+
+  .tool-icon-wrapper {
+    width: 38px;
+    height: 38px;
+  }
+
+  .tool-icon-wrapper i {
+    font-size: 17px;
+  }
+
+  .tool-label {
+    font-size: 14px;
+  }
+
+  .tool-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .tool-description {
+    font-size: 12px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.4;
   }
 
   .tool-actions {
@@ -927,21 +1025,74 @@
     grid-template-columns: 1fr;
   }
 
-  .tool-description {
-    white-space: normal;
+  .admin-nav {
+    gap: 6px;
   }
 
-  .admin-nav-link span {
-    display: none;
+  .admin-nav-link {
+    padding: 6px 8px;
+    font-size: 10px;
+    gap: 3px;
+    border-radius: 6px;
+  }
+
+  .admin-nav-link i {
+    font-size: 12px;
+  }
+
+  .tool-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .tool-left {
+    gap: 10px;
+  }
+
+  .tool-icon-wrapper {
+    width: 34px;
+    height: 34px;
+  }
+
+  .tool-icon-wrapper i {
+    font-size: 15px;
+  }
+
+  .tool-header {
+    gap: 6px;
+  }
+
+  .tool-label {
+    font-size: 13px;
+  }
+
+  .tool-tag {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .tool-description {
+    font-size: 11px;
   }
 
   .tool-actions {
+    gap: 6px;
     justify-content: stretch;
+  }
+
+  .tool-btn {
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .tool-btn-icon {
+    width: 30px;
   }
 
   .tool-btn-go {
     flex: 1;
     justify-content: center;
+    padding: 0 10px;
   }
 
   .issue-meta {
@@ -964,13 +1115,28 @@
     font-size: 18px;
   }
 
-  /* On very small screens, stack Open/Resolved too if labels get cramped */
   .dash-overview-left {
-    gap: 8px;
+    gap: 6px;
   }
 
   .dash-stat-card,
   .dash-meetings-card {
-    padding: 12px 14px;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .dash-stat-card .stat-icon,
+  .dash-meetings-card .stat-icon {
+    font-size: 14px;
+  }
+
+  .dash-stat-card .stat-label,
+  .dash-meetings-card .stat-label {
+    font-size: 7px;
+  }
+
+  .dash-stat-card .stat-value,
+  .dash-meetings-card .stat-value {
+    font-size: 13px;
   }
 }

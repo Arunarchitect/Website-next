@@ -201,37 +201,49 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+function redirectToLogin(): void {
+  if (typeof window !== 'undefined' && !window.location.pathname.includes('/auth/login')) {
+    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname);
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    if (error.response) {
+  async (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response) {
       console.error(`❌ API Error ${error.response.status}:`, {
         url: error.config?.url,
         data: error.response.data,
       });
 
-      if (error.response.status === 401) {
+      if (error.response.status === 401 && error.config && !(error.config as { _retry?: boolean })._retry) {
+        (error.config as { _retry?: boolean })._retry = true;
         const refreshToken = localStorage.getItem('refresh');
-        if (refreshToken && !error.config._retry) {
-          error.config._retry = true;
+
+        if (refreshToken) {
           try {
-            const response = await axios.post(`${API_URL}/auth/refresh/`, {
-              refresh: refreshToken
+            const refreshResponse = await axios.post(`${API_URL}/auth/refresh/`, {
+              refresh: refreshToken,
             });
-            if (response.data.access) {
-              localStorage.setItem('access', response.data.access);
-              error.config.headers.Authorization = `Bearer ${response.data.access}`;
+            if (refreshResponse.data?.access) {
+              localStorage.setItem('access', refreshResponse.data.access);
+              error.config.headers.Authorization = `Bearer ${refreshResponse.data.access}`;
               return apiClient(error.config);
             }
+            redirectToLogin();
           } catch {
             localStorage.removeItem('access');
             localStorage.removeItem('refresh');
-            if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-              window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
-            }
+            redirectToLogin();
           }
+        } else {
+          redirectToLogin();
         }
+      } else if (error.response.status === 401) {
+        redirectToLogin();
       }
+      // 403: authenticated but not permitted — page shows an access message,
+      // no redirect (would otherwise loop since the user IS logged in).
     }
     return Promise.reject(error);
   }

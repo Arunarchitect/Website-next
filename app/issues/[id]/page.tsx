@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import axios from "axios";
 import {
   getIssue,
   updateIssue,
@@ -28,10 +29,11 @@ export default function IssueDetailPage() {
   const [issue, setIssue] = useState<Issue | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [commentSortOrder, setCommentSortOrder] = useState<"asc" | "desc">("desc");
 
-    const currentUserData = useCurrentUser();
-    const currentUser: CurrentUser = {
+  const currentUserData = useCurrentUser();
+  const currentUser: CurrentUser = {
     id: currentUserData?.id ?? null,
     email: currentUserData?.email || '',
     firstName: currentUserData?.first_name || '',
@@ -41,7 +43,7 @@ export default function IssueDetailPage() {
     displayName: currentUserData?.display_name || currentUserData?.full_name || `${currentUserData?.first_name || ''} ${currentUserData?.last_name || ''}`.trim() || currentUserData?.email || '',
   };
 
-    const isUserCreator = (reportedBy: string, user: CurrentUser): boolean => {
+  const isUserCreator = (reportedBy: string, user: CurrentUser): boolean => {
     if (!reportedBy || reportedBy === 'Unknown') return false;
     const rb = reportedBy.toLowerCase().trim().replace(/\s+/g, '');
     const candidates = [
@@ -57,6 +59,7 @@ export default function IssueDetailPage() {
   const refresh = useCallback(async () => {
     try {
       setError(null);
+      setForbidden(false);
       const data = await getIssue(id);
       if (!data) {
         setError('Issue not found.');
@@ -65,7 +68,14 @@ export default function IssueDetailPage() {
       return data;
     } catch (err: unknown) {
       console.error('Refresh error:', err);
-      setError('Failed to load issue. Please try again.');
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setForbidden(true);
+        setError("You don't have access to this issue. Ask an organisation admin to add you.");
+      } else if (!(axios.isAxiosError(err) && err.response?.status === 401)) {
+        // 401 is handled globally by the apiClient interceptor (redirects
+        // to /login?next=...), so no local error is needed for that case.
+        setError('Failed to load issue. Please try again.');
+      }
       throw err;
     }
   }, [id]);
@@ -100,6 +110,11 @@ export default function IssueDetailPage() {
     return (
       <main className="issues-page">
         <p className="hero-subtitle">{error}</p>
+        {forbidden && (
+          <p className="hero-subtitle" style={{ fontSize: '13px', color: 'var(--slate)' }}>
+            Signed in as {currentUser.email || currentUser.displayName || 'unknown user'}.
+          </p>
+        )}
         <button className="btn-outline" onClick={() => router.push('/issues')} type="button">
           <i className="ti ti-arrow-left" /> Back to issues
         </button>

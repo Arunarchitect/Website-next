@@ -32,10 +32,6 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
-
-
-// Helper to normalize status
-
 export default function MainAdminPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -97,11 +93,7 @@ export default function MainAdminPage() {
     fetchOrganisations();
   }, []);
 
-  // Fetch issue stats when organisation changes. This now hits the dedicated
-  // /stats/ endpoint (via getDashboardStats), which aggregates over the whole
-  // filtered set in the database — not a client-side page of issues — so
-  // Open / Resolved / High Priority are accurate regardless of how many
-  // issues exist.
+  // Fetch issue stats when organisation changes.
   useEffect(() => {
     if (selectedOrganisation === null && organisations.length > 0) {
       setSelectedOrganisation(organisations[0].id);
@@ -128,7 +120,6 @@ export default function MainAdminPage() {
     }
   }, [selectedOrganisation, organisations, loadingOrganisations]);
 
-
   // Fetch upcoming meetings count, scoped to the selected organisation.
   useEffect(() => {
     if (loadingOrganisations) return;
@@ -152,13 +143,11 @@ export default function MainAdminPage() {
     fetchMeetingsCount();
   }, [selectedOrganisation, loadingOrganisations]);
 
-  // Get user's display name
   const getDisplayName = (): string => {
     if (!currentUser) return "Guest";
     return currentUser.full_name || currentUser.email || "User";
   };
 
-  // Get user's initials for avatar
   const getInitials = (): string => {
     if (!currentUser) return "?";
     const name = currentUser.full_name || currentUser.email || "User";
@@ -169,7 +158,6 @@ export default function MainAdminPage() {
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Get greeting based on time of day
   const getGreeting = (): string => {
     const hour = new Date().getHours();
     if (hour < 12) return "Good morning";
@@ -177,10 +165,8 @@ export default function MainAdminPage() {
     return "Good evening";
   };
 
-  // Check if there are any open issues
   const hasOpenIssues = issueStats.open > 0;
 
-  // Filter out areacalc-related entries for users without areacalc access
   const visibleTools = tools.filter(
     (tool) => tool.key !== "areacalc" || canAccessAreacalc
   );
@@ -198,7 +184,7 @@ export default function MainAdminPage() {
           <span className="admin-brand-text">Admin Hub</span>
         </div>
         <nav className="admin-nav">
-          <Link href="/new/dash/dashadmin" className="admin-nav-link">
+          <Link href="/new/dash/dashadmin" className="admin-nav-link active">
             <i className="ti ti-layout-dashboard" aria-hidden="true" />
             <span>Dashboard</span>
           </Link>
