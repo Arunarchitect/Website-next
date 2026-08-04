@@ -206,7 +206,7 @@ export default function IssuesPage() {
   const [loadingFilterProjects, setLoadingFilterProjects] = useState(false);
   const [loadingFilterDeliverables, setLoadingFilterDeliverables] = useState(false);
 
-  const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(new Set());
+  const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(new Set(["open"]));
 
   useEffect(() => {
     const loadUserFromStorage = () => {

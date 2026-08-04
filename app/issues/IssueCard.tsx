@@ -1,9 +1,4 @@
 // app/issues/IssueCard.tsx
-//
-// List-view card. Deliberately compact-only — clicking it navigates to the
-// dedicated /issues/[id] page (IssueDetail) instead of expanding inline.
-// This also gives every issue a real, linkable, bookmarkable URL.
-
 "use client";
 
 import Link from "next/link";
@@ -41,6 +36,9 @@ export function IssueCard({ issue, currentUser, isUserCreator }: IssueCardProps)
           <div className="issue-compact-line1">
             <span className="issue-id">#{issue.id}</span>
             <span className="issue-compact-title">{issue.title}</span>
+          </div>
+
+          <div className="issue-compact-line2">
             <span className={`domain-badge domain-${issue.domain}`}>
               {isBim ? (
                 <><i className="ti ti-file-barcode" /> BIM</>
@@ -50,9 +48,6 @@ export function IssueCard({ issue, currentUser, isUserCreator }: IssueCardProps)
             </span>
             <ClassificationBadge classification={issue.classification} />
             {isCreator && <span className="issue-owner-badge">(You)</span>}
-          </div>
-
-          <div className="issue-compact-line2">
             {issue.module && (
               <span className="meta-item">
                 <i className="ti ti-box" />
