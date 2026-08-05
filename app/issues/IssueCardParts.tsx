@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";   
 import { getPriorityColor, getStatusColor, AssigneeOption, DrawingOption } from "./issueApi";
 import {
   Issue,
@@ -1152,11 +1153,16 @@ export function ResolvePanel({
 // ActionsBar — edit/save/cancel/delete/resolve/add-comment
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ActionsBar — edit/save/cancel/delete/resolve/add-comment/share
+// ---------------------------------------------------------------------------
+
 interface ActionsBarProps {
   isEditing: boolean;
   isCreator: boolean;
   canResolve: boolean;
   canManageAccess: boolean;
+  shareUrl?: string;                       // ← NEW
   onCancelEdit: () => void;
   onSave: () => void;
   onEdit: () => void;
@@ -1171,6 +1177,7 @@ export function ActionsBar({
   isCreator,
   canManageAccess,
   canResolve,
+  shareUrl,
   onCancelEdit,
   onSave,
   onEdit,
@@ -1179,6 +1186,34 @@ export function ActionsBar({
   onToggleCommentInput,
   onToggleManageAccess,
 }: ActionsBarProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    if (!shareUrl) return;
+    try {
+      // Mobile / modern desktop browsers
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({ title: document.title, url: shareUrl });
+        return;
+      }
+      // Clipboard fallback
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = shareUrl;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // User cancelled or API unavailable — ignore
+    }
+  };
+
   return (
     <div className="issue-actions">
       {isEditing ? (
@@ -1201,10 +1236,6 @@ export function ActionsBar({
             </>
           )}
 
-          {/* Shown for org admins/staff even when they didn't report the
-              issue — this is the only affordance that reaches the
-              dedicated /access/ endpoint, deliberately decoupled from the
-              creator-only edit form above. */}
           {canManageAccess && (
             <button className="btn-outline" onClick={onToggleManageAccess}>
               <i className="ti ti-shield-lock" /> Manage Access
@@ -1219,12 +1250,23 @@ export function ActionsBar({
           <button className="btn-outline" onClick={onToggleCommentInput}>
             <i className="ti ti-message-plus" /> Add Comment
           </button>
+
+          {/* ← NEW SHARE BUTTON */}
+          {shareUrl && (
+            <button
+              className="btn-outline"
+              onClick={handleShare}
+              title={copied ? "Link copied!" : "Copy link to this issue"}
+            >
+              <i className={`ti ${copied ? "ti-check" : "ti-link"}`} />
+              {copied ? "Copied!" : "Share"}
+            </button>
+          )}
         </>
       )}
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // AddCommentPanel — the single "post a comment, optionally with an image"
 // entry point. Both the text and (if provided) the image land on the same

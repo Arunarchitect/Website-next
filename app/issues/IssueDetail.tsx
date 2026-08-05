@@ -102,6 +102,10 @@ export function IssueDetail({
   const [showManageAccess, setShowManageAccess] = useState(false);
   const [accessOrgMembers, setAccessOrgMembers] = useState<AssigneeOption[]>([]);
   const [loadingAccessMembers, setLoadingAccessMembers] = useState(false);
+  const shareUrl =
+  typeof window !== "undefined"
+    ? `${window.location.origin}/issues/${issue.id}`
+    : "";
 
   // Screenshot upload flows — one hook instance per independent upload site.
   const mainScreenshot = useScreenshotUpload(setSaveError, false);
@@ -617,6 +621,7 @@ export function IssueDetail({
             isCreator={isCreator}
             canManageAccess={issue.canManageAccess}
             canResolve={canResolve}
+            shareUrl={shareUrl}  
             onCancelEdit={() => {
               setIsEditing(false);
               mainScreenshot.setScreenshot(null);
