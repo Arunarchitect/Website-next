@@ -592,6 +592,12 @@ function PinDeliverableSection({ meta, pinnedIds, onToggle }: {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
+// DROP-IN REPLACEMENT for `export default function WorklogPage() { ... }`
+// in your original file. Everything above it (T, CalGrid, DeleteModal,
+// WorklogCard, AddWorklogForm, PinDeliverableSection, etc.) is unchanged —
+// keep those as-is and just swap this function in.
+
 export default function WorklogPage() {
   const w        = useWindowWidth();
   const isMobile = w < 700;
@@ -617,6 +623,14 @@ export default function WorklogPage() {
   const [allActiveDates, setAllActiveDates] = useState<Set<string>>(new Set());
   const [datesLoading,   setDatesLoading]   = useState(false);
 
+  // 🔧 FIX: total hours for the current filter must be summed across ALL
+  // pages in that range — not just the 10 rows currently shown. `rows` is
+  // paginated (page_size ~10), so summing only `rows` undercounts whenever
+  // a filtered range has more than one page of entries. This mirrors the
+  // same "fetch every page and sum" approach the PDF export already uses.
+  const [rangeMinutes,        setRangeMinutes]        = useState(0);
+  const [rangeMinutesLoading, setRangeMinutesLoading] = useState(false);
+
   const dateRangeRef = useRef<{from?:string;to?:string}>({});
 
   async function loadActiveDates(params: {from?:string; to?:string}) {
@@ -628,6 +642,32 @@ export default function WorklogPage() {
       // non-fatal
     } finally {
       setDatesLoading(false);
+    }
+  }
+
+  // 🔧 FIX: paginate through every page of the filtered range and sum
+  // durations, instead of relying on whatever page happens to be loaded
+  // into `rows`. Same page-walking pattern as fetchAllLogs() in the PDF
+  // button — keeps the two numbers in sync.
+  async function loadRangeMinutes(params: {from?:string; to?:string}) {
+    setRangeMinutesLoading(true);
+    try {
+      let total = 0;
+      let page = 1;
+      while (true) {
+        const data = await fetchMyWorkLogs({ ...params, page });
+        total += data.results.reduce((s, r) => {
+          if (!r.start_time || !r.end_time) return s;
+          return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
+        }, 0);
+        if (page >= data.pages) break;
+        page++;
+      }
+      setRangeMinutes(total);
+    } catch {
+      // non-fatal; keep previous value rather than showing 0
+    } finally {
+      setRangeMinutesLoading(false);
     }
   }
 
@@ -644,6 +684,7 @@ export default function WorklogPage() {
 
   async function loadAll(params: {from?:string; to?:string; page?:number}) {
     loadActiveDates({from:params.from, to:params.to});
+    loadRangeMinutes({from:params.from, to:params.to});
     await loadRows(params);
   }
 
@@ -662,6 +703,9 @@ export default function WorklogPage() {
       dateRangeRef.current = {from, to};
       setInitialDeliverables(await fetchInitialDeliverables(data.results[0] ?? null));
       setMeta(m); setPinnedIds(new Set(pins));
+      // 🔧 FIX: seed the range total for the initial "current week" view too,
+      // not just on subsequent filter changes.
+      loadRangeMinutes({from, to});
     }).catch(e => { setError(e.message); setLoading(false); });
   }, []);
 
@@ -681,20 +725,28 @@ export default function WorklogPage() {
 
   function goToPage(p: number) { loadRows({...dateRangeRef.current, page:p}); }
 
-  const totalMinutes = useMemo(() => rows.reduce((s, r) => {
-    if (!r.start_time || !r.end_time) return s;
-    return s + Math.round((new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / 60000);
-  }, 0), [rows]);
-
   const availableYears = useMemo(() =>
     Array.from(new Set(rows.map(r => new Date(r.start_time).getFullYear()))).sort()
   , [rows]);
 
   const hasFilter = selDates.size > 0 || selMonth !== null || selYear !== null;
 
-  function saveRow(id: number, data: WorkLogEntry) { setRows(p => p.map(r => r.id===id ? data : r)); }
-  function deleteRow(id: number) { setRows(p => p.filter(r => r.id!==id)); setTotalCount(c => c-1); }
-  function addRow(w: WorkLogEntry) { setRows(p => [w, ...p.slice(0,9)]); setTotalCount(c => c+1); }
+  function saveRow(id: number, data: WorkLogEntry) {
+    setRows(p => p.map(r => r.id===id ? data : r));
+    // 🔧 FIX: an edit can change a row's duration — refresh the range total
+    // so it doesn't drift out of sync with what's actually saved.
+    loadRangeMinutes(dateRangeRef.current);
+  }
+  function deleteRow(id: number) {
+    setRows(p => p.filter(r => r.id!==id));
+    setTotalCount(c => c-1);
+    loadRangeMinutes(dateRangeRef.current);
+  }
+  function addRow(w: WorkLogEntry) {
+    setRows(p => [w, ...p.slice(0,9)]);
+    setTotalCount(c => c+1);
+    loadRangeMinutes(dateRangeRef.current);
+  }
 
   async function togglePin(deliverableId: number) {
     const pinned = pinnedIds.has(deliverableId);
@@ -785,7 +837,9 @@ export default function WorklogPage() {
       <Divider />
       {[
         {label:"Entries", val:`${rows.length}/${totalCount}`},
-        {label:"Hours",   val:`${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m`},
+        // 🔧 FIX: use rangeMinutes (full-range fetch) instead of the old
+        // rows-only totalMinutes. Shows a small loading hint while it refreshes.
+        {label:"Hours",   val: rangeMinutesLoading ? "…" : `${Math.floor(rangeMinutes/60)}h ${rangeMinutes%60}m`},
         {label:"Pinned",  val:String(pinnedIds.size)},
       ].map(({label,val}) => (
         <div key={label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -877,7 +931,7 @@ export default function WorklogPage() {
           </div>
           <WorklogPDFButton
             workLogs={rows}
-            totalMinutes={totalMinutes}
+            totalMinutes={rangeMinutes}
             dateFrom={dateRangeRef.current.from}
             dateTo={dateRangeRef.current.to}
           />
