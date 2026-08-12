@@ -1,0 +1,945 @@
+/* project.module.css */
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800;900&family=Lato:wght@400;500;600&family=JetBrains+Mono:wght@500;600;700&display=swap");
+
+/* ─── Keyframes ─────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Page shell ────────────────────────────────────────────────────── */
+
+.page {
+  --font-display: "Bricolage Grotesque", sans-serif;
+  --font-body: "Lato", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --ink: #0a0a0a;
+  --ink-soft: #222222;
+  --muted: #888888;
+  --faint: #bbbbbb;
+  --faintest: #cccccc;
+  --line: #efefef;
+  --line-strong: #e4e4e4;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --accent: #1565c0;
+  --accent-soft: #f0f4ff;
+  --good: #2e7d32;
+  --bad: #c62828;
+  --warn: #e65100;
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  font-family: var(--font-body);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 16px clamp(16px, 5vw, 28px) 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.titleBlock { flex: 0 0 auto; }
+
+.title {
+  margin: 0;
+  font-size: clamp(18px, 6vw, 20px);
+  font-weight: 900;
+  color: var(--ink);
+  letter-spacing: -0.04em;
+  font-family: var(--font-display);
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+.filterSlot {
+  flex: 1;
+  min-width: min(280px, 100%);
+}
+
+/* ─── Body / layout grid ────────────────────────────────────────────── */
+
+.body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: clamp(280px, 28%, 340px) 1fr;
+  overflow: hidden;
+  height: calc(100vh - 77px);
+  height: calc(100dvh - 77px);
+  position: relative;
+}
+
+@media (max-width: 768px) {
+  .body {
+    grid-template-columns: 1fr;
+    height: calc(100dvh - 98px);
+  }
+  /* On mobile only one pane is visible at a time, controlled by state */
+  .sidebar { display: block; }
+  .main { display: none; }
+  .body.mobileDetailOpen .sidebar { display: none; }
+  .body.mobileDetailOpen .main {
+    display: block;
+    position: fixed;
+    inset: 98px 0 0 0;
+    z-index: 10;
+    background: var(--bg);
+  }
+}
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: var(--card);
+  overflow-y: auto;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.main {
+  overflow-y: auto;
+  padding: clamp(16px, 4vw, 24px) clamp(16px, 5vw, 28px);
+  background: var(--bg);
+}
+
+/* ─── Filter bar ────────────────────────────────────────────────────── */
+
+.filterBar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 9px;
+  padding: 8px 12px;
+  background: var(--card);
+}
+
+.searchIcon { color: var(--faint); flex-shrink: 0; }
+
+.searchInput {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  width: 100%;
+}
+
+.clearBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--faint);
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
+}
+
+.select {
+  border: 1.5px solid var(--line-strong);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: var(--card);
+  outline: none;
+  font-family: var(--font-body);
+  cursor: pointer;
+  appearance: none;
+  flex: 1 1 130px;
+  min-width: 110px;
+}
+
+@media (max-width: 480px) {
+  .select { flex: 1 1 calc(50% - 4px); }
+}
+
+/* ─── Error / empty states ──────────────────────────────────────────── */
+
+.errorBox {
+  padding: 12px 14px;
+  background: #fce4ec;
+  border-radius: 10px;
+  color: var(--bad);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.emptyState {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--faintest);
+}
+.emptyIcon { font-size: 32px; margin-bottom: 10px; }
+.emptyText { margin: 0; font-size: 13px; font-family: var(--font-body); }
+
+.detailPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--faintest);
+  gap: 10px;
+  min-height: 320px;
+}
+.detailPlaceholderText {
+  margin: 0;
+  font-size: 13px;
+  font-family: var(--font-body);
+  color: var(--faint);
+}
+
+/* ─── Skeletons ─────────────────────────────────────────────────────── */
+
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(90deg, #ececec 25%, #f8f8f8 50%, #ececec 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  flex-shrink: 0;
+}
+
+.skeletonCard {
+  padding: 13px 15px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeletonDetailCard {
+  background: var(--card);
+  border-radius: 16px;
+  padding: clamp(20px, 5vw, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--line);
+}
+
+.skeletonStatsRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skeletonStat {
+  flex: 1 1 120px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ─── Project card (list item) ──────────────────────────────────────── */
+
+.cardEnter { animation: fadeIn 0.2s ease forwards; }
+
+.projectCard {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 13px 15px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1.5px solid var(--line-strong);
+  background: var(--card);
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+}
+.projectCard:hover { border-color: #c5d5f5; }
+.projectCardSelected,
+.projectCardSelected:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cardTopRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.cardName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.cardMeta {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--faint);
+  font-family: var(--font-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardStats {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  flex-wrap: wrap;
+}
+
+/* ─── Badge ─────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+/* ─── Detail card ───────────────────────────────────────────────────── */
+
+.detailEnter { animation: fadeIn 0.25s ease forwards; }
+
+.detailCard {
+  background: var(--card);
+  border-radius: 16px;
+  padding: clamp(18px, 5vw, 28px);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.mobileBackBtn {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+@media (max-width: 768px) {
+  .mobileBackBtn { display: inline-flex; }
+}
+
+.detailHeaderRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.detailName {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 22px);
+  font-weight: 900;
+  color: var(--ink);
+  letter-spacing: -0.04em;
+  font-family: var(--font-display);
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.detailSub {
+  margin: 4px 0 0;
+  font-size: clamp(11px, 3vw, 12px);
+  color: var(--muted);
+  font-family: var(--font-body);
+}
+
+.badgeRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* ─── Tab bar ───────────────────────────────────────────────────────── */
+
+.tabBar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: #f0f0f0;
+  border-radius: 10px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tabBtn {
+  all: unset;
+  cursor: pointer;
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  transition: background 0.15s, color 0.15s;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tabBtnActive {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ─── Stat chip ─────────────────────────────────────────────────────── */
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.statChip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.statLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+.statValue {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  overflow-wrap: break-word;
+}
+
+.statSub {
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+/* ─── Section heading / divider ─────────────────────────────────────── */
+
+.sectionHeading {
+  margin: 0 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faintest);
+  font-family: var(--font-mono);
+}
+
+.sectionHeadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
+/* ─── Progress bar ──────────────────────────────────────────────────── */
+
+.progressHeadRow {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.progressLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.progressValue {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.progressTrack {
+  height: 6px;
+  background: #ededed;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.5s ease;
+}
+
+/* ─── Overview tab: client / timeline columns ───────────────────────── */
+
+.infoColumns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.infoRows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.infoLabel {
+  margin: 0;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+}
+
+.infoValue {
+  margin: 2px 0 0;
+  font-size: clamp(12px, 3.5vw, 13px);
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  overflow-wrap: break-word;
+}
+
+.description {
+  margin: 0;
+  font-size: 13px;
+  color: #555555;
+  line-height: 1.65;
+  font-family: var(--font-body);
+}
+
+/* ─── Deliverable row ───────────────────────────────────────────────── */
+
+.deliverableList {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.deliverableRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  transition: background 0.15s;
+}
+.deliverableRow:hover { background: #f4f4f4; }
+
+@media (max-width: 560px) {
+  .deliverableRow {
+    grid-template-columns: 1fr auto;
+    row-gap: 6px;
+  }
+  .deliverableAssignee { display: none; }
+}
+
+.deliverableName {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+.deliverableDue {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.deliverableAssignee {
+  font-size: 11px;
+  color: #666666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.deliverableHours {
+  font-size: 12px;
+  font-weight: 600;
+  color: #444444;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.emptyRow {
+  font-size: 13px;
+  color: var(--faintest);
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ─── Fee stage row ─────────────────────────────────────────────────── */
+
+.feeStageList {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.feeStageRow {
+  display: grid;
+  grid-template-columns: 26px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  transition: background 0.15s;
+}
+.feeStageRow:hover { background: #f4f4f4; }
+
+@media (max-width: 560px) {
+  .feeStageRow {
+    grid-template-columns: 22px 1fr;
+    row-gap: 8px;
+  }
+  .feeStageBadge, .feeStageAmountBlock {
+    grid-column: 2;
+  }
+}
+
+.stageBubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #efefef;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.stageName {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+.stageMeta {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  overflow-wrap: break-word;
+}
+
+.stageAmountBlock { text-align: right; }
+
+.stageAmount {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+.stageCollectedDate {
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--good);
+  font-family: var(--font-mono);
+}
+
+/* ─── Outstanding callout ───────────────────────────────────────────── */
+
+.outstandingCallout {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.outstandingLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f57f17;
+  font-family: var(--font-body);
+}
+
+.outstandingValue {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--warn);
+  font-family: var(--font-mono);
+}
+
+/* ─── Accordion (hours / billing breakdown) ─────────────────────────── */
+
+.accordionBtn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chevron {
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.chevronOpen { transform: rotate(90deg); }
+
+.manualEntryList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.manualEntryRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-family: var(--font-body);
+}
+
+@media (max-width: 480px) {
+  .manualEntryRow {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+  }
+}
+
+.manualEntryUser { font-weight: 600; color: #222222; }
+.manualEntryRemark { color: var(--faint); margin-left: 6px; font-size: 11px; }
+.manualEntryDate { color: #888888; font-size: 11px; font-family: var(--font-mono); }
+.manualEntryHours { font-weight: 700; color: #333333; font-family: var(--font-mono); }
+
+/* ─── Billing breakdown table ───────────────────────────────────────── */
+
+.billingHeaderRow {
+  display: grid;
+  grid-template-columns: 1fr 60px 100px 100px;
+  gap: 8px;
+  padding: 4px 12px;
+}
+
+.billingHeaderCell {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--faintest);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+.billingHeaderCellRight { text-align: right; }
+
+.billingList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.billingRow {
+  display: grid;
+  grid-template-columns: 1fr 60px 100px 100px;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .billingHeaderRow { display: none; }
+  .billingRow {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "name name"
+      "hours rate"
+      "cost cost";
+    row-gap: 4px;
+  }
+  .billingCellName { grid-area: name; text-align: left !important; }
+  .billingCellHours { grid-area: hours; text-align: left !important; }
+  .billingCellRate { grid-area: rate; }
+  .billingCellCost { grid-area: cost; text-align: left !important; }
+}
+
+.billingCellName {
+  font-size: 12px;
+  font-weight: 600;
+  color: #222222;
+  font-family: var(--font-body);
+}
+.billingCellHours {
+  font-size: 11px;
+  color: #555555;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.billingCellRate {
+  font-size: 11px;
+  color: #888888;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.billingCellCost {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+/* ─── No-fee-setup notice ───────────────────────────────────────────── */
+
+.noticeBox {
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: #fafafa;
+  border: 1px dashed #e0e0e0;
+  text-align: center;
+}
+.noticeText {
+  margin: 0;
+  font-size: 12px;
+  color: var(--faintest);
+  font-family: var(--font-body);
+}
+
+/* ─── Scrollbars ────────────────────────────────────────────────────── */
+
+.sidebar::-webkit-scrollbar,
+.main::-webkit-scrollbar,
+.tabBar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.sidebar::-webkit-scrollbar-track,
+.main::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb,
+.main::-webkit-scrollbar-thumb {
+  background: #e0e0e0;
+  border-radius: 99px;
+}
+
+/* ─── Reduced motion ────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .cardEnter, .detailEnter {
+    animation: none !important;
+  }
+  .progressFill, .chevron {
+    transition: none !important;
+  }
+}
