@@ -9,6 +9,30 @@ import type {
   ProjectListParams,
 } from "@/app/new/projectdash/types";
 
+// Re-export every type from ./types so existing imports like
+// `import { ProjectListItem, FeeSetup } from "@/app/new/project_api"`
+// (written against the old single-file version) keep working unchanged.
+export type {
+  ProjectStage,
+  DeliverableStatus,
+  BillingType,
+  PaymentStatus,
+  FeeSetupStatus,
+  FeeCalcStatus,
+  DetailTab,
+  OrganisationOption,
+  FeeStage,
+  FeeSetup,
+  ManualHoursEntry,
+  BillingBreakdownItem,
+  FeeCalcSummary,
+  ProjectFinancials,
+  ProjectListItem,
+  DeliverableDetail,
+  ProjectDetail,
+  ProjectListParams,
+} from "@/app/new/projectdash/types";
+
 const BASE = process.env.NEXT_PUBLIC_HOST;
 
 function getToken(): string {
