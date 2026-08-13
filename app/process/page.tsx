@@ -13,10 +13,24 @@ import {
   isNodeComplete,
 } from "@/app/process/lib/process-utils";
 
-const DRAG_THRESHOLD = 6; // px of movement before a pointerdown counts as a pan, not a click
+const DRAG_THRESHOLD = 6;
 
 export default function Home() {
-  const [data, setData] = useState<ProcessData | null>(null);
+  // ─── State ──────────────────────────────────────────────────────
+  const [data, setData] = useState<ProcessData | null>(() => {
+    // Start with a default root node so the user can add processes right away
+    return {
+      title: "Untitled Workflow",
+      description: "Start building your process by adding nodes.",
+      type: "process",
+      width: 1700,
+      height: 220,
+      children: [],
+      completed: [],
+      edgeStyles: {},
+    };
+  });
+
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
 
@@ -33,17 +47,25 @@ export default function Home() {
     mode: "successor" | "predecessor";
   } | null>(null);
 
-  // PDF export modal state
   const [exportModal, setExportModal] = useState<"pdf" | null>(null);
   const [pdfPageSize, setPdfPageSize] = useState<"A4" | "A3" | "A2">("A4");
   const [pdfOrientation, setPdfOrientation] = useState<"portrait" | "landscape">("landscape");
 
-  // Arrow style state: key = "from->to", value = { dashed: boolean }
   const [edgeStyles, setEdgeStyles] = useState<Map<string, { dashed: boolean }>>(new Map());
 
+  // ─── Add Process Modal State ──────────────────────────────────
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newProcess, setNewProcess] = useState({
+    label: "",
+    description: "",
+    position: 0,
+  });
+  const [addError, setAddError] = useState("");
+
+  // ─── Refs ──────────────────────────────────────────────────────
   const dragStart = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
-  const didDragRef = useRef(false); // tracks if a real drag (past threshold) occurred
+  const didDragRef = useRef(false);
 
   const activePointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchStart = useRef({
@@ -56,7 +78,6 @@ export default function Home() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const printRef = useRef<HTMLDivElement | null>(null);
-
   const warningTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const zoomRef = useRef(zoom);
@@ -129,6 +150,7 @@ export default function Home() {
     closeEditor();
   };
 
+  // ─── Tree Helpers ──────────────────────────────────────────────
   const updateNodeData = (
     root: ProcessNode,
     id: string,
@@ -152,6 +174,111 @@ export default function Home() {
     return null;
   };
 
+  const addNodeToTree = (
+    root: ProcessNode,
+    parentId: string | null,
+    newNode: ProcessNode,
+    position: number
+  ): ProcessNode => {
+    if (parentId === null) {
+      const children = root.children || [];
+      const newChildren = [...children];
+      newChildren.splice(position, 0, newNode);
+      return { ...root, children: newChildren };
+    }
+
+    if (root.id === parentId) {
+      const children = root.children || [];
+      const newChildren = [...children];
+      newChildren.splice(position, 0, newNode);
+      return { ...root, children: newChildren };
+    }
+
+    if (root.children) {
+      return {
+        ...root,
+        children: root.children.map((child) =>
+          addNodeToTree(child, parentId, newNode, position)
+        ),
+      };
+    }
+    return root;
+  };
+
+  // ─── Add Process Handler ──────────────────────────────────────
+  const handleAddProcess = () => {
+    if (!data) {
+      // Should never happen because we initialise with default data, but keep safeguard.
+      setAddError("No process data loaded.");
+      return;
+    }
+    const trimmedLabel = newProcess.label.trim();
+    if (!trimmedLabel) {
+      setAddError("Title is required.");
+      return;
+    }
+
+    const parentId = selectedNodeId || null;
+
+    // Compute current children to validate position
+    let currentChildren: ProcessNode[] = [];
+    if (parentId === null) {
+      currentChildren = data.children || [];
+    } else {
+      const rootNode = {
+        id: "root",
+        label: data.title,
+        description: data.description,
+        type: data.type || "process",
+        children: data.children || [],
+      };
+      const parent = findNodeById(rootNode, parentId);
+      if (parent) {
+        currentChildren = parent.children || [];
+      } else {
+        setAddError("Selected parent not found.");
+        return;
+      }
+    }
+
+    const pos = Math.min(Math.max(newProcess.position, 0), currentChildren.length);
+
+    const newId = `node-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const newNode: ProcessNode = {
+      id: newId,
+      label: trimmedLabel,
+      description: newProcess.description.trim() || undefined,
+      children: [],
+    };
+
+    const rootNode: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children || [],
+    };
+
+    const newRoot = addNodeToTree(rootNode, parentId, newNode, pos);
+
+    setData({
+      ...data,
+      title: newRoot.label,
+      description: newRoot.description,
+      type: newRoot.type,
+      width: newRoot.width,
+      height: newRoot.height,
+      children: newRoot.children,
+    });
+
+    setShowAddModal(false);
+    setNewProcess({ label: "", description: "", position: 0 });
+    setAddError("");
+  };
+
+  // ─── Relation Management ──────────────────────────────────────
   const addRelation = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
     if (!data) return;
     setData((prev) => {
@@ -291,6 +418,7 @@ export default function Home() {
     });
   };
 
+  // ─── Upload / Save ──────────────────────────────────────────────
   const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -316,13 +444,13 @@ export default function Home() {
         setSelectedEdge(null);
         setPendingRelation(null);
         setEdgeStyles(
-  new Map(
-    Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [
-      key,
-      { dashed: value?.dashed ?? false },
-    ])
-  )
-);
+          new Map(
+            Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [
+              key,
+              { dashed: value?.dashed ?? false },
+            ])
+          )
+        );
       } catch (err) {
         console.error(err);
         setData(null);
@@ -388,9 +516,7 @@ export default function Home() {
     }
   };
 
-  /* =======================================================
-     EXPORT PNG / PDF / SVG
-  ======================================================= */
+  // ─── Export Functions (unchanged) ──────────────────────────────
   const getElementForExport = () => printRef.current;
 
   const captureFullDiagram = async (format: "png" | "svg") => {
@@ -527,6 +653,7 @@ export default function Home() {
     return () => cancelAnimationFrame(frame);
   }, [data]);
 
+  // ─── Pan / Zoom / Pointer Handlers (unchanged) ──────────────────
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -573,15 +700,10 @@ export default function Home() {
     const pointers = activePointers.current;
 
     if (pointers.size === 1) {
-      // Don't capture or decide pan-vs-click yet — a plain click (on a node,
-      // an edge, or empty canvas) must be allowed to hit its real target.
-      // We only commit to "this is a pan" once movement crosses the
-      // threshold, in handlePointerMove.
       dragStart.current = { x: event.clientX, y: event.clientY };
       panStart.current = { ...pan };
       didDragRef.current = false;
     } else if (pointers.size === 2) {
-      // Second finger down — this is unambiguously a pinch, capture now.
       event.currentTarget.setPointerCapture(event.pointerId);
       setDragging(false);
       const [p1, p2] = [...pointers.values()];
@@ -605,14 +727,13 @@ export default function Home() {
       const dy = event.clientY - dragStart.current.y;
 
       if (!dragging) {
-        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return; // still just a click-in-progress
-        // Threshold crossed — this is a real pan, even if it started on a node.
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         setDragging(true);
       }
 
       setPan({ x: panStart.current.x + dx, y: panStart.current.y + dy });
-      didDragRef.current = true; // a drag occurred — suppress the click that follows
+      didDragRef.current = true;
     } else if (pointers.size === 2) {
       const [p1, p2] = [...pointers.values()];
       const newDist = getDistance(p1, p2);
@@ -638,7 +759,7 @@ export default function Home() {
         x: (localX - halfW) * (1 - zoomRatio) + oldPan.x * zoomRatio,
         y: (localY - halfH) * (1 - zoomRatio) + oldPan.y * zoomRatio,
       });
-      didDragRef.current = true; // pinch also counts as a drag
+      didDragRef.current = true;
     }
   };
 
@@ -653,8 +774,6 @@ export default function Home() {
     activePointers.current.delete(event.pointerId);
     if (activePointers.current.size < 2) {
       if (activePointers.current.size === 1) {
-        // If one pointer remains, we don't continue panning automatically.
-        // The remaining pointer could start a new pan if it moves.
         setDragging(false);
       } else {
         setDragging(false);
@@ -664,7 +783,6 @@ export default function Home() {
 
   const handleNodeClick = (id: string) => {
     if (didDragRef.current) {
-      // This click is the tail end of a real pan (started on this node) — ignore it.
       didDragRef.current = false;
       return;
     }
@@ -699,19 +817,32 @@ export default function Home() {
   const completedLeaves = completed.size;
   void countNodes;
 
-  // Clear all selections
   const clearSelection = () => {
     setSelectedNodeId(null);
     setSelectedEdge(null);
     setPendingRelation(null);
   };
 
+  const getParentInfo = () => {
+    if (!data) return { parentLabel: "Root", childCount: 0 };
+    if (selectedNodeId) {
+      const parent = findNodeById(
+        { id: "root", label: data.title, description: data.description, type: "process", children: data.children || [] },
+        selectedNodeId
+      );
+      if (parent) {
+        return { parentLabel: parent.label, childCount: (parent.children || []).length };
+      }
+    }
+    return { parentLabel: "Root", childCount: (data.children || []).length };
+  };
+
+  // ─── Render ────────────────────────────────────────────────────
   return (
     <main
       className="relative w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px] overflow-hidden bg-gray-100 rounded-xl"
       style={{ userSelect: dragging ? "none" : "auto" }}
     >
-      {/* Inline print styles */}
       <style>{`
         @media print {
           body.printing * { visibility: hidden; }
@@ -752,14 +883,21 @@ export default function Home() {
           <button onClick={fitAllView} title="Zoom to fit" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Reset</button>
           <button onClick={handleSave} title="Download JSON" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Save JSON</button>
 
-          {/* Export buttons */}
+          <button
+            onClick={() => setShowAddModal(true)}
+            title="Add a new process node"
+            className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm bg-blue-50 border-blue-300 hover:bg-blue-100"
+          >
+            + Add Process
+          </button>
+
           <button onClick={exportPng} title="Export as PNG" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">PNG</button>
           <button onClick={() => setExportModal("pdf")} title="Export as PDF" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">PDF</button>
           <button onClick={exportSvg} title="Export as SVG" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">SVG</button>
         </div>
       </div>
 
-      {/* ACTION POPUP (no overlay) */}
+      {/* ACTION POPUP (unchanged) */}
       {(selectedNodeId || selectedEdge) && !pendingRelation && (
         <div
           data-action-popup
@@ -888,7 +1026,6 @@ export default function Home() {
         onPointerCancel={handlePointerUp}
         onPointerLeave={() => setHoveredNodeId(null)}
         onClick={() => {
-          // Clear selection only if not after a drag
           if (didDragRef.current) {
             didDragRef.current = false;
             return;
@@ -904,15 +1041,7 @@ export default function Home() {
           }}
         />
 
-        {!data && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none no-print">
-            <div className="text-center">
-              <div className="text-lg font-medium text-gray-500">No process loaded</div>
-              <div className="text-sm mt-1 text-gray-400">Click &quot;Upload JSON&quot; to begin</div>
-            </div>
-          </div>
-        )}
-
+        {/* No more "No process loaded" – we always have a default data object */}
         {error && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-lg px-4 py-2 text-sm shadow-md no-print">
             {error}
@@ -966,7 +1095,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* EDIT MODAL */}
+      {/* EDIT MODAL (unchanged) */}
       {editingNodeId && (
         <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print" onClick={closeEditor}>
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1000,7 +1129,97 @@ export default function Home() {
         </div>
       )}
 
-      {/* PDF EXPORT DIALOG */}
+      {/* ─── ADD PROCESS MODAL (simplified) ────────────────────── */}
+      {showAddModal && (
+        <div
+          className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
+          onClick={() => {
+            setShowAddModal(false);
+            setAddError("");
+          }}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-4 text-gray-800">Add New Process</h3>
+
+            {addError && (
+              <div className="mb-3 text-sm text-red-600 bg-red-50 p-2 rounded">
+                {addError}
+              </div>
+            )}
+
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+              <input
+                type="text"
+                value={newProcess.label}
+                onChange={(e) => setNewProcess({ ...newProcess, label: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g. Site Analysis"
+                autoFocus
+              />
+            </div>
+
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={newProcess.description}
+                onChange={(e) => setNewProcess({ ...newProcess, description: e.target.value })}
+                rows={2}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
+                placeholder="Brief description of the process"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Position (order)
+              </label>
+              <div className="text-xs text-gray-500 mb-1">
+                Parent: <strong>{getParentInfo().parentLabel}</strong> &nbsp;|&nbsp; Current siblings: {getParentInfo().childCount}
+              </div>
+              <input
+                type="number"
+                min={0}
+                max={getParentInfo().childCount}
+                value={newProcess.position}
+                onChange={(e) =>
+                  setNewProcess({
+                    ...newProcess,
+                    position: Math.min(Math.max(Number(e.target.value) || 0, 0), getParentInfo().childCount),
+                  })
+                }
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="text-xs text-gray-400 mt-1">
+                0 = first, {getParentInfo().childCount} = last (append)
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  setAddError("");
+                }}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddProcess}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+              >
+                Add Process
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF EXPORT DIALOG (unchanged) */}
       {exportModal === "pdf" && (
         <div className="absolute inset-0 z-[300] flex items-center justify-center bg-black/40 no-print" onClick={() => setExportModal(null)}>
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>

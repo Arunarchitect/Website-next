@@ -1,138 +1,386 @@
 {
-  "title": "Design Process",
+  "title": "AI Park Design Challenge – Al Safa 2 Park Redesign",
   "type": "process",
-  "description": "A structured design process with predecessor/successor relationships.",
-  "width": 1700,
-  "height": 220,
+  "description": "Complete workflow for the Dubai Municipality AI Design Challenge, integrating human‑centred design, AI tools, and the required concept & preliminary design stages.",
+  "width": 2400,
+  "height": 450,
   "edgeStyles": {
-    "analysis->problem-definition": {
-      "dashed": true
+    "brief-review->redesign-justification": {
+      "dashed": false
     },
-    "scenario-testing->evaluation": {
-      "dashed": true
+    "redesign-justification->data-collection": {
+      "dashed": false
     },
-    "scenario-testing->problem-definition": {
+    "data-collection->analysis": {
+      "dashed": false
+    },
+    "analysis->ideation": {
+      "dashed": false
+    },
+    "ideation->scenario-testing": {
+      "dashed": false
+    },
+    "scenario-testing->preliminary-design": {
+      "dashed": false
+    },
+    "preliminary-design->submission": {
+      "dashed": false
+    },
+    "ideation->submission": {
       "dashed": true
     }
   },
   "children": [
     {
-      "id": "analysis",
-      "label": "Analysis",
+      "id": "brief-review",
+      "label": "1. Design Challenge Brief & Team Assembly",
       "type": "process",
-      "description": "Understand the existing conditions and context.",
+      "description": "Thorough review of TOR, schedules, and evaluation matrix. Assemble a multidisciplinary team (landscape architect, urban designer, AI specialist, sustainability engineer, etc.).",
       "successors": [
-        "problem-definition"
+        "redesign-justification"
       ],
       "children": [
         {
-          "id": "site-analysis",
-          "label": "Site Analysis",
+          "id": "tor-analysis",
+          "label": "TOR & Deliverables Analysis",
           "type": "process",
-          "description": "Study physical, environmental and spatial characteristics.",
-          "successors": [
-            "user-analysis",
-            "context-analysis"
-          ],
+          "description": "Interpret the brief: Concept & Preliminary Design stages, required deliverables (3x A1 boards, design report, AI methodology report, 1‑minute animation, CAD files). Understand the AED 35M budget and 15,000 m² site.",
           "children": []
         },
         {
-          "id": "user-analysis",
-          "label": "User Analysis",
+          "id": "team-formation",
+          "label": "Team & AI Tool Selection",
           "type": "process",
-          "description": "Understand users and their needs.",
-          "predecessors": [
-            "site-analysis"
-          ],
-          "children": []
-        },
-        {
-          "id": "context-analysis",
-          "label": "Context Analysis",
-          "type": "process",
-          "description": "Understand wider context.",
-          "predecessors": [
-            "site-analysis"
-          ],
+          "description": "Form team with defined roles. Select AI platforms for analysis (e.g., ChatGPT, Midjourney, RunwayML, Grasshopper plugins) and simulation tools (ENVI‑met, Ladybug, AnyLogic).",
           "children": []
         }
       ]
     },
     {
-      "id": "problem-definition",
-      "label": "Problem Definition",
+      "id": "redesign-justification",
+      "label": "2. Redesign Justification (Why Redesign)",
       "type": "process",
-      "description": "Convert findings into design problems.",
+      "description": "Identify the shortcomings of the existing park and establish strategic objectives aligned with Dubai 2040 and community needs.",
       "predecessors": [
-        "analysis",
-        "scenario-testing"
+        "brief-review"
       ],
-      "successors": [],
-      "children": []
+      "successors": [
+        "data-collection"
+      ],
+      "children": [
+        {
+          "id": "current-condition-audit",
+          "label": "Existing Park Condition Audit",
+          "type": "process",
+          "description": "On‑site inspection of ageing infrastructure, inadequate shading, poor accessibility, and lack of inclusive facilities. Use photographic documentation and condition mapping.",
+          "children": []
+        },
+        {
+          "id": "stakeholder-needs",
+          "label": "Stakeholder & Community Aspirations",
+          "type": "process",
+          "description": "Identify gaps in user satisfaction through interviews and social media sentiment. Define key drivers: safety, thermal comfort, intergenerational spaces, and sense of belonging.",
+          "children": []
+        },
+        {
+          "id": "strategic-alignment",
+          "label": "Alignment with Dubai 2040 & Sustainability Goals",
+          "type": "process",
+          "description": "Set measurable KPIs: reduce UHI by 4°C, increase native biodiversity by 40%, improve pedestrian connectivity, and achieve 100% TSE irrigation.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "data-collection",
+      "label": "3. Data Collection (Primary & Secondary)",
+      "type": "process",
+      "description": "Gather comprehensive data on site, users, microclimate, and utilities, as required by the brief. Use mixed methods: LiDAR, surveys, sensor logging, and GIS archives.",
+      "predecessors": [
+        "redesign-justification"
+      ],
+      "successors": [
+        "analysis"
+      ],
+      "children": [
+        {
+          "id": "physical-topography",
+          "label": "Topography & LiDAR Survey",
+          "type": "process",
+          "description": "Method: UAV‑based LiDAR to capture existing contours, tree canopy heights, and hardscape. Output: .LAS point cloud and 3D terrain model.",
+          "children": []
+        },
+        {
+          "id": "microclimate-logging",
+          "label": "Microclimate & Thermal Data",
+          "type": "process",
+          "description": "Method: Deploy HOBO sensors for 7 days (temp, RH, wind speed). Use weather station data. Output: CSV time‑series for ENVI‑met calibration.",
+          "children": []
+        },
+        {
+          "id": "user-surveys",
+          "label": "User Demographics & Intercept Surveys",
+          "type": "process",
+          "description": "Method: On‑site face‑to‑face interviews (n=300) using Kobo Toolbox. Capture usage patterns, preferences, and accessibility challenges. Output: statistical summaries and personas.",
+          "children": []
+        },
+        {
+          "id": "utility-mapping",
+          "label": "Underground Utilities & Existing Drawings",
+          "type": "process",
+          "description": "Method: Retrieve as‑built CAD (from Appendix) and Dubai Municipality GIS. Map DEWA, sewer, and irrigation mains. Output: DXF overlay and clash analysis.",
+          "children": []
+        },
+        {
+          "id": "land-use-context",
+          "label": "Surrounding Land Use & Connectivity",
+          "type": "process",
+          "description": "Method: Spatial analysis of neighbourhood density, transport nodes, and nearby amenities. Output: GIS maps of walkability and accessibility.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "analysis",
+      "label": "4. Comprehensive Analysis & Synthesis",
+      "type": "process",
+      "description": "Transform data into design intelligence using AI‑augmented analysis tools. Conduct SWOT, spatial suitability, and thermal comfort studies.",
+      "predecessors": [
+        "data-collection"
+      ],
+      "successors": [
+        "ideation"
+      ],
+      "children": [
+        {
+          "id": "gis-overlay",
+          "label": "GIS Multi‑Criteria Spatial Suitability",
+          "type": "process",
+          "description": "Method: Weighted overlay in ArcGIS Pro to map optimal zones for planting, play areas, and quiet zones. Use AI to automate weighting based on user preferences.",
+          "children": []
+        },
+        {
+          "id": "swot-matrix",
+          "label": "SWOT & PESTLE Analysis",
+          "type": "process",
+          "description": "Method: Structured brainstorming supported by AI sentiment analysis. Strengths (central location), Weaknesses (heat), Opportunities (new mobility), Threats (sea‑level rise). Format: 2x2 matrix and radar chart.",
+          "children": []
+        },
+        {
+          "id": "thermal-comfort",
+          "label": "Thermal Comfort & Microclimate Baseline",
+          "type": "process",
+          "description": "Method: ENVI‑met simulation calibrated with sensor data. Map UTCI at peak summer hours to pinpoint hotspots. Use AI to generate heat‑mitigation scenarios.",
+          "children": []
+        },
+        {
+          "id": "user-journey-mapping",
+          "label": "User Persona & Journey Mapping",
+          "type": "process",
+          "description": "Method: Create personas using survey data and AI‑generated user profiles. Map current pain points and desired experiences for children, families, elderly, and People of Determination.",
+          "children": []
+        }
+      ]
     },
     {
       "id": "ideation",
-      "label": "Ideation",
+      "label": "5. Concept Ideation (AI‑Augmented)",
       "type": "process",
-      "description": "Generate and develop design responses.",
-      "predecessors": [],
-      "successors": [
-        "scenario-testing"
+      "description": "Generate multiple design concepts using AI for rapid iteration. Explore spatial, programmatic, and landscape alternatives.",
+      "predecessors": [
+        "analysis"
       ],
-      "children": []
+      "successors": [
+        "scenario-testing",
+        "submission"
+      ],
+      "children": [
+        {
+          "id": "morphological-chart",
+          "label": "Morphological Matrix & AI Generation",
+          "type": "process",
+          "description": "Method: Break down park components (circulation, vegetation, water, program). Use generative AI (e.g., Midjourney, Grasshopper with machine learning) to produce 50+ massing options. Format: digital matrix and image libraries.",
+          "children": []
+        },
+        {
+          "id": "concept-variants",
+          "label": "Three Distinct Concept Scenarios (A, B, C)",
+          "type": "process",
+          "description": "Method: Divergent sketching with AI‑assisted refinement. Scenario A: 'Oasis' (heavy water and shade); B: 'Green Spine' (linear ecology); C: 'Urban Living Room' (dense programming). Format: hand sketches and AI‑enhanced mood boards.",
+          "children": []
+        },
+        {
+          "id": "physical-massing",
+          "label": "Physical Massing Models (Foam)",
+          "type": "process",
+          "description": "Method: 1:1000 scale foam models to test volumetric relationships and sightlines, integrated with AI‑generated 3D prints.",
+          "children": []
+        },
+        {
+          "id": "ai-methodology-draft",
+          "label": "Draft AI Methodology Report",
+          "type": "process",
+          "description": "Document the AI tools used, workflows, and how AI influenced each concept. This will be finalised later.",
+          "children": []
+        }
+      ]
     },
     {
       "id": "scenario-testing",
-      "label": "Scenario Testing",
+      "label": "6. Scenario Testing & Performance Simulation",
       "type": "process",
-      "description": "Test design alternatives.",
+      "description": "Quantitatively validate the top concepts through AI‑driven simulations for microclimate, pedestrian flow, cost, and sustainability.",
       "predecessors": [
         "ideation"
       ],
       "successors": [
-        "evaluation",
-        "problem-definition"
+        "preliminary-design"
       ],
-      "children": []
+      "children": [
+        {
+          "id": "microclimate-optimisation",
+          "label": "Microclimate & Solar Optimisation",
+          "type": "process",
+          "description": "Method: Test scenarios A, B, C in Ladybug + ENVI‑met. Iterate tree placement and shading structures. Use AI to suggest optimal layouts. Output: comparative comfort maps.",
+          "children": []
+        },
+        {
+          "id": "pedestrian-flow",
+          "label": "Pedestrian & Accessibility Simulation",
+          "type": "process",
+          "description": "Method: Agent‑based modelling in AnyLogic. Simulate peak‑hour (Friday evening) to identify bottlenecks and ensure inclusive access. Use AI to optimise path widths.",
+          "children": []
+        },
+        {
+          "id": "water-balance",
+          "label": "Irrigation Demand & Water Self‑Sufficiency",
+          "type": "process",
+          "description": "Method: Calculate ET rates and rainwater capture. Validate feasibility of 100% TSE irrigation with AI‑based predictive models.",
+          "children": []
+        },
+        {
+          "id": "cost-estimation",
+          "label": "Preliminary Cost & Value Engineering",
+          "type": "process",
+          "description": "Method: Rough Order of Magnitude (ROM) costing for each scenario, ensuring alignment with AED 35M budget. AI‑assisted cost optimisation.",
+          "children": []
+        }
+      ]
     },
     {
-      "id": "evaluation",
-      "label": "Evaluation",
+      "id": "preliminary-design",
+      "label": "7. Preliminary Design Development",
       "type": "process",
-      "description": "Compare and assess alternatives.",
+      "description": "Elaborate the selected concept into a coordinated preliminary design, integrating all program elements and preparing for submission.",
       "predecessors": [
         "scenario-testing"
       ],
       "successors": [
-        "design-development"
+        "submission"
       ],
-      "children": []
+      "children": [
+        {
+          "id": "masterplan-refinement",
+          "label": "Detailed Masterplan & Spatial Organisation",
+          "type": "process",
+          "description": "Method: CAD drafting in AutoCAD / Rhino. Define zoning, hierarchy, and functional relationships. Format: .DWG and scaled PDF (1:200) with dimensions.",
+          "children": []
+        },
+        {
+          "id": "landscape-design",
+          "label": "Landscape & Public Realm Plans",
+          "type": "process",
+          "description": "Method: Develop planting palette (native, climate‑responsive), path networks, plazas, and play areas. Include irrigation zones and biodiversity enhancements.",
+          "children": []
+        },
+        {
+          "id": "sections-elevations",
+          "label": "Key Sections & Elevations",
+          "type": "process",
+          "description": "Method: Produce at least 5 critical sections and elevations illustrating topography, shading, and built elements. Format: CAD/BIM outputs.",
+          "children": []
+        },
+        {
+          "id": "material-palette",
+          "label": "Material & Landscape Palette",
+          "type": "process",
+          "description": "Method: Select durable, sustainable materials (permeable paving, recycled composites, etc.) with AI‑aided life‑cycle assessment.",
+          "children": []
+        },
+        {
+          "id": "accessibility-plan",
+          "label": "Universal Accessibility & Circulation Strategy",
+          "type": "process",
+          "description": "Method: Ensure compliance with Dubai accessibility standards. Include detailed ramps, tactile paving, and wayfinding. Use AI to validate inclusive design.",
+          "children": []
+        },
+        {
+          "id": "smart-tech-strategy",
+          "label": "Smart Technologies & Monitoring Strategy",
+          "type": "process",
+          "description": "Method: Propose sensor networks for irrigation, occupancy, and environmental monitoring (non‑intrusive). Align with the brief's 'smart features' requirement.",
+          "children": []
+        }
+      ]
     },
     {
-      "id": "design-development",
-      "label": "Design Development",
+      "id": "submission",
+      "label": "8. Final Submission Package",
       "type": "process",
-      "description": "Develop the selected design.",
+      "description": "Produce all required deliverables as per Schedule 2. Ensure high‑quality storytelling and professional presentation.",
       "predecessors": [
-        "evaluation"
+        "preliminary-design",
+        "ideation"
       ],
-      "successors": [
-        "final-review"
-      ],
-      "children": []
-    },
-    {
-      "id": "final-review",
-      "label": "Final Review",
-      "type": "process",
-      "description": "Review the developed design.",
-      "predecessors": [
-        "design-development"
-      ],
-      "children": []
+      "children": [
+        {
+          "id": "design-report",
+          "label": "Design Narrative & AI Methodology Report",
+          "type": "process",
+          "description": "Method: Write a compelling narrative covering vision, human‑centred approach, sustainability, and the AI workflow (tools, processes, value added). Format: PDF booklet (20‑30 pages).",
+          "children": []
+        },
+        {
+          "id": "presentation-boards",
+          "label": "A1 Presentation Boards (3x)",
+          "type": "process",
+          "description": "Method: Layout masterplan, analysis, diagrams, renderings, and sustainability strategies. Follow the mandatory A1 landscape format. Use AI‑assisted graphic design.",
+          "children": []
+        },
+        {
+          "id": "visualizations",
+          "label": "High‑Quality Visualizations (Day & Night)",
+          "type": "process",
+          "description": "Method: Produce 6 photorealistic renders (aerial, main entry, central plaza, children’s zone, water feature, night scene) using VRay or Lumion. Include AI‑generated atmospherics.",
+          "children": []
+        },
+        {
+          "id": "animation",
+          "label": "1‑Minute Concept Animation",
+          "type": "process",
+          "description": "Method: Create a flythrough video with voice‑over or music, illustrating user journey and key design features. AI tools allowed (e.g., RunwayML, Pika). Format: MP4.",
+          "children": []
+        },
+        {
+          "id": "commercial-plan",
+          "label": "Commercial & Service Facilities Plan",
+          "type": "process",
+          "description": "Method: Locate café, kiosks, and maintenance areas ensuring they enhance but do not dominate the park. Format: A3 plan with legend.",
+          "children": []
+        },
+        {
+          "id": "final-review",
+          "label": "Final Quality Check & Upload",
+          "type": "process",
+          "description": "Method: Cross‑check all deliverables against the checklist (Schedule 2). Ensure files are under the required size limits and upload via the official portal by 15 August 2026.",
+          "children": []
+        }
+      ]
     }
   ],
   "completed": [
-    "context-analysis"
+    "brief-review",
+    "redesign-justification",
+    "data-collection"
   ]
 }
