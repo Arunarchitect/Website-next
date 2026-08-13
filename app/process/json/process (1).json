@@ -1,7 +1,7 @@
 {
-  "title": "Design Processer",
+  "title": "Design Process",
   "type": "process",
-  "description": "A structured design process that moves from understanding the context to defining problems, developing responses, testing alternatives, and refining the design letter",
+  "description": "A structured design process that moves from understanding the context to defining problems, developing responses, testing alternatives, and refining the design.",
   "children": [
     {
       "id": "analysis",

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   ProcessNode,
   getColorTheme,
@@ -25,11 +26,7 @@ export function CompletionCheckbox({
   locked,
   onToggle,
 }: CompletionCheckboxProps) {
-  const borderColor = checked
-    ? "#2F9E58"
-    : indeterminate
-    ? "#7FBF93"
-    : "#B8C5D6";
+  const borderColor = checked ? "#2F9E58" : indeterminate ? "#7FBF93" : "#B8C5D6";
 
   return (
     <button
@@ -43,9 +40,7 @@ export function CompletionCheckbox({
           : "Mark as complete"
       }
       title={locked && !checked ? "Complete all subprocesses first" : undefined}
-      onPointerDown={(event) => {
-        event.stopPropagation();
-      }}
+      onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();
         onToggle();
@@ -77,7 +72,6 @@ export function CompletionCheckbox({
           />
         </svg>
       )}
-
       {!checked && indeterminate && (
         <div
           style={{
@@ -102,6 +96,14 @@ type ProcessContainerProps = {
   colorIndex: number;
   completed: Set<string>;
   onToggleComplete: (node: ProcessNode) => void;
+  onEditNode: (
+    id: string,
+    field: "label" | "description",
+    currentValue: string
+  ) => void;
+  registerNodeRef: (id: string, el: HTMLDivElement | null) => void;
+  activeNodeId: string | null;
+  onSelectNode: (id: string) => void;
 };
 
 export function ProcessContainer({
@@ -110,9 +112,12 @@ export function ProcessContainer({
   colorIndex,
   completed,
   onToggleComplete,
+  onEditNode,
+  registerNodeRef,
+  activeNodeId,
+  onSelectNode,
 }: ProcessContainerProps) {
   const children = node.children ?? [];
-
   const layout = getLayout(level);
   const color = getColorTheme(level, colorIndex);
 
@@ -120,47 +125,78 @@ export function ProcessContainer({
   const isPartial = isNodePartial(node, completed);
   const isParent = children.length > 0;
 
+  // Long‑press handling for mobile
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
+
+  const startLongPress = (field: "label" | "description", value: string) => {
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      onEditNode(node.id, field, value);
+    }, 600);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  useEffect(() => cancelLongPress, []);
+
+  const handleTextPointerDown = (
+    e: React.PointerEvent,
+    field: "label" | "description"
+  ) => {
+    e.stopPropagation();
+    if (e.pointerType === "touch" || e.pointerType === "pen") {
+      startLongPress(field, field === "label" ? node.label : node.description ?? "");
+    }
+  };
+
+  const handleTextPointerUp = () => cancelLongPress();
+
+  const handleDoubleClick = (field: "label" | "description", value: string) => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    onEditNode(node.id, field, value);
+  };
+
   return (
     <div
+      ref={(el) => registerNodeRef(node.id, el)}
+      data-node-id={node.id}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelectNode(node.id);
+      }}
       style={{
         background: color.background,
-        border: `1.5px solid ${color.border}`,
+        border: `1.5px solid ${activeNodeId === node.id ? "#3b82f6" : color.border}`,
         outline: isCompleted ? "2px solid #2F9E58" : "none",
         outlineOffset: "2px",
         borderRadius: level === 0 ? "18px" : "14px",
-
-        /*
-         * VERY IMPORTANT:
-         *
-         * Parent height is determined by its content, and
-         * `minHeight` (from the JSON, when present) only ever
-         * makes the box taller than it would otherwise be —
-         * it never shrinks or clips content.
-         */
         height: "fit-content",
         minHeight: node.height ? `${node.height}px` : undefined,
-
-        /*
-         * STRICT CONTAINMENT RULE:
-         *
-         * A node's width can be suggested via node.width, but
-         * it is always capped at 100% of its parent's content
-         * box. Combined with `overflow: hidden` below, a child
-         * rectangle can never extend past its parent's edges,
-         * no matter what width/height values are stored in the
-         * JSON.
-         */
         width: level === 0 ? "100%" : node.width ? `${node.width}px` : "100%",
         maxWidth: "100%",
         minWidth: 0,
         boxSizing: "border-box",
         padding: layout.padding,
-
-        /* Prevent children from visually escaping. */
         overflow: "hidden",
+        cursor: "pointer",
+        boxShadow:
+          activeNodeId === node.id
+            ? "0 0 0 2px rgba(59,130,246,0.5)"
+            : "none",
+        transition: "border-color 0.15s ease, box-shadow 0.15s ease",
       }}
     >
-      {/* TITLE ROW (checkbox + title) */}
+      {/* TITLE ROW */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
         <CompletionCheckbox
           checked={isCompleted}
@@ -182,7 +218,17 @@ export function ProcessContainer({
             overflowWrap: "break-word",
             wordBreak: "normal",
             hyphens: "auto",
+            cursor: "text",
+            border: "1px solid transparent",
+            WebkitTouchCallout: "none",
+            WebkitUserSelect: "none",
+            userSelect: "none",
           }}
+          onPointerDown={(e) => handleTextPointerDown(e, "label")}
+          onPointerUp={handleTextPointerUp}
+          onPointerCancel={handleTextPointerUp}
+          onPointerLeave={handleTextPointerUp}
+          onDoubleClick={() => handleDoubleClick("label", node.label)}
         >
           {node.label}
         </div>
@@ -203,7 +249,17 @@ export function ProcessContainer({
             wordBreak: "normal",
             hyphens: "auto",
             minWidth: 0,
+            cursor: "text",
+            border: "1px solid transparent",
+            WebkitTouchCallout: "none",
+            WebkitUserSelect: "none",
+            userSelect: "none",
           }}
+          onPointerDown={(e) => handleTextPointerDown(e, "description")}
+          onPointerUp={handleTextPointerUp}
+          onPointerCancel={handleTextPointerUp}
+          onPointerLeave={handleTextPointerUp}
+          onDoubleClick={() => handleDoubleClick("description", node.description ?? "")}
         >
           {node.description}
         </div>
@@ -214,11 +270,6 @@ export function ProcessContainer({
         <div
           style={{
             marginTop: "16px",
-
-            /*
-             * LEVEL 0: top-level processes are arranged horizontally.
-             * LEVEL 1+: subprocesses are stacked vertically inside parent.
-             */
             display: level === 0 ? "grid" : "flex",
             gridTemplateColumns:
               level === 0
@@ -226,7 +277,6 @@ export function ProcessContainer({
                 : undefined,
             flexDirection: level === 0 ? undefined : "column",
             gap: "12px",
-
             width: "100%",
             maxWidth: "100%",
             minWidth: 0,
@@ -239,10 +289,13 @@ export function ProcessContainer({
               key={child.id}
               node={child}
               level={level + 1}
-              /* Every top-level process gets its own colour family. */
               colorIndex={level === 0 ? index : colorIndex}
               completed={completed}
               onToggleComplete={onToggleComplete}
+              onEditNode={onEditNode}
+              registerNodeRef={registerNodeRef}
+              activeNodeId={activeNodeId}
+              onSelectNode={onSelectNode}
             />
           ))}
         </div>
