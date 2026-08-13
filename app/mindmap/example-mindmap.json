@@ -1,0 +1,281 @@
+{
+  "_readme": [
+    "MIND MAP FILE FORMAT — safe to edit by hand.",
+    "title: shown at the top of the editor.",
+    "stages: the boxes. Each needs a unique 'id' and a 'label'. Set 'parentId' to another stage's 'id' to nest it under that stage, or null to keep it top-level.",
+    "relationships: connector lines between stages. All arrows in this file use the forward direction only."
+  ],
+  "title": "Al Safa Park Redesign — AI Competition Workflow",
+  "stages": [
+    {
+      "id": "brief",
+      "label": "Competition Brief",
+      "color": "#5B5BD6",
+      "textColor": "#ffffff",
+      "fontSize": 20,
+      "parentId": null,
+      "shape": "circle",
+      "strokeColor": "rgba(255,255,255,0.55)",
+      "strokeWidth": 2
+    },
+    {
+      "id": "site",
+      "label": "Site & Context Analysis",
+      "color": "#14B8A6",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "brief",
+      "shape": "roundedRectangle"
+    },
+    {
+      "id": "users",
+      "label": "Users & Activities",
+      "color": "#14B8A6",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "brief",
+      "shape": "roundedRectangle"
+    },
+    {
+      "id": "problems",
+      "label": "Problems & Opportunities",
+      "color": "#F43F5E",
+      "textColor": "#ffffff",
+      "fontSize": 17,
+      "parentId": "site",
+      "shape": "diamond"
+    },
+    {
+      "id": "priorities",
+      "label": "Prioritised Design Needs",
+      "color": "#F59E0B",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "problems",
+      "shape": "roundedRectangle"
+    },
+    {
+      "id": "principles",
+      "label": "Design Principles",
+      "color": "#756243",
+      "textColor": "#ffffff",
+      "fontSize": 17,
+      "parentId": "priorities",
+      "shape": "circle"
+    },
+    {
+      "id": "ideas",
+      "label": "Design Ideas",
+      "color": "#5B5BD6",
+      "textColor": "#ffffff",
+      "fontSize": 18,
+      "parentId": "principles",
+      "shape": "circle"
+    },
+    {
+      "id": "concepts",
+      "label": "Alternative Concepts",
+      "color": "#8B5CF6",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "ideas",
+      "shape": "hexagon"
+    },
+    {
+      "id": "scenarios",
+      "label": "Scenario Testing",
+      "color": "#F59E0B",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "concepts",
+      "shape": "roundedRectangle"
+    },
+    {
+      "id": "evaluation",
+      "label": "Compare & Evaluate",
+      "color": "#F43F5E",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "scenarios",
+      "shape": "diamond"
+    },
+    {
+      "id": "selected",
+      "label": "Selected Design Direction",
+      "color": "#14B8A6",
+      "textColor": "#ffffff",
+      "fontSize": 17,
+      "parentId": "evaluation",
+      "shape": "circle"
+    },
+    {
+      "id": "proposal",
+      "label": "Al Safa Park Redesign Proposal",
+      "color": "#5B5BD6",
+      "textColor": "#ffffff",
+      "fontSize": 18,
+      "parentId": "selected",
+      "shape": "hexagon"
+    },
+    {
+      "id": "ai",
+      "label": "AI-Assisted Design Development",
+      "color": "#8B5CF6",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "proposal",
+      "shape": "roundedRectangle"
+    },
+    {
+      "id": "presentation",
+      "label": "Competition Presentation",
+      "color": "#14B8A6",
+      "textColor": "#ffffff",
+      "fontSize": 16,
+      "parentId": "proposal",
+      "shape": "roundedRectangle"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "brief-site",
+      "source": "brief",
+      "target": "site",
+      "label": "understand context",
+      "direction": "forward",
+      "color": "#94A3B8",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "brief-users",
+      "source": "brief",
+      "target": "users",
+      "label": "understand users",
+      "direction": "forward",
+      "color": "#94A3B8",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "site-problems",
+      "source": "site",
+      "target": "problems",
+      "label": "identify",
+      "direction": "forward",
+      "color": "#F43F5E",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "users-problems",
+      "source": "users",
+      "target": "problems",
+      "label": "reveal needs",
+      "direction": "forward",
+      "color": "#F43F5E",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "problems-priorities",
+      "source": "problems",
+      "target": "priorities",
+      "label": "prioritise",
+      "direction": "forward",
+      "color": "#F59E0B",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "priorities-principles",
+      "source": "priorities",
+      "target": "principles",
+      "label": "translate into principles",
+      "direction": "forward",
+      "color": "#756243",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "principles-ideas",
+      "source": "principles",
+      "target": "ideas",
+      "label": "generate",
+      "direction": "forward",
+      "color": "#5B5BD6",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "ideas-concepts",
+      "source": "ideas",
+      "target": "concepts",
+      "label": "develop alternatives",
+      "direction": "forward",
+      "color": "#8B5CF6",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "concepts-scenarios",
+      "source": "concepts",
+      "target": "scenarios",
+      "label": "test scenarios",
+      "direction": "forward",
+      "color": "#F59E0B",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "scenarios-evaluation",
+      "source": "scenarios",
+      "target": "evaluation",
+      "label": "compare outcomes",
+      "direction": "forward",
+      "color": "#F43F5E",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "evaluation-selected",
+      "source": "evaluation",
+      "target": "selected",
+      "label": "select best fit",
+      "direction": "forward",
+      "color": "#14B8A6",
+      "strokeWidth": 2,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "selected-proposal",
+      "source": "selected",
+      "target": "proposal",
+      "label": "develop proposal",
+      "direction": "forward",
+      "color": "#5B5BD6",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "proposal-ai",
+      "source": "proposal",
+      "target": "ai",
+      "label": "develop & visualise",
+      "direction": "forward",
+      "color": "#8B5CF6",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    },
+    {
+      "id": "ai-presentation",
+      "source": "ai",
+      "target": "presentation",
+      "label": "communicate",
+      "direction": "forward",
+      "color": "#14B8A6",
+      "strokeWidth": 1.6,
+      "lineStyle": "solid"
+    }
+  ]
+}

@@ -1,0 +1,701 @@
+/*
+  Everything here is scoped under .mindmap-page so it can never bleed into
+  your existing navbar/footer styles. Drop this component into a layout
+  that already reserves the space for it; by default the page fills the
+  height of its parent (set --mm-app-height below if you need an explicit
+  viewport-based height, e.g. calc(100dvh - 64px) to account for a fixed
+  navbar + footer of 64px combined).
+*/
+
+.mindmap-page {
+  --mm-ink: #14171f;
+  --mm-ink-soft: #4b5160;
+  --mm-paper: #fbfbf9;
+  --mm-line: #e4e4e0;
+  --mm-accent: #5b5bd6;
+  --mm-accent-soft: #ececfc;
+  --mm-danger: #e11d48;
+  --mm-radius: 10px;
+  --mm-app-height: 100%;
+
+  height: var(--mm-app-height);
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  background: var(--mm-paper);
+  color: var(--mm-ink);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Inter, sans-serif;
+  isolation: isolate;
+}
+
+.mindmap-page * {
+  box-sizing: border-box;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Toolbar                                                                 */
+/* ---------------------------------------------------------------------- */
+
+.mindmap-page:has(.react-flow__edge.selected) .react-flow__edge:not(.selected) {
+  opacity: 0.25;
+  transition: opacity 0.12s ease;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2.5px !important;
+}
+
+.mm-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--mm-line);
+  z-index: 5;
+}
+
+.mm-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mm-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mm-brand-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--mm-accent);
+  transform: rotate(45deg);
+}
+
+.mm-title-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mm-ink);
+  padding: 4px 2px;
+  border-radius: 6px;
+}
+
+.mm-title-input:hover,
+.mm-title-input:focus {
+  background: var(--mm-accent-soft);
+  outline: none;
+}
+
+.mm-toolbar-actions {
+  flex-wrap: wrap;
+}
+
+.mm-file-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--mm-ink-soft);
+  min-width: 0;
+}
+
+.mm-file-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #cbd0da;
+}
+
+.mm-file-dot[data-linked="true"] {
+  background: #16a34a;
+}
+
+.mm-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.mm-file-name-empty {
+  color: #9aa0ac;
+}
+
+.mm-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.mm-layout-group {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: #f4f4f2;
+  border-radius: 9px;
+  margin-right: 4px;
+}
+
+.mm-layout-group .mm-btn {
+  border: none;
+  background: transparent;
+  padding: 5px 10px;
+}
+
+.mm-layout-group .mm-btn:hover {
+  background: #ffffff;
+}
+
+.mm-layout-group .mm-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mm-btn {
+  border: 1px solid var(--mm-line);
+  background: #ffffff;
+  color: var(--mm-ink);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 13px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
+  white-space: nowrap;
+}
+
+.mm-btn:hover {
+  background: #f4f4f2;
+  border-color: #d5d5d0;
+}
+
+.mm-btn:active {
+  transform: translateY(1px);
+}
+
+.mm-btn-primary {
+  background: var(--mm-ink);
+  border-color: var(--mm-ink);
+  color: #ffffff;
+}
+
+.mm-btn-primary:hover {
+  background: #2a2e3a;
+}
+
+.mm-btn-danger {
+  border-color: #fecdd3;
+  color: var(--mm-danger);
+  background: #fff1f2;
+}
+
+.mm-btn-danger:hover {
+  background: #ffe4e6;
+}
+
+.mm-btn-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.mm-hidden-input {
+  display: none;
+}
+
+.mm-panel-toggle {
+  display: none;
+  border: 1px solid var(--mm-line);
+  background: #fff;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Body: canvas + side panel                                              */
+/* ---------------------------------------------------------------------- */
+
+.mm-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+
+.mm-canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  background: var(--mm-paper);
+}
+
+.mm-canvas-wrap .react-flow__renderer,
+.mm-canvas-wrap .react-flow {
+  background: var(--mm-paper);
+}
+
+.mm-controls {
+  box-shadow: 0 1px 4px rgba(20, 23, 31, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mm-controls button {
+  border-bottom-color: var(--mm-line) !important;
+}
+
+.mm-minimap {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(20, 23, 31, 0.12);
+}
+
+.mm-minimap-toggle {
+  position: absolute;
+  right: 16px;
+  bottom: 108px;
+  z-index: 6;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--mm-line);
+  background: #ffffff;
+  color: var(--mm-ink-soft);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(20, 23, 31, 0.15);
+}
+
+.mm-minimap-toggle:hover {
+  color: var(--mm-ink);
+  border-color: #d5d5d0;
+}
+
+.mm-minimap-toggle[data-open="false"] {
+  bottom: 16px;
+}
+
+.mm-empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: #9aa0ac;
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Node — shape is driven by a class (mm-node-circle / -rectangle / etc), */
+/* sized per node via --mm-node-w / --mm-node-h set inline by the node.   */
+/* ---------------------------------------------------------------------- */
+
+.mm-node {
+  position: relative;
+  width: var(--mm-node-w, 104px);
+  height: var(--mm-node-h, 104px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  box-shadow: 0 10px 18px -6px rgba(20, 23, 31, 0.35), 0 2px 4px rgba(20, 23, 31, 0.15),
+    inset 0 -6px 10px rgba(0, 0, 0, 0.12);
+  border-style: solid;
+  cursor: grab;
+}
+
+.mm-node:active {
+  cursor: grabbing;
+}
+
+.mm-node-circle {
+  border-radius: 50%;
+}
+
+.mm-node-roundedRectangle {
+  border-radius: 18px;
+}
+
+.mm-node-rectangle {
+  border-radius: 4px;
+}
+
+.mm-node-diamond {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+.mm-node-hexagon {
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+.mm-node::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0) 52%),
+    radial-gradient(circle at 72% 82%, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0) 60%);
+}
+
+.mm-node-selected {
+  outline: 2px solid var(--mm-ink);
+  outline-offset: 4px;
+}
+
+.mm-node-label {
+  position: relative;
+  z-index: 1;
+  outline: none;
+  word-break: break-word;
+  max-height: 100%;
+  overflow: hidden;
+  font-size: inherit;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.mm-node-label[contenteditable="true"] {
+  cursor: text;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5) inset;
+  border-radius: 4px;
+}
+
+/* "+" connect/create button — sits at the node's corner, hidden until
+   hover/selection so it doesn't clutter a busy map. Drag from it onto
+   empty canvas to spawn a new connected box, or onto another box to link
+   to it. Everything outside this small corner is left free for normal
+   node dragging (reposition), including in Force mode. */
+.mm-node-plus {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--mm-ink);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  box-shadow: 0 2px 6px rgba(20, 23, 31, 0.3);
+  z-index: 2;
+  cursor: crosshair;
+}
+
+.mm-node:hover .mm-node-plus,
+.mm-node-selected .mm-node-plus {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.mm-node-plus-icon {
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+}
+
+.mm-node-plus-handle {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 50%;
+  background: transparent !important;
+  border: none !important;
+  opacity: 0;
+  transform: none !important;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Edge label chip — floats at the connector midpoint, click to reverse   */
+/* direction or cycle the line style without opening the side panel.     */
+/* ---------------------------------------------------------------------- */
+
+.mm-edge-chip {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: #ffffff;
+  border: 1px solid var(--mm-line);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(20, 23, 31, 0.15);
+  font-size: 11px;
+  color: var(--mm-ink-soft);
+  pointer-events: all;
+  white-space: nowrap;
+}
+
+.mm-edge-chip-selected {
+  border-color: var(--mm-accent);
+}
+
+.mm-edge-chip-label {
+  padding: 0 4px 0 8px;
+  font-weight: 500;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mm-edge-chip-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #f4f4f2;
+  color: var(--mm-ink);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mm-edge-chip-btn:hover {
+  background: var(--mm-accent-soft);
+  color: var(--mm-accent);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Edit panel                                                              */
+/* ---------------------------------------------------------------------- */
+
+.mm-panel {
+  flex: 0 0 280px;
+  width: 280px;
+  background: #ffffff;
+  border-left: 1px solid var(--mm-line);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.mm-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mm-ink-soft);
+  margin-bottom: 14px;
+}
+
+.mm-panel-close {
+  display: none;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  color: var(--mm-ink-soft);
+  line-height: 1;
+}
+
+.mm-panel-empty {
+  font-size: 13px;
+  color: #9aa0ac;
+  line-height: 1.6;
+}
+
+.mm-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mm-field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--mm-ink-soft);
+  margin-top: 10px;
+}
+
+.mm-field-input {
+  border: 1px solid var(--mm-line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 13px;
+  color: var(--mm-ink);
+  background: #fff;
+}
+
+.mm-field-input:focus {
+  outline: none;
+  border-color: var(--mm-accent);
+}
+
+.mm-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.mm-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  outline: 1px solid var(--mm-line);
+  cursor: pointer;
+  padding: 0;
+}
+
+.mm-swatch-active {
+  outline: 2px solid var(--mm-ink);
+}
+
+.mm-color-input {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--mm-line);
+  border-radius: 50%;
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+}
+
+input[type="range"] {
+  accent-color: var(--mm-accent);
+  flex: 1;
+}
+
+.mm-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mm-link-btn {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--mm-accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+  margin-top: -2px;
+}
+
+.mm-link-btn:hover {
+  text-decoration: underline;
+}
+
+.mm-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.mm-panel-actions .mm-btn {
+  width: 100%;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Mobile                                                                  */
+/* ---------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  .mm-body {
+    --mm-node-scale: 0.8;
+  }
+
+  .mm-panel-toggle {
+    display: inline-block;
+  }
+
+  .mm-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .mm-file-status {
+    display: none;
+  }
+
+  .mm-body {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .mm-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(86vw, 320px);
+    flex: none;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    box-shadow: -4px 0 16px rgba(20, 23, 31, 0.12);
+    z-index: 10;
+  }
+
+  .mm-panel-open {
+    transform: translateX(0);
+  }
+
+  .mm-panel-close {
+    display: inline-block;
+  }
+
+  .mm-minimap,
+  .mm-minimap-toggle {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .mm-toolbar {
+    padding: 10px 12px;
+  }
+
+  .mm-btn {
+    padding: 7px 10px;
+    font-size: 12.5px;
+  }
+}

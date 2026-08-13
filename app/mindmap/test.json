@@ -1,0 +1,28 @@
+{
+  "_readme": [
+    "MIND MAP FILE FORMAT — safe to edit by hand.",
+    "title: shown at the top of the editor.",
+    "stages: the boxes. Each needs a unique 'id' and a 'label'. Set 'parentId' to another stage's 'id' to nest it under that stage, or null to keep it top-level. That's the only thing that drives layout — positions are never stored here, they're generated fresh every time the file is opened.",
+    "Optional per stage: 'color' (fill, hex like '#5B5BD6'), 'textColor' (hex), 'fontSize' (px), 'shape' (one of 'circle' | 'roundedRectangle' | 'rectangle' | 'diamond' | 'hexagon'), 'strokeColor' (hex or rgba), 'strokeWidth' (px).",
+    "'size' (px, the box's footprint) is optional and usually best left out — the app auto-fits the box to its label. Only include it if you want to force an exact size; once present it overrides auto-sizing until removed.",
+    "relationships: the connector lines. Each needs 'source' and 'target' (stage ids). Optional: 'label', 'direction' ('forward' | 'backward' | 'bidirectional'), 'color' (hex), 'strokeWidth', 'lineStyle' ('solid' | 'dashed' | 'dotted').",
+    "You don't have to list a relationship for every parent/child pair — any stage with a 'parentId' gets a default connecting line automatically. Only add one to 'relationships' when you want it labeled, styled, or connecting boxes that aren't parent/child.",
+    "Easiest way to edit: open this file with Import in the app and use the editor UI — it writes valid JSON back out, comment included."
+  ],
+  "title": "Untitled mind map",
+  "stages": [
+    {
+      "id": "node-msr5zbu9-r30cg",
+      "label": "New box",
+      "color": "#5B5BD6",
+      "textColor": "#ffffff",
+      "fontSize": 13,
+      "parentId": null,
+      "shape": "circle",
+      "strokeColor": "rgba(255,255,255,0.55)",
+      "strokeWidth": 2,
+      "size": 183
+    }
+  ],
+  "relationships": []
+}
