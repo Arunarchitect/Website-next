@@ -1,0 +1,58 @@
+{
+  "title": "Design Process",
+  "type": "process",
+  "description": "A structured process for developing, testing, evaluating, and refining a design.",
+  "children": [
+    {
+      "id": "analysis",
+      "label": "Analysis",
+      "type": "process",
+      "description": "Study the existing conditions, context, users, opportunities, and constraints before making design decisions.",
+      "children": [
+        {
+          "id": "site-analysis",
+          "label": "Site Analysis",
+          "type": "process",
+          "description": "Understand the physical, environmental, spatial, and contextual characteristics of the site.",
+          "children": [
+            {
+              "id": "physical-analysis",
+              "label": "Physical Analysis",
+              "type": "process",
+              "description": "Study site dimensions, topography, existing structures, access, circulation, vegetation, edges, and physical features.",
+              "children": []
+            },
+            {
+              "id": "environmental-analysis",
+              "label": "Environmental Analysis",
+              "type": "process",
+              "description": "Study climate, sun, wind, rainfall, drainage, ecology, microclimate, and other environmental conditions.",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "user-analysis",
+          "label": "User Analysis",
+          "type": "process",
+          "description": "Understand users, their activities, behaviours, needs, expectations, and patterns of use.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "problem-definition",
+      "label": "Problem Definition",
+      "type": "process",
+      "description": "Convert the findings from analysis into clearly defined design problems and priorities.",
+      "children": []
+    },
+    {
+      "id": "ideation",
+      "label": "Ideation",
+      "type": "process",
+      "description": "Generate and develop possible design responses to the identified problems and opportunities.",
+      "children": []
+    }
+  ]
+}

@@ -1,0 +1,586 @@
+{
+  "title": "Design Process",
+  "type": "process",
+  "description": "A structured design process that moves from understanding the context to defining problems, developing responses, testing alternatives, and refining the design.",
+  "children": [
+    {
+      "id": "analysis",
+      "label": "Analysis",
+      "type": "process",
+      "description": "Understand the existing conditions, context, users, opportunities, and constraints that influence the design.",
+      "children": [
+        {
+          "id": "site-analysis",
+          "label": "Site Analysis",
+          "type": "process",
+          "description": "Study the physical, environmental, spatial, and contextual characteristics of the site.",
+          "children": [
+            {
+              "id": "physical-analysis",
+              "label": "Physical Analysis",
+              "type": "process",
+              "description": "Study the physical characteristics and existing conditions of the site.",
+              "children": [
+                {
+                  "id": "topography",
+                  "label": "Topography",
+                  "type": "process",
+                  "description": "Understand levels, slopes, contours, depressions, and other terrain characteristics.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "existing-structures",
+                  "label": "Existing Structures",
+                  "type": "process",
+                  "description": "Document buildings, walls, paving, utilities, structures, and other existing physical elements.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "access-circulation",
+                  "label": "Access and Circulation",
+                  "type": "process",
+                  "description": "Study pedestrian, vehicular, service, emergency, and universal access routes.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                }
+              ],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "environmental-analysis",
+              "label": "Environmental Analysis",
+              "type": "process",
+              "description": "Understand environmental factors that affect comfort, ecology, and design performance.",
+              "children": [
+                {
+                  "id": "sun-analysis",
+                  "label": "Sun and Shadow",
+                  "type": "process",
+                  "description": "Study solar exposure, shade patterns, seasonal changes, and potential solar gains.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "wind-analysis",
+                  "label": "Wind Analysis",
+                  "type": "process",
+                  "description": "Study prevailing winds, ventilation opportunities, and areas of wind exposure.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "water-analysis",
+                  "label": "Water and Drainage",
+                  "type": "process",
+                  "description": "Understand rainfall, surface runoff, drainage patterns, water accumulation, and infiltration.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "ecological-analysis",
+                  "label": "Ecological Analysis",
+                  "type": "process",
+                  "description": "Study existing vegetation, habitats, biodiversity, ecological assets, and sensitive areas.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                }
+              ],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "spatial-analysis",
+              "label": "Spatial Analysis",
+              "type": "process",
+              "description": "Understand spatial structure, edges, connections, visibility, and relationships between spaces.",
+              "children": [
+                {
+                  "id": "spatial-structure",
+                  "label": "Spatial Structure",
+                  "type": "process",
+                  "description": "Identify major spaces, spatial hierarchy, enclosure, openness, and spatial sequences.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "visual-analysis",
+                  "label": "Visual Analysis",
+                  "type": "process",
+                  "description": "Study views, vistas, landmarks, visual connections, and important visual relationships.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "edge-analysis",
+                  "label": "Edge Analysis",
+                  "type": "process",
+                  "description": "Study boundaries, transitions, interfaces, barriers, and connections between adjacent areas.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                }
+              ],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "user-analysis",
+          "label": "User Analysis",
+          "type": "process",
+          "description": "Understand users, their needs, behaviours, activities, expectations, and patterns of use.",
+          "children": [
+            {
+              "id": "user-groups",
+              "label": "User Groups",
+              "type": "process",
+              "description": "Identify different user groups and their characteristics.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "user-needs",
+              "label": "User Needs",
+              "type": "process",
+              "description": "Identify functional, social, physical, emotional, and accessibility needs.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "user-behaviour",
+              "label": "User Behaviour",
+              "type": "process",
+              "description": "Understand how users move, interact, occupy, and use spaces over time.",
+              "children": [
+                {
+                  "id": "movement-patterns",
+                  "label": "Movement Patterns",
+                  "type": "process",
+                  "description": "Study pedestrian and other movement patterns through the site.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                },
+                {
+                  "id": "activity-patterns",
+                  "label": "Activity Patterns",
+                  "type": "process",
+                  "description": "Study where, when, and how different activities occur.",
+                  "children": [],
+                  "width": 200,
+                  "height": 90
+                }
+              ],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "context-analysis",
+          "label": "Context Analysis",
+          "type": "process",
+          "description": "Understand the wider physical, social, cultural, regulatory, and urban context.",
+          "children": [
+            {
+              "id": "urban-context",
+              "label": "Urban Context",
+              "type": "process",
+              "description": "Study surrounding development, land uses, infrastructure, streets, and public spaces.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "social-context",
+              "label": "Social Context",
+              "type": "process",
+              "description": "Understand community characteristics, social relationships, local practices, and patterns of use.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "regulatory-context",
+              "label": "Regulatory Context",
+              "type": "process",
+              "description": "Identify applicable regulations, standards, planning requirements, and design constraints.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    },
+    {
+      "id": "problem-definition",
+      "label": "Problem Definition",
+      "type": "process",
+      "description": "Convert analytical findings into clearly defined design problems, opportunities, and priorities.",
+      "children": [
+        {
+          "id": "problem-identification",
+          "label": "Problem Identification",
+          "type": "process",
+          "description": "Identify gaps, conflicts, deficiencies, risks, and unmet needs revealed through analysis.",
+          "children": [
+            {
+              "id": "functional-problems",
+              "label": "Functional Problems",
+              "type": "process",
+              "description": "Identify problems related to access, movement, use, capacity, and functionality.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "environmental-problems",
+              "label": "Environmental Problems",
+              "type": "process",
+              "description": "Identify environmental weaknesses and opportunities for improvement.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "user-problems",
+              "label": "User Problems",
+              "type": "process",
+              "description": "Identify problems experienced by different user groups.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "problem-magnitude",
+          "label": "Problem Magnitude",
+          "type": "process",
+          "description": "Assess the scale, severity, frequency, impact, and extent of identified problems.",
+          "children": [
+            {
+              "id": "severity",
+              "label": "Severity",
+              "type": "process",
+              "description": "Assess how serious the consequence of the problem is.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "frequency",
+              "label": "Frequency",
+              "type": "process",
+              "description": "Assess how frequently the problem occurs.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "impact",
+              "label": "Impact",
+              "type": "process",
+              "description": "Assess the effect of the problem on users, environment, function, and design quality.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "prioritisation",
+          "label": "Prioritisation",
+          "type": "process",
+          "description": "Rank problems and opportunities according to their importance, urgency, impact, and feasibility.",
+          "children": [
+            {
+              "id": "priority-ranking",
+              "label": "Priority Ranking",
+              "type": "process",
+              "description": "Rank identified problems according to defined evaluation criteria.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "design-objectives",
+              "label": "Design Objectives",
+              "type": "process",
+              "description": "Translate prioritised problems into clear objectives that the design should address.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    },
+    {
+      "id": "ideation",
+      "label": "Ideation",
+      "type": "process",
+      "description": "Generate and develop possible design responses to the identified problems and opportunities.",
+      "children": [
+        {
+          "id": "concept-generation",
+          "label": "Concept Generation",
+          "type": "process",
+          "description": "Generate multiple possible design concepts without prematurely selecting a single solution.",
+          "children": [
+            {
+              "id": "spatial-concepts",
+              "label": "Spatial Concepts",
+              "type": "process",
+              "description": "Generate alternative spatial arrangements and organisational strategies.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "circulation-concepts",
+              "label": "Circulation Concepts",
+              "type": "process",
+              "description": "Generate alternative movement and circulation strategies.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "landscape-concepts",
+              "label": "Landscape Concepts",
+              "type": "process",
+              "description": "Generate landscape, planting, ecological, and open-space strategies.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "concept-development",
+          "label": "Concept Development",
+          "type": "process",
+          "description": "Develop promising concepts into more coherent and testable design alternatives.",
+          "children": [
+            {
+              "id": "spatial-development",
+              "label": "Spatial Development",
+              "type": "process",
+              "description": "Develop spatial relationships, hierarchy, proportions, and organisation.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "material-development",
+              "label": "Material and Character Development",
+              "type": "process",
+              "description": "Develop material, landscape, architectural, and visual character.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            },
+            {
+              "id": "technical-development",
+              "label": "Technical Development",
+              "type": "process",
+              "description": "Develop technical feasibility, construction logic, infrastructure, and performance considerations.",
+              "children": [],
+              "width": 240,
+              "height": 100
+            }
+          ],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    },
+    {
+      "id": "scenario-testing",
+      "label": "Scenario Testing",
+      "type": "process",
+      "description": "Test design alternatives against different conditions, users, situations, and performance criteria.",
+      "children": [
+        {
+          "id": "user-scenarios",
+          "label": "User Scenarios",
+          "type": "process",
+          "description": "Test how different users experience and interact with the proposed design.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "environmental-scenarios",
+          "label": "Environmental Scenarios",
+          "type": "process",
+          "description": "Test the design under different environmental and climatic conditions.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "time-based-scenarios",
+          "label": "Time-Based Scenarios",
+          "type": "process",
+          "description": "Test how the design performs across different times of day, seasons, or phases of use.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    },
+    {
+      "id": "evaluation",
+      "label": "Evaluation",
+      "type": "process",
+      "description": "Compare design alternatives and assess how effectively they respond to the defined objectives and problems.",
+      "children": [
+        {
+          "id": "criteria-evaluation",
+          "label": "Criteria-Based Evaluation",
+          "type": "process",
+          "description": "Evaluate alternatives against predefined design criteria and objectives.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "alternative-comparison",
+          "label": "Alternative Comparison",
+          "type": "process",
+          "description": "Compare the strengths, weaknesses, opportunities, and limitations of different alternatives.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "solution-selection",
+          "label": "Solution Selection",
+          "type": "process",
+          "description": "Select or combine the alternatives that best satisfy the design objectives.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    },
+    {
+      "id": "design-development",
+      "label": "Design Development",
+      "type": "process",
+      "description": "Develop the selected design direction into a coordinated and resolved proposal.",
+      "children": [
+        {
+          "id": "spatial-resolution",
+          "label": "Spatial Resolution",
+          "type": "process",
+          "description": "Resolve spatial organisation, dimensions, circulation, hierarchy, and relationships.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "material-resolution",
+          "label": "Material Resolution",
+          "type": "process",
+          "description": "Resolve materials, finishes, planting, furniture, lighting, and visual character.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "technical-resolution",
+          "label": "Technical Resolution",
+          "type": "process",
+          "description": "Resolve technical systems, construction details, drainage, services, and implementation requirements.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    },
+    {
+      "id": "final-review",
+      "label": "Final Review",
+      "type": "process",
+      "description": "Review the developed design against the original objectives, constraints, and identified problems.",
+      "children": [
+        {
+          "id": "objective-check",
+          "label": "Objective Check",
+          "type": "process",
+          "description": "Verify whether the final design responds adequately to the established design objectives.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "performance-check",
+          "label": "Performance Check",
+          "type": "process",
+          "description": "Review functional, environmental, social, aesthetic, and technical performance.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        },
+        {
+          "id": "final-refinement",
+          "label": "Final Refinement",
+          "type": "process",
+          "description": "Make final adjustments based on the review before documenting the design.",
+          "children": [],
+          "width": 300,
+          "height": 130
+        }
+      ],
+      "width": 380,
+      "height": 170
+    }
+  ],
+  "width": 1700,
+  "height": 220
+}
