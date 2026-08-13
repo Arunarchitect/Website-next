@@ -150,7 +150,8 @@ export function ProcessContainer({
     e: React.PointerEvent,
     field: "label" | "description"
   ) => {
-    e.stopPropagation();
+    // IMPORTANT: Do NOT stop propagation here.
+    // The viewport needs to receive the pointer event for pan/pinch to work.
     if (e.pointerType === "touch" || e.pointerType === "pen") {
       startLongPress(field, field === "label" ? node.label : node.description ?? "");
     }
@@ -175,6 +176,15 @@ export function ProcessContainer({
         onSelectNode(node.id);
       }}
       style={{
+        // Root (level 0) spans the whole canvas — same footprint as the
+        // arrows overlay — so it must stay in normal flow (unpositioned)
+        // or its opaque background would paint over every arrow.
+        // Deeper nodes are smaller boxes with gaps around them, so raising
+        // them above the arrows layer only hides arrows exactly under
+        // those boxes (expected) while making clicks/double-clicks land
+        // on the node reliably instead of a crossing arrow line.
+        position: level === 0 ? undefined : "relative",
+        zIndex: level === 0 ? undefined : 10,
         background: color.background,
         border: `1.5px solid ${activeNodeId === node.id ? "#3b82f6" : color.border}`,
         outline: isCompleted ? "2px solid #2F9E58" : "none",
@@ -276,7 +286,7 @@ export function ProcessContainer({
                 ? `repeat(${children.length}, minmax(0, 1fr))`
                 : undefined,
             flexDirection: level === 0 ? undefined : "column",
-            gap: "12px",
+            gap: level === 0 ? "40px" : "24px",
             width: "100%",
             maxWidth: "100%",
             minWidth: 0,

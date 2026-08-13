@@ -9,19 +9,30 @@ type NodeRect = {
   height: number;
 };
 
+export type Edge = { from: string; to: string };
+
+export type EdgeStyle = {
+  dashed?: boolean;
+};
+
 type RelationshipArrowsProps = {
   rootNode: ProcessNode;
   positions: Map<string, NodeRect>;
   selectedNodeId: string | null;
+  selectedEdge: Edge | null;
+  onSelectEdge: (edge: Edge | null) => void;
+  edgeStyles?: Map<string, EdgeStyle>;
 };
 
 export function RelationshipArrows({
   rootNode,
   positions,
   selectedNodeId,
+  selectedEdge,
+  onSelectEdge,
+  edgeStyles = new Map(),
 }: RelationshipArrowsProps) {
-  // Collect all edges from `successors`
-  const edges: { from: string; to: string }[] = [];
+  const edges: Edge[] = [];
   const traverse = (node: ProcessNode) => {
     (node.successors ?? []).forEach((succId) => {
       edges.push({ from: node.id, to: succId });
@@ -30,11 +41,6 @@ export function RelationshipArrows({
   };
   traverse(rootNode);
 
-  /**
-   * Find the intersection point of the line from a rectangle's centre
-   * to an external point with the rectangle's border.
-   * Returns the point on the edge closest to the external point.
-   */
   const getAnchorPoint = (
     rect: NodeRect,
     externalPoint: { x: number; y: number }
@@ -46,24 +52,31 @@ export function RelationshipArrows({
     const dy = externalPoint.y - centerY;
 
     if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
-      // Same centre – fallback to centre
       return { x: centerX, y: centerY, side: "right" };
     }
 
-    // Compute t for each edge
     const tLeft = dx !== 0 ? (rect.x - centerX) / dx : -Infinity;
     const tRight = dx !== 0 ? (rect.x + rect.width - centerX) / dx : -Infinity;
     const tTop = dy !== 0 ? (rect.y - centerY) / dy : -Infinity;
     const tBottom = dy !== 0 ? (rect.y + rect.height - centerY) / dy : -Infinity;
 
-    // Find the smallest positive t where the intersection lies on the segment
     let bestT = Infinity;
     let side: "left" | "right" | "top" | "bottom" = "right";
     let bestPoint = { x: centerX, y: centerY };
 
-    const check = (t: number, candidateSide: typeof side, point: { x: number; y: number }) => {
-      if (t > 0 && t < bestT && point.x >= rect.x && point.x <= rect.x + rect.width &&
-          point.y >= rect.y && point.y <= rect.y + rect.height) {
+    const check = (
+      t: number,
+      candidateSide: typeof side,
+      point: { x: number; y: number }
+    ) => {
+      if (
+        t > 0 &&
+        t < bestT &&
+        point.x >= rect.x &&
+        point.x <= rect.x + rect.width &&
+        point.y >= rect.y &&
+        point.y <= rect.y + rect.height
+      ) {
         bestT = t;
         side = candidateSide;
         bestPoint = point;
@@ -78,73 +91,39 @@ export function RelationshipArrows({
     return { ...bestPoint, side };
   };
 
-  /**
-   * Build an orthogonal stepped path that goes out from the source
-   * anchor, makes one turn, and enters the target anchor.
-   */
-  const buildDockedPath = (
-    sourceAnchor: { x: number; y: number },
-    targetAnchor: { x: number; y: number },
-    sourceCenter: { x: number; y: number },
-    targetCenter: { x: number; y: number }
+  const buildBezierPath = (
+    source: { x: number; y: number },
+    target: { x: number; y: number }
   ) => {
-    // Outward direction from source centre to anchor (perpendicular to edge)
-    const sourceOutX = sourceAnchor.x - sourceCenter.x;
-    const sourceOutY = sourceAnchor.y - sourceCenter.y;
-    const sourceOutLen = Math.hypot(sourceOutX, sourceOutY) || 1;
-    const sourceOutUnit = { x: sourceOutX / sourceOutLen, y: sourceOutY / sourceOutLen };
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const dist = Math.hypot(dx, dy) || 1;
 
-    // Inward direction from target anchor to target centre (opposite of outward)
-    const targetInX = targetCenter.x - targetAnchor.x;
-    const targetInY = targetCenter.y - targetAnchor.y;
-    const targetInLen = Math.hypot(targetInX, targetInY) || 1;
-    const targetInUnit = { x: targetInX / targetInLen, y: targetInY / targetInLen };
+    const nx = -dy / dist;
+    const ny = dx / dist;
 
-    // How far the arrow goes out before turning
-    const exitMargin = 30;
-    const enterMargin = 30;
+    const offset = Math.min(dist * 0.4, 80);
 
-    const pExit = {
-      x: sourceAnchor.x + sourceOutUnit.x * exitMargin,
-      y: sourceAnchor.y + sourceOutUnit.y * exitMargin,
+    const cp1 = {
+      x: source.x + dx * 0.25 + nx * offset,
+      y: source.y + dy * 0.25 + ny * offset,
     };
-    const pEnter = {
-      x: targetAnchor.x + targetInUnit.x * enterMargin,
-      y: targetAnchor.y + targetInUnit.y * enterMargin,
+    const cp2 = {
+      x: source.x + dx * 0.75 + nx * offset,
+      y: source.y + dy * 0.75 + ny * offset,
     };
 
-    // Choose a corner for the orthogonal turn
-    const corner1 = { x: pEnter.x, y: pExit.y };
-    const corner2 = { x: pExit.x, y: pEnter.y };
-
-    // Pick the corner that lies farther from the straight line to avoid overlapping
-    const dist1 = Math.hypot(corner1.x - sourceAnchor.x, corner1.y - sourceAnchor.y);
-    const dist2 = Math.hypot(corner2.x - sourceAnchor.x, corner2.y - sourceAnchor.y);
-    const corner = dist1 >= dist2 ? corner1 : corner2;
-
-    const points = [
-      sourceAnchor,
-      pExit,
-      corner,
-      pEnter,
-      targetAnchor,
-    ];
-
-    // Remove consecutive duplicates
-    const cleaned: { x: number; y: number }[] = [];
-    for (const p of points) {
-      const last = cleaned[cleaned.length - 1];
-      if (!last || Math.abs(last.x - p.x) > 0.5 || Math.abs(last.y - p.y) > 0.5) {
-        cleaned.push(p);
-      }
-    }
-
-    return cleaned.map((p) => `${p.x},${p.y}`).join(" ");
+    return `M ${source.x} ${source.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${target.x} ${target.y}`;
   };
 
-  const isHighlighted = (edge: { from: string; to: string }) =>
+  const isHighlightedByNode = (edge: Edge) =>
     selectedNodeId !== null &&
     (edge.from === selectedNodeId || edge.to === selectedNodeId);
+
+  const isEdgeSelected = (edge: Edge) =>
+    selectedEdge !== null &&
+    edge.from === selectedEdge.from &&
+    edge.to === selectedEdge.to;
 
   return (
     <svg
@@ -155,30 +134,19 @@ export function RelationshipArrows({
         width: "100%",
         height: "100%",
         pointerEvents: "none",
-        zIndex: 5,
+        zIndex: 1,
         overflow: "visible",
       }}
     >
       <defs>
-        <marker
-          id="arrowhead"
-          markerWidth="10"
-          markerHeight="7"
-          refX="9"
-          refY="3.5"
-          orient="auto"
-        >
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
           <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
         </marker>
-        <marker
-          id="arrowhead-highlight"
-          markerWidth="10"
-          markerHeight="7"
-          refX="9"
-          refY="3.5"
-          orient="auto"
-        >
+        <marker id="arrowhead-highlight" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
           <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+        </marker>
+        <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+          <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
         </marker>
       </defs>
 
@@ -199,32 +167,94 @@ export function RelationshipArrows({
         const sourceAnchor = getAnchorPoint(sourceRect, targetCenter);
         const targetAnchor = getAnchorPoint(targetRect, sourceCenter);
 
-        const d = buildDockedPath(sourceAnchor, targetAnchor, sourceCenter, targetCenter);
-        const highlight = isHighlighted(edge);
+        const d = buildBezierPath(sourceAnchor, targetAnchor);
+        const nodeHighlight = isHighlightedByNode(edge);
+        const edgeSelected = isEdgeSelected(edge);
+
+        const edgeKey = `${edge.from}->${edge.to}`;
+        const style = edgeStyles.get(edgeKey) || {};
+        const isDashed = style.dashed === true;
+
+        let stroke = "#64748b";
+        let strokeWidth = 2;
+        let marker = "url(#arrowhead)";
+        let outlineStroke = "#ffffff";
+        let outlineWidth = 3.5;
+
+        if (edgeSelected) {
+          stroke = "#f59e0b";
+          strokeWidth = 3;
+          marker = "url(#arrowhead-selected)";
+          outlineStroke = "#fff";
+          outlineWidth = 4.5;
+        } else if (nodeHighlight) {
+          stroke = "#3b82f6";
+          strokeWidth = 2.5;
+          marker = "url(#arrowhead-highlight)";
+          outlineStroke = "#fff";
+          outlineWidth = 4;
+        }
 
         return (
           <g key={`${edge.from}-${edge.to}-${idx}`}>
-            <polyline
-              points={d}
+            {/* Outline for contrast */}
+            <path
+              d={d}
               fill="none"
-              stroke={highlight ? "#3b82f6" : "#64748b"}
-              strokeWidth={highlight ? 2.5 : 1.5}
-              strokeLinejoin="round"
+              stroke={outlineStroke}
+              strokeWidth={outlineWidth}
               strokeLinecap="round"
-              markerEnd={highlight ? "url(#arrowhead-highlight)" : "url(#arrowhead)"}
+              strokeLinejoin="round"
+              pointerEvents="none"
             />
-            {/* Anchor dots (small circles at connection points) */}
+            {/* Main arrow */}
+            <path
+              d={d}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              markerEnd={marker}
+              strokeDasharray={isDashed ? "6 4" : undefined}
+              style={{ pointerEvents: "stroke", cursor: "pointer" }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectEdge(edgeSelected ? null : edge);
+              }}
+            />
+            {/* Anchor dots */}
             <circle
               cx={sourceAnchor.x}
               cy={sourceAnchor.y}
-              r={3}
-              fill={highlight ? "#3b82f6" : "#64748b"}
+              r={2.5}
+              fill={edgeSelected ? "#f59e0b" : nodeHighlight ? "#3b82f6" : "#64748b"}
+              stroke="#fff"
+              strokeWidth={1}
+              style={{ pointerEvents: "all", cursor: "pointer" }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectEdge(edgeSelected ? null : edge);
+              }}
             />
             <circle
               cx={targetAnchor.x}
               cy={targetAnchor.y}
-              r={3}
-              fill={highlight ? "#3b82f6" : "#64748b"}
+              r={2.5}
+              fill={edgeSelected ? "#f59e0b" : nodeHighlight ? "#3b82f6" : "#64748b"}
+              stroke="#fff"
+              strokeWidth={1}
+              style={{ pointerEvents: "all", cursor: "pointer" }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectEdge(edgeSelected ? null : edge);
+              }}
             />
           </g>
         );

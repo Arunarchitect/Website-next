@@ -1,194 +1,220 @@
-# Process Viewer
+# Process Viewer (Updated)
 
-An interactive, pannable/zoomable tree diagram for visualizing a nested
-process (process → subprocess → sub-subprocess…), loaded from a JSON file,
-with per-leaf completion tracking.
+An interactive, pannable/zoomable tree diagram for visualizing a nested process (process → subprocess → sub-subprocess…), loaded from a JSON file, with:
+
+- per-leaf completion tracking
+- **predecessor/successor relationships** drawn as curved arrows
+- **inline editing** of node titles/descriptions
+- **relation management** (add/delete arrows)
+- **export** to PNG, SVG, or vector PDF
+- full **mobile/touch support** (pinch zoom, long-press edit)
+
+---
 
 ## File structure
 
 ```
-app/page.tsx                     Home — owns all state, toolbar, canvas
-components/ProcessContainer.tsx  CompletionCheckbox + ProcessContainer (pure rendering)
+app/page.tsx                     Home — owns all state, toolbar, canvas, modals
+components/ProcessContainer.tsx  CompletionCheckbox + ProcessContainer (rendering, editing, selection)
+components/RelationshipArrows.tsx  SVG curved arrows for predecessor/successor relations
 lib/process-utils.ts             Types, tree math, colors, sizing (no React)
 ```
 
-**Why split this way:** `process-utils.ts` has zero React and zero state —
-it's just data in, data out, so it's the easiest place to reason about or
-unit-test the completion logic. `ProcessContainer.tsx` renders a node and
-recurses into its children, but never touches state directly — it only
-calls `onToggleComplete(node)` and lets the parent decide what happens.
-`page.tsx` is the only file that owns `useState`/`useRef` — uploading,
-zoom, pan, and the completed-leaf set all live there.
+**Why split this way:**
+
+- `process-utils.ts` has zero React and zero state. Pure data‑in, data‑out.
+- `ProcessContainer.tsx` renders a node and recurses into children. It calls callbacks (`onToggleComplete`, `onEditNode`, `onSelectNode`, `registerNodeRef`) but never owns app state.
+- `RelationshipArrows.tsx` draws the directed arrows between nodes using node positions supplied by `page.tsx`.
+- `page.tsx` owns all global state: upload, zoom, pan, completed set, selection, relation editing, export.
 
 ---
 
 ## Data model
 
-A JSON file uploaded by the user has this shape:
-
 ```ts
 type ProcessData = {
   title: string;
   description?: string;
+  type?: string;
   width?: number;   // optional layout hint, px
   height?: number;  // optional layout hint, px (min-height only)
+  completed?: string[]; // leaf IDs that are completed
   children?: ProcessNode[];
 };
 
 type ProcessNode = {
-  id: string;        // must be unique across the whole tree
+  id: string;           // must be unique across the whole tree
   label: string;
   description?: string;
+  type?: string;
   width?: number;
   height?: number;
+  predecessors?: string[]; // ids of predecessor nodes (same level)
+  successors?: string[];   // ids of successor nodes (same level)
   children?: ProcessNode[];
 };
 ```
 
-`ProcessData` (the uploaded file) is wrapped into a synthetic root
-`ProcessNode` with `id: "root"` inside `page.tsx`, so the rest of the app
-only ever deals with one node type.
-
 ### Layout hints are advisory, not authoritative
 
-- `width` is a *preferred* size, but every node is also capped at
-  `maxWidth: 100%` of its parent, so a bad/huge stored width can never make
-  a box overflow its container.
-- `height` is a *minimum* height (`minHeight`), never a fixed height — the
-  box always grows with its content, so text or children can never be
-  clipped.
+- `width` is preferred, but capped at `maxWidth: 100%` of parent, so a huge stored width cannot overflow.
+- `height` is minimum height (`minHeight`), never fixed. Boxes grow with content.
 
-This means the JSON can be sloppy about sizing without breaking the
-diagram.
+### Ordering
+
+- Visual order follows the `children` array order.
+- Relationships are explicit via `predecessors`/`successors`. They are **same-level only**.
 
 ---
 
-## Completion logic (the part worth remembering)
+## Completion logic
 
-**Completion state is only ever stored for leaf nodes** (nodes with no
-`children`). It lives in a single `Set<string>` of leaf IDs, in
-`page.tsx`:
+**Completion state is only stored for leaves** (nodes with no children).
 
 ```ts
 const [completed, setCompleted] = useState<Set<string>>(new Set());
 ```
 
-Parent nodes **never** get their own entry in that set. Instead, a
-parent's status is *derived* every render by walking its subtree:
+Parent status is derived every render:
 
 | Function          | Meaning                                                            |
 |--------------------|---------------------------------------------------------------------|
-| `isNodeComplete`   | Leaf → is it in the set? Parent → are **all** children complete?    |
-| `isNodePartial`    | Parent only. True if *some but not all* descendants have progress.  |
+| `isNodeComplete`   | Leaf → in set? Parent → **all** children complete?                  |
+| `isNodePartial`    | Parent only. Some but not all descendants have progress.            |
 
-This derivation is what makes the checkbox UI (checked / indeterminate /
-unchecked) "just work" without ever getting out of sync with its children
-— there is nothing to keep in sync, because the parent state doesn't
-exist independently.
+### Click behavior
 
-### Click behavior (`toggleComplete` in `page.tsx`)
-
-1. **Click a leaf** → always allowed. Adds/removes that one leaf's `id`
-   from the `completed` set.
-2. **Click a parent that is already 100% complete** → allowed, and
-   unchecks *every leaf underneath it* in one action (undo a whole
-   branch).
-3. **Click a parent that is not yet 100% complete** → blocked. Nothing is
-   toggled; instead a temporary warning banner is shown
-   ("`X` can't be checked off yet — complete every subprocess underneath
-   it first.") for ~3.2 seconds via `showWarning`.
-
-The intent: you can't shortcut a branch by checking its parent — every
-subprocess underneath has to be completed individually first — but once
-it's fully complete, checking/unchecking the parent is a convenient
-bulk-toggle.
+1. **Leaf** → always toggles its own ID in `completed`.
+2. **Parent already complete** → allowed; unchecks every leaf underneath.
+3. **Parent not complete** → blocked. Shows a warning for ~3.2s.
 
 ### Progress counter
 
-The toolbar shows `completedLeaves / totalLeaves`, both computed from
-leaves only (`getLeafIds`), since leaves are the only nodes with "real"
-independent state. `countNodes` (counts every node, not just leaves) is
-kept in `process-utils.ts` for future use but isn't currently displayed.
+`completedLeaves / totalLeaves` computed from `getLeafIds`.
+
+### Persistence
+
+- `Save JSON` exports the current state including `completed: string[]`.
+- On upload, if JSON contains `completed`, it is rehydrated into the set.
+
+---
+
+## Relationships (predecessors / successors)
+
+- Relationships are stored on nodes as arrays of IDs.
+- They are **same-level only** — a node can only relate to siblings under the same parent.
+- The UI draws a directed arrow for every `successors` entry.
+- The reverse `predecessors` entries are maintained for data consistency.
+
+### Adding a relation
+
+1. Click a node to select it.
+2. Click **Add Successor** or **Add Predecessor** in the action bar.
+3. Click another node on canvas. The relation is created, and an arrow appears.
+
+### Deleting a relation
+
+1. Click the arrow itself (line or end dot). It turns amber.
+2. Click **Delete Selected Arrow** in the action bar.
 
 ---
 
 ## Rendering (`ProcessContainer.tsx`)
 
-`ProcessContainer` is a single recursive component. For each node it
-renders:
+For each node it renders:
 
-1. A checkbox row (`CompletionCheckbox`) — checked/indeterminate/locked
-   are all derived props, not local state.
-2. An optional description.
-3. Its children, laid out differently depending on depth:
-   - **Level 0** (the root's direct children — the top-level processes):
-     arranged **horizontally** in a CSS grid, one column per child.
-   - **Level 1+** (everything deeper): stacked **vertically** with flexbox.
+1. **CompletionCheckbox** — checked/indeterminate/locked (derived, not local).
+2. **Title** — double-click (desktop) or long-press (mobile) to edit via modal.
+3. **Description** — same editing interaction.
+4. **Children**:
+   - Level 0 (top-level processes): **horizontal grid**.
+   - Level 1+: **vertical stack**.
 
-Each top-level process (level 0's children) is assigned its own color
-family (`colorIndex = index` at level 0), and every node below it inherits
-that same `colorIndex` so a whole branch stays visually grouped. Deeper
-levels just get progressively lighter versions of the same base color
-(`lighten()` in `process-utils.ts`).
+Gaps have been increased to make room for arrows:
 
-Text size and padding shrink with depth via `getLayout(level)` — level 0
-is the largest/boldest, level 3+ is the smallest, and anything past index
-3 in `getLayout`'s array reuses the level-3 sizing.
+- Level 0 gap: `40px`
+- Deeper levels: `24px`
+
+Colour families are assigned at level 0 by `colorIndex = index` and inherited down. Deeper levels are lightened versions.
 
 ---
 
-## Canvas: zoom & pan (`page.tsx`)
+## Canvas: zoom & pan
 
-- `zoom` (number, 0.15–4) and `pan` (`{x, y}` in px) are plain state.
-- The whole tree renders once, absolutely positioned and centered, inside
-  a wrapper (`canvasRef`) that gets a single combined
-  `translate(...) scale(...)` transform — panning and zooming don't
-  re-layout anything, they're pure CSS transforms.
-- **Mouse wheel** (`handleWheel`) multiplies zoom by 0.9/1.1 per tick.
-- **Drag to pan** (`handlePointerDown/Move/Up`) tracks the pointer delta
-  from where the drag started and adds it to the pan value that was
-  active when the drag began (`panStart.current`), using native Pointer
-  Capture so dragging keeps working even if the cursor leaves the canvas.
+- `zoom` (0.15–4) and `pan` (`{x, y}`) are plain state.
+- The tree is transformed with a single CSS `translate(...) scale(...)`.
+- **Mouse wheel** zooms **towards the cursor** (not centre).
+- **Pinch** works on touch devices.
+- **Drag** pans with Pointer Capture.
+- Hovering a node highlights it and its connected arrows.
 
-### "Reset" vs "Reset Format"
+### Buttons
 
-These are two different, intentionally separate behaviors:
-
-- **Reset** (`fitAllView`) — measures the diagram's *natural, unscaled*
-  size (by briefly forcing `scale(1)`, measuring, then restoring) against
-  the visible viewport size, and picks the largest zoom that fits it all
-  with padding. This runs automatically once, on a `requestAnimationFrame`,
-  every time a new file is uploaded.
-- **Reset Format** (`resetFormatView`) — ignores content size entirely and
-  just goes back to the plain default: `zoom = 1`, `pan = {0, 0}`.
+| Button | Behavior |
+|--------|----------|
+| Reset | Fits the entire diagram into the viewport |
+| Upload | Load a JSON file |
+| Save JSON | Download JSON including completed state and relations |
+| PNG | Export raster image at 3× resolution |
+| SVG | Export vector SVG |
+| PDF | Opens dialog for page size (A4/A3/A2) and orientation (portrait/landscape), then prints to vector PDF |
 
 ---
 
-## Upload flow (`handleUpload` in `page.tsx`)
+## Editing
 
-1. Reads the selected file as text via `FileReader`.
-2. `JSON.parse`s it and does minimal validation (must be an object, must
-   have a `title`) — anything else throws and is caught.
-3. On success: sets `data`, resets `zoom`/`pan`/`completed` for a clean
-   slate, and the `useEffect` on `data` triggers `fitAllView()` on the
-   next frame.
-4. On failure: clears `data` and shows an inline error banner
-   ("Invalid JSON file...").
-5. The file input's value is reset after reading so the same file can be
-   re-uploaded (e.g. after editing it) and still fire `onChange`.
+- **Double-click** title or description → modal opens with input/textarea.
+- **Long-press** on mobile/pen → same modal.
+- Modal has **Done** and **Cancel** buttons.
+- Changes update the in-memory JSON, which can be saved later.
+
+---
+
+## Export
+
+### PNG
+
+Captures the full diagram after fitting it into view. Uses `html2canvas` at 3× scale.
+
+### SVG
+
+Uses `html-to-image` to produce a vector SVG.
+
+### PDF
+
+Opens a dialog:
+
+- Page size: **A4 / A3 / A2**
+- Orientation: **Portrait / Landscape**
+
+Then uses the browser's print-to-PDF engine. The diagram is scaled to fit the chosen page size. Text and arrows remain vector.
+
+---
+
+## Upload flow
+
+1. Read file with `FileReader`.
+2. `JSON.parse` and validate (`title` required).
+3. On success: set data, reset zoom/pan/completed, load `completed` if present.
+4. Trigger `fitAllView()` on next frame.
+5. On failure: show error banner.
+6. File input value is reset so the same file can be re-uploaded.
+
+---
+
+## Mobile support
+
+- **Touch action: none** on canvas to prevent browser scroll/zoom.
+- **Pinch** to zoom at midpoint.
+- **One finger drag** to pan.
+- **Long press** to edit text.
+- Toolbar is responsive and scrolls horizontally if needed.
 
 ---
 
 ## Extending this
 
-- **Add a "total nodes" stat**: `countNodes(rootNode)` already exists in
-  `process-utils.ts` — just read it in `page.tsx` (it's currently computed
-  but unused/void'd) and drop it into the toolbar string.
-- **Persist completion across reloads**: serialize `Array.from(completed)`
-  to `localStorage`/a backend on change, and rehydrate into a `Set` on
-  load — the rest of the completion logic needs no changes since it's all
-  derived from that one set.
-- **New node-level field** (e.g. an owner or due date): add it to
-  `ProcessNode` in `process-utils.ts`, then render it inside
-  `ProcessContainer.tsx` — no changes needed to `page.tsx` or the
-  completion logic.
+- **Add total nodes stat**: `countNodes(rootNode)` already exists in `process-utils.ts`. Just read it in `page.tsx` and drop it into the toolbar.
+- **Persist completion across reloads**: already partially supported via JSON `completed` field. Could also use `localStorage`.
+- **New node-level field** (e.g. owner, due date): add to `ProcessNode`, render in `ProcessContainer.tsx`, no other changes needed.
+- **Drag-to-reorder**: currently not implemented, but node order follows `children` array order; you can extend with drag events and update the array.

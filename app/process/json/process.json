@@ -4,54 +4,46 @@
   "description": "A structured design process with predecessor/successor relationships.",
   "width": 1700,
   "height": 220,
+  "edgeStyles": {
+    "analysis->problem-definition": {
+      "dashed": true
+    },
+    "scenario-testing->evaluation": {
+      "dashed": true
+    },
+    "scenario-testing->problem-definition": {
+      "dashed": true
+    }
+  },
   "children": [
     {
       "id": "analysis",
       "label": "Analysis",
       "type": "process",
       "description": "Understand the existing conditions and context.",
-      "successors": ["problem-definition"],
+      "successors": [
+        "problem-definition"
+      ],
       "children": [
         {
           "id": "site-analysis",
           "label": "Site Analysis",
           "type": "process",
           "description": "Study physical, environmental and spatial characteristics.",
-          "successors": ["user-analysis", "context-analysis"],
-          "children": [
-            {
-              "id": "physical-analysis",
-              "label": "Physical Analysis",
-              "type": "process",
-              "description": "Study physical characteristics.",
-              "successors": ["environmental-analysis", "spatial-analysis"],
-              "children": []
-            },
-            {
-              "id": "environmental-analysis",
-              "label": "Environmental Analysis",
-              "type": "process",
-              "description": "Understand environmental factors.",
-              "predecessors": ["physical-analysis"],
-              "successors": ["spatial-analysis"],
-              "children": []
-            },
-            {
-              "id": "spatial-analysis",
-              "label": "Spatial Analysis",
-              "type": "process",
-              "description": "Understand spatial structure.",
-              "predecessors": ["physical-analysis", "environmental-analysis"],
-              "children": []
-            }
-          ]
+          "successors": [
+            "user-analysis",
+            "context-analysis"
+          ],
+          "children": []
         },
         {
           "id": "user-analysis",
           "label": "User Analysis",
           "type": "process",
           "description": "Understand users and their needs.",
-          "predecessors": ["site-analysis"],
+          "predecessors": [
+            "site-analysis"
+          ],
           "children": []
         },
         {
@@ -59,7 +51,9 @@
           "label": "Context Analysis",
           "type": "process",
           "description": "Understand wider context.",
-          "predecessors": ["site-analysis"],
+          "predecessors": [
+            "site-analysis"
+          ],
           "children": []
         }
       ]
@@ -69,43 +63,22 @@
       "label": "Problem Definition",
       "type": "process",
       "description": "Convert findings into design problems.",
-      "predecessors": ["analysis"],
-      "successors": ["ideation"],
-      "children": [
-        {
-          "id": "problem-identification",
-          "label": "Problem Identification",
-          "type": "process",
-          "description": "Identify problems.",
-          "successors": ["problem-magnitude"],
-          "children": []
-        },
-        {
-          "id": "problem-magnitude",
-          "label": "Problem Magnitude",
-          "type": "process",
-          "description": "Assess scale and severity.",
-          "predecessors": ["problem-identification"],
-          "successors": ["prioritisation"],
-          "children": []
-        },
-        {
-          "id": "prioritisation",
-          "label": "Prioritisation",
-          "type": "process",
-          "description": "Rank problems and set objectives.",
-          "predecessors": ["problem-magnitude"],
-          "children": []
-        }
-      ]
+      "predecessors": [
+        "analysis",
+        "scenario-testing"
+      ],
+      "successors": [],
+      "children": []
     },
     {
       "id": "ideation",
       "label": "Ideation",
       "type": "process",
       "description": "Generate and develop design responses.",
-      "predecessors": ["problem-definition"],
-      "successors": ["scenario-testing"],
+      "predecessors": [],
+      "successors": [
+        "scenario-testing"
+      ],
       "children": []
     },
     {
@@ -113,8 +86,13 @@
       "label": "Scenario Testing",
       "type": "process",
       "description": "Test design alternatives.",
-      "predecessors": ["ideation"],
-      "successors": ["evaluation"],
+      "predecessors": [
+        "ideation"
+      ],
+      "successors": [
+        "evaluation",
+        "problem-definition"
+      ],
       "children": []
     },
     {
@@ -122,8 +100,12 @@
       "label": "Evaluation",
       "type": "process",
       "description": "Compare and assess alternatives.",
-      "predecessors": ["scenario-testing"],
-      "successors": ["design-development"],
+      "predecessors": [
+        "scenario-testing"
+      ],
+      "successors": [
+        "design-development"
+      ],
       "children": []
     },
     {
@@ -131,8 +113,12 @@
       "label": "Design Development",
       "type": "process",
       "description": "Develop the selected design.",
-      "predecessors": ["evaluation"],
-      "successors": ["final-review"],
+      "predecessors": [
+        "evaluation"
+      ],
+      "successors": [
+        "final-review"
+      ],
       "children": []
     },
     {
@@ -140,8 +126,13 @@
       "label": "Final Review",
       "type": "process",
       "description": "Review the developed design.",
-      "predecessors": ["design-development"],
+      "predecessors": [
+        "design-development"
+      ],
       "children": []
     }
+  ],
+  "completed": [
+    "context-analysis"
   ]
 }

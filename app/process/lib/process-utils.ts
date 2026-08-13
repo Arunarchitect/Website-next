@@ -20,6 +20,8 @@ export type ProcessData = {
   type?: string;
   width?: number;
   height?: number;
+  completed?: string[];
+  edgeStyles?: Record<string, { dashed?: boolean }>;  // NEW
   children?: ProcessNode[];
 };
 
