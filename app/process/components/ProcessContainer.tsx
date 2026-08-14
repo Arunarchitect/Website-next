@@ -104,6 +104,8 @@ type ProcessContainerProps = {
   registerNodeRef: (id: string, el: HTMLDivElement | null) => void;
   activeNodeId: string | null;
   onSelectNode: (id: string) => void;
+  /** This node's position in the tree, e.g. [2, 1] for "2nd top-level process, 1st subprocess". Empty for root. */
+  numberPath?: number[];
 };
 
 export function ProcessContainer({
@@ -116,6 +118,7 @@ export function ProcessContainer({
   registerNodeRef,
   activeNodeId,
   onSelectNode,
+  numberPath = [],
 }: ProcessContainerProps) {
   const children = node.children ?? [];
   const layout = getLayout(level);
@@ -124,6 +127,9 @@ export function ProcessContainer({
   const isCompleted = isNodeComplete(node, completed);
   const isPartial = isNodePartial(node, completed);
   const isParent = children.length > 0;
+
+  // Root (level 0) is the canvas container, not a numbered process itself.
+  const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
 
   // Long‑press handling for mobile
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -176,13 +182,6 @@ export function ProcessContainer({
         onSelectNode(node.id);
       }}
       style={{
-        // Root (level 0) spans the whole canvas — same footprint as the
-        // arrows overlay — so it must stay in normal flow (unpositioned)
-        // or its opaque background would paint over every arrow.
-        // Deeper nodes are smaller boxes with gaps around them, so raising
-        // them above the arrows layer only hides arrows exactly under
-        // those boxes (expected) while making clicks/double-clicks land
-        // on the node reliably instead of a crossing arrow line.
         position: level === 0 ? undefined : "relative",
         zIndex: level === 0 ? undefined : 10,
         background: color.background,
@@ -240,6 +239,11 @@ export function ProcessContainer({
           onPointerLeave={handleTextPointerUp}
           onDoubleClick={() => handleDoubleClick("label", node.label)}
         >
+          {numberLabel && (
+            <span style={{ opacity: 0.55, fontWeight: 700, marginRight: "6px" }}>
+              {numberLabel}.
+            </span>
+          )}
           {node.label}
         </div>
       </div>
@@ -306,6 +310,7 @@ export function ProcessContainer({
               registerNodeRef={registerNodeRef}
               activeNodeId={activeNodeId}
               onSelectNode={onSelectNode}
+              numberPath={[...numberPath, index + 1]}
             />
           ))}
         </div>

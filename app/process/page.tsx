@@ -5,62 +5,31 @@ import { ProcessContainer } from "@/app/process/components/ProcessContainer";
 import { RelationshipArrows, Edge } from "@/app/process/components/RelationshipArrows";
 import html2canvas from "html2canvas";
 import { toSvg } from "html-to-image";
-import {
-  ProcessData,
-  ProcessNode,
-  countNodes,
-  getLeafIds,
-  isNodeComplete,
-} from "@/app/process/lib/process-utils";
+import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
 
 const DRAG_THRESHOLD = 6;
 
 export default function Home() {
-  // ─── State ──────────────────────────────────────────────────────
-  const [data, setData] = useState<ProcessData | null>(() => {
-    // Start with a default root node so the user can add processes right away
-    return {
-      title: "Untitled Workflow",
-      description: "Start building your process by adding nodes.",
-      type: "process",
-      width: 1700,
-      height: 220,
-      children: [],
-      completed: [],
-      edgeStyles: {},
-    };
+  // ─── Editing logic (data, relations, modals, upload/save) lives in the hook ───
+  const editor = useProcessEditor({
+    title: "Untitled Workflow",
+    description: "Start building your process by adding nodes.",
+    type: "process",
+    width: 1700,
+    height: 220,
+    children: [],
+    completed: [],
+    edgeStyles: {},
   });
 
-  const [error, setError] = useState("");
-  const [warning, setWarning] = useState("");
-
+  // ─── View state (pan/zoom/drag, export) ────────────────────────
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
-  const [completed, setCompleted] = useState<Set<string>>(new Set());
-
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
-  const [pendingRelation, setPendingRelation] = useState<{
-    fromId: string;
-    mode: "successor" | "predecessor";
-  } | null>(null);
 
   const [exportModal, setExportModal] = useState<"pdf" | null>(null);
   const [pdfPageSize, setPdfPageSize] = useState<"A4" | "A3" | "A2">("A4");
   const [pdfOrientation, setPdfOrientation] = useState<"portrait" | "landscape">("landscape");
-
-  const [edgeStyles, setEdgeStyles] = useState<Map<string, { dashed: boolean }>>(new Map());
-
-  // ─── Add Process Modal State ──────────────────────────────────
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newProcess, setNewProcess] = useState({
-    label: "",
-    description: "",
-    position: 0,
-  });
-  const [addError, setAddError] = useState("");
 
   // ─── Refs ──────────────────────────────────────────────────────
   const dragStart = useRef({ x: 0, y: 0 });
@@ -78,7 +47,6 @@ export default function Home() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const printRef = useRef<HTMLDivElement | null>(null);
-  const warningTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
@@ -101,7 +69,7 @@ export default function Home() {
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !data) return;
+    if (!canvas || !editor.data) return;
 
     const positions = new Map<string, { x: number; y: number; width: number; height: number }>();
 
@@ -125,404 +93,17 @@ export default function Home() {
     });
 
     setNodePositions(positions);
-  }, [data, completed]);
+  }, [editor.data, editor.completed]);
 
-  const activeNodeId = hoveredNodeId ?? selectedNodeId;
+  const activeNodeId = editor.hoveredNodeId ?? editor.selectedNodeId;
 
-  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<"label" | "description">("label");
-  const [editingValue, setEditingValue] = useState("");
-
-  const openEditor = (id: string, field: "label" | "description", currentValue: string) => {
-    setEditingNodeId(id);
-    setEditingField(field);
-    setEditingValue(currentValue);
-  };
-
-  const closeEditor = () => setEditingNodeId(null);
-
-  const submitEditor = () => {
-    if (editingNodeId) {
-      const trimmed = editingValue.trim();
-      if (editingField === "label" && trimmed === "") return;
-      updateNode(editingNodeId, editingField, trimmed);
-    }
-    closeEditor();
-  };
-
-  // ─── Tree Helpers ──────────────────────────────────────────────
-  const updateNodeData = (
-    root: ProcessNode,
-    id: string,
-    updater: (node: ProcessNode) => ProcessNode
-  ): ProcessNode => {
-    if (root.id === id) return updater(root);
-    if (root.children) {
-      return { ...root, children: root.children.map((child) => updateNodeData(child, id, updater)) };
-    }
-    return root;
-  };
-
-  const findNodeById = (root: ProcessNode, id: string): ProcessNode | null => {
-    if (root.id === id) return root;
-    if (root.children) {
-      for (const child of root.children) {
-        const found = findNodeById(child, id);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-
-  const addNodeToTree = (
-    root: ProcessNode,
-    parentId: string | null,
-    newNode: ProcessNode,
-    position: number
-  ): ProcessNode => {
-    if (parentId === null) {
-      const children = root.children || [];
-      const newChildren = [...children];
-      newChildren.splice(position, 0, newNode);
-      return { ...root, children: newChildren };
-    }
-
-    if (root.id === parentId) {
-      const children = root.children || [];
-      const newChildren = [...children];
-      newChildren.splice(position, 0, newNode);
-      return { ...root, children: newChildren };
-    }
-
-    if (root.children) {
-      return {
-        ...root,
-        children: root.children.map((child) =>
-          addNodeToTree(child, parentId, newNode, position)
-        ),
-      };
-    }
-    return root;
-  };
-
-  // ─── Add Process Handler ──────────────────────────────────────
-  const handleAddProcess = () => {
-    if (!data) {
-      // Should never happen because we initialise with default data, but keep safeguard.
-      setAddError("No process data loaded.");
-      return;
-    }
-    const trimmedLabel = newProcess.label.trim();
-    if (!trimmedLabel) {
-      setAddError("Title is required.");
-      return;
-    }
-
-    const parentId = selectedNodeId || null;
-
-    // Compute current children to validate position
-    let currentChildren: ProcessNode[] = [];
-    if (parentId === null) {
-      currentChildren = data.children || [];
-    } else {
-      const rootNode = {
-        id: "root",
-        label: data.title,
-        description: data.description,
-        type: data.type || "process",
-        children: data.children || [],
-      };
-      const parent = findNodeById(rootNode, parentId);
-      if (parent) {
-        currentChildren = parent.children || [];
-      } else {
-        setAddError("Selected parent not found.");
-        return;
-      }
-    }
-
-    const pos = Math.min(Math.max(newProcess.position, 0), currentChildren.length);
-
-    const newId = `node-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    const newNode: ProcessNode = {
-      id: newId,
-      label: trimmedLabel,
-      description: newProcess.description.trim() || undefined,
-      children: [],
-    };
-
-    const rootNode: ProcessNode = {
-      id: "root",
-      label: data.title,
-      description: data.description,
-      type: data.type || "process",
-      width: data.width,
-      height: data.height,
-      children: data.children || [],
-    };
-
-    const newRoot = addNodeToTree(rootNode, parentId, newNode, pos);
-
-    setData({
-      ...data,
-      title: newRoot.label,
-      description: newRoot.description,
-      type: newRoot.type,
-      width: newRoot.width,
-      height: newRoot.height,
-      children: newRoot.children,
-    });
-
-    setShowAddModal(false);
-    setNewProcess({ label: "", description: "", position: 0 });
-    setAddError("");
-  };
-
-  // ─── Relation Management ──────────────────────────────────────
-  const addRelation = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
-    if (!data) return;
-    setData((prev) => {
-      if (!prev) return prev;
-      const root: ProcessNode = {
-        id: "root",
-        label: prev.title,
-        description: prev.description,
-        type: "process",
-        width: prev.width,
-        height: prev.height,
-        children: prev.children ?? [],
-      };
-
-      let newRoot = root;
-      if (mode === "successor") {
-        newRoot = updateNodeData(newRoot, fromId, (node) => ({
-          ...node,
-          successors: node.successors ? Array.from(new Set([...node.successors, toId])) : [toId],
-        }));
-        newRoot = updateNodeData(newRoot, toId, (node) => ({
-          ...node,
-          predecessors: node.predecessors ? Array.from(new Set([...node.predecessors, fromId])) : [fromId],
-        }));
-      } else {
-        newRoot = updateNodeData(newRoot, fromId, (node) => ({
-          ...node,
-          predecessors: node.predecessors ? Array.from(new Set([...node.predecessors, toId])) : [toId],
-        }));
-        newRoot = updateNodeData(newRoot, toId, (node) => ({
-          ...node,
-          successors: node.successors ? Array.from(new Set([...node.successors, fromId])) : [fromId],
-        }));
-      }
-
-      return {
-        ...prev,
-        title: newRoot.label,
-        description: newRoot.description,
-        type: newRoot.type,
-        width: newRoot.width,
-        height: newRoot.height,
-        children: newRoot.children,
-      };
-    });
-  };
-
-  const deleteRelation = (edge: Edge) => {
-    if (!data) return;
-    setData((prev) => {
-      if (!prev) return prev;
-      const root: ProcessNode = {
-        id: "root",
-        label: prev.title,
-        description: prev.description,
-        type: "process",
-        width: prev.width,
-        height: prev.height,
-        children: prev.children ?? [],
-      };
-
-      let newRoot = updateNodeData(root, edge.from, (node) => ({
-        ...node,
-        successors: node.successors?.filter((s) => s !== edge.to) ?? [],
-      }));
-      newRoot = updateNodeData(newRoot, edge.to, (node) => ({
-        ...node,
-        predecessors: node.predecessors?.filter((p) => p !== edge.from) ?? [],
-      }));
-
-      return {
-        ...prev,
-        title: newRoot.label,
-        description: newRoot.description,
-        type: newRoot.type,
-        width: newRoot.width,
-        height: newRoot.height,
-        children: newRoot.children,
-      };
-    });
-    setSelectedEdge(null);
-    const key = `${edge.from}->${edge.to}`;
-    setEdgeStyles((prev) => {
-      const next = new Map(prev);
-      next.delete(key);
-      return next;
-    });
-  };
-
-  const reverseRelation = () => {
-    if (!selectedEdge) return;
-    const { from, to } = selectedEdge;
-    deleteRelation(selectedEdge);
-    addRelation(to, from, "successor");
-    setSelectedEdge(null);
-  };
-
-  const toggleEdgeDashed = () => {
-    if (!selectedEdge) return;
-    const key = `${selectedEdge.from}->${selectedEdge.to}`;
-    setEdgeStyles((prev) => {
-      const next = new Map(prev);
-      const current = next.get(key) || { dashed: false };
-      next.set(key, { ...current, dashed: !current.dashed });
-      return next;
-    });
-  };
-
-  const showWarning = (message: string) => {
-    setWarning(message);
-    if (warningTimeout.current) clearTimeout(warningTimeout.current);
-    warningTimeout.current = setTimeout(() => setWarning(""), 3200);
-  };
-
-  const toggleComplete = (node: ProcessNode) => {
-    const children = node.children ?? [];
-    const isParent = children.length > 0;
-
-    if (isParent) {
-      const currentlyComplete = isNodeComplete(node, completed);
-      if (!currentlyComplete) {
-        showWarning(`"${node.label}" can't be checked off yet — complete every subprocess underneath it first.`);
-        return;
-      }
-    }
-
-    setCompleted((prev) => {
-      const next = new Set(prev);
-      const leafIds = getLeafIds(node);
-      const currentlyComplete = isNodeComplete(node, prev);
-      if (currentlyComplete) {
-        leafIds.forEach((id) => next.delete(id));
-      } else {
-        leafIds.forEach((id) => next.add(id));
-      }
-      return next;
-    });
-  };
-
-  // ─── Upload / Save ──────────────────────────────────────────────
-  const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setError("");
-    setWarning("");
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result;
-        if (typeof text !== "string") throw new Error("Unable to read file.");
-        const json = JSON.parse(text) as ProcessData;
-        if (!json || typeof json !== "object") throw new Error("Invalid JSON.");
-        if (!json.title) throw new Error("JSON must contain a title.");
-
-        setData(json);
-        setZoom(1);
-        setPan({ x: 0, y: 0 });
-        setCompleted(new Set(json.completed ?? []));
-        setSelectedNodeId(null);
-        setHoveredNodeId(null);
-        setSelectedEdge(null);
-        setPendingRelation(null);
-        setEdgeStyles(
-          new Map(
-            Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [
-              key,
-              { dashed: value?.dashed ?? false },
-            ])
-          )
-        );
-      } catch (err) {
-        console.error(err);
-        setData(null);
-        setError("Invalid JSON file. Please check the file structure.");
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = "";
-  };
-
-  const updateNode = (id: string, field: "label" | "description", value: string) => {
-    if (!data) return;
-
-    if (id === "root") {
-      setData({
-        ...data,
-        [field === "label" ? "title" : "description"]: value,
-      });
-      return;
-    }
-
-    const updateTree = (node: ProcessNode): ProcessNode => {
-      if (node.id === id) return { ...node, [field]: value };
-      if (node.children) return { ...node, children: node.children.map(updateTree) };
-      return node;
-    };
-
-    setData({
-      ...data,
-      children: data.children ? data.children.map(updateTree) : undefined,
-    });
-  };
-
-  const handleSave = () => {
-    if (!data) {
-      setError("No process data to save.");
-      return;
-    }
-
-    try {
-      const exportData = {
-        ...data,
-        completed: Array.from(completed),
-        edgeStyles: Object.fromEntries(edgeStyles.entries()),
-      };
-
-      const jsonString = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([jsonString], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "process.json";
-      document.body.appendChild(a);
-      a.click();
-
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
-    } catch (err) {
-      console.error("Save JSON failed:", err);
-      setError("Failed to save JSON. Check console for details.");
-    }
-  };
-
-  // ─── Export Functions (unchanged) ──────────────────────────────
+  // ─── Export Functions ──────────────────────────────────────────
   const getElementForExport = () => printRef.current;
 
   const captureFullDiagram = async (format: "png" | "svg") => {
     const el = getElementForExport();
     if (!el) {
-      setError("Diagram is not ready to export. Please try again.");
+      editor.setError("Diagram is not ready to export. Please try again.");
       return;
     }
 
@@ -556,7 +137,7 @@ export default function Home() {
       }
     } catch (err) {
       console.error(`Export ${format.toUpperCase()} failed:`, err);
-      setError(`Export ${format.toUpperCase()} failed. Check console.`);
+      editor.setError(`Export ${format.toUpperCase()} failed. Check console.`);
     } finally {
       el.style.transform = prevTransform;
       el.style.transition = prevTransition;
@@ -618,6 +199,7 @@ export default function Home() {
     );
   };
 
+  // ─── Zoom / Pan ─────────────────────────────────────────────────
   const zoomIn = () => setZoom((v) => Math.min(v * 1.2, 4));
   const zoomOut = () => setZoom((v) => Math.max(v / 1.2, 0.15));
 
@@ -648,12 +230,12 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!data) return;
+    if (!editor.data) return;
     const frame = requestAnimationFrame(() => fitAllView());
     return () => cancelAnimationFrame(frame);
-  }, [data]);
+  }, [editor.data]);
 
-  // ─── Pan / Zoom / Pointer Handlers (unchanged) ──────────────────
+  // ─── Pan / Zoom / Pointer Handlers ──────────────────────────────
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -767,17 +349,13 @@ export default function Home() {
     if (dragging || activePointers.current.size > 0) return;
     const element = document.elementFromPoint(event.clientX, event.clientY);
     const nodeEl = element?.closest('[data-node-id]') as HTMLElement | null;
-    setHoveredNodeId(nodeEl ? nodeEl.dataset.nodeId ?? null : null);
+    editor.setHoveredNodeId(nodeEl ? nodeEl.dataset.nodeId ?? null : null);
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     activePointers.current.delete(event.pointerId);
     if (activePointers.current.size < 2) {
-      if (activePointers.current.size === 1) {
-        setDragging(false);
-      } else {
-        setDragging(false);
-      }
+      setDragging(false);
     }
   };
 
@@ -786,56 +364,10 @@ export default function Home() {
       didDragRef.current = false;
       return;
     }
-    if (pendingRelation) {
-      addRelation(pendingRelation.fromId, id, pendingRelation.mode);
-      setPendingRelation(null);
-      setSelectedNodeId(null);
-      return;
-    }
-    setSelectedEdge(null);
-    setSelectedNodeId(id);
+    editor.handleNodeClick(id, false);
   };
 
-  const handleSelectEdge = (edge: Edge | null) => {
-    setSelectedNodeId(null);
-    setSelectedEdge(edge);
-  };
-
-  const rootNode: ProcessNode | null = data
-    ? {
-        id: "root",
-        label: data.title,
-        description: data.description,
-        type: "process",
-        width: data.width,
-        height: data.height,
-        children: data.children ?? [],
-      }
-    : null;
-
-  const totalLeaves = rootNode ? getLeafIds(rootNode).length : 0;
-  const completedLeaves = completed.size;
-  void countNodes;
-
-  const clearSelection = () => {
-    setSelectedNodeId(null);
-    setSelectedEdge(null);
-    setPendingRelation(null);
-  };
-
-  const getParentInfo = () => {
-    if (!data) return { parentLabel: "Root", childCount: 0 };
-    if (selectedNodeId) {
-      const parent = findNodeById(
-        { id: "root", label: data.title, description: data.description, type: "process", children: data.children || [] },
-        selectedNodeId
-      );
-      if (parent) {
-        return { parentLabel: parent.label, childCount: (parent.children || []).length };
-      }
-    }
-    return { parentLabel: "Root", childCount: (data.children || []).length };
-  };
+  const rootNode = editor.rootNode;
 
   // ─── Render ────────────────────────────────────────────────────
   return (
@@ -866,8 +398,8 @@ export default function Home() {
         <div className="bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-md pointer-events-auto sm:px-4 sm:py-3">
           <div className="font-semibold text-gray-800 text-sm sm:text-base">Process Viewer</div>
           <div className="text-xs text-gray-500 mt-1">
-            {data
-              ? `Drag to move • Pinch/Scroll to zoom • ${completedLeaves} / ${totalLeaves} steps completed`
+            {editor.data
+              ? `Drag to move • Pinch/Scroll to zoom • ${editor.completedLeaves} / ${editor.totalLeaves} steps completed`
               : "Upload a process JSON file"}
           </div>
         </div>
@@ -875,16 +407,16 @@ export default function Home() {
         <div className="flex items-center gap-1 sm:gap-2 bg-white border border-gray-200 rounded-xl p-1 sm:p-2 shadow-md pointer-events-auto overflow-x-auto max-w-full">
           <label className="inline-flex items-center justify-center cursor-pointer bg-gray-900 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-gray-700 transition sm:px-4 sm:py-2 sm:text-sm">
             Upload
-            <input type="file" accept=".json,application/json" onChange={handleUpload} className="hidden" />
+            <input type="file" accept=".json,application/json" onChange={editor.handleUpload} className="hidden" />
           </label>
           <button onClick={zoomOut} className="w-7 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-base text-gray-700 sm:w-9 sm:h-9 sm:text-lg">−</button>
           <div className="min-w-[45px] text-center text-xs font-medium text-gray-700 sm:min-w-[55px] sm:text-sm">{Math.round(zoom * 100)}%</div>
           <button onClick={zoomIn} className="w-7 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-base text-gray-700 sm:w-9 sm:h-9 sm:text-lg">+</button>
           <button onClick={fitAllView} title="Zoom to fit" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Reset</button>
-          <button onClick={handleSave} title="Download JSON" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Save JSON</button>
+          <button onClick={editor.handleSave} title="Download JSON" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Save JSON</button>
 
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => editor.setShowAddModal(true)}
             title="Add a new process node"
             className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm bg-blue-50 border-blue-300 hover:bg-blue-100"
           >
@@ -897,57 +429,91 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ACTION POPUP (unchanged) */}
-      {(selectedNodeId || selectedEdge) && !pendingRelation && (
+      {/* ACTION POPUP */}
+      {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && (
         <div
           data-action-popup
           className="absolute top-24 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2 shadow-md pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-20"
         >
           <button
-            onClick={clearSelection}
+            onClick={editor.clearSelection}
             className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 text-xs font-bold"
             title="Dismiss"
           >
             ✕
           </button>
 
-          {selectedNodeId && rootNode && (
+          {editor.selectedNodeId && rootNode && (
             <>
               <span className="text-sm font-medium text-gray-700">
-                {findNodeById(rootNode, selectedNodeId)?.label ?? "Selected"}
+                {findNodeById(rootNode, editor.selectedNodeId)?.label ?? "Selected"}
               </span>
               <button
-                onClick={() => openEditor(selectedNodeId, "label", findNodeById(rootNode, selectedNodeId)?.label ?? "")}
+                onClick={() =>
+                  editor.openEditor(editor.selectedNodeId!, "label", findNodeById(rootNode, editor.selectedNodeId!)?.label ?? "")
+                }
                 className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
               >
                 Edit Title
               </button>
               <button
-                onClick={() => openEditor(selectedNodeId, "description", findNodeById(rootNode, selectedNodeId)?.description ?? "")}
+                onClick={() =>
+                  editor.openEditor(
+                    editor.selectedNodeId!,
+                    "description",
+                    findNodeById(rootNode, editor.selectedNodeId!)?.description ?? ""
+                  )
+                }
                 className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
               >
                 Edit Description
               </button>
 
               <button
-                onClick={() => setPendingRelation({ fromId: selectedNodeId, mode: "successor" })}
+                onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "successor" })}
                 className="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs hover:bg-blue-200"
               >
                 + Successor
               </button>
               <button
-                onClick={() => setPendingRelation({ fromId: selectedNodeId, mode: "predecessor" })}
+                onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "predecessor" })}
                 className="px-2 py-1 rounded bg-green-100 text-green-700 text-xs hover:bg-green-200"
               >
                 + Predecessor
               </button>
 
-              {findNodeById(rootNode, selectedNodeId)?.successors?.map((succId) => {
+              {editor.selectedNodeId !== "root" && (
+                <>
+                  <button
+                    onClick={() => editor.duplicateNode(editor.selectedNodeId!)}
+                    className="px-2 py-1 rounded bg-indigo-100 text-indigo-700 text-xs hover:bg-indigo-200"
+                    title="Duplicate this process and its subprocesses"
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    onClick={() => {
+                      const node = findNodeById(rootNode, editor.selectedNodeId!);
+                      const childCount = node?.children?.length ?? 0;
+                      const msg = childCount > 0
+                        ? `Delete "${node?.label}" and its ${childCount} subprocess${childCount > 1 ? "es" : ""}?`
+                        : `Delete "${node?.label}"?`;
+                      if (window.confirm(msg)) editor.deleteNode(editor.selectedNodeId!);
+                    }}
+                    className="px-2 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
+                    title="Delete this process (and any subprocesses)"
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
+
+              {findNodeById(rootNode, editor.selectedNodeId)?.successors?.map((succId) => {
                 const succNode = findNodeById(rootNode, succId);
                 return (
                   <button
                     key={`succ-${succId}`}
-                    onClick={() => deleteRelation({ from: selectedNodeId, to: succId })}
+                    onClick={() => editor.deleteRelation({ from: editor.selectedNodeId!, to: succId })}
                     className="px-1.5 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
                     title={`Delete successor: ${succNode?.label ?? succId}`}
                   >
@@ -956,12 +522,12 @@ export default function Home() {
                 );
               })}
 
-              {findNodeById(rootNode, selectedNodeId)?.predecessors?.map((predId) => {
+              {findNodeById(rootNode, editor.selectedNodeId)?.predecessors?.map((predId) => {
                 const predNode = findNodeById(rootNode, predId);
                 return (
                   <button
                     key={`pred-${predId}`}
-                    onClick={() => deleteRelation({ from: predId, to: selectedNodeId })}
+                    onClick={() => editor.deleteRelation({ from: predId, to: editor.selectedNodeId! })}
                     className="px-1.5 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
                     title={`Delete predecessor: ${predNode?.label ?? predId}`}
                   >
@@ -972,22 +538,22 @@ export default function Home() {
             </>
           )}
 
-          {selectedEdge && !pendingRelation && (
+          {editor.selectedEdge && !editor.pendingRelation && (
             <>
               <button
-                onClick={() => deleteRelation(selectedEdge)}
+                onClick={() => editor.deleteRelation(editor.selectedEdge!)}
                 className="px-2 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
               >
                 Delete
               </button>
               <button
-                onClick={reverseRelation}
+                onClick={editor.reverseRelation}
                 className="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs hover:bg-purple-200"
               >
                 Reverse
               </button>
               <button
-                onClick={toggleEdgeDashed}
+                onClick={editor.toggleEdgeDashed}
                 className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
               >
                 Toggle Dashed
@@ -998,13 +564,13 @@ export default function Home() {
       )}
 
       {/* PENDING RELATION POPUP */}
-      {pendingRelation && (
+      {editor.pendingRelation && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2 shadow-md pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-20">
           <span className="text-sm font-medium text-amber-700">
-            Select target {pendingRelation.mode === "successor" ? "successor" : "predecessor"}...
+            Select target {editor.pendingRelation.mode === "successor" ? "successor" : "predecessor"}...
           </span>
           <button
-            onClick={() => setPendingRelation(null)}
+            onClick={() => editor.setPendingRelation(null)}
             className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
           >
             Cancel
@@ -1024,13 +590,13 @@ export default function Home() {
         }}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onPointerLeave={() => setHoveredNodeId(null)}
+        onPointerLeave={() => editor.setHoveredNodeId(null)}
         onClick={() => {
           if (didDragRef.current) {
             didDragRef.current = false;
             return;
           }
-          clearSelection();
+          editor.clearSelection();
         }}
       >
         <div
@@ -1041,20 +607,19 @@ export default function Home() {
           }}
         />
 
-        {/* No more "No process loaded" – we always have a default data object */}
-        {error && (
+        {editor.error && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-lg px-4 py-2 text-sm shadow-md no-print">
-            {error}
+            {editor.error}
           </div>
         )}
 
-        {warning && (
+        {editor.warning && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-4 py-2 text-sm shadow-md max-w-md text-center no-print">
-            {warning}
+            {editor.warning}
           </div>
         )}
 
-        {data && rootNode && (
+        {editor.data && rootNode && (
           <div
             ref={(el) => {
               canvasRef.current = el;
@@ -1076,9 +641,9 @@ export default function Home() {
               node={rootNode}
               level={0}
               colorIndex={0}
-              completed={completed}
-              onToggleComplete={toggleComplete}
-              onEditNode={openEditor}
+              completed={editor.completed}
+              onToggleComplete={editor.toggleComplete}
+              onEditNode={editor.openEditor}
               registerNodeRef={registerNodeRef}
               activeNodeId={activeNodeId}
               onSelectNode={handleNodeClick}
@@ -1087,55 +652,55 @@ export default function Home() {
               rootNode={rootNode}
               positions={nodePositions}
               selectedNodeId={activeNodeId}
-              selectedEdge={selectedEdge}
-              onSelectEdge={handleSelectEdge}
-              edgeStyles={edgeStyles}
+              selectedEdge={editor.selectedEdge}
+              onSelectEdge={editor.handleSelectEdge}
+              edgeStyles={editor.edgeStyles}
             />
           </div>
         )}
       </div>
 
-      {/* EDIT MODAL (unchanged) */}
-      {editingNodeId && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print" onClick={closeEditor}>
+      {/* EDIT MODAL */}
+      {editor.editingNodeId && (
+        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print" onClick={editor.closeEditor}>
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold mb-4 text-gray-800">
-              Edit {editingField === "label" ? "Title" : "Description"}
+              Edit {editor.editingField === "label" ? "Title" : "Description"}
             </h3>
-            {editingField === "label" ? (
+            {editor.editingField === "label" ? (
               <input
                 autoFocus
                 type="text"
-                value={editingValue}
-                onChange={(e) => setEditingValue(e.target.value)}
+                value={editor.editingValue}
+                onChange={(e) => editor.setEditingValue(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Enter title"
               />
             ) : (
               <textarea
                 autoFocus
-                value={editingValue}
-                onChange={(e) => setEditingValue(e.target.value)}
+                value={editor.editingValue}
+                onChange={(e) => editor.setEditingValue(e.target.value)}
                 rows={5}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
                 placeholder="Enter description"
               />
             )}
             <div className="flex justify-end gap-2">
-              <button onClick={closeEditor} className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100">Cancel</button>
-              <button onClick={submitEditor} className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-gray-700">Done</button>
+              <button onClick={editor.closeEditor} className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100">Cancel</button>
+              <button onClick={editor.submitEditor} className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-gray-700">Done</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── ADD PROCESS MODAL (simplified) ────────────────────── */}
-      {showAddModal && (
+      {/* ADD PROCESS MODAL */}
+      {editor.showAddModal && (
         <div
           className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
           onClick={() => {
-            setShowAddModal(false);
-            setAddError("");
+            editor.setShowAddModal(false);
+            editor.setAddError("");
           }}
         >
           <div
@@ -1144,9 +709,9 @@ export default function Home() {
           >
             <h3 className="text-lg font-semibold mb-4 text-gray-800">Add New Process</h3>
 
-            {addError && (
+            {editor.addError && (
               <div className="mb-3 text-sm text-red-600 bg-red-50 p-2 rounded">
-                {addError}
+                {editor.addError}
               </div>
             )}
 
@@ -1154,8 +719,8 @@ export default function Home() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
               <input
                 type="text"
-                value={newProcess.label}
-                onChange={(e) => setNewProcess({ ...newProcess, label: e.target.value })}
+                value={editor.newProcess.label}
+                onChange={(e) => editor.setNewProcess({ ...editor.newProcess, label: e.target.value })}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="e.g. Site Analysis"
                 autoFocus
@@ -1165,8 +730,8 @@ export default function Home() {
             <div className="mb-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
               <textarea
-                value={newProcess.description}
-                onChange={(e) => setNewProcess({ ...newProcess, description: e.target.value })}
+                value={editor.newProcess.description}
+                onChange={(e) => editor.setNewProcess({ ...editor.newProcess, description: e.target.value })}
                 rows={2}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
                 placeholder="Brief description of the process"
@@ -1178,38 +743,38 @@ export default function Home() {
                 Position (order)
               </label>
               <div className="text-xs text-gray-500 mb-1">
-                Parent: <strong>{getParentInfo().parentLabel}</strong> &nbsp;|&nbsp; Current siblings: {getParentInfo().childCount}
+                Parent: <strong>{editor.getParentInfo().parentLabel}</strong> &nbsp;|&nbsp; Current siblings: {editor.getParentInfo().childCount}
               </div>
               <input
                 type="number"
                 min={0}
-                max={getParentInfo().childCount}
-                value={newProcess.position}
+                max={editor.getParentInfo().childCount}
+                value={editor.newProcess.position}
                 onChange={(e) =>
-                  setNewProcess({
-                    ...newProcess,
-                    position: Math.min(Math.max(Number(e.target.value) || 0, 0), getParentInfo().childCount),
+                  editor.setNewProcess({
+                    ...editor.newProcess,
+                    position: Math.min(Math.max(Number(e.target.value) || 0, 0), editor.getParentInfo().childCount),
                   })
                 }
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <div className="text-xs text-gray-400 mt-1">
-                0 = first, {getParentInfo().childCount} = last (append)
+                0 = first, {editor.getParentInfo().childCount} = last (append)
               </div>
             </div>
 
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => {
-                  setShowAddModal(false);
-                  setAddError("");
+                  editor.setShowAddModal(false);
+                  editor.setAddError("");
                 }}
                 className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
               >
                 Cancel
               </button>
               <button
-                onClick={handleAddProcess}
+                onClick={editor.handleAddProcess}
                 className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
               >
                 Add Process
@@ -1219,7 +784,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* PDF EXPORT DIALOG (unchanged) */}
+      {/* PDF EXPORT DIALOG */}
       {exportModal === "pdf" && (
         <div className="absolute inset-0 z-[300] flex items-center justify-center bg-black/40 no-print" onClick={() => setExportModal(null)}>
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1232,9 +797,8 @@ export default function Home() {
                   <button
                     key={size}
                     onClick={() => setPdfPageSize(size as "A4" | "A3" | "A2")}
-                    className={`flex-1 py-2 rounded-lg border text-sm font-medium ${
-                      pdfPageSize === size ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
-                    }`}
+                    className={`flex-1 py-2 rounded-lg border text-sm font-medium ${pdfPageSize === size ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                      }`}
                   >
                     {size}
                   </button>
@@ -1249,9 +813,8 @@ export default function Home() {
                   <button
                     key={orient}
                     onClick={() => setPdfOrientation(orient as "portrait" | "landscape")}
-                    className={`flex-1 py-2 rounded-lg border text-sm font-medium ${
-                      pdfOrientation === orient ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
-                    }`}
+                    className={`flex-1 py-2 rounded-lg border text-sm font-medium ${pdfOrientation === orient ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                      }`}
                   >
                     {orient.charAt(0).toUpperCase() + orient.slice(1)}
                   </button>
