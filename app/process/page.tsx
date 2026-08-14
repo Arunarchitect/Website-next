@@ -423,6 +423,17 @@ export default function Home() {
             + Add Process
           </button>
 
+          <button
+            onClick={() => editor.setShowPersonManager(true)}
+            title="Manage people"
+            className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-100 text-gray-700 sm:w-9 sm:h-9"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21a8 8 0 0 0-16 0" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </button>
+
           <button onClick={exportPng} title="Export as PNG" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">PNG</button>
           <button onClick={() => setExportModal("pdf")} title="Export as PDF" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">PDF</button>
           <button onClick={exportSvg} title="Export as SVG" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">SVG</button>
@@ -484,6 +495,13 @@ export default function Home() {
 
               {editor.selectedNodeId !== "root" && (
                 <>
+                  <button
+                    onClick={() => editor.openAssignPopup(editor.selectedNodeId!)}
+                    className="px-2 py-1 rounded bg-teal-100 text-teal-700 text-xs hover:bg-teal-200"
+                    title="Assign or remove people for this process"
+                  >
+                    Assign People
+                  </button>
                   <button
                     onClick={() => editor.duplicateNode(editor.selectedNodeId!)}
                     className="px-2 py-1 rounded bg-indigo-100 text-indigo-700 text-xs hover:bg-indigo-200"
@@ -647,6 +665,8 @@ export default function Home() {
               registerNodeRef={registerNodeRef}
               activeNodeId={activeNodeId}
               onSelectNode={handleNodeClick}
+              persons={editor.persons}
+              onOpenAssignPopup={editor.openAssignPopup}
             />
             <RelationshipArrows
               rootNode={rootNode}
@@ -778,6 +798,113 @@ export default function Home() {
                 className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
               >
                 Add Process
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PERSON MANAGER MODAL */}
+      {editor.showPersonManager && (
+        <div
+          className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
+          onClick={() => editor.setShowPersonManager(false)}
+        >
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4 text-gray-800">People</h3>
+
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                value={editor.newPersonName}
+                onChange={(e) => editor.setNewPersonName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") editor.addPerson();
+                }}
+                placeholder="Add a person's name"
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+              <button
+                onClick={editor.addPerson}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+              >
+                Add
+              </button>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto flex flex-col gap-1">
+              {editor.persons.length === 0 && (
+                <div className="text-sm text-gray-400 text-center py-4">No people yet.</div>
+              )}
+              {editor.persons.map((person) => (
+                <div key={person.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50">
+                  <span className="text-sm text-gray-700">{person.name}</span>
+                  <button
+                    onClick={() => editor.deletePerson(person.id)}
+                    className="text-xs text-red-600 hover:text-red-800"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => editor.setShowPersonManager(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ASSIGN PEOPLE TO NODE POPUP */}
+      {editor.assignPopupNodeId && rootNode && (
+        <div
+          className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
+          onClick={editor.closeAssignPopup}
+        >
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-1 text-gray-800">Assign people</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              {findNodeById(rootNode, editor.assignPopupNodeId)?.label ?? "This process"} — subprocesses are assigned separately.
+            </p>
+
+            {editor.persons.length === 0 ? (
+              <div className="text-sm text-gray-400 text-center py-4">
+                No people yet. Add some from the people button in the toolbar.
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto flex flex-col gap-1">
+                {editor.persons.map((person) => {
+                  const node = findNodeById(rootNode, editor.assignPopupNodeId!);
+                  const isAssigned = node?.assignedPersonIds?.includes(person.id) ?? false;
+                  return (
+                    <button
+                      key={person.id}
+                      onClick={() => editor.toggleNodeAssignment(editor.assignPopupNodeId!, person.id)}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left ${
+                        isAssigned ? "bg-blue-50 text-blue-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      <span>{person.name}</span>
+                      {isAssigned && <span className="text-xs">✓ assigned</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={editor.closeAssignPopup}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                Done
               </button>
             </div>
           </div>

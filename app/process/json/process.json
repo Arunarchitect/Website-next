@@ -5,93 +5,235 @@
   "width": 2400,
   "height": 450,
   "edgeStyles": {
-    "ideation->submission": { "dashed": true }
+    "ideation->submission": {
+      "dashed": true
+    }
   },
+  "persons": [
+    {
+      "id": "p-arun",
+      "name": "Arun"
+    },
+    {
+      "id": "person-1786701015227-kbq9bx",
+      "name": "Ali"
+    }
+  ],
   "children": [
     {
       "id": "brief-review",
       "label": "Design Challenge Brief & Team Assembly",
       "description": "Review TOR, deliverables, and budget. Assemble a multidisciplinary team and select AI tools.",
-      "successors": ["redesign-justification"],
+      "successors": [
+        "redesign-justification"
+      ],
+      "assignedPersonIds": [
+        "p-arun"
+      ],
       "children": [
-        { "id": "tor-analysis", "label": "TOR & Deliverables Analysis", "description": "Interpret required deliverables, AED 35M budget, 15,000 m² site.", "children": [] },
-        { "id": "team-formation", "label": "Team & AI Tool Selection", "description": "Form team; select AI platforms (Midjourney, RunwayML) and simulation tools (ENVI-met, AnyLogic).", "children": [] }
+        {
+          "id": "tor-analysis",
+          "label": "TOR & Deliverables Analysis",
+          "description": "Interpret required deliverables, AED 35M budget, 15,000 m² site.",
+          "children": []
+        },
+        {
+          "id": "team-formation",
+          "label": "Team & AI Tool Selection",
+          "description": "Form team; select AI platforms (Midjourney, RunwayML) and simulation tools (ENVI-met, AnyLogic).",
+          "children": []
+        }
       ]
     },
     {
       "id": "redesign-justification",
       "label": "Redesign Justification",
       "description": "Identify shortcomings of the existing park and set strategic objectives aligned with Dubai 2040.",
-      "predecessors": ["brief-review"],
-      "successors": ["data-collection"],
+      "predecessors": [
+        "brief-review"
+      ],
+      "successors": [
+        "data-collection"
+      ],
+      "assignedPersonIds": [],
       "children": [
-        { "id": "current-condition-audit", "label": "Existing Park Condition Audit", "description": "On-site inspection: ageing infrastructure, shading, accessibility gaps.", "children": [] },
-        { "id": "stakeholder-needs", "label": "Stakeholder & Community Aspirations", "description": "Interviews and sentiment analysis to identify safety, comfort, and inclusivity gaps.", "children": [] }
+        {
+          "id": "current-condition-audit",
+          "label": "Existing Park Condition Audit",
+          "description": "On-site inspection: ageing infrastructure, shading, accessibility gaps.",
+          "children": []
+        },
+        {
+          "id": "stakeholder-needs",
+          "label": "Stakeholder & Community Aspirations",
+          "description": "Interviews and sentiment analysis to identify safety, comfort, and inclusivity gaps.",
+          "children": []
+        }
       ]
     },
     {
       "id": "data-collection",
       "label": "Data Collection",
       "description": "Gather site, user, microclimate, and utility data using LiDAR, surveys, and GIS.",
-      "predecessors": ["redesign-justification"],
-      "successors": ["analysis"],
+      "predecessors": [
+        "redesign-justification"
+      ],
+      "successors": [
+        "analysis"
+      ],
+      "assignedPersonIds": [],
       "children": [
-        { "id": "physical-topography", "label": "Topography & LiDAR Survey", "description": "UAV-based LiDAR capture of contours, canopy heights, hardscape.", "children": [] },
-        { "id": "user-surveys", "label": "User Demographics & Intercept Surveys", "description": "On-site interviews (n=300) capturing usage patterns and accessibility needs.", "children": [] }
+        {
+          "id": "physical-topography",
+          "label": "Topography & LiDAR Survey",
+          "description": "UAV-based LiDAR capture of contours, canopy heights, hardscape.",
+          "children": []
+        },
+        {
+          "id": "user-surveys",
+          "label": "User Demographics & Intercept Surveys",
+          "description": "On-site interviews (n=300) capturing usage patterns and accessibility needs.",
+          "children": []
+        }
       ]
     },
     {
       "id": "analysis",
       "label": "Comprehensive Analysis & Synthesis",
       "description": "AI-augmented SWOT, spatial suitability, and thermal comfort studies.",
-      "predecessors": ["data-collection"],
-      "successors": ["ideation"],
+      "predecessors": [
+        "data-collection"
+      ],
+      "successors": [
+        "ideation"
+      ],
+      "assignedPersonIds": [],
       "children": [
-        { "id": "gis-overlay", "label": "GIS Multi-Criteria Spatial Suitability", "description": "Weighted overlay in ArcGIS Pro for planting, play, and quiet zones.", "children": [] },
-        { "id": "thermal-comfort", "label": "Thermal Comfort & Microclimate Baseline", "description": "ENVI-met simulation to pinpoint UTCI hotspots at peak summer hours.", "children": [] }
+        {
+          "id": "gis-overlay",
+          "label": "GIS Multi-Criteria Spatial Suitability",
+          "description": "Weighted overlay in ArcGIS Pro for planting, play, and quiet zones.",
+          "children": []
+        },
+        {
+          "id": "thermal-comfort",
+          "label": "Thermal Comfort & Microclimate Baseline",
+          "description": "ENVI-met simulation to pinpoint UTCI hotspots at peak summer hours.",
+          "children": []
+        }
       ]
     },
     {
       "id": "ideation",
       "label": "Concept Ideation (AI-Augmented)",
       "description": "Generate and refine multiple design concepts using generative AI.",
-      "predecessors": ["analysis"],
-      "successors": ["scenario-testing", "submission"],
+      "predecessors": [
+        "analysis"
+      ],
+      "successors": [
+        "scenario-testing",
+        "submission"
+      ],
+      "assignedPersonIds": [
+        "p-arun"
+      ],
       "children": [
-        { "id": "concept-variants", "label": "Three Concept Scenarios (A, B, C)", "description": "Oasis, Green Spine, and Urban Living Room — AI-enhanced mood boards.", "children": [] },
-        { "id": "ai-methodology-draft", "label": "Draft AI Methodology Report", "description": "Document AI tools, workflows, and their influence on each concept.", "children": [] }
+        {
+          "id": "concept-variants",
+          "label": "Three Concept Scenarios (A, B, C)",
+          "description": "Oasis, Green Spine, and Urban Living Room — AI-enhanced mood boards.",
+          "children": [],
+          "assignedPersonIds": [
+            "p-arun"
+          ]
+        },
+        {
+          "id": "ai-methodology-draft",
+          "label": "Draft AI Methodology Report",
+          "description": "Document AI tools, workflows, and their influence on each concept.",
+          "children": [],
+          "assignedPersonIds": [
+            "person-1786701015227-kbq9bx"
+          ]
+        }
       ]
     },
     {
       "id": "scenario-testing",
       "label": "Scenario Testing & Performance Simulation",
       "description": "AI-driven simulations for microclimate, pedestrian flow, cost, and sustainability.",
-      "predecessors": ["ideation"],
-      "successors": ["preliminary-design"],
+      "predecessors": [
+        "ideation"
+      ],
+      "successors": [
+        "preliminary-design"
+      ],
+      "assignedPersonIds": [],
       "children": [
-        { "id": "microclimate-optimisation", "label": "Microclimate & Solar Optimisation", "description": "Ladybug + ENVI-met scenario testing; AI-suggested tree placement and shading.", "children": [] },
-        { "id": "cost-estimation", "label": "Preliminary Cost & Value Engineering", "description": "ROM costing per scenario, aligned with AED 35M budget.", "children": [] }
+        {
+          "id": "microclimate-optimisation",
+          "label": "Microclimate & Solar Optimisation",
+          "description": "Ladybug + ENVI-met scenario testing; AI-suggested tree placement and shading.",
+          "children": []
+        },
+        {
+          "id": "cost-estimation",
+          "label": "Preliminary Cost & Value Engineering",
+          "description": "ROM costing per scenario, aligned with AED 35M budget.",
+          "children": []
+        }
       ]
     },
     {
       "id": "preliminary-design",
       "label": "Preliminary Design Development",
       "description": "Elaborate the selected concept into a coordinated preliminary design.",
-      "predecessors": ["scenario-testing"],
-      "successors": ["submission"],
+      "predecessors": [
+        "scenario-testing"
+      ],
+      "successors": [
+        "submission"
+      ],
+      "assignedPersonIds": [
+        "p-arun"
+      ],
       "children": [
-        { "id": "masterplan-refinement", "label": "Detailed Masterplan & Spatial Organisation", "description": "CAD drafting: zoning, hierarchy, functional relationships.", "children": [] },
-        { "id": "material-palette", "label": "Material & Landscape Palette", "description": "Durable, sustainable materials with AI-aided life-cycle assessment.", "children": [] }
+        {
+          "id": "masterplan-refinement",
+          "label": "Detailed Masterplan & Spatial Organisation",
+          "description": "CAD drafting: zoning, hierarchy, functional relationships.",
+          "children": []
+        },
+        {
+          "id": "material-palette",
+          "label": "Material & Landscape Palette",
+          "description": "Durable, sustainable materials with AI-aided life-cycle assessment.",
+          "children": []
+        }
       ]
     },
     {
       "id": "submission",
       "label": "Final Submission Package",
       "description": "Produce all required deliverables per Schedule 2.",
-      "predecessors": ["preliminary-design", "ideation"],
+      "predecessors": [
+        "preliminary-design",
+        "ideation"
+      ],
+      "assignedPersonIds": [],
       "children": [
-        { "id": "design-report", "label": "Design Narrative & AI Methodology Report", "description": "Vision, sustainability, and AI workflow — 20-30 page PDF booklet.", "children": [] },
-        { "id": "final-review", "label": "Final Quality Check & Upload", "description": "Cross-check deliverables against Schedule 2; upload by 15 Aug 2026.", "children": [] }
+        {
+          "id": "design-report",
+          "label": "Design Narrative & AI Methodology Report",
+          "description": "Vision, sustainability, and AI workflow — 20-30 page PDF booklet.",
+          "children": []
+        },
+        {
+          "id": "final-review",
+          "label": "Final Quality Check & Upload",
+          "description": "Cross-check deliverables against Schedule 2; upload by 15 Aug 2026.",
+          "children": []
+        }
       ]
     }
   ],

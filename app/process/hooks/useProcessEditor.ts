@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ProcessData, ProcessNode } from "@/app/process/lib/process-utils";
+import { Person, ProcessData, ProcessNode } from "@/app/process/lib/process-utils";
 
 // ─── Pure tree helpers ───────────────────────────────────────────
 
@@ -89,6 +89,8 @@ function cloneSubtreeWithNewIds(node: ProcessNode): ProcessNode {
     id: newId,
     successors: undefined,
     predecessors: undefined,
+    // assignedPersonIds intentionally NOT copied — see README note on duplicate
+    assignedPersonIds: undefined,
     children: (node.children ?? []).map(cloneSubtreeWithNewIds),
   };
 }
@@ -104,6 +106,14 @@ function insertNodeAfter(root: ProcessNode, targetId: string, newNode: ProcessNo
     return { ...root, children: root.children.map((c) => insertNodeAfter(c, targetId, newNode)) };
   }
   return root;
+}
+
+function stripPersonFromTree(root: ProcessNode, personId: string): ProcessNode {
+  return {
+    ...root,
+    assignedPersonIds: root.assignedPersonIds?.filter((pid) => pid !== personId),
+    children: root.children?.map((c) => stripPersonFromTree(c, personId)),
+  };
 }
 
 function isNodeComplete(node: ProcessNode, completed: Set<string>): boolean {
@@ -129,6 +139,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [edgeStyles, setEdgeStyles] = useState<Map<string, { dashed: boolean }>>(new Map());
+  const [persons, setPersons] = useState<Person[]>(initialData.persons ?? []);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -145,6 +156,11 @@ export function useProcessEditor(initialData: ProcessData) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newProcess, setNewProcess] = useState({ label: "", description: "", position: 0 });
   const [addError, setAddError] = useState("");
+
+  // ─── People ────────────────────────────────────────────────
+  const [showPersonManager, setShowPersonManager] = useState(false);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [assignPopupNodeId, setAssignPopupNodeId] = useState<string | null>(null);
 
   const showWarning = (message: string) => {
     setWarning(message);
@@ -328,6 +344,7 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedNodeId(null);
     setSelectedEdge(null);
     setPendingRelation(null);
+    if (assignPopupNodeId && idsToRemove.has(assignPopupNodeId)) setAssignPopupNodeId(null);
   };
 
   const duplicateNode = (id: string) => {
@@ -363,6 +380,82 @@ export function useProcessEditor(initialData: ProcessData) {
 
     setSelectedNodeId(clone.id);
   };
+
+  // ─── People ────────────────────────────────────────────────
+  const addPerson = () => {
+    const trimmed = newPersonName.trim();
+    if (!trimmed) return;
+    const newPerson: Person = {
+      id: `person-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      name: trimmed,
+    };
+    setPersons((prev) => [...prev, newPerson]);
+    setNewPersonName("");
+  };
+
+  const deletePerson = (id: string) => {
+    setPersons((prev) => prev.filter((p) => p.id !== id));
+
+    if (!data) return;
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    };
+    const newRoot = stripPersonFromTree(rootRef, id);
+
+    setData({
+      ...data,
+      title: newRoot.label,
+      description: newRoot.description,
+      type: newRoot.type,
+      width: newRoot.width,
+      height: newRoot.height,
+      children: newRoot.children,
+    });
+  };
+
+  const toggleNodeAssignment = (nodeId: string, personId: string) => {
+    if (!data) return;
+    setData((prev) => {
+      if (!prev) return prev;
+      const root: ProcessNode = {
+        id: "root",
+        label: prev.title,
+        description: prev.description,
+        type: "process",
+        width: prev.width,
+        height: prev.height,
+        children: prev.children ?? [],
+      };
+
+      const newRoot = updateNodeData(root, nodeId, (node) => {
+        const current = node.assignedPersonIds ?? [];
+        const has = current.includes(personId);
+        return {
+          ...node,
+          assignedPersonIds: has ? current.filter((pid) => pid !== personId) : [...current, personId],
+        };
+      });
+
+      return {
+        ...prev,
+        title: newRoot.label,
+        description: newRoot.description,
+        type: newRoot.type,
+        width: newRoot.width,
+        height: newRoot.height,
+        children: newRoot.children,
+      };
+    });
+  };
+
+  const openAssignPopup = (nodeId: string) => setAssignPopupNodeId(nodeId);
+  const closeAssignPopup = () => setAssignPopupNodeId(null);
 
   // ─── Relations ─────────────────────────────────────────────
   const addRelation = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
@@ -518,10 +611,12 @@ export function useProcessEditor(initialData: ProcessData) {
 
         setData(json);
         setCompleted(new Set(json.completed ?? []));
+        setPersons(json.persons ?? []);
         setSelectedNodeId(null);
         setHoveredNodeId(null);
         setSelectedEdge(null);
         setPendingRelation(null);
+        setAssignPopupNodeId(null);
         setEdgeStyles(
           new Map(
             Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
@@ -548,6 +643,7 @@ export function useProcessEditor(initialData: ProcessData) {
         ...data,
         completed: Array.from(completed),
         edgeStyles: Object.fromEntries(edgeStyles.entries()),
+        persons,
       };
 
       const jsonString = JSON.stringify(exportData, null, 2);
@@ -609,5 +705,9 @@ export function useProcessEditor(initialData: ProcessData) {
     toggleComplete, handleUpload, handleSave, updateNode,
     totalLeaves, completedLeaves,
     clearSelection, handleNodeClick, handleSelectEdge,
+    // people
+    persons, showPersonManager, setShowPersonManager,
+    newPersonName, setNewPersonName, addPerson, deletePerson,
+    assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment,
   };
 }

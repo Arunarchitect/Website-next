@@ -2,6 +2,11 @@
    TYPES
 ========================================================= */
 
+export type Person = {
+  id: string;
+  name: string;
+};
+
 export type ProcessNode = {
   id: string;
   label: string;
@@ -11,6 +16,7 @@ export type ProcessNode = {
   height?: number;
   predecessors?: string[];  // ids of predecessor nodes (same level)
   successors?: string[];    // ids of successor nodes (same level)
+  assignedPersonIds?: string[]; // ids into ProcessData.persons — NOT inherited by children
   children?: ProcessNode[];
 };
 
@@ -21,7 +27,8 @@ export type ProcessData = {
   width?: number;
   height?: number;
   completed?: string[];
-  edgeStyles?: Record<string, { dashed?: boolean }>;  // NEW
+  edgeStyles?: Record<string, { dashed?: boolean }>;
+  persons?: Person[]; // global roster, referenced by ProcessNode.assignedPersonIds
   children?: ProcessNode[];
 };
 

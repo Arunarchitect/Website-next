@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import {
+  Person,
   ProcessNode,
   getColorTheme,
   getLayout,
@@ -106,6 +107,10 @@ type ProcessContainerProps = {
   onSelectNode: (id: string) => void;
   /** This node's position in the tree, e.g. [2, 1] for "2nd top-level process, 1st subprocess". Empty for root. */
   numberPath?: number[];
+  /** Global person roster, used to resolve assignedPersonIds -> names. */
+  persons: Person[];
+  /** Opens the assign/unassign popup for this node. */
+  onOpenAssignPopup: (nodeId: string) => void;
 };
 
 export function ProcessContainer({
@@ -119,6 +124,8 @@ export function ProcessContainer({
   activeNodeId,
   onSelectNode,
   numberPath = [],
+  persons,
+  onOpenAssignPopup,
 }: ProcessContainerProps) {
   const children = node.children ?? [];
   const layout = getLayout(level);
@@ -130,6 +137,10 @@ export function ProcessContainer({
 
   // Root (level 0) is the canvas container, not a numbered process itself.
   const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
+
+  const assignedNames = (node.assignedPersonIds ?? [])
+    .map((pid) => persons.find((p) => p.id === pid)?.name)
+    .filter((name): name is string => Boolean(name));
 
   // Long‑press handling for mobile
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -279,6 +290,30 @@ export function ProcessContainer({
         </div>
       )}
 
+      {/* ASSIGNED PEOPLE (own row, click opens assign popup) — not shown on root */}
+      {level > 0 && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenAssignPopup(node.id);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            marginTop: "5px",
+            marginLeft: "30px",
+            fontSize: "10px",
+            lineHeight: 1.3,
+            color: assignedNames.length > 0 ? "#8B96A5" : "#B8C5D6",
+            cursor: "pointer",
+            userSelect: "none",
+            fontStyle: assignedNames.length > 0 ? "normal" : "italic",
+          }}
+          title="Click to assign or remove people"
+        >
+          {assignedNames.length > 0 ? assignedNames.join(", ") : "+ assign person"}
+        </div>
+      )}
+
       {/* CHILDREN */}
       {children.length > 0 && (
         <div
@@ -311,6 +346,8 @@ export function ProcessContainer({
               activeNodeId={activeNodeId}
               onSelectNode={onSelectNode}
               numberPath={[...numberPath, index + 1]}
+              persons={persons}
+              onOpenAssignPopup={onOpenAssignPopup}
             />
           ))}
         </div>
