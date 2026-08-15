@@ -1,13 +1,43 @@
 "use client";
 
+import "./page.css";
 import { useEffect, useRef, useState, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { ProcessContainer } from "@/app/process/components/ProcessContainer";
-import { RelationshipArrows, Edge } from "@/app/process/components/RelationshipArrows";
+import { RelationshipArrows} from "@/app/process/components/RelationshipArrows";
 import html2canvas from "html2canvas";
 import { toSvg } from "html-to-image";
 import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
+import { useCloudSync } from "@/app/process/hooks/useCloudSync";
+import { useAutosave } from "@/app/process/hooks/useAutoSave";
 
 const DRAG_THRESHOLD = 6;
+
+// ─── Shared button style tokens (keeps the toolbar/modals consistent) ───
+const btnBase =
+  "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap";
+const btnGhost = `${btnBase} text-gray-600 hover:bg-gray-100`;
+const btnOutline = `${btnBase} border border-gray-200 text-gray-700 hover:bg-gray-50`;
+const btnPrimary = `${btnBase} bg-indigo-600 text-white hover:bg-indigo-500`;
+const btnDanger = `${btnBase} bg-red-50 text-red-600 hover:bg-red-100`;
+const inputBase =
+  "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition";
+
+// ─── Small inline icons — kept minimal since most toolbar buttons use text labels now ───
+const IconWrap = ({ children }: { children: React.ReactNode }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {children}
+  </svg>
+);
+const IconUsers = () => (
+  <IconWrap><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" /></IconWrap>
+);
+const IconChevronLeft = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+);
+const IconChevronRight = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+);
 
 export default function Home() {
   // ─── Editing logic (data, relations, modals, upload/save) lives in the hook ───
@@ -21,6 +51,171 @@ export default function Home() {
     completed: [],
     edgeStyles: {},
   });
+
+  // ─── Cloud sync + autosave ───────────────────────────────────
+  const cloud = useCloudSync(editor.loadData);
+  const autosave = useAutosave(editor.getExportData, cloud.saveToCloud);
+
+  // Save popup state — server is the default tab
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveMode, setSaveMode] = useState<"local" | "server">("server");
+  const [passphrase, setPassphrase] = useState("");
+  const [saveTitle, setSaveTitle] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveFormError, setSaveFormError] = useState("");
+
+  // Admin-only: setting a document as master requires this key, so it
+  // isn't just a checkbox anyone saving can tick.
+  const [showAdminMaster, setShowAdminMaster] = useState(false);
+  const [wantMaster, setWantMaster] = useState(false);
+  const [masterKeyInput, setMasterKeyInput] = useState("");
+
+  // Autosave enable prompt (asks for passphrase once, then silent)
+  const [autosavePromptOpen, setAutosavePromptOpen] = useState(false);
+  const [autosavePassphraseInput, setAutosavePassphraseInput] = useState("");
+
+  // People manager: inline rename state — which person row is being edited
+  const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [editingPersonName, setEditingPersonName] = useState("");
+
+  const startRenamePerson = (id: string, currentName: string) => {
+    setEditingPersonId(id);
+    setEditingPersonName(currentName);
+  };
+
+  const commitRenamePerson = () => {
+    if (editingPersonId) {
+      editor.renamePerson(editingPersonId, editingPersonName);
+    }
+    setEditingPersonId(null);
+    setEditingPersonName("");
+  };
+
+  const cancelRenamePerson = () => {
+    setEditingPersonId(null);
+    setEditingPersonName("");
+  };
+
+  // Compact toolbar: dropdown popover + horizontal scroll affordance
+  const [loadMenuOpen, setLoadMenuOpen] = useState(false);
+  const loadBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0 });
+
+  const toggleLoadMenu = () => {
+    if (!loadMenuOpen && loadBtnRef.current) {
+      const rect = loadBtnRef.current.getBoundingClientRect();
+      setLoadMenuPos({ top: rect.bottom + 6, left: rect.left });
+    }
+    setLoadMenuOpen((v) => !v);
+  };
+
+  const loadMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!loadMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        loadMenuRef.current &&
+        !loadMenuRef.current.contains(target) &&
+        loadBtnRef.current &&
+        !loadBtnRef.current.contains(target)
+      ) {
+        setLoadMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [loadMenuOpen]);
+
+
+  const toolbarScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateToolbarScrollState = () => {
+    const el = toolbarScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    updateToolbarScrollState();
+    const el = toolbarScrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", updateToolbarScrollState, { passive: true });
+    window.addEventListener("resize", updateToolbarScrollState);
+    return () => {
+      el.removeEventListener("scroll", updateToolbarScrollState);
+      window.removeEventListener("resize", updateToolbarScrollState);
+    };
+  }, [editor.data]);
+
+  const scrollToolbar = (dir: "left" | "right") => {
+    toolbarScrollRef.current?.scrollBy({ left: dir === "left" ? -140 : 140, behavior: "smooth" });
+  };
+
+  const openSaveModal = () => {
+    setSaveTitle(editor.data?.title || "");
+    setSaveFormError("");
+    setShowAdminMaster(false);
+    setWantMaster(false);
+    setMasterKeyInput("");
+    setSaveModalOpen(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (saveMode === "local") {
+      editor.handleSave();
+      setSaveModalOpen(false);
+      return;
+    }
+
+    // server save
+    if (!passphrase.trim()) {
+      setSaveFormError("Enter your passphrase to save to the server.");
+      return;
+    }
+    const exportData = editor.getExportData();
+    if (!exportData) {
+      setSaveFormError("No process data to save.");
+      return;
+    }
+    if (wantMaster && !masterKeyInput.trim()) {
+      setSaveFormError("Enter the master key to set this as the default workflow.");
+      return;
+    }
+
+    setSaveBusy(true);
+    setSaveFormError("");
+    try {
+      await cloud.saveToCloud({
+        passphrase: passphrase.trim(),
+        title: saveTitle.trim(),
+        is_master: wantMaster,
+        master_key: wantMaster ? masterKeyInput.trim() : undefined,
+        data: exportData,
+      });
+      // This passphrase just proved itself against the server — reuse it
+      // for autosave without asking again.
+      autosave.enable(passphrase.trim());
+      setSaveModalOpen(false);
+    }  catch (err: unknown) {
+      setSaveFormError(err instanceof Error ? err.message : "Failed to save to server.");
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
+  const handleEnableAutosave = async () => {
+    if (!autosavePassphraseInput.trim()) return;
+    const ok = await autosave.verifyAndEnable(autosavePassphraseInput);
+    if (ok) {
+      setAutosavePromptOpen(false);
+      setAutosavePassphraseInput("");
+    }
+  };
 
   // ─── View state (pan/zoom/drag, export) ────────────────────────
   const [zoom, setZoom] = useState(1);
@@ -372,71 +567,184 @@ export default function Home() {
   // ─── Render ────────────────────────────────────────────────────
   return (
     <main
-      className="relative w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px] overflow-hidden bg-gray-100 rounded-xl"
+      className="relative w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px] overflow-hidden bg-gray-50 rounded-2xl"
       style={{ userSelect: dragging ? "none" : "auto" }}
     >
-      <style>{`
-        @media print {
-          body.printing * { visibility: hidden; }
-          body.printing [data-print-root],
-          body.printing [data-print-root] * { visibility: visible; }
-          body.printing [data-print-root] {
-            position: absolute;
-            left: 0;
-            top: 0;
-            transform: scale(var(--print-scale, 1));
-            transform-origin: top left;
-            width: auto;
-            height: auto;
-          }
-          .no-print { display: none !important; }
-        }
-      `}</style>
 
       {/* TOOLBAR */}
-      <div className="absolute top-2 left-2 right-2 z-[100] flex flex-wrap items-start justify-between gap-2 pointer-events-none sm:top-4 sm:left-4 sm:right-4 sm:gap-4 no-print">
-        <div className="bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-md pointer-events-auto sm:px-4 sm:py-3">
-          <div className="font-semibold text-gray-800 text-sm sm:text-base">Process Viewer</div>
-          <div className="text-xs text-gray-500 mt-1">
+      <div className="absolute top-2 left-2 right-2 z-[100] flex flex-wrap items-start justify-between gap-2 pointer-events-none sm:top-4 sm:left-4 sm:right-4 sm:gap-3 no-print">
+        <div className="bg-white/95 backdrop-blur border border-gray-200/70 rounded-2xl px-3.5 py-2.5 shadow-[0_2px_16px_rgba(15,23,42,0.06)] pointer-events-auto sm:px-4 sm:py-3">
+          <div className="font-semibold text-gray-900 text-sm sm:text-base tracking-tight">Process Viewer</div>
+          <div className="text-xs text-gray-500 mt-0.5">
             {editor.data
-              ? `Drag to move • Pinch/Scroll to zoom • ${editor.completedLeaves} / ${editor.totalLeaves} steps completed`
+              ? `${editor.completedLeaves} / ${editor.totalLeaves} steps done`
               : "Upload a process JSON file"}
           </div>
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-2 bg-white border border-gray-200 rounded-xl p-1 sm:p-2 shadow-md pointer-events-auto overflow-x-auto max-w-full">
-          <label className="inline-flex items-center justify-center cursor-pointer bg-gray-900 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-gray-700 transition sm:px-4 sm:py-2 sm:text-sm">
-            Upload
-            <input type="file" accept=".json,application/json" onChange={editor.handleUpload} className="hidden" />
-          </label>
-          <button onClick={zoomOut} className="w-7 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-base text-gray-700 sm:w-9 sm:h-9 sm:text-lg">−</button>
-          <div className="min-w-[45px] text-center text-xs font-medium text-gray-700 sm:min-w-[55px] sm:text-sm">{Math.round(zoom * 100)}%</div>
-          <button onClick={zoomIn} className="w-7 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-base text-gray-700 sm:w-9 sm:h-9 sm:text-lg">+</button>
-          <button onClick={fitAllView} title="Zoom to fit" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Reset</button>
-          <button onClick={editor.handleSave} title="Download JSON" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">Save JSON</button>
+        {/* Action bar — one compact, icon-first row for both mobile and desktop.
+            On mobile it scrolls horizontally with arrow affordances; on desktop
+            it's short enough to just fit. */}
+        <div className="relative max-w-full pointer-events-auto">
+          <div className="bg-white/95 backdrop-blur border border-gray-200/70 rounded-2xl shadow-[0_2px_16px_rgba(15,23,42,0.06)] overflow-hidden">
+            <div
+              ref={toolbarScrollRef}
+              className="flex items-center gap-1 p-1.5 overflow-x-auto no-scrollbar scroll-smooth"
+            >
+              <label className={`${btnPrimary} h-8 px-2.5 text-xs cursor-pointer shrink-0 sm:h-9 sm:px-3 sm:text-sm`} title="Upload a process JSON file">
+                Upload
+                <input type="file" accept=".json,application/json" onChange={editor.handleUpload} className="hidden" />
+              </label>
 
-          <button
-            onClick={() => editor.setShowAddModal(true)}
-            title="Add a new process node"
-            className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm bg-blue-50 border-blue-300 hover:bg-blue-100"
-          >
-            + Add Process
-          </button>
+              <div className="flex items-center gap-0.5 mx-0.5 shrink-0">
+                <button onClick={zoomOut} title="Zoom out" className={`${btnGhost} w-8 h-8 text-base sm:w-9 sm:h-9`}>−</button>
+                <div className="min-w-[34px] text-center text-[11px] font-medium text-gray-500 sm:min-w-[40px] sm:text-xs">{Math.round(zoom * 100)}%</div>
+                <button onClick={zoomIn} title="Zoom in" className={`${btnGhost} w-8 h-8 text-base sm:w-9 sm:h-9`}>+</button>
+              </div>
 
-          <button
-            onClick={() => editor.setShowPersonManager(true)}
-            title="Manage people"
-            className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-100 text-gray-700 sm:w-9 sm:h-9"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 21a8 8 0 0 0-16 0" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
-          </button>
+              <button onClick={fitAllView} title="Fit to screen" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>
+                Fit
+              </button>
 
-          <button onClick={exportPng} title="Export as PNG" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">PNG</button>
-          <button onClick={() => setExportModal("pdf")} title="Export as PDF" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">PDF</button>
-          <button onClick={exportSvg} title="Export as SVG" className="px-2 h-7 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs text-gray-700 sm:px-3 sm:h-9 sm:text-sm">SVG</button>
+              <button onClick={openSaveModal} title="Save this workflow" className={`${btnOutline} h-8 px-2.5 text-xs shrink-0 sm:h-9 sm:px-3 sm:text-sm`}>
+                Save
+              </button>
+
+              <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
+
+              {/* Load from server — rendered through a portal (see below) so the
+                  toolbar's overflow-hidden / overflow-x-auto ancestors can't
+                  clip the dropdown panel */}
+              <div className="relative shrink-0">
+                <button
+                  ref={loadBtnRef}
+                  onClick={toggleLoadMenu}
+                  title="Load a saved workflow from the server"
+                  className={`${btnGhost} h-8 px-2 text-xs sm:h-9 sm:px-2.5 sm:text-sm`}
+                >
+                  Load ▾
+                </button>
+
+                {loadMenuOpen &&
+                  createPortal(
+                    <div
+                      ref={loadMenuRef}
+                      style={{ position: "fixed", top: loadMenuPos.top, left: loadMenuPos.left, zIndex: 500 }}
+                      className="w-72 max-h-80 overflow-y-auto bg-white border border-gray-200/70 rounded-xl shadow-[0_8px_30px_rgba(15,23,42,0.12)] p-1.5"
+                    >
+                      {cloud.cloudError && (
+                        <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 mb-1.5">
+                          {cloud.cloudError}
+                        </div>
+                      )}
+
+                      {cloud.cloudLoading && (
+                        <div className="text-xs text-gray-400 text-center py-3">Loading…</div>
+                      )}
+
+                      {!cloud.cloudLoading && cloud.cloudList.length === 0 && (
+                        <div className="text-xs text-gray-400 text-center py-4">No saved workflows yet.</div>
+                      )}
+
+                      {!cloud.cloudLoading &&
+                        cloud.cloudList.map((doc) => (
+                          <button
+                            key={doc.id}
+                            onClick={async () => {
+                              try {
+                                await cloud.loadCloudDoc(doc.id);
+                                setLoadMenuOpen(false);
+                              } catch {
+                                // cloudError is already set by the hook; keep menu open so it's visible
+                              }
+                            }}
+                            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-gray-50 flex flex-col gap-0.5"
+                          >
+                            <span className="text-sm text-gray-800 flex items-center gap-1.5">
+                              {doc.title || "Untitled Workflow"}
+                              {doc.is_master && (
+                                <span className="text-[10px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-full">
+                                  master
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-[11px] text-gray-400">
+                              {doc.person_name ? `${doc.person_name} · ` : ""}
+                              {new Date(doc.updated_at).toLocaleString()}
+                            </span>
+                          </button>
+                        ))}
+                    </div>,
+                    document.body
+                  )}
+              </div>
+
+              <button
+                onClick={() => {
+                  if (autosave.enabled) {
+                    autosave.disable();
+                  } else {
+                    setAutosavePromptOpen(true);
+                  }
+                }}
+                title={
+                  autosave.enabled
+                    ? autosave.lastSavedAt
+                      ? `Autosaving — last saved ${autosave.lastSavedAt.toLocaleTimeString()}`
+                      : "Autosave on — waiting for first save"
+                    : "Autosave every 5 minutes to the server"
+                }
+                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${autosave.enabled
+                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "text-gray-600 hover:bg-gray-100"
+                  }`}
+              >
+                {autosave.enabled ? "Auto: On" : "Autosave"}
+              </button>
+
+              <button
+                onClick={() => editor.setShowAddModal(true)}
+                title="Add a new process node"
+                className={`${btnBase} h-8 px-2.5 text-xs shrink-0 sm:h-9 sm:px-3 sm:text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
+              >
+                + Add
+              </button>
+
+              <button
+                onClick={() => editor.setShowPersonManager(true)}
+                title="Manage people"
+                className={`${btnGhost} w-8 h-8 shrink-0 sm:w-9 sm:h-9`}
+              >
+                <IconUsers />
+              </button>
+
+              <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
+
+              <button onClick={exportPng} title="Export as PNG" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>PNG</button>
+              <button onClick={() => setExportModal("pdf")} title="Export as PDF" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>PDF</button>
+              <button onClick={exportSvg} title="Export as SVG" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>SVG</button>
+            </div>
+          </div>
+
+          {/* Mobile scroll affordances — replace the old three-dot menu */}
+          {canScrollLeft && (
+            <button
+              onClick={() => scrollToolbar("left")}
+              className="sm:hidden absolute left-0 top-0 bottom-0 flex items-center pl-1 pr-3 rounded-l-2xl bg-gradient-to-r from-white via-white/90 to-transparent text-gray-500"
+              aria-label="Scroll toolbar left"
+            >
+              <IconChevronLeft />
+            </button>
+          )}
+          {canScrollRight && (
+            <button
+              onClick={() => scrollToolbar("right")}
+              className="sm:hidden absolute right-0 top-0 bottom-0 flex items-center pr-1 pl-3 rounded-r-2xl bg-gradient-to-l from-white via-white/90 to-transparent text-gray-500"
+              aria-label="Scroll toolbar right"
+            >
+              <IconChevronRight />
+            </button>
+          )}
         </div>
       </div>
 
@@ -444,11 +752,11 @@ export default function Home() {
       {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && (
         <div
           data-action-popup
-          className="absolute top-24 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2 shadow-md pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-20"
+          className="absolute top-28 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-1.5 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-24"
         >
           <button
             onClick={editor.clearSelection}
-            className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 text-xs font-bold"
+            className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs font-bold shrink-0"
             title="Dismiss"
           >
             ✕
@@ -456,14 +764,14 @@ export default function Home() {
 
           {editor.selectedNodeId && rootNode && (
             <>
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-gray-800 px-1">
                 {findNodeById(rootNode, editor.selectedNodeId)?.label ?? "Selected"}
               </span>
               <button
                 onClick={() =>
                   editor.openEditor(editor.selectedNodeId!, "label", findNodeById(rootNode, editor.selectedNodeId!)?.label ?? "")
                 }
-                className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
+                className={`${btnGhost} h-7 px-2 text-xs`}
               >
                 Edit Title
               </button>
@@ -475,20 +783,20 @@ export default function Home() {
                     findNodeById(rootNode, editor.selectedNodeId!)?.description ?? ""
                   )
                 }
-                className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
+                className={`${btnGhost} h-7 px-2 text-xs`}
               >
                 Edit Description
               </button>
 
               <button
                 onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "successor" })}
-                className="px-2 py-1 rounded bg-blue-100 text-blue-700 text-xs hover:bg-blue-200"
+                className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs hover:bg-blue-100 transition-colors"
               >
                 + Successor
               </button>
               <button
                 onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "predecessor" })}
-                className="px-2 py-1 rounded bg-green-100 text-green-700 text-xs hover:bg-green-200"
+                className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs hover:bg-emerald-100 transition-colors"
               >
                 + Predecessor
               </button>
@@ -497,14 +805,14 @@ export default function Home() {
                 <>
                   <button
                     onClick={() => editor.openAssignPopup(editor.selectedNodeId!)}
-                    className="px-2 py-1 rounded bg-teal-100 text-teal-700 text-xs hover:bg-teal-200"
+                    className="px-2 py-1 rounded-lg bg-teal-50 text-teal-700 text-xs hover:bg-teal-100 transition-colors"
                     title="Assign or remove people for this process"
                   >
                     Assign People
                   </button>
                   <button
                     onClick={() => editor.duplicateNode(editor.selectedNodeId!)}
-                    className="px-2 py-1 rounded bg-indigo-100 text-indigo-700 text-xs hover:bg-indigo-200"
+                    className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs hover:bg-indigo-100 transition-colors"
                     title="Duplicate this process and its subprocesses"
                   >
                     Duplicate
@@ -518,7 +826,7 @@ export default function Home() {
                         : `Delete "${node?.label}"?`;
                       if (window.confirm(msg)) editor.deleteNode(editor.selectedNodeId!);
                     }}
-                    className="px-2 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
+                    className={`${btnDanger} h-7 px-2 text-xs`}
                     title="Delete this process (and any subprocesses)"
                   >
                     Delete
@@ -532,7 +840,7 @@ export default function Home() {
                   <button
                     key={`succ-${succId}`}
                     onClick={() => editor.deleteRelation({ from: editor.selectedNodeId!, to: succId })}
-                    className="px-1.5 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
+                    className="px-1.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100 transition-colors"
                     title={`Delete successor: ${succNode?.label ?? succId}`}
                   >
                     ✕ {succNode?.label ?? succId}
@@ -546,7 +854,7 @@ export default function Home() {
                   <button
                     key={`pred-${predId}`}
                     onClick={() => editor.deleteRelation({ from: predId, to: editor.selectedNodeId! })}
-                    className="px-1.5 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
+                    className="px-1.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100 transition-colors"
                     title={`Delete predecessor: ${predNode?.label ?? predId}`}
                   >
                     ✕ {predNode?.label ?? predId}
@@ -558,22 +866,16 @@ export default function Home() {
 
           {editor.selectedEdge && !editor.pendingRelation && (
             <>
-              <button
-                onClick={() => editor.deleteRelation(editor.selectedEdge!)}
-                className="px-2 py-1 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
-              >
+              <button onClick={() => editor.deleteRelation(editor.selectedEdge!)} className={`${btnDanger} h-7 px-2 text-xs`}>
                 Delete
               </button>
               <button
                 onClick={editor.reverseRelation}
-                className="px-2 py-1 rounded bg-purple-100 text-purple-700 text-xs hover:bg-purple-200"
+                className="px-2 py-1 rounded-lg bg-purple-50 text-purple-700 text-xs hover:bg-purple-100 transition-colors"
               >
                 Reverse
               </button>
-              <button
-                onClick={editor.toggleEdgeDashed}
-                className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
-              >
+              <button onClick={editor.toggleEdgeDashed} className={`${btnGhost} h-7 px-2 text-xs`}>
                 Toggle Dashed
               </button>
             </>
@@ -583,14 +885,11 @@ export default function Home() {
 
       {/* PENDING RELATION POPUP */}
       {editor.pendingRelation && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2 shadow-md pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-20">
-          <span className="text-sm font-medium text-amber-700">
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-24">
+          <span className="text-sm font-medium text-amber-700 px-1">
             Select target {editor.pendingRelation.mode === "successor" ? "successor" : "predecessor"}...
           </span>
-          <button
-            onClick={() => editor.setPendingRelation(null)}
-            className="px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs hover:bg-gray-200"
-          >
+          <button onClick={() => editor.setPendingRelation(null)} className={`${btnGhost} h-7 px-2 text-xs`}>
             Cancel
           </button>
         </div>
@@ -626,13 +925,13 @@ export default function Home() {
         />
 
         {editor.error && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-lg px-4 py-2 text-sm shadow-md no-print">
+          <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-xl px-4 py-2 text-sm shadow-md no-print sm:top-24">
             {editor.error}
           </div>
         )}
 
         {editor.warning && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-4 py-2 text-sm shadow-md max-w-md text-center no-print">
+          <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-xl px-4 py-2 text-sm shadow-md max-w-md text-center no-print sm:top-24">
             {editor.warning}
           </div>
         )}
@@ -682,9 +981,9 @@ export default function Home() {
 
       {/* EDIT MODAL */}
       {editor.editingNodeId && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print" onClick={editor.closeEditor}>
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-4 text-gray-800">
+        <div className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">
               Edit {editor.editingField === "label" ? "Title" : "Description"}
             </h3>
             {editor.editingField === "label" ? (
@@ -693,7 +992,7 @@ export default function Home() {
                 type="text"
                 value={editor.editingValue}
                 onChange={(e) => editor.setEditingValue(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`${inputBase} mb-4`}
                 placeholder="Enter title"
               />
             ) : (
@@ -702,13 +1001,13 @@ export default function Home() {
                 value={editor.editingValue}
                 onChange={(e) => editor.setEditingValue(e.target.value)}
                 rows={5}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
+                className={`${inputBase} mb-4 resize-vertical`}
                 placeholder="Enter description"
               />
             )}
             <div className="flex justify-end gap-2">
-              <button onClick={editor.closeEditor} className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100">Cancel</button>
-              <button onClick={editor.submitEditor} className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-gray-700">Done</button>
+              <button onClick={editor.closeEditor} className={`${btnOutline} h-10 px-4 text-sm`}>Cancel</button>
+              <button onClick={editor.submitEditor} className={`${btnPrimary} h-10 px-4 text-sm`}>Done</button>
             </div>
           </div>
         </div>
@@ -717,20 +1016,20 @@ export default function Home() {
       {/* ADD PROCESS MODAL */}
       {editor.showAddModal && (
         <div
-          className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
+          className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={() => {
             editor.setShowAddModal(false);
             editor.setAddError("");
           }}
         >
           <div
-            className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4"
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold mb-4 text-gray-800">Add New Process</h3>
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Add New Process</h3>
 
             {editor.addError && (
-              <div className="mb-3 text-sm text-red-600 bg-red-50 p-2 rounded">
+              <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">
                 {editor.addError}
               </div>
             )}
@@ -741,7 +1040,7 @@ export default function Home() {
                 type="text"
                 value={editor.newProcess.label}
                 onChange={(e) => editor.setNewProcess({ ...editor.newProcess, label: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputBase}
                 placeholder="e.g. Site Analysis"
                 autoFocus
               />
@@ -753,17 +1052,17 @@ export default function Home() {
                 value={editor.newProcess.description}
                 onChange={(e) => editor.setNewProcess({ ...editor.newProcess, description: e.target.value })}
                 rows={2}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
+                className={`${inputBase} resize-vertical`}
                 placeholder="Brief description of the process"
               />
             </div>
 
-            <div className="mb-4">
+            <div className="mb-5">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Position (order)
               </label>
-              <div className="text-xs text-gray-500 mb-1">
-                Parent: <strong>{editor.getParentInfo().parentLabel}</strong> &nbsp;|&nbsp; Current siblings: {editor.getParentInfo().childCount}
+              <div className="text-xs text-gray-500 mb-1.5">
+                Parent: <strong className="text-gray-700">{editor.getParentInfo().parentLabel}</strong> &nbsp;|&nbsp; Current siblings: {editor.getParentInfo().childCount}
               </div>
               <input
                 type="number"
@@ -776,7 +1075,7 @@ export default function Home() {
                     position: Math.min(Math.max(Number(e.target.value) || 0, 0), editor.getParentInfo().childCount),
                   })
                 }
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputBase}
               />
               <div className="text-xs text-gray-400 mt-1">
                 0 = first, {editor.getParentInfo().childCount} = last (append)
@@ -789,14 +1088,11 @@ export default function Home() {
                   editor.setShowAddModal(false);
                   editor.setAddError("");
                 }}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+                className={`${btnOutline} h-10 px-4 text-sm`}
               >
                 Cancel
               </button>
-              <button
-                onClick={editor.handleAddProcess}
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
-              >
+              <button onClick={editor.handleAddProcess} className={`${btnPrimary} h-10 px-4 text-sm`}>
                 Add Process
               </button>
             </div>
@@ -807,11 +1103,14 @@ export default function Home() {
       {/* PERSON MANAGER MODAL */}
       {editor.showPersonManager && (
         <div
-          className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
-          onClick={() => editor.setShowPersonManager(false)}
+          className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          onClick={() => {
+            cancelRenamePerson();
+            editor.setShowPersonManager(false);
+          }}
         >
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-4 text-gray-800">People</h3>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">People</h3>
 
             <div className="flex gap-2 mb-4">
               <input
@@ -822,27 +1121,46 @@ export default function Home() {
                   if (e.key === "Enter") editor.addPerson();
                 }}
                 placeholder="Add a person's name"
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`${inputBase} flex-1`}
                 autoFocus
               />
-              <button
-                onClick={editor.addPerson}
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
-              >
+              <button onClick={editor.addPerson} className={`${btnPrimary} h-10 px-4 text-sm shrink-0`}>
                 Add
               </button>
             </div>
 
-            <div className="max-h-64 overflow-y-auto flex flex-col gap-1">
+            <div className="max-h-64 overflow-y-auto flex flex-col gap-1.5">
               {editor.persons.length === 0 && (
-                <div className="text-sm text-gray-400 text-center py-4">No people yet.</div>
+                <div className="text-sm text-gray-400 text-center py-6">No people yet.</div>
               )}
               {editor.persons.map((person) => (
-                <div key={person.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50">
-                  <span className="text-sm text-gray-700">{person.name}</span>
+                <div key={person.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50">
+                  {editingPersonId === person.id ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={editingPersonName}
+                      onChange={(e) => setEditingPersonName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRenamePerson();
+                        if (e.key === "Escape") cancelRenamePerson();
+                      }}
+                      onBlur={commitRenamePerson}
+                      className="flex-1 min-w-0 text-sm text-gray-800 bg-white border border-indigo-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => startRenamePerson(person.id, person.name)}
+                      className="flex-1 min-w-0 text-left text-sm text-gray-700 hover:text-indigo-700 truncate"
+                      title="Click to rename"
+                    >
+                      {person.name}
+                    </button>
+                  )}
                   <button
                     onClick={() => editor.deletePerson(person.id)}
-                    className="text-xs text-red-600 hover:text-red-800"
+                    className="text-xs text-red-600 hover:text-red-700 font-medium shrink-0"
                   >
                     Delete
                   </button>
@@ -852,8 +1170,11 @@ export default function Home() {
 
             <div className="flex justify-end mt-4">
               <button
-                onClick={() => editor.setShowPersonManager(false)}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+                onClick={() => {
+                  cancelRenamePerson();
+                  editor.setShowPersonManager(false);
+                }}
+                className={`${btnOutline} h-10 px-4 text-sm`}
               >
                 Done
               </button>
@@ -865,21 +1186,21 @@ export default function Home() {
       {/* ASSIGN PEOPLE TO NODE POPUP */}
       {editor.assignPopupNodeId && rootNode && (
         <div
-          className="absolute inset-0 z-[200] flex items-center justify-center bg-black/40 no-print"
+          className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={editor.closeAssignPopup}
         >
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-1 text-gray-800">Assign people</h3>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base sm:text-lg font-semibold mb-1 text-gray-900">Assign people</h3>
             <p className="text-xs text-gray-500 mb-4">
               {findNodeById(rootNode, editor.assignPopupNodeId)?.label ?? "This process"} — subprocesses are assigned separately.
             </p>
 
             {editor.persons.length === 0 ? (
-              <div className="text-sm text-gray-400 text-center py-4">
+              <div className="text-sm text-gray-400 text-center py-6">
                 No people yet. Add some from the people button in the toolbar.
               </div>
             ) : (
-              <div className="max-h-64 overflow-y-auto flex flex-col gap-1">
+              <div className="max-h-64 overflow-y-auto flex flex-col gap-1.5">
                 {editor.persons.map((person) => {
                   const node = findNodeById(rootNode, editor.assignPopupNodeId!);
                   const isAssigned = node?.assignedPersonIds?.includes(person.id) ?? false;
@@ -887,9 +1208,8 @@ export default function Home() {
                     <button
                       key={person.id}
                       onClick={() => editor.toggleNodeAssignment(editor.assignPopupNodeId!, person.id)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left ${
-                        isAssigned ? "bg-blue-50 text-blue-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
-                      }`}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left transition-colors ${isAssigned ? "bg-indigo-50 text-indigo-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
+                        }`}
                     >
                       <span>{person.name}</span>
                       {isAssigned && <span className="text-xs">✓ assigned</span>}
@@ -900,10 +1220,7 @@ export default function Home() {
             )}
 
             <div className="flex justify-end mt-4">
-              <button
-                onClick={editor.closeAssignPopup}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
-              >
+              <button onClick={editor.closeAssignPopup} className={`${btnOutline} h-10 px-4 text-sm`}>
                 Done
               </button>
             </div>
@@ -913,9 +1230,9 @@ export default function Home() {
 
       {/* PDF EXPORT DIALOG */}
       {exportModal === "pdf" && (
-        <div className="absolute inset-0 z-[300] flex items-center justify-center bg-black/40 no-print" onClick={() => setExportModal(null)}>
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-4 text-gray-800">PDF Export Settings</h3>
+        <div className="absolute inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={() => setExportModal(null)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">PDF Export Settings</h3>
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">Page Size</label>
@@ -924,7 +1241,7 @@ export default function Home() {
                   <button
                     key={size}
                     onClick={() => setPdfPageSize(size as "A4" | "A3" | "A2")}
-                    className={`flex-1 py-2 rounded-lg border text-sm font-medium ${pdfPageSize === size ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                    className={`flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors ${pdfPageSize === size ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
                       }`}
                   >
                     {size}
@@ -940,7 +1257,7 @@ export default function Home() {
                   <button
                     key={orient}
                     onClick={() => setPdfOrientation(orient as "portrait" | "landscape")}
-                    className={`flex-1 py-2 rounded-lg border text-sm font-medium ${pdfOrientation === orient ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                    className={`flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors ${pdfOrientation === orient ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
                       }`}
                   >
                     {orient.charAt(0).toUpperCase() + orient.slice(1)}
@@ -950,10 +1267,7 @@ export default function Home() {
             </div>
 
             <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setExportModal(null)}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
-              >
+              <button onClick={() => setExportModal(null)} className={`${btnOutline} h-10 px-4 text-sm`}>
                 Cancel
               </button>
               <button
@@ -961,9 +1275,165 @@ export default function Home() {
                   setExportModal(null);
                   exportPdf(pdfPageSize, pdfOrientation);
                 }}
-                className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-gray-700"
+                className={`${btnPrimary} h-10 px-4 text-sm`}
               >
                 Export PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SAVE DIALOG */}
+      {saveModalOpen && (
+        <div
+          className="absolute inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          onClick={() => setSaveModalOpen(false)}
+        >
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Save Workflow</h3>
+
+            <div className="flex gap-2 mb-4 bg-gray-100 rounded-xl p-1">
+              <button
+                onClick={() => setSaveMode("local")}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${saveMode === "local" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  }`}
+              >
+                My device
+              </button>
+              <button
+                onClick={() => setSaveMode("server")}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${saveMode === "server" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  }`}
+              >
+                Server
+              </button>
+            </div>
+
+            {saveMode === "local" && (
+              <p className="text-sm text-gray-500 mb-4">
+                Downloads a <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">process.json</code> file to your computer.
+              </p>
+            )}
+
+            {saveMode === "server" && (
+              <>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Your passphrase *</label>
+                  <input
+                    type="password"
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    className={inputBase}
+                    placeholder="Only you should know this"
+                    autoFocus
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Don&apos;t have one? Ask your admin to set one up for you.
+                  </p>
+                </div>
+
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Title - edit title in the workflow to save</label>
+                  <input
+                    type="text"
+                    value={saveTitle}
+                    onChange={(e) => setSaveTitle(e.target.value)}
+                    className={inputBase}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAdminMaster((v) => !v)}
+                  className="text-xs text-gray-400 hover:text-gray-600 mb-4"
+                >
+                  {showAdminMaster ? "Hide admin options" : "Admin options"}
+                </button>
+
+                {showAdminMaster && (
+                  <div className="mb-4 p-3 rounded-xl bg-gray-50 border border-gray-200">
+                    <label className="flex items-center gap-2 mb-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={wantMaster}
+                        onChange={(e) => setWantMaster(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      Set as the default (master) workflow everyone sees on load
+                    </label>
+                    {wantMaster && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Master key</label>
+                        <input
+                          type="password"
+                          value={masterKeyInput}
+                          onChange={(e) => setMasterKeyInput(e.target.value)}
+                          className={inputBase}
+                          placeholder="Required to change the master workflow"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {saveFormError && (
+                  <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">{saveFormError}</div>
+                )}
+              </>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setSaveModalOpen(false)} className={`${btnOutline} h-10 px-4 text-sm`}>
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSave}
+                disabled={saveBusy}
+                className={`${btnPrimary} h-10 px-4 text-sm`}
+              >
+                {saveBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AUTOSAVE PASSPHRASE PROMPT — asked once, then silent every 5 min */}
+      {autosavePromptOpen && (
+        <div
+          className="absolute inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          onClick={() => setAutosavePromptOpen(false)}
+        >
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-sm mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base sm:text-lg font-semibold mb-2 text-gray-900">Enable Autosave</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Saves to the server automatically every 5 minutes under this passphrase — no further prompts.
+            </p>
+            <input
+              type="password"
+              value={autosavePassphraseInput}
+              onChange={(e) => setAutosavePassphraseInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleEnableAutosave();
+              }}
+              className={`${inputBase} mb-2`}
+              placeholder="Your passphrase"
+              autoFocus
+            />
+            {autosave.verifyError && (
+              <div className="mb-2 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">{autosave.verifyError}</div>
+            )}
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={() => setAutosavePromptOpen(false)} className={`${btnOutline} h-10 px-4 text-sm`}>
+                Cancel
+              </button>
+              <button
+                onClick={handleEnableAutosave}
+                disabled={autosave.verifying}
+                className={`${btnPrimary} h-10 px-4 text-sm`}
+              >
+                {autosave.verifying ? "Checking…" : "Enable"}
               </button>
             </div>
           </div>

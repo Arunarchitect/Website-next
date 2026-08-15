@@ -1,0 +1,32 @@
+/* Print export — only the diagram is visible/printed, scaled to fit the page */
+@media print {
+  body.printing * {
+    visibility: hidden;
+  }
+  body.printing [data-print-root],
+  body.printing [data-print-root] * {
+    visibility: visible;
+  }
+  body.printing [data-print-root] {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: scale(var(--print-scale, 1));
+    transform-origin: top left;
+    width: auto;
+    height: auto;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Hides the scrollbar on the mobile toolbar's horizontally-scrolling row,
+   while it still scrolls via touch/drag or the left/right arrow buttons. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

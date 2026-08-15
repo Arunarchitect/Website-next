@@ -170,14 +170,14 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const rootNode: ProcessNode | null = data
     ? {
-        id: "root",
-        label: data.title,
-        description: data.description,
-        type: "process",
-        width: data.width,
-        height: data.height,
-        children: data.children ?? [],
-      }
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    }
     : null;
 
   const totalLeaves = rootNode ? getLeafIds(rootNode).length : 0;
@@ -393,6 +393,14 @@ export function useProcessEditor(initialData: ProcessData) {
     setNewPersonName("");
   };
 
+  const renamePerson = (id: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return; // ignore empty names, same guard style as addPerson
+    setPersons((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, name: trimmed } : p))
+    );
+  };
+
   const deletePerson = (id: string) => {
     setPersons((prev) => prev.filter((p) => p.id !== id));
 
@@ -573,26 +581,52 @@ export function useProcessEditor(initialData: ProcessData) {
 
     if (isParent) {
       const currentlyComplete = isNodeComplete(node, completed);
-      if (!currentlyComplete) {
+      if (currentlyComplete) {
+        showWarning(`"${node.label}" is complete because every subprocess under it is checked — uncheck those individually to reopen it.`);
+      } else {
         showWarning(`"${node.label}" can't be checked off yet — complete every subprocess underneath it first.`);
-        return;
       }
+      return;
     }
 
     setCompleted((prev) => {
       const next = new Set(prev);
-      const leafIds = getLeafIds(node);
-      const currentlyComplete = isNodeComplete(node, prev);
-      if (currentlyComplete) {
-        leafIds.forEach((id) => next.delete(id));
+      if (next.has(node.id)) {
+        next.delete(node.id);
       } else {
-        leafIds.forEach((id) => next.add(id));
+        next.add(node.id);
       }
       return next;
     });
   };
 
-  // ─── Upload / Save ─────────────────────────────────────────
+  // ─── Load / Upload / Save ───────────────────────────────────
+
+  /**
+   * Full state restore from a ProcessData blob — whether it came from a
+   * local file upload or a server load. `data` alone isn't the whole
+   * picture: completed steps, people, and edge styles are their own
+   * pieces of state, not derived from `data`, so anything that loads a
+   * document has to go through here or it'll silently drop them (this is
+   * what was happening to the server-load path before — it only called
+   * the raw `setData`).
+   */
+  const loadData = (json: ProcessData) => {
+    setData(json);
+    setCompleted(new Set(json.completed ?? []));
+    setPersons(json.persons ?? []);
+    setSelectedNodeId(null);
+    setHoveredNodeId(null);
+    setSelectedEdge(null);
+    setPendingRelation(null);
+    setAssignPopupNodeId(null);
+    setEdgeStyles(
+      new Map(
+        Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
+      )
+    );
+  };
+
   const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -609,19 +643,7 @@ export function useProcessEditor(initialData: ProcessData) {
         if (!json || typeof json !== "object") throw new Error("Invalid JSON.");
         if (!json.title) throw new Error("JSON must contain a title.");
 
-        setData(json);
-        setCompleted(new Set(json.completed ?? []));
-        setPersons(json.persons ?? []);
-        setSelectedNodeId(null);
-        setHoveredNodeId(null);
-        setSelectedEdge(null);
-        setPendingRelation(null);
-        setAssignPopupNodeId(null);
-        setEdgeStyles(
-          new Map(
-            Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
-          )
-        );
+        loadData(json);
       } catch (err) {
         console.error(err);
         setData(null);
@@ -632,20 +654,24 @@ export function useProcessEditor(initialData: ProcessData) {
     event.target.value = "";
   };
 
+  const getExportData = () => {
+    if (!data) return null;
+    return {
+      ...data,
+      completed: Array.from(completed),
+      edgeStyles: Object.fromEntries(edgeStyles.entries()),
+      persons,
+    };
+  };
+
   const handleSave = () => {
-    if (!data) {
+    const exportData = getExportData();
+    if (!exportData) {
       setError("No process data to save.");
       return;
     }
 
     try {
-      const exportData = {
-        ...data,
-        completed: Array.from(completed),
-        edgeStyles: Object.fromEntries(edgeStyles.entries()),
-        persons,
-      };
-
       const jsonString = JSON.stringify(exportData, null, 2);
       const blob = new Blob([jsonString], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -689,7 +715,7 @@ export function useProcessEditor(initialData: ProcessData) {
   };
 
   return {
-    data, setData, rootNode,
+    data, setData, loadData, rootNode,
     error, setError, warning,
     completed, edgeStyles,
     selectedNodeId, setSelectedNodeId,
@@ -702,12 +728,12 @@ export function useProcessEditor(initialData: ProcessData) {
     handleAddProcess, getParentInfo,
     deleteNode, duplicateNode,
     addRelation, deleteRelation, reverseRelation, toggleEdgeDashed,
-    toggleComplete, handleUpload, handleSave, updateNode,
+    toggleComplete, handleUpload, handleSave, updateNode, getExportData,
     totalLeaves, completedLeaves,
     clearSelection, handleNodeClick, handleSelectEdge,
     // people
     persons, showPersonManager, setShowPersonManager,
-    newPersonName, setNewPersonName, addPerson, deletePerson,
+    newPersonName, setNewPersonName, addPerson, deletePerson,renamePerson,
     assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment,
   };
 }
