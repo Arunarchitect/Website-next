@@ -1,17 +1,13 @@
 {
-  "title": "AI Park Design Challenge – Al Safa 2 Park Redesign",
+  "title": "AI Park Design Challenge \u2013 Al Safa 2 Park Redesign",
   "type": "process",
   "description": "Workflow for the Dubai Municipality AI Design Challenge: human-centred design, AI tools, concept & preliminary design stages.",
   "width": 2400,
   "height": 450,
-  "edgeStyles": {
-    "ideation->submission": {
-      "dashed": true
-    }
-  },
+  "edgeStyles": {},
   "persons": [
     {
-      "id": "p-arun",
+      "id": "person-1786811491462-ynbdbm",
       "name": "Arun"
     },
     {
@@ -28,20 +24,23 @@
         "redesign-justification"
       ],
       "assignedPersonIds": [
-        "p-arun"
+        "person-1786811491462-ynbdbm"
       ],
       "children": [
         {
           "id": "tor-analysis",
           "label": "TOR & Deliverables Analysis",
-          "description": "Interpret required deliverables, AED 35M budget, 15,000 m² site.",
+          "description": "Interpret required deliverables, AED 35M budget, 15,000 m\u00b2 site.",
           "children": []
         },
         {
           "id": "team-formation",
           "label": "Team & AI Tool Selection",
           "description": "Form team; select AI platforms (Midjourney, RunwayML) and simulation tools (ENVI-met, AnyLogic).",
-          "children": []
+          "children": [],
+          "assignedPersonIds": [
+            "person-1786701015227-kbq9bx"
+          ]
         }
       ]
     },
@@ -99,7 +98,7 @@
     },
     {
       "id": "analysis",
-      "label": "Comprehensive Analysis & Synthesis",
+      "label": "Comprehensive Analysis & Synthesiser",
       "description": "AI-augmented SWOT, spatial suitability, and thermal comfort studies.",
       "predecessors": [
         "data-collection"
@@ -135,16 +134,16 @@
         "submission"
       ],
       "assignedPersonIds": [
-        "p-arun"
+        "person-1786811491462-ynbdbm"
       ],
       "children": [
         {
           "id": "concept-variants",
           "label": "Three Concept Scenarios (A, B, C)",
-          "description": "Oasis, Green Spine, and Urban Living Room — AI-enhanced mood boards.",
+          "description": "Oasis, Green Spine, and Urban Living Room \u2014 AI-enhanced mood boards.",
           "children": [],
           "assignedPersonIds": [
-            "p-arun"
+            "person-1786811491462-ynbdbm"
           ]
         },
         {
@@ -195,7 +194,7 @@
         "submission"
       ],
       "assignedPersonIds": [
-        "p-arun"
+        "person-1786811491462-ynbdbm"
       ],
       "children": [
         {
@@ -225,7 +224,7 @@
         {
           "id": "design-report",
           "label": "Design Narrative & AI Methodology Report",
-          "description": "Vision, sustainability, and AI workflow — 20-30 page PDF booklet.",
+          "description": "Vision, sustainability, and AI workflow \u2014 20-30 page PDF booklet.",
           "children": []
         },
         {
@@ -238,11 +237,7 @@
     }
   ],
   "completed": [
-    "tor-analysis",
-    "team-formation",
-    "current-condition-audit",
-    "stakeholder-needs",
     "physical-topography",
-    "user-surveys"
+    "thermal-comfort"
   ]
 }
