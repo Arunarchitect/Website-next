@@ -5,8 +5,7 @@ import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { ProcessContainer } from "@/app/process/components/ProcessContainer";
 import { RelationshipArrows} from "@/app/process/components/RelationshipArrows";
-import html2canvas from "html2canvas";
-import { toSvg } from "html-to-image";
+import { UploadButton, ExportButtons } from "@/app/process/components/transfer";
 import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
 import { useCloudSync } from "@/app/process/hooks/useCloudSync";
 import { useAutosave } from "@/app/process/hooks/useAutoSave";
@@ -96,15 +95,28 @@ export default function Home() {
     setEditingPersonName("");
   };
 
+  // Which server doc is currently loaded — used to highlight it in the Load
+  // list. Falls back to whichever doc is flagged is_master, since that's
+  // what auto-loads on mount before the user explicitly picks anything.
+  const [loadedDocId, setLoadedDocId] = useState<string | null>(null);
+
   // Compact toolbar: dropdown popover + horizontal scroll affordance
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
   const loadBtnRef = useRef<HTMLButtonElement | null>(null);
-  const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0 });
+  const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0, width: 288 });
 
   const toggleLoadMenu = () => {
     if (!loadMenuOpen && loadBtnRef.current) {
       const rect = loadBtnRef.current.getBoundingClientRect();
-      setLoadMenuPos({ top: rect.bottom + 6, left: rect.left });
+      const viewportWidth = window.innerWidth;
+      const margin = 8;
+      const width = Math.min(288, viewportWidth - margin * 2);
+      let left = rect.left;
+      if (left + width + margin > viewportWidth) {
+        left = viewportWidth - width - margin;
+      }
+      if (left < margin) left = margin;
+      setLoadMenuPos({ top: rect.bottom + 6, left, width });
     }
     setLoadMenuOpen((v) => !v);
   };
@@ -217,14 +229,10 @@ export default function Home() {
     }
   };
 
-  // ─── View state (pan/zoom/drag, export) ────────────────────────
+  // ─── View state (pan/zoom/drag) ────────────────────────
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
-
-  const [exportModal, setExportModal] = useState<"pdf" | null>(null);
-  const [pdfPageSize, setPdfPageSize] = useState<"A4" | "A3" | "A2">("A4");
-  const [pdfOrientation, setPdfOrientation] = useState<"portrait" | "landscape">("landscape");
 
   // ─── Refs ──────────────────────────────────────────────────────
   const dragStart = useRef({ x: 0, y: 0 });
@@ -243,6 +251,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const printRef = useRef<HTMLDivElement | null>(null);
 
+
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
 
@@ -250,6 +259,19 @@ export default function Home() {
     zoomRef.current = zoom;
     panRef.current = pan;
   }, [zoom, pan]);
+
+  // Stop the browser's own pinch/ctrl+scroll page zoom from firing when a
+  // gesture starts outside the canvas viewport (e.g. over the toolbar) —
+  // otherwise the whole page, toolbar included, scales up with it. The
+  // canvas's own zoom (app state, not the browser's) is unaffected: it's
+  // handled separately by the viewport's own wheel/pointer listeners below.
+  useEffect(() => {
+    const preventBrowserZoom = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    document.addEventListener("wheel", preventBrowserZoom, { passive: false });
+    return () => document.removeEventListener("wheel", preventBrowserZoom);
+  }, []);
 
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number; width: number; height: number }>>(new Map());
@@ -291,108 +313,6 @@ export default function Home() {
   }, [editor.data, editor.completed]);
 
   const activeNodeId = editor.hoveredNodeId ?? editor.selectedNodeId;
-
-  // ─── Export Functions ──────────────────────────────────────────
-  const getElementForExport = () => printRef.current;
-
-  const captureFullDiagram = async (format: "png" | "svg") => {
-    const el = getElementForExport();
-    if (!el) {
-      editor.setError("Diagram is not ready to export. Please try again.");
-      return;
-    }
-
-    const prevTransform = el.style.transform;
-    const prevTransition = el.style.transition;
-
-    el.style.transition = "none";
-    el.style.transform = "none";
-
-    try {
-      if (format === "png") {
-        const canvas = await html2canvas(el, {
-          scale: 3,
-          backgroundColor: "#ffffff",
-          logging: false,
-          useCORS: true,
-        });
-        const link = document.createElement("a");
-        link.download = "workflow.png";
-        link.href = canvas.toDataURL("image/png");
-        link.click();
-      } else {
-        const dataUrl = await toSvg(el, {
-          backgroundColor: "#ffffff",
-          pixelRatio: 2,
-        });
-        const link = document.createElement("a");
-        link.download = "workflow.svg";
-        link.href = dataUrl;
-        link.click();
-      }
-    } catch (err) {
-      console.error(`Export ${format.toUpperCase()} failed:`, err);
-      editor.setError(`Export ${format.toUpperCase()} failed. Check console.`);
-    } finally {
-      el.style.transform = prevTransform;
-      el.style.transition = prevTransition;
-    }
-  };
-
-  const exportPng = () => captureFullDiagram("png");
-  const exportSvg = () => captureFullDiagram("svg");
-
-  const exportPdf = (pageSize: "A4" | "A3" | "A2", orientation: "portrait" | "landscape") => {
-    const style = document.createElement("style");
-    style.id = "print-page-style";
-    style.innerHTML = `
-      @page {
-        size: ${pageSize} ${orientation};
-        margin: 0;
-      }
-    `;
-    document.head.appendChild(style);
-
-    const el = getElementForExport();
-    if (el) {
-      const prevTransform = el.style.transform;
-      const prevTransition = el.style.transition;
-      el.style.transition = "none";
-      el.style.transform = "none";
-      const naturalWidth = el.offsetWidth;
-      const naturalHeight = el.offsetHeight;
-      el.style.transform = prevTransform;
-      el.style.transition = prevTransition;
-
-      const pageSizes: Record<string, { width: number; height: number }> = {
-        A4: { width: 794, height: 1123 },
-        A3: { width: 1123, height: 1587 },
-        A2: { width: 1587, height: 2245 },
-      };
-      const page = pageSizes[pageSize];
-      const pageWidth = orientation === "landscape" ? page.height : page.width;
-      const pageHeight = orientation === "landscape" ? page.width : page.height;
-
-      const scaleX = pageWidth / naturalWidth;
-      const scaleY = pageHeight / naturalHeight;
-      const printScale = Math.min(scaleX, scaleY, 1);
-      document.documentElement.style.setProperty("--print-scale", printScale.toString());
-    }
-
-    document.body.classList.add("printing");
-    window.print();
-
-    window.addEventListener(
-      "afterprint",
-      () => {
-        document.body.classList.remove("printing");
-        document.documentElement.style.removeProperty("--print-scale");
-        const existingStyle = document.getElementById("print-page-style");
-        if (existingStyle) existingStyle.remove();
-      },
-      { once: true }
-    );
-  };
 
   // ─── Zoom / Pan ─────────────────────────────────────────────────
   const zoomIn = () => setZoom((v) => Math.min(v * 1.2, 4));
@@ -565,16 +485,29 @@ export default function Home() {
   const rootNode = editor.rootNode;
 
   // ─── Render ────────────────────────────────────────────────────
+  // Outer wrapper owns the overall height budget (same calc as before) and
+  // lays the toolbar out in normal flow, above the canvas — the toolbar is
+  // no longer an absolutely-positioned overlay sitting on top of the canvas.
   return (
-    <main
-      className="relative w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px] overflow-hidden bg-gray-50 rounded-2xl"
-      style={{ userSelect: dragging ? "none" : "auto" }}
+    <div
+      className="flex flex-col w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px]"
+      style={{ touchAction: "pan-x pan-y" }}
     >
 
-      {/* TOOLBAR */}
-      <div className="absolute top-2 left-2 right-2 z-[100] flex flex-wrap items-start justify-between gap-2 pointer-events-none sm:top-4 sm:left-4 sm:right-4 sm:gap-3 no-print">
-        <div className="bg-white/95 backdrop-blur border border-gray-200/70 rounded-2xl px-3.5 py-2.5 shadow-[0_2px_16px_rgba(15,23,42,0.06)] pointer-events-auto sm:px-4 sm:py-3">
-          <div className="font-semibold text-gray-900 text-sm sm:text-base tracking-tight">Process Viewer</div>
+      {/* TOOLBAR — normal document flow, outside/above the canvas */}
+      <div className="flex flex-wrap items-start justify-between gap-2 px-0.5 pb-2 sm:gap-3 sm:pb-3 no-print shrink-0">
+        <div className="bg-white border border-gray-200/70 rounded-2xl px-3.5 py-2.5 shadow-[0_2px_16px_rgba(15,23,42,0.06)] sm:px-4 sm:py-3">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div className="font-semibold text-gray-900 text-sm sm:text-base tracking-tight shrink-0">Process Viewer</div>
+            {editor.data?.title && (
+              <span
+                title={editor.data.title}
+                className="text-[10px] sm:text-[11px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-md truncate max-w-[110px] sm:max-w-[200px]"
+              >
+                {editor.data.title}
+              </span>
+            )}
+          </div>
           <div className="text-xs text-gray-500 mt-0.5">
             {editor.data
               ? `${editor.completedLeaves} / ${editor.totalLeaves} steps done`
@@ -585,16 +518,14 @@ export default function Home() {
         {/* Action bar — one compact, icon-first row for both mobile and desktop.
             On mobile it scrolls horizontally with arrow affordances; on desktop
             it's short enough to just fit. */}
-        <div className="relative max-w-full pointer-events-auto">
-          <div className="bg-white/95 backdrop-blur border border-gray-200/70 rounded-2xl shadow-[0_2px_16px_rgba(15,23,42,0.06)] overflow-hidden">
+        <div className="relative max-w-full">
+          <div className="bg-white border border-gray-200/70 rounded-2xl shadow-[0_2px_16px_rgba(15,23,42,0.06)] overflow-hidden">
             <div
               ref={toolbarScrollRef}
               className="flex items-center gap-1 p-1.5 overflow-x-auto no-scrollbar scroll-smooth"
+              style={{ touchAction: "pan-x" }}
             >
-              <label className={`${btnPrimary} h-8 px-2.5 text-xs cursor-pointer shrink-0 sm:h-9 sm:px-3 sm:text-sm`} title="Upload a process JSON file">
-                Upload
-                <input type="file" accept=".json,application/json" onChange={editor.handleUpload} className="hidden" />
-              </label>
+              <UploadButton onUpload={editor.handleUpload} />
 
               <div className="flex items-center gap-0.5 mx-0.5 shrink-0">
                 <button onClick={zoomOut} title="Zoom out" className={`${btnGhost} w-8 h-8 text-base sm:w-9 sm:h-9`}>−</button>
@@ -629,8 +560,14 @@ export default function Home() {
                   createPortal(
                     <div
                       ref={loadMenuRef}
-                      style={{ position: "fixed", top: loadMenuPos.top, left: loadMenuPos.left, zIndex: 500 }}
-                      className="w-72 max-h-80 overflow-y-auto bg-white border border-gray-200/70 rounded-xl shadow-[0_8px_30px_rgba(15,23,42,0.12)] p-1.5"
+                      style={{
+                        position: "fixed",
+                        top: loadMenuPos.top,
+                        left: loadMenuPos.left,
+                        width: loadMenuPos.width,
+                        zIndex: 500,
+                      }}
+                      className="max-h-80 overflow-y-auto bg-white border border-gray-200/70 rounded-xl shadow-[0_8px_30px_rgba(15,23,42,0.12)] p-1.5"
                     >
                       {cloud.cloudError && (
                         <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-2 mb-1.5">
@@ -647,33 +584,44 @@ export default function Home() {
                       )}
 
                       {!cloud.cloudLoading &&
-                        cloud.cloudList.map((doc) => (
-                          <button
-                            key={doc.id}
-                            onClick={async () => {
-                              try {
-                                await cloud.loadCloudDoc(doc.id);
-                                setLoadMenuOpen(false);
-                              } catch {
-                                // cloudError is already set by the hook; keep menu open so it's visible
-                              }
-                            }}
-                            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-gray-50 flex flex-col gap-0.5"
-                          >
-                            <span className="text-sm text-gray-800 flex items-center gap-1.5">
-                              {doc.title || "Untitled Workflow"}
-                              {doc.is_master && (
-                                <span className="text-[10px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-full">
-                                  master
-                                </span>
-                              )}
-                            </span>
-                            <span className="text-[11px] text-gray-400">
-                              {doc.person_name ? `${doc.person_name} · ` : ""}
-                              {new Date(doc.updated_at).toLocaleString()}
-                            </span>
-                          </button>
-                        ))}
+                        cloud.cloudList.map((doc) => {
+                          const isCurrent = loadedDocId ? String(doc.id) === loadedDocId : doc.is_master;
+                          return (
+                            <button
+                              key={doc.id}
+                              onClick={async () => {
+                                try {
+                                  await cloud.loadCloudDoc(doc.id);
+                                  setLoadedDocId(String(doc.id));
+                                  setLoadMenuOpen(false);
+                                } catch {
+                                  // cloudError is already set by the hook; keep menu open so it's visible
+                                }
+                              }}
+                              className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${
+                                isCurrent ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "hover:bg-gray-50"
+                              }`}
+                            >
+                              <span className="text-sm text-gray-800 flex items-center gap-1.5 min-w-0">
+                                <span className="truncate">{doc.title || "Untitled Workflow"}</span>
+                                {doc.is_master && (
+                                  <span className="shrink-0 text-[10px] font-medium text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-full">
+                                    master
+                                  </span>
+                                )}
+                                {isCurrent && (
+                                  <span className="shrink-0 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                                    current
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-[11px] text-gray-400">
+                                {doc.person_name ? `${doc.person_name} · ` : ""}
+                                {new Date(doc.updated_at).toLocaleString()}
+                              </span>
+                            </button>
+                          );
+                        })}
                     </div>,
                     document.body
                   )}
@@ -720,9 +668,7 @@ export default function Home() {
 
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
-              <button onClick={exportPng} title="Export as PNG" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>PNG</button>
-              <button onClick={() => setExportModal("pdf")} title="Export as PDF" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>PDF</button>
-              <button onClick={exportSvg} title="Export as SVG" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>SVG</button>
+              <ExportButtons printRef={printRef} setError={editor.setError} />
             </div>
           </div>
 
@@ -748,240 +694,248 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ACTION POPUP */}
-      {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && (
-        <div
-          data-action-popup
-          className="absolute top-28 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-1.5 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-24"
-        >
-          <button
-            onClick={editor.clearSelection}
-            className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs font-bold shrink-0"
-            title="Dismiss"
-          >
-            ✕
-          </button>
-
-          {editor.selectedNodeId && rootNode && (
-            <>
-              <span className="text-sm font-medium text-gray-800 px-1">
-                {findNodeById(rootNode, editor.selectedNodeId)?.label ?? "Selected"}
-              </span>
-              <button
-                onClick={() =>
-                  editor.openEditor(editor.selectedNodeId!, "label", findNodeById(rootNode, editor.selectedNodeId!)?.label ?? "")
-                }
-                className={`${btnGhost} h-7 px-2 text-xs`}
-              >
-                Edit Title
-              </button>
-              <button
-                onClick={() =>
-                  editor.openEditor(
-                    editor.selectedNodeId!,
-                    "description",
-                    findNodeById(rootNode, editor.selectedNodeId!)?.description ?? ""
-                  )
-                }
-                className={`${btnGhost} h-7 px-2 text-xs`}
-              >
-                Edit Description
-              </button>
-
-              <button
-                onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "successor" })}
-                className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs hover:bg-blue-100 transition-colors"
-              >
-                + Successor
-              </button>
-              <button
-                onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "predecessor" })}
-                className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs hover:bg-emerald-100 transition-colors"
-              >
-                + Predecessor
-              </button>
-
-              {editor.selectedNodeId !== "root" && (
-                <>
-                  <button
-                    onClick={() => editor.openAssignPopup(editor.selectedNodeId!)}
-                    className="px-2 py-1 rounded-lg bg-teal-50 text-teal-700 text-xs hover:bg-teal-100 transition-colors"
-                    title="Assign or remove people for this process"
-                  >
-                    Assign People
-                  </button>
-                  <button
-                    onClick={() => editor.duplicateNode(editor.selectedNodeId!)}
-                    className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs hover:bg-indigo-100 transition-colors"
-                    title="Duplicate this process and its subprocesses"
-                  >
-                    Duplicate
-                  </button>
-                  <button
-                    onClick={() => {
-                      const node = findNodeById(rootNode, editor.selectedNodeId!);
-                      const childCount = node?.children?.length ?? 0;
-                      const msg = childCount > 0
-                        ? `Delete "${node?.label}" and its ${childCount} subprocess${childCount > 1 ? "es" : ""}?`
-                        : `Delete "${node?.label}"?`;
-                      if (window.confirm(msg)) editor.deleteNode(editor.selectedNodeId!);
-                    }}
-                    className={`${btnDanger} h-7 px-2 text-xs`}
-                    title="Delete this process (and any subprocesses)"
-                  >
-                    Delete
-                  </button>
-                </>
-              )}
-
-              {findNodeById(rootNode, editor.selectedNodeId)?.successors?.map((succId) => {
-                const succNode = findNodeById(rootNode, succId);
-                return (
-                  <button
-                    key={`succ-${succId}`}
-                    onClick={() => editor.deleteRelation({ from: editor.selectedNodeId!, to: succId })}
-                    className="px-1.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100 transition-colors"
-                    title={`Delete successor: ${succNode?.label ?? succId}`}
-                  >
-                    ✕ {succNode?.label ?? succId}
-                  </button>
-                );
-              })}
-
-              {findNodeById(rootNode, editor.selectedNodeId)?.predecessors?.map((predId) => {
-                const predNode = findNodeById(rootNode, predId);
-                return (
-                  <button
-                    key={`pred-${predId}`}
-                    onClick={() => editor.deleteRelation({ from: predId, to: editor.selectedNodeId! })}
-                    className="px-1.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100 transition-colors"
-                    title={`Delete predecessor: ${predNode?.label ?? predId}`}
-                  >
-                    ✕ {predNode?.label ?? predId}
-                  </button>
-                );
-              })}
-            </>
-          )}
-
-          {editor.selectedEdge && !editor.pendingRelation && (
-            <>
-              <button onClick={() => editor.deleteRelation(editor.selectedEdge!)} className={`${btnDanger} h-7 px-2 text-xs`}>
-                Delete
-              </button>
-              <button
-                onClick={editor.reverseRelation}
-                className="px-2 py-1 rounded-lg bg-purple-50 text-purple-700 text-xs hover:bg-purple-100 transition-colors"
-              >
-                Reverse
-              </button>
-              <button onClick={editor.toggleEdgeDashed} className={`${btnGhost} h-7 px-2 text-xs`}>
-                Toggle Dashed
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* PENDING RELATION POPUP */}
-      {editor.pendingRelation && (
-        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto sm:top-24">
-          <span className="text-sm font-medium text-amber-700 px-1">
-            Select target {editor.pendingRelation.mode === "successor" ? "successor" : "predecessor"}...
-          </span>
-          <button onClick={() => editor.setPendingRelation(null)} className={`${btnGhost} h-7 px-2 text-xs`}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {/* CANVAS */}
-      <div
-        ref={viewportRef}
-        className={`absolute inset-0 overflow-hidden ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
-        style={{ touchAction: "none" }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={(e) => {
-          handlePointerMove(e);
-          handleHoverMove(e);
-        }}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onPointerLeave={() => editor.setHoveredNodeId(null)}
-        onClick={() => {
-          if (didDragRef.current) {
-            didDragRef.current = false;
-            return;
-          }
-          editor.clearSelection();
-        }}
+      {/* CANVAS BOX — everything below is unchanged in behavior, just now
+          sized by flex-1 instead of filling the whole outer wrapper */}
+      <main
+        className="relative flex-1 min-h-0 w-full overflow-hidden bg-gray-50 rounded-2xl"
+        style={{ userSelect: dragging ? "none" : "auto" }}
       >
-        <div
-          className="absolute inset-0 pointer-events-none hidden sm:block no-print"
-          style={{
-            backgroundImage: `radial-gradient(#cbd5e1 1px, transparent 1px)`,
-            backgroundSize: "24px 24px",
-          }}
-        />
 
-        {editor.error && (
-          <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-xl px-4 py-2 text-sm shadow-md no-print sm:top-24">
-            {editor.error}
-          </div>
-        )}
-
-        {editor.warning && (
-          <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-xl px-4 py-2 text-sm shadow-md max-w-md text-center no-print sm:top-24">
-            {editor.warning}
-          </div>
-        )}
-
-        {editor.data && rootNode && (
+        {/* ACTION POPUP */}
+        {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && (
           <div
-            ref={(el) => {
-              canvasRef.current = el;
-              printRef.current = el;
-            }}
-            data-print-root
-            style={{
-              position: "absolute",
-              left: "50%",
-              top: "50%",
-              width: rootNode.width ? `${rootNode.width}px` : "1700px",
-              boxSizing: "border-box",
-              transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom})`,
-              transformOrigin: "center center",
-              transition: dragging ? "none" : "transform 0.08s ease-out",
-            }}
+            data-action-popup
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-1.5 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto"
           >
-            <ProcessContainer
-              node={rootNode}
-              level={0}
-              colorIndex={0}
-              completed={editor.completed}
-              onToggleComplete={editor.toggleComplete}
-              onEditNode={editor.openEditor}
-              registerNodeRef={registerNodeRef}
-              activeNodeId={activeNodeId}
-              onSelectNode={handleNodeClick}
-              persons={editor.persons}
-              onOpenAssignPopup={editor.openAssignPopup}
-            />
-            <RelationshipArrows
-              rootNode={rootNode}
-              positions={nodePositions}
-              selectedNodeId={activeNodeId}
-              selectedEdge={editor.selectedEdge}
-              onSelectEdge={editor.handleSelectEdge}
-              edgeStyles={editor.edgeStyles}
-            />
+            <button
+              onClick={editor.clearSelection}
+              className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs font-bold shrink-0"
+              title="Dismiss"
+            >
+              ✕
+            </button>
+
+            {editor.selectedNodeId && rootNode && (
+              <>
+                <span className="text-sm font-medium text-gray-800 px-1">
+                  {findNodeById(rootNode, editor.selectedNodeId)?.label ?? "Selected"}
+                </span>
+                <button
+                  onClick={() =>
+                    editor.openEditor(editor.selectedNodeId!, "label", findNodeById(rootNode, editor.selectedNodeId!)?.label ?? "")
+                  }
+                  className={`${btnGhost} h-7 px-2 text-xs`}
+                >
+                  Edit Title
+                </button>
+                <button
+                  onClick={() =>
+                    editor.openEditor(
+                      editor.selectedNodeId!,
+                      "description",
+                      findNodeById(rootNode, editor.selectedNodeId!)?.description ?? ""
+                    )
+                  }
+                  className={`${btnGhost} h-7 px-2 text-xs`}
+                >
+                  Edit Description
+                </button>
+
+                <button
+                  onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "successor" })}
+                  className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs hover:bg-blue-100 transition-colors"
+                >
+                  + Successor
+                </button>
+                <button
+                  onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "predecessor" })}
+                  className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs hover:bg-emerald-100 transition-colors"
+                >
+                  + Predecessor
+                </button>
+
+                {editor.selectedNodeId !== "root" && (
+                  <>
+                    <button
+                      onClick={() => editor.openAssignPopup(editor.selectedNodeId!)}
+                      className="px-2 py-1 rounded-lg bg-teal-50 text-teal-700 text-xs hover:bg-teal-100 transition-colors"
+                      title="Assign or remove people for this process"
+                    >
+                      Assign People
+                    </button>
+                    <button
+                      onClick={() => editor.duplicateNode(editor.selectedNodeId!)}
+                      className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs hover:bg-indigo-100 transition-colors"
+                      title="Duplicate this process and its subprocesses"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      onClick={() => {
+                        const node = findNodeById(rootNode, editor.selectedNodeId!);
+                        const childCount = node?.children?.length ?? 0;
+                        const msg = childCount > 0
+                          ? `Delete "${node?.label}" and its ${childCount} subprocess${childCount > 1 ? "es" : ""}?`
+                          : `Delete "${node?.label}"?`;
+                        if (window.confirm(msg)) editor.deleteNode(editor.selectedNodeId!);
+                      }}
+                      className={`${btnDanger} h-7 px-2 text-xs`}
+                      title="Delete this process (and any subprocesses)"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
+
+                {findNodeById(rootNode, editor.selectedNodeId)?.successors?.map((succId) => {
+                  const succNode = findNodeById(rootNode, succId);
+                  return (
+                    <button
+                      key={`succ-${succId}`}
+                      onClick={() => editor.deleteRelation({ from: editor.selectedNodeId!, to: succId })}
+                      className="px-1.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100 transition-colors"
+                      title={`Delete successor: ${succNode?.label ?? succId}`}
+                    >
+                      ✕ {succNode?.label ?? succId}
+                    </button>
+                  );
+                })}
+
+                {findNodeById(rootNode, editor.selectedNodeId)?.predecessors?.map((predId) => {
+                  const predNode = findNodeById(rootNode, predId);
+                  return (
+                    <button
+                      key={`pred-${predId}`}
+                      onClick={() => editor.deleteRelation({ from: predId, to: editor.selectedNodeId! })}
+                      className="px-1.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100 transition-colors"
+                      title={`Delete predecessor: ${predNode?.label ?? predId}`}
+                    >
+                      ✕ {predNode?.label ?? predId}
+                    </button>
+                  );
+                })}
+              </>
+            )}
+
+            {editor.selectedEdge && !editor.pendingRelation && (
+              <>
+                <button onClick={() => editor.deleteRelation(editor.selectedEdge!)} className={`${btnDanger} h-7 px-2 text-xs`}>
+                  Delete
+                </button>
+                <button
+                  onClick={editor.reverseRelation}
+                  className="px-2 py-1 rounded-lg bg-purple-50 text-purple-700 text-xs hover:bg-purple-100 transition-colors"
+                >
+                  Reverse
+                </button>
+                <button onClick={editor.toggleEdgeDashed} className={`${btnGhost} h-7 px-2 text-xs`}>
+                  Toggle Dashed
+                </button>
+              </>
+            )}
           </div>
         )}
-      </div>
+
+        {/* PENDING RELATION POPUP */}
+        {editor.pendingRelation && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto">
+            <span className="text-sm font-medium text-amber-700 px-1">
+              Select target {editor.pendingRelation.mode === "successor" ? "successor" : "predecessor"}...
+            </span>
+            <button onClick={() => editor.setPendingRelation(null)} className={`${btnGhost} h-7 px-2 text-xs`}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* CANVAS */}
+        <div
+          ref={viewportRef}
+          className={`absolute inset-0 overflow-hidden ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+          style={{ touchAction: "none" }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={(e) => {
+            handlePointerMove(e);
+            handleHoverMove(e);
+          }}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={() => editor.setHoveredNodeId(null)}
+          onClick={() => {
+            if (didDragRef.current) {
+              didDragRef.current = false;
+              return;
+            }
+            editor.clearSelection();
+          }}
+        >
+          <div
+            className="absolute inset-0 pointer-events-none hidden sm:block no-print"
+            style={{
+              backgroundImage: `radial-gradient(#cbd5e1 1px, transparent 1px)`,
+              backgroundSize: "24px 24px",
+            }}
+          />
+
+          {editor.error && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-xl px-4 py-2 text-sm shadow-md no-print">
+              {editor.error}
+            </div>
+          )}
+
+          {editor.warning && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-xl px-4 py-2 text-sm shadow-md max-w-md text-center no-print">
+              {editor.warning}
+            </div>
+          )}
+
+          {editor.data && rootNode && (
+            <div
+              ref={(el) => {
+                canvasRef.current = el;
+                printRef.current = el;
+              }}
+              data-print-root
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                width: rootNode.width ? `${rootNode.width}px` : "1700px",
+                boxSizing: "border-box",
+                transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom})`,
+                transformOrigin: "center center",
+                transition: dragging ? "none" : "transform 0.08s ease-out",
+              }}
+            >
+              <ProcessContainer
+                node={rootNode}
+                level={0}
+                colorIndex={0}
+                completed={editor.completed}
+                onToggleComplete={editor.toggleComplete}
+                onEditNode={editor.openEditor}
+                registerNodeRef={registerNodeRef}
+                activeNodeId={activeNodeId}
+                onSelectNode={handleNodeClick}
+                persons={editor.persons}
+                onOpenAssignPopup={editor.openAssignPopup}
+              />
+              <RelationshipArrows
+                rootNode={rootNode}
+                positions={nodePositions}
+                selectedNodeId={activeNodeId}
+                selectedEdge={editor.selectedEdge}
+                onSelectEdge={editor.handleSelectEdge}
+                edgeStyles={editor.edgeStyles}
+              />
+            </div>
+          )}
+        </div>
+      </main>
 
       {/* EDIT MODAL */}
       {editor.editingNodeId && (
-        <div className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">
               Edit {editor.editingField === "label" ? "Title" : "Description"}
@@ -1016,7 +970,7 @@ export default function Home() {
       {/* ADD PROCESS MODAL */}
       {editor.showAddModal && (
         <div
-          className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={() => {
             editor.setShowAddModal(false);
             editor.setAddError("");
@@ -1103,7 +1057,7 @@ export default function Home() {
       {/* PERSON MANAGER MODAL */}
       {editor.showPersonManager && (
         <div
-          className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={() => {
             cancelRenamePerson();
             editor.setShowPersonManager(false);
@@ -1186,7 +1140,7 @@ export default function Home() {
       {/* ASSIGN PEOPLE TO NODE POPUP */}
       {editor.assignPopupNodeId && rootNode && (
         <div
-          className="absolute inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={editor.closeAssignPopup}
         >
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1228,66 +1182,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* PDF EXPORT DIALOG */}
-      {exportModal === "pdf" && (
-        <div className="absolute inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={() => setExportModal(null)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">PDF Export Settings</h3>
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Page Size</label>
-              <div className="flex gap-2">
-                {["A4", "A3", "A2"].map((size) => (
-                  <button
-                    key={size}
-                    onClick={() => setPdfPageSize(size as "A4" | "A3" | "A2")}
-                    className={`flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors ${pdfPageSize === size ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                      }`}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Orientation</label>
-              <div className="flex gap-2">
-                {["portrait", "landscape"].map((orient) => (
-                  <button
-                    key={orient}
-                    onClick={() => setPdfOrientation(orient as "portrait" | "landscape")}
-                    className={`flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors ${pdfOrientation === orient ? "bg-indigo-50 border-indigo-400 text-indigo-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                      }`}
-                  >
-                    {orient.charAt(0).toUpperCase() + orient.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setExportModal(null)} className={`${btnOutline} h-10 px-4 text-sm`}>
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  setExportModal(null);
-                  exportPdf(pdfPageSize, pdfOrientation);
-                }}
-                className={`${btnPrimary} h-10 px-4 text-sm`}
-              >
-                Export PDF
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* SAVE DIALOG */}
       {saveModalOpen && (
         <div
-          className="absolute inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={() => setSaveModalOpen(false)}
         >
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1402,7 +1300,7 @@ export default function Home() {
       {/* AUTOSAVE PASSPHRASE PROMPT — asked once, then silent every 5 min */}
       {autosavePromptOpen && (
         <div
-          className="absolute inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={() => setAutosavePromptOpen(false)}
         >
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-sm mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1439,6 +1337,6 @@ export default function Home() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }

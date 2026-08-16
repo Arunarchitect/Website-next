@@ -24,6 +24,37 @@ type RelationshipArrowsProps = {
   edgeStyles?: Map<string, EdgeStyle>;
 };
 
+// ─── Color palette for edges ─────────────────────────────────────
+// Each edge gets a stable color derived from a hash of its "from->to" key,
+// so the color doesn't shift around when nodes are added/reordered.
+const EDGE_COLORS = [
+  "#6366f1", // indigo
+  "#0ea5e9", // sky
+  "#10b981", // emerald
+  "#f97316", // orange
+  "#ec4899", // pink
+  "#8b5cf6", // violet
+  "#14b8a6", // teal
+  "#eab308", // yellow
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function colorForEdge(key: string): { color: string; index: number } {
+  const index = hashString(key) % EDGE_COLORS.length;
+  return { color: EDGE_COLORS[index], index };
+}
+
+const DIM_OPACITY = 0.25;
+const FULL_OPACITY = 1;
+
 export function RelationshipArrows({
   rootNode,
   positions,
@@ -134,17 +165,27 @@ export function RelationshipArrows({
         width: "100%",
         height: "100%",
         pointerEvents: "none",
-        zIndex: 1,
+        // Sits above node boxes, but individual paths/dots are the only
+        // parts with pointerEvents enabled below, so nodes stay clickable
+        // everywhere an arrow isn't actually drawn.
+        zIndex: 40,
         overflow: "visible",
       }}
     >
       <defs>
-        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-          <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
-        </marker>
-        <marker id="arrowhead-highlight" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-          <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
-        </marker>
+        {EDGE_COLORS.map((color, i) => (
+          <marker
+            key={`arrowhead-${i}`}
+            id={`arrowhead-${i}`}
+            markerWidth="10"
+            markerHeight="7"
+            refX="9"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill={color} />
+          </marker>
+        ))}
         <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
           <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
         </marker>
@@ -170,33 +211,24 @@ export function RelationshipArrows({
         const d = buildBezierPath(sourceAnchor, targetAnchor);
         const nodeHighlight = isHighlightedByNode(edge);
         const edgeSelected = isEdgeSelected(edge);
+        const highlighted = nodeHighlight || edgeSelected;
 
         const edgeKey = `${edge.from}->${edge.to}`;
         const style = edgeStyles.get(edgeKey) || {};
         const isDashed = style.dashed === true;
 
-        let stroke = "#64748b";
-        let strokeWidth = 2;
-        let marker = "url(#arrowhead)";
-        let outlineStroke = "#ffffff";
-        let outlineWidth = 3.5;
+        const { color: baseColor, index: colorIndex } = colorForEdge(edgeKey);
 
-        if (edgeSelected) {
-          stroke = "#f59e0b";
-          strokeWidth = 3;
-          marker = "url(#arrowhead-selected)";
-          outlineStroke = "#fff";
-          outlineWidth = 4.5;
-        } else if (nodeHighlight) {
-          stroke = "#3b82f6";
-          strokeWidth = 2.5;
-          marker = "url(#arrowhead-highlight)";
-          outlineStroke = "#fff";
-          outlineWidth = 4;
-        }
+        const stroke = edgeSelected ? "#f59e0b" : baseColor;
+        const strokeWidth = highlighted ? 3 : 2;
+        const marker = edgeSelected ? "url(#arrowhead-selected)" : `url(#arrowhead-${colorIndex})`;
+        const outlineStroke = "#ffffff";
+        const outlineWidth = highlighted ? 4.5 : 3.5;
+        const opacity = highlighted ? FULL_OPACITY : DIM_OPACITY;
+        const dotFill = edgeSelected ? "#f59e0b" : baseColor;
 
         return (
-          <g key={`${edge.from}-${edge.to}-${idx}`}>
+          <g key={`${edge.from}-${edge.to}-${idx}`} opacity={opacity} style={{ transition: "opacity 0.15s ease-out" }}>
             {/* Outline for contrast */}
             <path
               d={d}
@@ -232,7 +264,7 @@ export function RelationshipArrows({
               cx={sourceAnchor.x}
               cy={sourceAnchor.y}
               r={2.5}
-              fill={edgeSelected ? "#f59e0b" : nodeHighlight ? "#3b82f6" : "#64748b"}
+              fill={dotFill}
               stroke="#fff"
               strokeWidth={1}
               style={{ pointerEvents: "all", cursor: "pointer" }}
@@ -246,7 +278,7 @@ export function RelationshipArrows({
               cx={targetAnchor.x}
               cy={targetAnchor.y}
               r={2.5}
-              fill={edgeSelected ? "#f59e0b" : nodeHighlight ? "#3b82f6" : "#64748b"}
+              fill={dotFill}
               stroke="#fff"
               strokeWidth={1}
               style={{ pointerEvents: "all", cursor: "pointer" }}

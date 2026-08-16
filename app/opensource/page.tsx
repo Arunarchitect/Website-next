@@ -1,8 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-// app/opensource/page.tsx
 "use client";
 
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -32,7 +34,12 @@ interface PlacedDonor extends Donor {
 
 const GRID_COLUMNS = 40;
 const PIXEL_SIZE = 20;
-const COST_PER_PIXEL = 5;
+
+const DRAG_THRESHOLD = 6;
+const MIN_ZOOM = 0.15;
+const MAX_ZOOM = 4;
+
+const CONTENT_WIDTH = GRID_COLUMNS * PIXEL_SIZE;
 
 /* ------------------------------------------------------------------ */
 /*  Mock data — replace with a fetch() to your API                    */
@@ -66,7 +73,7 @@ const DONORS: Donor[] = [
     amount: 800,
     cols: 6,
     rows: 6,
-    isActive: false, // Subscription ended
+    isActive: false,
   },
   {
     id: "4",
@@ -85,7 +92,7 @@ const DONORS: Donor[] = [
     amount: 400,
     cols: 4,
     rows: 4,
-    isActive: false, // Subscription ended
+    isActive: false,
   },
   {
     id: "6",
@@ -106,9 +113,10 @@ function packDonors(
   donors: Donor[],
   gridCols: number
 ): { placed: PlacedDonor[]; totalRows: number } {
-  // Only pack active donors
-  const activeDonors = donors.filter(d => d.isActive);
-  const sorted = [...activeDonors].sort((a, b) => b.rows * b.cols - a.rows * a.cols);
+  const activeDonors = donors.filter((d) => d.isActive);
+  const sorted = [...activeDonors].sort(
+    (a, b) => b.rows * b.cols - a.rows * a.cols
+  );
 
   const occupied: boolean[][] = [];
 
@@ -174,13 +182,41 @@ function packDonors(
 /* ------------------------------------------------------------------ */
 
 export default function OpenSourcePage() {
-  const { placed, totalRows } = useMemo(() => packDonors(DONORS, GRID_COLUMNS), []);
+  const { placed, totalRows } = useMemo(
+    () => packDonors(DONORS, GRID_COLUMNS),
+    []
+  );
+
+  const contentHeight = Math.max(totalRows * PIXEL_SIZE, 1);
+
   const [hovered, setHovered] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [isDragging, setIsDragging] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Canvas pan / zoom state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+
+  // Canvas interaction refs
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const panStart = useRef({ x: 0, y: 0 });
+  const didDragRef = useRef(false);
+  const activePointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinchStart = useRef({
+    distance: 0,
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+    midpoint: { x: 0, y: 0 },
+  });
+
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+    panRef.current = pan;
+  }, [zoom, pan]);
 
   useEffect(() => {
     const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -196,47 +232,181 @@ export default function OpenSourcePage() {
     setTheme(theme === "dark" ? "light" : "dark");
   };
 
-  const activeDonors = DONORS.filter(d => d.isActive);
+  const zoomIn = () => setZoom((v) => Math.min(v * 1.2, MAX_ZOOM));
+  const zoomOut = () => setZoom((v) => Math.max(v / 1.2, MIN_ZOOM));
+
+  const fitAllView = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const padding = 48;
+    const availableWidth = Math.max(rect.width - padding * 2, 1);
+    const availableHeight = Math.max(rect.height - padding * 2, 1);
+
+    const scaleX = availableWidth / CONTENT_WIDTH;
+    const scaleY = availableHeight / contentHeight;
+
+    const nextZoom = Math.min(
+      Math.max(Math.min(scaleX, scaleY), MIN_ZOOM),
+      MAX_ZOOM
+    );
+
+    setZoom(nextZoom);
+    setPan({ x: 0, y: 0 });
+  }, [contentHeight]);
+
+  // Initial fit + refit when content size changes
+  useEffect(() => {
+    const frame = requestAnimationFrame(fitAllView);
+    return () => cancelAnimationFrame(frame);
+  }, [fitAllView]);
+
+  // Wheel zoom around cursor
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+
+      const factor = event.deltaY > 0 ? 0.9 : 1.1;
+      const oldZoom = zoomRef.current;
+      const newZoom = Math.min(Math.max(oldZoom * factor, MIN_ZOOM), MAX_ZOOM);
+
+      if (newZoom === oldZoom) return;
+
+      const rect = viewport.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      const halfW = rect.width / 2;
+      const halfH = rect.height / 2;
+      const ratio = newZoom / oldZoom;
+      const oldPan = panRef.current;
+
+      setZoom(newZoom);
+      setPan({
+        x: (mouseX - halfW) * (1 - ratio) + oldPan.x * ratio,
+        y: (mouseY - halfH) * (1 - ratio) + oldPan.y * ratio,
+      });
+    };
+
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  const getDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+
+  const getMidpoint = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  });
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    activePointers.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+
+    const pointers = activePointers.current;
+
+    if (pointers.size === 1) {
+      dragStart.current = { x: event.clientX, y: event.clientY };
+      panStart.current = { ...pan };
+      didDragRef.current = false;
+    } else if (pointers.size === 2) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setDragging(false);
+
+      const [p1, p2] = Array.from(pointers.values());
+      pinchStart.current = {
+        distance: getDistance(p1, p2),
+        zoom,
+        pan: { ...pan },
+        midpoint: getMidpoint(p1, p2),
+      };
+    }
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!activePointers.current.has(event.pointerId)) return;
+
+    activePointers.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+
+    const pointers = activePointers.current;
+
+    if (pointers.size === 1) {
+      const dx = event.clientX - dragStart.current.x;
+      const dy = event.clientY - dragStart.current.y;
+
+      if (!dragging) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setDragging(true);
+      }
+
+      setPan({
+        x: panStart.current.x + dx,
+        y: panStart.current.y + dy,
+      });
+      didDragRef.current = true;
+    } else if (pointers.size === 2) {
+      const [p1, p2] = Array.from(pointers.values());
+      const newDist = getDistance(p1, p2);
+      const oldDist = pinchStart.current.distance;
+
+      if (oldDist === 0) return;
+
+      const ratio = newDist / oldDist;
+      const newZoom = Math.min(
+        Math.max(pinchStart.current.zoom * ratio, MIN_ZOOM),
+        MAX_ZOOM
+      );
+
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+
+      const rect = viewport.getBoundingClientRect();
+      const mid = getMidpoint(p1, p2);
+      const localX = mid.x - rect.left;
+      const localY = mid.y - rect.top;
+      const halfW = rect.width / 2;
+      const halfH = rect.height / 2;
+      const zoomRatio = newZoom / pinchStart.current.zoom;
+      const oldPan = pinchStart.current.pan;
+
+      setZoom(newZoom);
+      setPan({
+        x: (localX - halfW) * (1 - zoomRatio) + oldPan.x * zoomRatio,
+        y: (localY - halfH) * (1 - zoomRatio) + oldPan.y * zoomRatio,
+      });
+
+      didDragRef.current = true;
+    }
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    activePointers.current.delete(event.pointerId);
+    if (activePointers.current.size < 2) {
+      setDragging(false);
+    }
+  };
+
+  const handleViewportClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (didDragRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      didDragRef.current = false;
+    }
+  };
+
+  const activeDonors = DONORS.filter((d) => d.isActive);
   const totalRaised = activeDonors.reduce((sum, d) => sum + d.amount, 0);
-  const inactiveDonors = DONORS.filter(d => !d.isActive);
-
-  // Mouse drag handlers for sliding
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!containerRef.current) return;
-    setIsDragging(true);
-    setStartX(e.pageX - containerRef.current.offsetLeft);
-    setScrollLeft(containerRef.current.scrollLeft);
-  };
-
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !containerRef.current) return;
-    e.preventDefault();
-    const x = e.pageX - containerRef.current.offsetLeft;
-    const walk = (x - startX) * 2;
-    containerRef.current.scrollLeft = scrollLeft - walk;
-  };
-
-  // Touch handlers for mobile
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!containerRef.current) return;
-    setStartX(e.touches[0].pageX - containerRef.current.offsetLeft);
-    setScrollLeft(containerRef.current.scrollLeft);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!containerRef.current) return;
-    const x = e.touches[0].pageX - containerRef.current.offsetLeft;
-    const walk = (x - startX) * 2;
-    containerRef.current.scrollLeft = scrollLeft - walk;
-  };
+  const inactiveDonors = DONORS.filter((d) => !d.isActive);
 
   const themeClasses = {
     background: theme === "dark" ? "bg-neutral-950" : "bg-neutral-50",
@@ -246,10 +416,13 @@ export default function OpenSourcePage() {
     cardBg: theme === "dark" ? "bg-neutral-900" : "bg-white",
     cardBorder: theme === "dark" ? "border-neutral-800" : "border-neutral-200",
     gridLines: theme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)",
+    canvasBg: theme === "dark" ? "bg-neutral-950" : "bg-neutral-100",
   };
 
   return (
-    <main className={`min-h-screen ${themeClasses.background} ${themeClasses.text} px-4 py-6 sm:py-12 sm:px-8 transition-colors duration-300`}>
+    <main
+      className={`min-h-screen ${themeClasses.background} ${themeClasses.text} px-4 py-6 sm:py-12 sm:px-8 transition-colors duration-300`}
+    >
       <div className="mx-auto max-w-5xl">
         {/* Theme toggle */}
         <div className="flex justify-end mb-4">
@@ -273,29 +446,65 @@ export default function OpenSourcePage() {
           </p>
         </section>
 
-        {/* Pixel wall with drag to slide */}
+        {/* Canvas toolbar */}
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+          <button
+            onClick={zoomOut}
+            title="Zoom out"
+            className={`h-9 w-9 rounded-lg border ${themeClasses.border} ${themeClasses.cardBg} text-lg font-medium transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800`}
+          >
+            −
+          </button>
+
+          <div className="min-w-[52px] text-center text-sm tabular-nums text-neutral-500">
+            {Math.round(zoom * 100)}%
+          </div>
+
+          <button
+            onClick={zoomIn}
+            title="Zoom in"
+            className={`h-9 w-9 rounded-lg border ${themeClasses.border} ${themeClasses.cardBg} text-lg font-medium transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800`}
+          >
+            +
+          </button>
+
+          <button
+            onClick={fitAllView}
+            title="Fit to screen"
+            className={`h-9 px-3 rounded-lg border ${themeClasses.border} ${themeClasses.cardBg} text-sm font-medium transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800`}
+          >
+            Fit to wall
+          </button>
+        </div>
+
+        {/* Pixel wall canvas */}
         <div
-          ref={containerRef}
-          className={`mb-6 overflow-x-auto rounded-xl border ${themeClasses.cardBorder} ${themeClasses.cardBg} p-4 transition-colors duration-300 cursor-grab active:cursor-grabbing`}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={handleMouseLeave}
-          onMouseUp={handleMouseUp}
-          onMouseMove={handleMouseMove}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
+          ref={viewportRef}
+          className={`relative mb-6 h-[55vh] min-h-[400px] w-full overflow-hidden rounded-xl border ${themeClasses.cardBorder} ${themeClasses.canvasBg} p-4 transition-colors duration-300 ${
+            dragging ? "cursor-grabbing" : "cursor-grab"
+          }`}
           style={{
-            scrollbarWidth: 'thin',
-            WebkitOverflowScrolling: 'touch',
+            touchAction: "none",
+            userSelect: dragging ? "none" : "auto",
           }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onClickCapture={handleViewportClickCapture}
         >
           <div
-            className="relative mx-auto"
+            className="absolute"
             style={{
-              width: GRID_COLUMNS * PIXEL_SIZE,
-              height: totalRows * PIXEL_SIZE,
-              minWidth: GRID_COLUMNS * PIXEL_SIZE,
-              backgroundImage:
-                `linear-gradient(to right, ${themeClasses.gridLines} 1px, transparent 1px), linear-gradient(to bottom, ${themeClasses.gridLines} 1px, transparent 1px)`,
+              left: "50%",
+              top: "50%",
+              width: CONTENT_WIDTH,
+              height: contentHeight,
+              boxSizing: "border-box",
+              transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom})`,
+              transformOrigin: "center center",
+              transition: dragging ? "none" : "transform 0.08s ease-out",
+              backgroundImage: `linear-gradient(to right, ${themeClasses.gridLines} 1px, transparent 1px), linear-gradient(to bottom, ${themeClasses.gridLines} 1px, transparent 1px)`,
               backgroundSize: `${PIXEL_SIZE}px ${PIXEL_SIZE}px`,
             }}
           >
@@ -316,11 +525,17 @@ export default function OpenSourcePage() {
                     src={donor.logoUrl}
                     alt={donor.name}
                     fill
+                    draggable={false}
                     sizes={`${donor.cols * PIXEL_SIZE}px`}
                     className="object-cover"
                   />
+
                   {hovered === donor.id && (
-                    <div className={`absolute inset-0 flex flex-col items-center justify-center ${theme === "dark" ? "bg-black/75" : "bg-white/75"} text-center px-1`}>
+                    <div
+                      className={`absolute inset-0 flex flex-col items-center justify-center ${
+                        theme === "dark" ? "bg-black/75" : "bg-white/75"
+                      } text-center px-1`}
+                    >
                       <span className="text-[10px] sm:text-xs font-medium leading-tight">
                         {donor.name}
                       </span>
@@ -331,7 +546,13 @@ export default function OpenSourcePage() {
 
               if (donor.link) {
                 return (
-                  <a key={donor.id} href={donor.link} target="_blank" rel="noopener noreferrer" className="contents">
+                  <a
+                    key={donor.id}
+                    href={donor.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="contents"
+                  >
                     {donorBlock}
                   </a>
                 );
@@ -342,8 +563,10 @@ export default function OpenSourcePage() {
           </div>
         </div>
 
-        {/* Stats after the wall - only supporters and total raised */}
-        <div className={`flex flex-wrap justify-center gap-6 sm:gap-8 text-sm mb-8 ${themeClasses.textSecondary}`}>
+        {/* Stats after the wall */}
+        <div
+          className={`flex flex-wrap justify-center gap-6 sm:gap-8 text-sm mb-8 ${themeClasses.textSecondary}`}
+        >
           <span>
             <strong className={themeClasses.text}>{activeDonors.length}</strong> supporters
           </span>
@@ -352,8 +575,10 @@ export default function OpenSourcePage() {
           </span>
         </div>
 
-        {/* Support section with text link and archives link */}
-        <section className={`rounded-xl border ${themeClasses.cardBorder} ${themeClasses.cardBg} p-6 sm:p-8 transition-colors duration-300 space-y-4`}>
+        {/* Support section */}
+        <section
+          className={`rounded-xl border ${themeClasses.cardBorder} ${themeClasses.cardBg} p-6 sm:p-8 transition-colors duration-300 space-y-4`}
+        >
           <div className="text-center">
             <p className={`${themeClasses.textSecondary} text-sm sm:text-base`}>
               I want to support open source dev through this platform.{' '}
@@ -365,7 +590,7 @@ export default function OpenSourcePage() {
               </Link>
             </p>
           </div>
-          
+
           {inactiveDonors.length > 0 && (
             <div className="text-center border-t pt-4 border-neutral-700/30">
               <Link
