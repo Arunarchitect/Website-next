@@ -37,6 +37,12 @@ const IconChevronLeft = () => (
 const IconChevronRight = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
 );
+const IconUndo = () => (
+  <IconWrap><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-15-6.7L3 13" /></IconWrap>
+);
+const IconRedo = () => (
+  <IconWrap><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 15-6.7L21 13" /></IconWrap>
+);
 
 export default function Home() {
   // ─── Editing logic (data, relations, modals, upload/save) lives in the hook ───
@@ -344,11 +350,12 @@ export default function Home() {
     setPan({ x: 0, y: 0 });
   };
 
+  // ─── Auto-fit only on a genuine "load a new document" event ───────────
   useEffect(() => {
     if (!editor.data) return;
     const frame = requestAnimationFrame(() => fitAllView());
     return () => cancelAnimationFrame(frame);
-  }, [editor.data]);
+  }, [editor.loadVersion]);
 
   // ─── Pan / Zoom / Pointer Handlers ──────────────────────────────
   useEffect(() => {
@@ -485,9 +492,6 @@ export default function Home() {
   const rootNode = editor.rootNode;
 
   // ─── Render ────────────────────────────────────────────────────
-  // Outer wrapper owns the overall height budget (same calc as before) and
-  // lays the toolbar out in normal flow, above the canvas — the toolbar is
-  // no longer an absolutely-positioned overlay sitting on top of the canvas.
   return (
     <div
       className="flex flex-col w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px]"
@@ -536,6 +540,32 @@ export default function Home() {
               <button onClick={fitAllView} title="Fit to screen" className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}>
                 Fit
               </button>
+
+              <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
+
+              {/* Undo / Redo — Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z also work
+                  globally (see useProcessEditor), these buttons are the
+                  discoverable/tappable equivalent for mobile. */}
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button
+                  onClick={editor.undo}
+                  disabled={!editor.canUndo}
+                  title="Undo (Ctrl+Z)"
+                  className={`${btnGhost} w-8 h-8 sm:w-9 sm:h-9`}
+                >
+                  <IconUndo />
+                </button>
+                <button
+                  onClick={editor.redo}
+                  disabled={!editor.canRedo}
+                  title="Redo (Ctrl+Shift+Z)"
+                  className={`${btnGhost} w-8 h-8 sm:w-9 sm:h-9`}
+                >
+                  <IconRedo />
+                </button>
+              </div>
+
+              <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
               <button onClick={openSaveModal} title="Save this workflow" className={`${btnOutline} h-8 px-2.5 text-xs shrink-0 sm:h-9 sm:px-3 sm:text-sm`}>
                 Save
@@ -878,10 +908,23 @@ export default function Home() {
           />
 
           {editor.error && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-600 border border-red-200 rounded-xl px-4 py-2 text-sm shadow-md no-print">
-              {editor.error}
-            </div>
-          )}
+  <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-700 border border-red-200 rounded-xl px-4 py-3 text-sm shadow-md no-print max-w-[90vw] sm:max-w-md">
+    <div className="flex items-start gap-2">
+      <span className="flex-1">{editor.error}</span>
+    </div>
+    {editor.invalidUpload && (
+      <div className="mt-2 flex justify-end">
+        <button
+          onClick={editor.downloadInvalidUpload}
+          className="shrink-0 text-xs font-medium bg-white border border-red-200 text-red-700 rounded-lg px-2.5 py-1 hover:bg-red-100 transition-colors"
+          title="Download a correctly formatted sample file"
+        >
+          Download sample template
+        </button>
+      </div>
+    )}
+  </div>
+)}
 
           {editor.warning && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-xl px-4 py-2 text-sm shadow-md max-w-md text-center no-print">
@@ -946,6 +989,9 @@ export default function Home() {
                 type="text"
                 value={editor.editingValue}
                 onChange={(e) => editor.setEditingValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") editor.submitEditor();
+                }}
                 className={`${inputBase} mb-4`}
                 placeholder="Enter title"
               />
@@ -954,6 +1000,14 @@ export default function Home() {
                 autoFocus
                 value={editor.editingValue}
                 onChange={(e) => editor.setEditingValue(e.target.value)}
+                onKeyDown={(e) => {
+                  // Ctrl/Cmd+Enter submits; plain Enter still inserts a
+                  // newline since this is a multi-line description field.
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    editor.submitEditor();
+                  }
+                }}
                 rows={5}
                 className={`${inputBase} mb-4 resize-vertical`}
                 placeholder="Enter description"
@@ -994,6 +1048,9 @@ export default function Home() {
                 type="text"
                 value={editor.newProcess.label}
                 onChange={(e) => editor.setNewProcess({ ...editor.newProcess, label: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") editor.handleAddProcess();
+                }}
                 className={inputBase}
                 placeholder="e.g. Site Analysis"
                 autoFocus
@@ -1029,6 +1086,9 @@ export default function Home() {
                     position: Math.min(Math.max(Number(e.target.value) || 0, 0), editor.getParentInfo().childCount),
                   })
                 }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") editor.handleAddProcess();
+                }}
                 className={inputBase}
               />
               <div className="text-xs text-gray-400 mt-1">
@@ -1222,6 +1282,9 @@ export default function Home() {
                     type="password"
                     value={passphrase}
                     onChange={(e) => setPassphrase(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmSave();
+                    }}
                     className={inputBase}
                     placeholder="Only you should know this"
                     autoFocus
@@ -1237,6 +1300,9 @@ export default function Home() {
                     type="text"
                     value={saveTitle}
                     onChange={(e) => setSaveTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmSave();
+                    }}
                     className={inputBase}
                   />
                 </div>
@@ -1267,6 +1333,9 @@ export default function Home() {
                           type="password"
                           value={masterKeyInput}
                           onChange={(e) => setMasterKeyInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleConfirmSave();
+                          }}
                           className={inputBase}
                           placeholder="Required to change the master workflow"
                         />

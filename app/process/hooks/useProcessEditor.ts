@@ -1,7 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Person, ProcessData, ProcessNode } from "@/app/process/lib/process-utils";
+import { useEffect, useRef, useState } from "react";
+import {
+  Person,
+  ProcessData,
+  ProcessNode,
+  sanitizeProcessRelations,
+  reverseEdgeExists,
+} from "@/app/process/lib/process-utils";
+import sampleProcess from "@/app/process/json/process.json";
 
 // ─── Pure tree helpers ───────────────────────────────────────────
 
@@ -130,6 +137,90 @@ function getLeafIds(node: ProcessNode): string[] {
 
 export type Edge = { from: string; to: string };
 
+// ─── Schema validation ────────────────────────────────────────────
+// Checked against the reference ProcessData shape: a node needs at least
+// `id` and `label`; everything else (description, children, successors,
+// predecessors, assignedPersonIds, width/height) is optional but must be
+// the right type when present. Returns the first problem found, or null
+// if the document looks structurally sound.
+
+function validateNodeShape(node: unknown, path: string): string | null {
+  if (!node || typeof node !== "object") return `${path} is not an object.`;
+  const n = node as Record<string, unknown>;
+
+  if (typeof n.id !== "string" || n.id.trim() === "") return `${path}.id is missing or not a string.`;
+  if (typeof n.label !== "string" || n.label.trim() === "") return `${path}.label is missing or not a string.`;
+  if (n.description !== undefined && typeof n.description !== "string") return `${path}.description must be a string.`;
+  if (n.successors !== undefined && !isStringArray(n.successors)) return `${path}.successors must be an array of strings.`;
+  if (n.predecessors !== undefined && !isStringArray(n.predecessors)) return `${path}.predecessors must be an array of strings.`;
+  if (n.assignedPersonIds !== undefined && !isStringArray(n.assignedPersonIds)) return `${path}.assignedPersonIds must be an array of strings.`;
+
+  if (n.children !== undefined) {
+    if (!Array.isArray(n.children)) return `${path}.children must be an array.`;
+    for (let i = 0; i < n.children.length; i++) {
+      const err = validateNodeShape(n.children[i], `${path}.children[${i}]`);
+      if (err) return err;
+    }
+  }
+  return null;
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+export function validateProcessData(json: unknown): { valid: boolean; error: string | null } {
+  if (!json || typeof json !== "object") return { valid: false, error: "File is not a JSON object." };
+  const j = json as Record<string, unknown>;
+
+  if (typeof j.title !== "string" || j.title.trim() === "") {
+    return { valid: false, error: "Missing required field: title (string)." };
+  }
+  if (j.description !== undefined && typeof j.description !== "string") {
+    return { valid: false, error: "description must be a string." };
+  }
+  if (j.width !== undefined && typeof j.width !== "number") {
+    return { valid: false, error: "width must be a number." };
+  }
+  if (j.height !== undefined && typeof j.height !== "number") {
+    return { valid: false, error: "height must be a number." };
+  }
+  if (j.children !== undefined) {
+    if (!Array.isArray(j.children)) return { valid: false, error: "children must be an array." };
+    for (let i = 0; i < j.children.length; i++) {
+      const err = validateNodeShape(j.children[i], `children[${i}]`);
+      if (err) return { valid: false, error: err };
+    }
+  }
+  if (j.persons !== undefined) {
+    if (!Array.isArray(j.persons)) return { valid: false, error: "persons must be an array." };
+    for (const p of j.persons as unknown[]) {
+      if (!p || typeof p !== "object" || typeof (p as Record<string, unknown>).id !== "string" || typeof (p as Record<string, unknown>).name !== "string") {
+        return { valid: false, error: "Each entry in persons must have a string id and name." };
+      }
+    }
+  }
+  if (j.completed !== undefined && !isStringArray(j.completed)) {
+    return { valid: false, error: "completed must be an array of strings." };
+  }
+  if (j.edgeStyles !== undefined && (typeof j.edgeStyles !== "object" || j.edgeStyles === null || Array.isArray(j.edgeStyles))) {
+    return { valid: false, error: "edgeStyles must be an object keyed by 'fromId->toId'." };
+  }
+
+  return { valid: true, error: null };
+}
+
+// ─── Undo/redo history ────────────────────────────────────────────
+
+type Snapshot = {
+  data: ProcessData | null;
+  completed: Set<string>;
+  persons: Person[];
+  edgeStyles: Map<string, { dashed: boolean }>;
+};
+
+const MAX_HISTORY = 50;
+
 export function useProcessEditor(initialData: ProcessData) {
   const [data, setData] = useState<ProcessData | null>(initialData);
 
@@ -161,6 +252,133 @@ export function useProcessEditor(initialData: ProcessData) {
   const [showPersonManager, setShowPersonManager] = useState(false);
   const [newPersonName, setNewPersonName] = useState("");
   const [assignPopupNodeId, setAssignPopupNodeId] = useState<string | null>(null);
+
+  // ─── Invalid-upload fallback ─────────────────────────────────
+  // When an uploaded JSON is invalid — either malformed (fails JSON.parse)
+  // or structurally wrong (fails schema validation) — we do NOT modify or
+  // re-download the uploaded file. We only keep its filename so the UI can
+  // show the error and offer the known-good sample JSON from
+  // app/process/json/process.json.
+  const [invalidUpload, setInvalidUpload] = useState<{ filename: string } | null>(null);
+
+  // ─── Load tracking ───────────────────────────────────────────
+  const [loadVersion, setLoadVersion] = useState(0);
+
+  // ─── Undo / redo history ──────────────────────────────────────
+  const [past, setPast] = useState<Snapshot[]>([]);
+  const [future, setFuture] = useState<Snapshot[]>([]);
+  const pastRef = useRef<Snapshot[]>([]);
+  const futureRef = useRef<Snapshot[]>([]);
+
+  // Mirror the "live" pieces of state into refs so captureSnapshot() and
+  // the global keydown handler always see the latest values without
+  // needing to be recreated (and without going stale inside a listener
+  // that's only attached once).
+  const dataRef = useRef(data);
+  const completedRef = useRef(completed);
+  const personsRef = useRef(persons);
+  const edgeStylesRef = useRef(edgeStyles);
+  useEffect(() => { dataRef.current = data; }, [data]);
+  useEffect(() => { completedRef.current = completed; }, [completed]);
+  useEffect(() => { personsRef.current = persons; }, [persons]);
+  useEffect(() => { edgeStylesRef.current = edgeStyles; }, [edgeStyles]);
+
+  const captureSnapshot = (): Snapshot => ({
+    data: dataRef.current ? (JSON.parse(JSON.stringify(dataRef.current)) as ProcessData) : null,
+    completed: new Set(completedRef.current),
+    persons: personsRef.current.map((p) => ({ ...p })),
+    edgeStyles: new Map(Array.from(edgeStylesRef.current.entries()).map(([k, v]) => [k, { ...v }])),
+  });
+
+  const applySnapshot = (snap: Snapshot) => {
+    setData(snap.data);
+    setCompleted(new Set(snap.completed));
+    setPersons(snap.persons.map((p) => ({ ...p })));
+    setEdgeStyles(new Map(Array.from(snap.edgeStyles.entries()).map(([k, v]) => [k, { ...v }])));
+    // Clear anything that might reference a node/edge that no longer
+    // exists post-undo/redo.
+    setSelectedNodeId(null);
+    setSelectedEdge(null);
+    setPendingRelation(null);
+    setEditingNodeId(null);
+    setAssignPopupNodeId(null);
+  };
+
+  // Call before any mutating action to snapshot the state as it was
+  // *before* that action, so undo can restore it. Clears the redo stack,
+  // same as any normal editor (a fresh action invalidates old redos).
+  const pushHistory = () => {
+    const snap = captureSnapshot();
+    const newPast = [...pastRef.current, snap].slice(-MAX_HISTORY);
+    pastRef.current = newPast;
+    futureRef.current = [];
+    setPast(newPast);
+    setFuture([]);
+  };
+
+  const undo = () => {
+    const p = pastRef.current;
+    if (p.length === 0) return;
+    const previous = p[p.length - 1];
+    const newPast = p.slice(0, -1);
+    const currentSnap = captureSnapshot();
+    const newFuture = [currentSnap, ...futureRef.current];
+    pastRef.current = newPast;
+    futureRef.current = newFuture;
+    setPast(newPast);
+    setFuture(newFuture);
+    applySnapshot(previous);
+  };
+
+  const redo = () => {
+    const f = futureRef.current;
+    if (f.length === 0) return;
+    const next = f[0];
+    const newFuture = f.slice(1);
+    const currentSnap = captureSnapshot();
+    const newPast = [...pastRef.current, currentSnap];
+    pastRef.current = newPast;
+    futureRef.current = newFuture;
+    setPast(newPast);
+    setFuture(newFuture);
+    applySnapshot(next);
+  };
+
+  const canUndo = past.length > 0;
+  const canRedo = future.length > 0;
+
+  // Global Ctrl/Cmd+Z (undo) and Ctrl/Cmd+Shift+Z (redo). Also accepts
+  // Ctrl+Y as a common Windows redo shortcut. Skipped while a text field
+  // is focused so native input/textarea undo isn't hijacked.
+  const undoRef = useRef(undo);
+  const redoRef = useRef(redo);
+  undoRef.current = undo;
+  redoRef.current = redo;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+      const key = e.key.toLowerCase();
+      const isUndoKey = key === "z" && !e.shiftKey;
+      const isRedoKey = (key === "z" && e.shiftKey) || key === "y";
+      if (!isUndoKey && !isRedoKey) return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isEditableField = tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable;
+      if (isEditableField) return; // let the field's own undo run
+
+      e.preventDefault();
+      if (isRedoKey) {
+        redoRef.current();
+      } else {
+        undoRef.current();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const showWarning = (message: string) => {
     setWarning(message);
@@ -194,6 +412,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const updateNode = (id: string, field: "label" | "description", value: string) => {
     if (!data) return;
+    pushHistory();
 
     if (id === "root") {
       setData({ ...data, [field === "label" ? "title" : "description"]: value });
@@ -279,6 +498,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
     const newRoot = addNodeToTree(rootRef, parentId, newNode, pos);
 
+    pushHistory();
     setData({
       ...data,
       title: newRoot.label,
@@ -316,6 +536,7 @@ export function useProcessEditor(initialData: ProcessData) {
     let newRoot = removeNodeFromTree(rootRef, id);
     newRoot = stripRelationsToIds(newRoot, idsToRemove);
 
+    pushHistory();
     setData({
       ...data,
       title: newRoot.label,
@@ -368,6 +589,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
     const newRoot = insertNodeAfter(rootRef, id, clone);
 
+    pushHistory();
     setData({
       ...data,
       title: newRoot.label,
@@ -389,6 +611,7 @@ export function useProcessEditor(initialData: ProcessData) {
       id: `person-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       name: trimmed,
     };
+    pushHistory();
     setPersons((prev) => [...prev, newPerson]);
     setNewPersonName("");
   };
@@ -396,12 +619,14 @@ export function useProcessEditor(initialData: ProcessData) {
   const renamePerson = (id: string, newName: string) => {
     const trimmed = newName.trim();
     if (!trimmed) return; // ignore empty names, same guard style as addPerson
+    pushHistory();
     setPersons((prev) =>
       prev.map((p) => (p.id === id ? { ...p, name: trimmed } : p))
     );
   };
 
   const deletePerson = (id: string) => {
+    pushHistory();
     setPersons((prev) => prev.filter((p) => p.id !== id));
 
     if (!data) return;
@@ -429,6 +654,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const toggleNodeAssignment = (nodeId: string, personId: string) => {
     if (!data) return;
+    pushHistory();
     setData((prev) => {
       if (!prev) return prev;
       const root: ProcessNode = {
@@ -466,7 +692,9 @@ export function useProcessEditor(initialData: ProcessData) {
   const closeAssignPopup = () => setAssignPopupNodeId(null);
 
   // ─── Relations ─────────────────────────────────────────────
-  const addRelation = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
+  // Raw (non-history-pushing) versions so reverseRelation can compose
+  // delete+add as a single history entry instead of two.
+  const addRelationRaw = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
     if (!data) return;
     setData((prev) => {
       if (!prev) return prev;
@@ -513,7 +741,7 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  const deleteRelation = (edge: Edge) => {
+  const deleteRelationRaw = (edge: Edge) => {
     if (!data) return;
     setData((prev) => {
       if (!prev) return prev;
@@ -555,16 +783,63 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
+  const addRelation = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
+    if (fromId === toId) {
+      showWarning("A process can't be its own predecessor or successor.");
+      return;
+    }
+    if (!data) return;
+
+    // Normalize to the actual successor-direction pair regardless of
+    // which button ("+ Successor" / "+ Predecessor") triggered this, so
+    // the mutual check below is checking the same thing addRelationRaw
+    // is about to write.
+    const forwardFrom = mode === "successor" ? fromId : toId;
+    const forwardTo = mode === "successor" ? toId : fromId;
+
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      children: data.children ?? [],
+    };
+    const completesMutualPair = reverseEdgeExists(rootRef, forwardFrom, forwardTo);
+
+    pushHistory();
+    addRelationRaw(fromId, toId, mode);
+
+    if (completesMutualPair) {
+      // The reverse edge already existed, so this one just turned it
+      // into a two-way relation — dash both arrows so it reads as a
+      // deliberate loop instead of a duplicate/broken arrow.
+      const forwardKey = `${forwardFrom}->${forwardTo}`;
+      const reverseKey = `${forwardTo}->${forwardFrom}`;
+      setEdgeStyles((prev) => {
+        const next = new Map(prev);
+        next.set(forwardKey, { dashed: true });
+        next.set(reverseKey, { dashed: true });
+        return next;
+      });
+      showWarning("These two processes now reference each other both ways — shown as a dashed loop.");
+    }
+  };
+
+  const deleteRelation = (edge: Edge) => {
+    pushHistory();
+    deleteRelationRaw(edge);
+  };
+
   const reverseRelation = () => {
     if (!selectedEdge) return;
     const { from, to } = selectedEdge;
-    deleteRelation(selectedEdge);
-    addRelation(to, from, "successor");
+    pushHistory();
+    deleteRelationRaw(selectedEdge);
+    addRelationRaw(to, from, "successor");
     setSelectedEdge(null);
   };
 
   const toggleEdgeDashed = () => {
     if (!selectedEdge) return;
+    pushHistory();
     const key = `${selectedEdge.from}->${selectedEdge.to}`;
     setEdgeStyles((prev) => {
       const next = new Map(prev);
@@ -589,6 +864,7 @@ export function useProcessEditor(initialData: ProcessData) {
       return;
     }
 
+    pushHistory();
     setCompleted((prev) => {
       const next = new Set(prev);
       if (next.has(node.id)) {
@@ -604,14 +880,13 @@ export function useProcessEditor(initialData: ProcessData) {
 
   /**
    * Full state restore from a ProcessData blob — whether it came from a
-   * local file upload or a server load. `data` alone isn't the whole
-   * picture: completed steps, people, and edge styles are their own
-   * pieces of state, not derived from `data`, so anything that loads a
-   * document has to go through here or it'll silently drop them (this is
-   * what was happening to the server-load path before — it only called
-   * the raw `setData`).
+   * local file upload or a server load. Loading a new document resets
+   * undo/redo history rather than pushing onto it (same convention as
+   * most editors: opening a different file isn't something you'd "undo"
+   * back through your previous file's edits).
    */
   const loadData = (json: ProcessData) => {
+    setInvalidUpload(null);
     setData(json);
     setCompleted(new Set(json.completed ?? []));
     setPersons(json.persons ?? []);
@@ -625,6 +900,13 @@ export function useProcessEditor(initialData: ProcessData) {
         Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
       )
     );
+    setLoadVersion((v) => v + 1);
+
+    // New document — clear undo/redo history.
+    pastRef.current = [];
+    futureRef.current = [];
+    setPast([]);
+    setFuture([]);
   };
 
   const handleUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -633,25 +915,61 @@ export function useProcessEditor(initialData: ProcessData) {
 
     setError("");
     setWarning("");
+    setInvalidUpload(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const text = e.target?.result;
         if (typeof text !== "string") throw new Error("Unable to read file.");
-        const json = JSON.parse(text) as ProcessData;
-        if (!json || typeof json !== "object") throw new Error("Invalid JSON.");
-        if (!json.title) throw new Error("JSON must contain a title.");
+        const json = JSON.parse(text) as unknown;
 
-        loadData(json);
+        const { valid, error: validationError } = validateProcessData(json);
+        if (!valid) {
+          setData(null);
+          // Do not attempt to repair, rewrite, or re-download the uploaded JSON.
+          // Keep only the filename so the UI can explain what went wrong.
+          setInvalidUpload({ filename: file.name });
+          setError(`"${file.name}" is invalid: ${validationError}`);
+          return;
+        }
+
+        loadData(json as ProcessData);
       } catch (err) {
         console.error(err);
         setData(null);
-        setError("Invalid JSON file. Please check the file structure.");
+        setInvalidUpload({ filename: file.name });
+        setError(`"${file.name}" is not a valid process file. Download the sample template below to see the correct format.`);
       }
     };
     reader.readAsText(file);
     event.target.value = "";
+  };
+
+  // Download the known-good sample JSON from the codebase.
+  // The invalid uploaded JSON is never modified or downloaded back.
+  const downloadInvalidUpload = () => {
+    if (!invalidUpload) return;
+
+    try {
+      const jsonString = JSON.stringify(sampleProcess, null, 2);
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "process.json";
+      document.body.appendChild(a);
+      a.click();
+
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    } catch (err) {
+      console.error("Download sample JSON failed:", err);
+      setError("Failed to download the sample JSON. Check console for details.");
+    }
   };
 
   const getExportData = () => {
@@ -716,6 +1034,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
   return {
     data, setData, loadData, rootNode,
+    loadVersion,
     error, setError, warning,
     completed, edgeStyles,
     selectedNodeId, setSelectedNodeId,
@@ -733,7 +1052,11 @@ export function useProcessEditor(initialData: ProcessData) {
     clearSelection, handleNodeClick, handleSelectEdge,
     // people
     persons, showPersonManager, setShowPersonManager,
-    newPersonName, setNewPersonName, addPerson, deletePerson,renamePerson,
+    newPersonName, setNewPersonName, addPerson, deletePerson, renamePerson,
     assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment,
+    // schema validation fallback
+    invalidUpload, downloadInvalidUpload,
+    // undo / redo
+    undo, redo, canUndo, canRedo,
   };
 }

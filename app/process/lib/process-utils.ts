@@ -71,6 +71,130 @@ export function isNodePartial(node: ProcessNode, completed: Set<string>): boolea
 }
 
 /* =========================================================
+   RELATION SANITIZATION
+   ---------------------------------------------------------
+   The ProcessNode/ProcessData types above only guarantee *shape*
+   (id/label are strings, successors/predecessors are string arrays,
+   etc). They can't express graph-level rules like "a node can't be its
+   own successor" or "two nodes pointing at each other should read as a
+   loop, not a rendering glitch." That's handled here instead.
+========================================================= */
+
+export type SanitizeResult = {
+  data: ProcessData;
+  notes: string[];
+};
+
+function collectAllNodes(node: ProcessNode, acc: ProcessNode[]) {
+  acc.push(node);
+  (node.children ?? []).forEach((c) => collectAllNodes(c, acc));
+}
+
+/**
+ * Cleans up two specific relation problems that the TypeScript shape
+ * can't catch on its own:
+ *
+ * 1. SELF-LOOPS — a node listing its own id in its own `successors` or
+ *    `predecessors`. This is always a data bug (a node can't be its own
+ *    predecessor/successor) and the offending id is stripped out.
+ *
+ * 2. MUTUAL PAIRS — two *different* nodes that reference each other in
+ *    both directions (A is a successor of B *and* B is a successor of
+ *    A). This is a legitimate pattern — e.g. an iterative feedback loop
+ *    between two stages — but rendered as two overlapping solid arrows
+ *    it just looks like a bug. Both directions get
+ *    `edgeStyles[...].dashed = true` so the loop reads as intentional.
+ *
+ * Pure function — returns a new ProcessData (the input is never
+ * mutated) plus a list of human-readable notes describing what changed,
+ * so the caller can surface them instead of silently rewriting the
+ * user's file.
+ */
+export function sanitizeProcessRelations(data: ProcessData): SanitizeResult {
+  const notes: string[] = [];
+  const rootChildren = data.children ?? [];
+
+  // ── Pass 1: strip self-loops ──────────────────────────────────────
+  const stripSelfLoops = (node: ProcessNode): ProcessNode => {
+    const successors = (node.successors ?? []).filter((id) => id !== node.id);
+    const predecessors = (node.predecessors ?? []).filter((id) => id !== node.id);
+
+    if (node.successors && node.successors.length !== successors.length) {
+      notes.push(`"${node.label}" listed itself as its own successor — removed.`);
+    }
+    if (node.predecessors && node.predecessors.length !== predecessors.length) {
+      notes.push(`"${node.label}" listed itself as its own predecessor — removed.`);
+    }
+
+    return {
+      ...node,
+      successors: node.successors ? successors : undefined,
+      predecessors: node.predecessors ? predecessors : undefined,
+      children: node.children?.map(stripSelfLoops),
+    };
+  };
+
+  const cleanedChildren = rootChildren.map(stripSelfLoops);
+
+  // ── Pass 2: find mutual pairs across the *cleaned* tree ─────────────
+  const allNodes: ProcessNode[] = [];
+  cleanedChildren.forEach((c) => collectAllNodes(c, allNodes));
+  const nodesById = new Map(allNodes.map((n) => [n.id, n]));
+
+  const edgeSet = new Set<string>(); // "from->to"
+  allNodes.forEach((n) => {
+    (n.successors ?? []).forEach((to) => edgeSet.add(`${n.id}->${to}`));
+  });
+
+  const newEdgeStyles: Record<string, { dashed?: boolean }> = { ...(data.edgeStyles ?? {}) };
+  const seenPairs = new Set<string>();
+
+  edgeSet.forEach((key) => {
+    const [from, to] = key.split("->");
+    const reverseKey = `${to}->${from}`;
+    if (!edgeSet.has(reverseKey)) return; // one-directional, nothing to do
+
+    const pairKey = [from, to].sort().join("|");
+    if (seenPairs.has(pairKey)) return;
+    seenPairs.add(pairKey);
+
+    const alreadyDashedBothWays = newEdgeStyles[key]?.dashed && newEdgeStyles[reverseKey]?.dashed;
+    if (!alreadyDashedBothWays) {
+      newEdgeStyles[key] = { ...newEdgeStyles[key], dashed: true };
+      newEdgeStyles[reverseKey] = { ...newEdgeStyles[reverseKey], dashed: true };
+      const fromLabel = nodesById.get(from)?.label ?? from;
+      const toLabel = nodesById.get(to)?.label ?? to;
+      notes.push(`"${fromLabel}" and "${toLabel}" reference each other — shown as a dashed loop.`);
+    }
+  });
+
+  return {
+    data: { ...data, children: cleanedChildren, edgeStyles: newEdgeStyles },
+    notes,
+  };
+}
+
+/**
+ * Given a single from/to pair, tells you whether the *reverse* edge
+ * (to -> from) already exists somewhere in the tree. Used by the editor
+ * to decide, at the moment a relation is drawn interactively, whether it
+ * just completed a mutual pair and should be dashed immediately rather
+ * than waiting for the next sanitize pass.
+ */
+export function reverseEdgeExists(root: ProcessNode, fromId: string, toId: string): boolean {
+  const findNode = (node: ProcessNode, id: string): ProcessNode | null => {
+    if (node.id === id) return node;
+    for (const child of node.children ?? []) {
+      const found = findNode(child, id);
+      if (found) return found;
+    }
+    return null;
+  };
+  const toNode = findNode(root, toId);
+  return !!toNode?.successors?.includes(fromId);
+}
+
+/* =========================================================
    COLOUR THEMES
 ========================================================= */
 

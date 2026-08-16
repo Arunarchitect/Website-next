@@ -1,243 +1,105 @@
 {
-  "title": "AI Park Design Challenge \u2013 Al Safa 2 Park Redesign",
+  "title": "AI Park Design Challenge — Al Safa 2 Park",
   "type": "process",
-  "description": "Workflow for the Dubai Municipality AI Design Challenge: human-centred design, AI tools, concept & preliminary design stages.",
-  "width": 2400,
-  "height": 450,
+  "description": "Dubai Municipality AI Park Design Challenge — 15,000 sqm park redevelopment in Al Safa 2, AED 35M budget. Concept + Preliminary Design, 2-person team, free/open-source tools only. AI must be documented at every stage (worth 20% alone). Submission deadline extended to 21 Sep 2026 (was 15 Aug 2026). Portal opened 28 Jun 2026, query deadline 5 Aug 2026.",
+  "width": 4200,
+  "height": 480,
   "edgeStyles": {},
   "persons": [
-    {
-      "id": "person-1786811491462-ynbdbm",
-      "name": "Arun"
-    },
-    {
-      "id": "person-1786701015227-kbq9bx",
-      "name": "Ali"
-    }
+    { "id": "person-arun", "name": "Arun (Urban Planner / Architect)" },
+    { "id": "person-ali", "name": "Ali (Engineer)" }
   ],
   "children": [
     {
-      "id": "brief-review",
-      "label": "Design Challenge Brief & Team Assembly",
-      "description": "Review TOR, deliverables, and budget. Assemble a multidisciplinary team and select AI tools.",
-      "successors": [
-        "redesign-justification"
-      ],
-      "assignedPersonIds": [
-        "person-1786811491462-ynbdbm"
-      ],
+      "id": "brief-setup",
+      "label": "Brief Intake & Setup",
+      "description": "Get grounded and locked in before touching design work.",
       "children": [
-        {
-          "id": "tor-analysis",
-          "label": "TOR & Deliverables Analysis",
-          "description": "Interpret required deliverables, AED 35M budget, 15,000 m\u00b2 site.",
-          "children": []
-        },
-        {
-          "id": "team-formation",
-          "label": "Team & AI Tool Selection",
-          "description": "Form team; select AI platforms (Midjourney, RunwayML) and simulation tools (ENVI-met, AnyLogic).",
-          "children": [],
-          "assignedPersonIds": [
-            "person-1786701015227-kbq9bx"
-          ]
-        }
+        { "id": "read-schedules", "label": "Read Schedules 1–7", "description": "Site brief, deliverables, eligibility, evaluation matrix.", "children": [] },
+        { "id": "lock-tool-stack", "label": "Lock Free Tool Stack", "description": "QGIS, FreeCAD+BlenderBIM, Rhino+Grasshopper edu (Ladybug/Honeybee), ChatGPT/Gemini free tier, Stable Diffusion/Bing, Blender.", "children": [] },
+        { "id": "start-ai-log", "label": "Start AI Methodology Log", "description": "Date, tool, prompt, output, human correction, value added — from day one.", "children": [] },
+        { "id": "prep-team-docs", "label": "Prep Team Registration Info", "description": "Names, discipline, role, contact, Emirates ID, photo.", "children": [] }
       ]
     },
     {
-      "id": "redesign-justification",
-      "label": "Redesign Justification",
-      "description": "Identify shortcomings of the existing park and set strategic objectives aligned with Dubai 2040.",
-      "predecessors": [
-        "brief-review"
-      ],
-      "successors": [
-        "data-collection"
-      ],
-      "assignedPersonIds": [],
+      "id": "site-user-analysis",
+      "label": "Site & User Analysis",
+      "description": "Understand the ground and the people before designing anything.",
       "children": [
-        {
-          "id": "current-condition-audit",
-          "label": "Existing Park Condition Audit",
-          "description": "On-site inspection: ageing infrastructure, shading, accessibility gaps.",
-          "children": []
-        },
-        {
-          "id": "stakeholder-needs",
-          "label": "Stakeholder & Community Aspirations",
-          "description": "Interviews and sentiment analysis to identify safety, comfort, and inclusivity gaps.",
-          "children": []
-        }
+        { "id": "site-walkthrough", "label": "On-Foot Site Audit", "description": "Photos, laser meter, Polycam scan.", "children": [] },
+        { "id": "gis-basemap", "label": "QGIS Basemap", "description": "OpenStreetMap + free satellite + open DEM.", "children": [] },
+        { "id": "climate-pull", "label": "Climate Data Pull", "description": "Open-Meteo API for sun, wind, temperature.", "children": [] },
+        { "id": "opportunities-constraints", "label": "Opportunities & Constraints Map", "description": "Synthesize audit + GIS + climate findings.", "children": [] },
+        { "id": "community-survey", "label": "Community Survey", "description": "Free Google Forms, ~30–50 respondents.", "children": [] },
+        { "id": "ai-personas", "label": "AI-Assisted Personas", "description": "Children, youth, families, older adults, People of Determination — human-reviewed.", "children": [] },
+        { "id": "accessibility-mapping", "label": "Accessibility Needs Mapping", "description": "Translate personas into concrete access requirements.", "children": [] }
       ]
     },
     {
-      "id": "data-collection",
-      "label": "Data Collection",
-      "description": "Gather site, user, microclimate, and utility data using LiDAR, surveys, and GIS.",
-      "predecessors": [
-        "redesign-justification"
-      ],
-      "successors": [
-        "analysis"
-      ],
-      "assignedPersonIds": [],
+      "id": "ai-analysis-concept",
+      "label": "AI-Driven Analysis & Concept",
+      "description": "Core AI-scored stage — analysis into a chosen direction.",
       "children": [
-        {
-          "id": "physical-topography",
-          "label": "Topography & LiDAR Survey",
-          "description": "UAV-based LiDAR capture of contours, canopy heights, hardscape.",
-          "children": []
-        },
-        {
-          "id": "user-surveys",
-          "label": "User Demographics & Intercept Surveys",
-          "description": "On-site interviews (n=300) capturing usage patterns and accessibility needs.",
-          "children": []
-        }
-      ]
-    },
-    {
-      "id": "analysis",
-      "label": "Comprehensive Analysis & Synthesiser",
-      "description": "AI-augmented SWOT, spatial suitability, and thermal comfort studies.",
-      "predecessors": [
-        "data-collection"
-      ],
-      "successors": [
-        "ideation"
-      ],
-      "assignedPersonIds": [],
-      "children": [
-        {
-          "id": "gis-overlay",
-          "label": "GIS Multi-Criteria Spatial Suitability",
-          "description": "Weighted overlay in ArcGIS Pro for planting, play, and quiet zones.",
-          "children": []
-        },
-        {
-          "id": "thermal-comfort",
-          "label": "Thermal Comfort & Microclimate Baseline",
-          "description": "ENVI-met simulation to pinpoint UTCI hotspots at peak summer hours.",
-          "children": []
-        }
-      ]
-    },
-    {
-      "id": "ideation",
-      "label": "Concept Ideation (AI-Augmented)",
-      "description": "Generate and refine multiple design concepts using generative AI.",
-      "predecessors": [
-        "analysis"
-      ],
-      "successors": [
-        "scenario-testing",
-        "submission"
-      ],
-      "assignedPersonIds": [
-        "person-1786811491462-ynbdbm"
-      ],
-      "children": [
-        {
-          "id": "concept-variants",
-          "label": "Three Concept Scenarios (A, B, C)",
-          "description": "Oasis, Green Spine, and Urban Living Room \u2014 AI-enhanced mood boards.",
-          "children": [],
-          "assignedPersonIds": [
-            "person-1786811491462-ynbdbm"
-          ]
-        },
-        {
-          "id": "ai-methodology-draft",
-          "label": "Draft AI Methodology Report",
-          "description": "Document AI tools, workflows, and their influence on each concept.",
-          "children": [],
-          "assignedPersonIds": [
-            "person-1786701015227-kbq9bx"
-          ]
-        }
+        { "id": "suitability-overlay", "label": "QGIS Suitability Overlay", "description": "Weighted overlay for zones — play, quiet, gathering, planting.", "children": [] },
+        { "id": "ai-criteria-check", "label": "AI Criteria Cross-Check", "description": "Weight overlay against community priorities, log overrides.", "children": [] },
+        { "id": "ai-swot", "label": "AI-Assisted SWOT & Decision Log", "description": "2–3 candidate directions, human review, recorded reasoning.", "children": [] },
+        { "id": "ai-moodboards", "label": "AI Moodboards", "description": "3 directions via Stable Diffusion/Bing, prompt-refined.", "children": [] },
+        { "id": "vision-narrative", "label": "Design Vision & Narrative", "description": "Concept statement tying findings to identity.", "children": [] },
+        { "id": "concept-massing", "label": "Concept Massing (IFC)", "description": "Block chosen concept in shared FreeCAD/BlenderBIM model.", "children": [] },
+        { "id": "concept-strategies", "label": "Concept-Level Strategies", "description": "Landscape, sustainability, accessibility — draft resolution.", "children": [] }
       ]
     },
     {
       "id": "scenario-testing",
-      "label": "Scenario Testing & Performance Simulation",
-      "description": "AI-driven simulations for microclimate, pedestrian flow, cost, and sustainability.",
-      "predecessors": [
-        "ideation"
-      ],
-      "successors": [
-        "preliminary-design"
-      ],
-      "assignedPersonIds": [],
+      "label": "Environmental Scenario Testing",
+      "description": "Simulate, interpret, and respond — not raw output alone.",
       "children": [
-        {
-          "id": "microclimate-optimisation",
-          "label": "Microclimate & Solar Optimisation",
-          "description": "Ladybug + ENVI-met scenario testing; AI-suggested tree placement and shading.",
-          "children": []
-        },
-        {
-          "id": "cost-estimation",
-          "label": "Preliminary Cost & Value Engineering",
-          "description": "ROM costing per scenario, aligned with AED 35M budget.",
-          "children": []
-        }
+        { "id": "sun-shade-study", "label": "Ladybug Sun & Shade Study", "description": "Solar exposure and shading on the concept massing.", "children": [] },
+        { "id": "ai-comfort-cost", "label": "AI Comfort & ROM Cost Read", "description": "Plain-language commentary against AED 35M, human-verified.", "children": [] },
+        { "id": "design-response", "label": "Design Response to Findings", "description": "Adjust shading/planting/circulation; log what changed and why.", "children": [] }
       ]
     },
     {
       "id": "preliminary-design",
       "label": "Preliminary Design Development",
-      "description": "Elaborate the selected concept into a coordinated preliminary design.",
-      "predecessors": [
-        "scenario-testing"
-      ],
-      "successors": [
-        "submission"
-      ],
-      "assignedPersonIds": [
-        "person-1786811491462-ynbdbm"
-      ],
+      "description": "Coordinated, buildable-resolution design package.",
       "children": [
-        {
-          "id": "masterplan-refinement",
-          "label": "Detailed Masterplan & Spatial Organisation",
-          "description": "CAD drafting: zoning, hierarchy, functional relationships.",
-          "children": []
-        },
-        {
-          "id": "material-palette",
-          "label": "Material & Landscape Palette",
-          "description": "Durable, sustainable materials with AI-aided life-cycle assessment.",
-          "children": []
-        }
+        { "id": "detailed-masterplan", "label": "Detailed Masterplan & Flows", "description": "Spatial organization, zoning, user-journey diagrams.", "children": [] },
+        { "id": "landscape-planting", "label": "Landscape & Planting Plans", "description": "AI-shortlisted palette, verified for local availability.", "children": [] },
+        { "id": "play-social-spaces", "label": "Play, Community & Social Spaces", "description": "Playgrounds, plaza, picnic and seating areas.", "children": [] },
+        { "id": "circulation-access", "label": "Circulation & Accessibility", "description": "Pedestrian, jogging track, universal-access detailing.", "children": [] },
+        { "id": "amenities-commercial", "label": "Amenities & Commercial Map", "description": "Services plan plus Commercial & Service Facilities Map.", "children": [] },
+        { "id": "smart-tech-strategy", "label": "Smart Tech & Data Strategy", "description": "Monitoring and data-driven park management opportunities.", "children": [] },
+        { "id": "sustainability-detailed", "label": "Detailed Sustainability Strategy", "description": "Water, energy, nature-based solutions at full resolution.", "children": [] },
+        { "id": "feasibility-check", "label": "Feasibility & Budget Check", "description": "Cross-check scope/materials against AED 35M budget.", "children": [] },
+        { "id": "phasing-plan", "label": "Preliminary Phasing Plan", "description": "Implementation sequence and maintenance approach.", "children": [] }
+      ]
+    },
+    {
+      "id": "deliverables-assembly",
+      "label": "Deliverables Assembly",
+      "description": "Package everything Schedule 2 requires — 16 items total.",
+      "children": [
+        { "id": "exec-summary", "label": "Executive Summary", "description": "Vision, concept, and key innovations.", "children": [] },
+        { "id": "narrative-analysis-docs", "label": "Narrative & Analysis Docs", "description": "Design narrative, site analysis, user/community analysis.", "children": [] },
+        { "id": "ai-methodology-report", "label": "AI Methodology Report", "description": "Compiled from the running AI log.", "children": [] },
+        { "id": "masterplan-landscape-docs", "label": "Masterplan & Landscape Docs", "description": "Masterplan, landscape plans, accessibility & sustainability strategies.", "children": [] },
+        { "id": "cadbim-drawings", "label": "CAD/BIM Drawings", "description": "Concept diagrams, sections, and elevations.", "children": [] },
+        { "id": "renders-video", "label": "Renders & Concept Video", "description": "Day/night renders, full presentation, 1-min AI-assisted animation.", "children": [] },
+        { "id": "supporting-materials", "label": "Additional Supporting Materials", "description": "Anything else needed to communicate the proposal.", "children": [] }
       ]
     },
     {
       "id": "submission",
-      "label": "Final Submission Package",
-      "description": "Produce all required deliverables per Schedule 2.",
-      "predecessors": [
-        "preliminary-design",
-        "ideation"
-      ],
-      "assignedPersonIds": [],
+      "label": "Final Review & Submission",
+      "description": "Score, tighten, and upload before the deadline.",
       "children": [
-        {
-          "id": "design-report",
-          "label": "Design Narrative & AI Methodology Report",
-          "description": "Vision, sustainability, and AI workflow \u2014 20-30 page PDF booklet.",
-          "children": []
-        },
-        {
-          "id": "final-review",
-          "label": "Final Quality Check & Upload",
-          "description": "Cross-check deliverables against Schedule 2; upload by 15 Aug 2026.",
-          "children": []
-        }
+        { "id": "internal-scoring", "label": "Internal Evaluation-Matrix Review", "description": "Score against all 6 Schedule 7 criteria, fix weak spots.", "children": [] },
+        { "id": "finalize-team-info", "label": "Finalize Team Info", "description": "Confirm Schedule 3 details for portal registration.", "children": [] },
+        { "id": "review-ip-terms", "label": "Review IP Terms", "description": "Understand Schedule 6 rights transfer before submitting.", "children": [] },
+        { "id": "portal-upload", "label": "Upload to Portal", "description": "Submit complete package before 21 September 2026.", "children": [] }
       ]
     }
   ],
-  "completed": [
-    "physical-topography",
-    "thermal-comfort"
-  ]
+  "completed": []
 }
