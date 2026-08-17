@@ -137,12 +137,6 @@ function getLeafIds(node: ProcessNode): string[] {
 export type Edge = { from: string; to: string };
 
 // ─── Schema validation ────────────────────────────────────────────
-// Checked against the reference ProcessData shape: a node needs at least
-// `id` and `label`; everything else (description, children, successors,
-// predecessors, assignedPersonIds, width/height) is optional but must be
-// the right type when present. Returns the first problem found, or null
-// if the document looks structurally sound.
-
 function validateNodeShape(node: unknown, path: string): string | null {
   if (!node || typeof node !== "object") return `${path} is not an object.`;
   const n = node as Record<string, unknown>;
@@ -253,11 +247,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const [assignPopupNodeId, setAssignPopupNodeId] = useState<string | null>(null);
 
   // ─── Invalid-upload fallback ─────────────────────────────────
-  // When an uploaded JSON is invalid — either malformed (fails JSON.parse)
-  // or structurally wrong (fails schema validation) — we do NOT modify or
-  // re-download the uploaded file. We only keep its filename so the UI can
-  // show the error and offer the known-good sample JSON from
-  // app/process/json/process.json.
   const [invalidUpload, setInvalidUpload] = useState<{ filename: string } | null>(null);
 
   // ─── Load tracking ───────────────────────────────────────────
@@ -269,10 +258,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const pastRef = useRef<Snapshot[]>([]);
   const futureRef = useRef<Snapshot[]>([]);
 
-  // Mirror the "live" pieces of state into refs so captureSnapshot() and
-  // the global keydown handler always see the latest values without
-  // needing to be recreated (and without going stale inside a listener
-  // that's only attached once).
   const dataRef = useRef(data);
   const completedRef = useRef(completed);
   const personsRef = useRef(persons);
@@ -294,8 +279,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setCompleted(new Set(snap.completed));
     setPersons(snap.persons.map((p) => ({ ...p })));
     setEdgeStyles(new Map(Array.from(snap.edgeStyles.entries()).map(([k, v]) => [k, { ...v }])));
-    // Clear anything that might reference a node/edge that no longer
-    // exists post-undo/redo.
     setSelectedNodeId(null);
     setSelectedEdge(null);
     setPendingRelation(null);
@@ -303,9 +286,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setAssignPopupNodeId(null);
   };
 
-  // Call before any mutating action to snapshot the state as it was
-  // *before* that action, so undo can restore it. Clears the redo stack,
-  // same as any normal editor (a fresh action invalidates old redos).
   const pushHistory = () => {
     const snap = captureSnapshot();
     const newPast = [...pastRef.current, snap].slice(-MAX_HISTORY);
@@ -346,9 +326,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
 
-  // Global Ctrl/Cmd+Z (undo) and Ctrl/Cmd+Shift+Z (redo). Also accepts
-  // Ctrl+Y as a common Windows redo shortcut. Skipped while a text field
-  // is focused so native input/textarea undo isn't hijacked.
   const undoRef = useRef(undo);
   const redoRef = useRef(redo);
   undoRef.current = undo;
@@ -366,7 +343,7 @@ export function useProcessEditor(initialData: ProcessData) {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const isEditableField = tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable;
-      if (isEditableField) return; // let the field's own undo run
+      if (isEditableField) return;
 
       e.preventDefault();
       if (isRedoKey) {
@@ -602,6 +579,136 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedNodeId(clone.id);
   };
 
+  // ─── Move node up/down among siblings ──────────────────────────
+  // Helper: recursively swap a node with its previous/next sibling.
+  const moveNodeInTree = (
+    root: ProcessNode,
+    targetId: string,
+    direction: "up" | "down"
+  ): ProcessNode | null => {
+    if (!root.children) return null;
+
+    const idx = root.children.findIndex((c) => c.id === targetId);
+    if (idx !== -1) {
+      const siblings = [...root.children];
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= siblings.length) return null; // already at boundary
+      [siblings[idx], siblings[targetIdx]] = [siblings[targetIdx], siblings[idx]];
+      return { ...root, children: siblings };
+    }
+
+    // not found directly, search deeper
+    for (let i = 0; i < root.children.length; i++) {
+      const child = root.children[i];
+      const newChild = moveNodeInTree(child, targetId, direction);
+      if (newChild) {
+        const newChildren = [...root.children];
+        newChildren[i] = newChild;
+        return { ...root, children: newChildren };
+      }
+    }
+    return null;
+  };
+
+  const moveNodeUp = (nodeId: string) => {
+    if (!data || nodeId === "root") return;
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    };
+    const newRoot = moveNodeInTree(rootRef, nodeId, "up");
+    if (!newRoot) return; // already at top
+
+    pushHistory();
+    setData({
+      ...data,
+      title: newRoot.label,
+      description: newRoot.description,
+      type: newRoot.type,
+      width: newRoot.width,
+      height: newRoot.height,
+      children: newRoot.children,
+    });
+  };
+
+  const moveNodeDown = (nodeId: string) => {
+    if (!data || nodeId === "root") return;
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    };
+    const newRoot = moveNodeInTree(rootRef, nodeId, "down");
+    if (!newRoot) return; // already at bottom
+
+    pushHistory();
+    setData({
+      ...data,
+      title: newRoot.label,
+      description: newRoot.description,
+      type: newRoot.type,
+      width: newRoot.width,
+      height: newRoot.height,
+      children: newRoot.children,
+    });
+  };
+
+  // ─── Move node to a different parent ───────────────────────────
+  const moveNodeToParent = (nodeId: string, newParentId: string) => {
+    if (!data || nodeId === "root" || newParentId === nodeId) return;
+
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    };
+
+    // Prevent moving a node into its own descendant
+    const nodeToMove = findNodeById(rootRef, nodeId);
+    if (!nodeToMove) return;
+    const descendantIds = new Set(collectIds(nodeToMove));
+    if (descendantIds.has(newParentId)) {
+      showWarning("Cannot move a process into its own subprocess.");
+      return;
+    }
+
+    // Find current parent and remove node
+    let newRoot = removeNodeFromTree(rootRef, nodeId);
+
+    // Add node to new parent (append to end)
+    const newParent = findNodeById(newRoot, newParentId);
+    if (!newParent) {
+      showWarning("New parent not found.");
+      return;
+    }
+    const position = (newParent.children || []).length;
+    newRoot = addNodeToTree(newRoot, newParentId, nodeToMove, position);
+
+    pushHistory();
+    setData({
+      ...data,
+      title: newRoot.label,
+      description: newRoot.description,
+      type: newRoot.type,
+      width: newRoot.width,
+      height: newRoot.height,
+      children: newRoot.children,
+    });
+  };
+
   // ─── People ────────────────────────────────────────────────
   const addPerson = () => {
     const trimmed = newPersonName.trim();
@@ -617,7 +724,7 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const renamePerson = (id: string, newName: string) => {
     const trimmed = newName.trim();
-    if (!trimmed) return; // ignore empty names, same guard style as addPerson
+    if (!trimmed) return;
     pushHistory();
     setPersons((prev) =>
       prev.map((p) => (p.id === id ? { ...p, name: trimmed } : p))
@@ -691,8 +798,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const closeAssignPopup = () => setAssignPopupNodeId(null);
 
   // ─── Relations ─────────────────────────────────────────────
-  // Raw (non-history-pushing) versions so reverseRelation can compose
-  // delete+add as a single history entry instead of two.
   const addRelationRaw = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
     if (!data) return;
     setData((prev) => {
@@ -789,10 +894,6 @@ export function useProcessEditor(initialData: ProcessData) {
     }
     if (!data) return;
 
-    // Normalize to the actual successor-direction pair regardless of
-    // which button ("+ Successor" / "+ Predecessor") triggered this, so
-    // the mutual check below is checking the same thing addRelationRaw
-    // is about to write.
     const forwardFrom = mode === "successor" ? fromId : toId;
     const forwardTo = mode === "successor" ? toId : fromId;
 
@@ -807,9 +908,6 @@ export function useProcessEditor(initialData: ProcessData) {
     addRelationRaw(fromId, toId, mode);
 
     if (completesMutualPair) {
-      // The reverse edge already existed, so this one just turned it
-      // into a two-way relation — dash both arrows so it reads as a
-      // deliberate loop instead of a duplicate/broken arrow.
       const forwardKey = `${forwardFrom}->${forwardTo}`;
       const reverseKey = `${forwardTo}->${forwardFrom}`;
       setEdgeStyles((prev) => {
@@ -876,14 +974,6 @@ export function useProcessEditor(initialData: ProcessData) {
   };
 
   // ─── Load / Upload / Save ───────────────────────────────────
-
-  /**
-   * Full state restore from a ProcessData blob — whether it came from a
-   * local file upload or a server load. Loading a new document resets
-   * undo/redo history rather than pushing onto it (same convention as
-   * most editors: opening a different file isn't something you'd "undo"
-   * back through your previous file's edits).
-   */
   const loadData = (json: ProcessData) => {
     setInvalidUpload(null);
     setData(json);
@@ -901,7 +991,6 @@ export function useProcessEditor(initialData: ProcessData) {
     );
     setLoadVersion((v) => v + 1);
 
-    // New document — clear undo/redo history.
     pastRef.current = [];
     futureRef.current = [];
     setPast([]);
@@ -926,8 +1015,6 @@ export function useProcessEditor(initialData: ProcessData) {
         const { valid, error: validationError } = validateProcessData(json);
         if (!valid) {
           setData(null);
-          // Do not attempt to repair, rewrite, or re-download the uploaded JSON.
-          // Keep only the filename so the UI can explain what went wrong.
           setInvalidUpload({ filename: file.name });
           setError(`"${file.name}" is invalid: ${validationError}`);
           return;
@@ -945,8 +1032,6 @@ export function useProcessEditor(initialData: ProcessData) {
     event.target.value = "";
   };
 
-  // Download the known-good sample JSON from the codebase.
-  // The invalid uploaded JSON is never modified or downloaded back.
   const downloadInvalidUpload = () => {
     if (!invalidUpload) return;
 
@@ -1057,5 +1142,7 @@ export function useProcessEditor(initialData: ProcessData) {
     invalidUpload, downloadInvalidUpload,
     // undo / redo
     undo, redo, canUndo, canRedo,
+    // new: move operations
+    moveNodeUp, moveNodeDown, moveNodeToParent,
   };
 }

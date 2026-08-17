@@ -6,9 +6,8 @@ import {
   changeCloudPassphrase,
   fetchCloudDoc,
   fetchCloudDocList,
+  fetchGroupBootstrap,
   fetchGroupDocList,
-  fetchGroupMasterDoc,
-  fetchMasterDoc,
   saveCloudDoc,
 } from "@/app/process/lib/api";
 import { ProcessData } from "@/app/process/lib/process-utils";
@@ -18,15 +17,14 @@ function getErrorMessage(err: unknown, fallback: string): string {
 }
 
 /**
- * `masterword`, when given, scopes this hook to one named group:
- * - the list is that group's documents instead of everyone's
- * - the initial load is that group's master instead of the default page's
- * - saveToCloud auto-joins the doc to this group (sends `masterword`)
- *   unless the caller explicitly overrides it in the params they pass
+ * `masterword`, when given, scopes this hook to one named group.
+ * Now uses the new bootstrap endpoint to fetch the group's list and
+ * master doc in one request, and exposes an `initialLoading` flag.
  */
 export function useCloudSync(loadData: (data: ProcessData) => void, masterword?: string) {
   const [cloudList, setCloudList] = useState<CloudDocSummary[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);  // ← NEW
   const [cloudError, setCloudError] = useState("");
   const [triedMaster, setTriedMaster] = useState(false);
 
@@ -43,23 +41,42 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
   };
 
   useEffect(() => {
-    refreshList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [masterword]);
+    let cancelled = false;
 
-  useEffect(() => {
-    (async () => {
+    const loadInitial = async () => {
+      setInitialLoading(true);
+      setCloudError("");
       try {
-        const master = masterword ? await fetchGroupMasterDoc(masterword) : await fetchMasterDoc();
-        if (master && master.data) {
-          loadData(master.data);
+        if (masterword) {
+          // Use bootstrap to get list + master in one request
+          const { documents, master } = await fetchGroupBootstrap(masterword);
+          if (!cancelled) {
+            setCloudList(documents);
+            if (master && master.data) {
+              loadData(master.data);
+            }
+          }
+        } else {
+          // No masterword – still list all documents, but do not auto‑load a master
+          const list = await fetchCloudDocList();
+          if (!cancelled) setCloudList(list);
         }
       } catch (err) {
-        console.error("Could not load master document:", err);
+        console.error("Could not load initial data:", err);
+        if (!cancelled) setCloudError(getErrorMessage(err, "Failed to load group data."));
       } finally {
-        setTriedMaster(true);
+        if (!cancelled) {
+          setInitialLoading(false);
+          setTriedMaster(true);
+        }
       }
-    })();
+    };
+
+    loadInitial();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [masterword]);
 
@@ -91,8 +108,9 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
     setCloudError("");
     try {
       const doc = await saveCloudDoc({
-        masterword,
         ...params,
+        // Ensure masterword is always a string (use outer scope, fallback to params, then empty string)
+        masterword: masterword ?? params.masterword ?? "",
       });
       await refreshList();
       return doc;
@@ -123,6 +141,7 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
     masterword,
     cloudList,
     cloudLoading,
+    initialLoading,       // ← NEW
     cloudError,
     setCloudError,
     triedMaster,

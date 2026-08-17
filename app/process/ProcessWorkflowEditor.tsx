@@ -4,15 +4,16 @@ import "./page.css";
 import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { ProcessContainer } from "@/app/process/components/ProcessContainer";
-import { RelationshipArrows} from "@/app/process/components/RelationshipArrows";
+import { RelationshipArrows } from "@/app/process/components/RelationshipArrows";
 import { UploadButton, ExportButtons } from "@/app/process/components/transfer";
 import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
 import { useCloudSync } from "@/app/process/hooks/useCloudSync";
 import { useAutosave } from "@/app/process/hooks/useAutoSave";
+import type { ProcessNode } from "@/app/process/lib/process-utils";
 
 const DRAG_THRESHOLD = 6;
 
-// ─── Shared button style tokens (keeps the toolbar/modals consistent) ───
+// ─── Shared button style tokens ───
 const btnBase =
   "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap";
 const btnGhost = `${btnBase} text-gray-600 hover:bg-gray-100`;
@@ -22,7 +23,7 @@ const btnDanger = `${btnBase} bg-red-50 text-red-600 hover:bg-red-100`;
 const inputBase =
   "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition";
 
-// ─── Small inline icons — kept minimal since most toolbar buttons use text labels now ───
+// ─── Small inline icons ───
 const IconWrap = ({ children }: { children: React.ReactNode }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     {children}
@@ -43,9 +44,15 @@ const IconUndo = () => (
 const IconRedo = () => (
   <IconWrap><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 15-6.7L21 13" /></IconWrap>
 );
+const IconArrowUp = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6" /></svg>
+);
+const IconArrowDown = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+);
 
 export default function ProcessWorkflowEditor({ masterword }: { masterword?: string }) {
-  // ─── Editing logic (data, relations, modals, upload/save) lives in the hook ───
+  // ─── Editing logic ───
   const editor = useProcessEditor({
     title: "Untitled Workflow",
     description: "Start building your process by adding nodes.",
@@ -57,13 +64,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     edgeStyles: {},
   });
 
-  // ─── Cloud sync + autosave ───────────────────────────────────
-  // `masterword`, when present (i.e. on /process/<masterword>), scopes
-  // loading/listing/saving to that one group instead of the default page.
+  // ─── Cloud sync + autosave ───
   const cloud = useCloudSync(editor.loadData, masterword);
   const autosave = useAutosave(editor.getExportData, cloud.saveToCloud);
 
-  // Save popup state — server is the default tab
+  // Save popup state
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<"local" | "server">("server");
   const [passphrase, setPassphrase] = useState("");
@@ -71,17 +76,16 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveFormError, setSaveFormError] = useState("");
 
-  // Admin-only: setting a document as master requires this key, so it
-  // isn't just a checkbox anyone saving can tick.
+  // Admin options
   const [showAdminMaster, setShowAdminMaster] = useState(false);
   const [wantMaster, setWantMaster] = useState(false);
   const [masterKeyInput, setMasterKeyInput] = useState("");
 
-  // Autosave enable prompt (asks for passphrase once, then silent)
+  // Autosave prompt
   const [autosavePromptOpen, setAutosavePromptOpen] = useState(false);
   const [autosavePassphraseInput, setAutosavePassphraseInput] = useState("");
 
-  // People manager: inline rename state — which person row is being edited
+  // People manager
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [editingPersonName, setEditingPersonName] = useState("");
 
@@ -103,12 +107,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     setEditingPersonName("");
   };
 
-  // Which server doc is currently loaded — used to highlight it in the Load
-  // list. Falls back to whichever doc is flagged is_master, since that's
-  // what auto-loads on mount before the user explicitly picks anything.
+  // Loaded doc id
   const [loadedDocId, setLoadedDocId] = useState<string | null>(null);
 
-  // Compact toolbar: dropdown popover + horizontal scroll affordance
+  // Load dropdown
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
   const loadBtnRef = useRef<HTMLButtonElement | null>(null);
   const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0, width: 288 });
@@ -148,7 +150,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [loadMenuOpen]);
 
-
+  // Toolbar scroll
   const toolbarScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -192,7 +194,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       return;
     }
 
-    // server save
     if (!passphrase.trim()) {
       setSaveFormError("Enter your passphrase to save to the server.");
       return;
@@ -203,11 +204,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       return;
     }
     if (wantMaster && !masterKeyInput.trim()) {
-      setSaveFormError(
-        masterword
-          ? "Enter this group's master key to set this as its default workflow."
-          : "Enter the master key to set this as the default workflow."
-      );
+      setSaveFormError("Enter this group's master key to set this as its default workflow.");
       return;
     }
 
@@ -221,11 +218,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         master_key: wantMaster ? masterKeyInput.trim() : undefined,
         data: exportData,
       });
-      // This passphrase just proved itself against the server — reuse it
-      // for autosave without asking again.
       autosave.enable(passphrase.trim());
       setSaveModalOpen(false);
-    }  catch (err: unknown) {
+    } catch (err: unknown) {
       setSaveFormError(err instanceof Error ? err.message : "Failed to save to server.");
     } finally {
       setSaveBusy(false);
@@ -241,12 +236,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     }
   };
 
-  // ─── View state (pan/zoom/drag) ────────────────────────
+  // ─── View state ───
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
 
-  // ─── Refs ──────────────────────────────────────────────────────
   const dragStart = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
   const didDragRef = useRef(false);
@@ -263,7 +257,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const printRef = useRef<HTMLDivElement | null>(null);
 
-
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
 
@@ -272,11 +265,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     panRef.current = pan;
   }, [zoom, pan]);
 
-  // Stop the browser's own pinch/ctrl+scroll page zoom from firing when a
-  // gesture starts outside the canvas viewport (e.g. over the toolbar) —
-  // otherwise the whole page, toolbar included, scales up with it. The
-  // canvas's own zoom (app state, not the browser's) is unaffected: it's
-  // handled separately by the viewport's own wheel/pointer listeners below.
   useEffect(() => {
     const preventBrowserZoom = (e: WheelEvent) => {
       if (e.ctrlKey) e.preventDefault();
@@ -326,7 +314,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
   const activeNodeId = editor.hoveredNodeId ?? editor.selectedNodeId;
 
-  // ─── Zoom / Pan ─────────────────────────────────────────────────
+  // ─── Zoom / Pan ───
   const zoomIn = () => setZoom((v) => Math.min(v * 1.2, 4));
   const zoomOut = () => setZoom((v) => Math.max(v / 1.2, 0.15));
 
@@ -356,17 +344,14 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     setPan({ x: 0, y: 0 });
   };
 
-  // ─── Auto-fit only on a genuine "load a new document" event ───────────
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately
-  // scoped to loadVersion only; including editor.data would re-fit on
-  // every edit (rename, add node, etc.), resetting the user's zoom/pan.
   useEffect(() => {
     if (!editor.data) return;
     const frame = requestAnimationFrame(() => fitAllView());
     return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.loadVersion]);
 
-  // ─── Pan / Zoom / Pointer Handlers ──────────────────────────────
+  // ─── Pointer handlers ───
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -490,24 +475,68 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     }
   };
 
+  // ─── Handle node click (including move mode) ───
   const handleNodeClick = (id: string) => {
     if (didDragRef.current) {
       didDragRef.current = false;
       return;
     }
+
+    // If move-to-parent mode is active, use this click as target
+    if (moveParentMode) {
+      if (id !== moveParentMode) {
+        editor.moveNodeToParent(moveParentMode, id);
+      }
+      setMoveParentMode(null);
+      return;
+    }
+
     editor.handleNodeClick(id, false);
   };
 
-  const rootNode = editor.rootNode;
+  // ─── Helper: get parent and index of a node ───
+  const getNodeParentAndIndex = (nodeId: string) => {
+    const search = (node: ProcessNode, targetId: string): { parent: ProcessNode; index: number } | null => {
+      if (!node.children) return null;
+      for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        if (child.id === targetId) {
+          return { parent: node, index: i };
+        }
+        const found = search(child, targetId);
+        if (found) return found;
+      }
+      return null;
+    };
+    return rootNode ? search(rootNode, nodeId) : null;
+  };
 
-  // ─── Render ────────────────────────────────────────────────────
+  // ─── State for move-to-parent mode ───
+  const [moveParentMode, setMoveParentMode] = useState<string | null>(null);
+
+  const rootNode = editor.rootNode;
+  const displayGroup = masterword?.trim() || "Ungrouped";
+
+  // Compute the label for the node being moved (safe even if rootNode is null)
+  const moveParentLabel = moveParentMode && rootNode ? findNodeById(rootNode, moveParentMode)?.label : null;
+
+  // ─── Render ───
   return (
     <div
       className="flex flex-col w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px]"
       style={{ touchAction: "pan-x pan-y" }}
     >
+      {/* INITIAL LOADING OVERLAY */}
+      {cloud.initialLoading && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+            <p className="text-sm text-gray-600">Loading workflow…</p>
+          </div>
+        </div>
+      )}
 
-      {/* TOOLBAR — normal document flow, outside/above the canvas */}
+      {/* TOOLBAR */}
       <div className="flex flex-wrap items-start justify-between gap-2 px-0.5 pb-2 sm:gap-3 sm:pb-3 no-print shrink-0">
         <div className="bg-white border border-gray-200/70 rounded-2xl px-3.5 py-2.5 shadow-[0_2px_16px_rgba(15,23,42,0.06)] sm:px-4 sm:py-3">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -520,14 +549,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 {editor.data.title}
               </span>
             )}
-            {masterword && (
-              <span
-                title={`Scoped to group: ${masterword}`}
-                className="text-[10px] sm:text-[11px] font-medium text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-full shrink-0"
-              >
-                group: {masterword}
-              </span>
-            )}
+            <span
+              title={`Scoped to group: ${displayGroup}`}
+              className="text-[10px] sm:text-[11px] font-medium text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-full shrink-0"
+            >
+              group: {displayGroup}
+            </span>
           </div>
           <div className="text-xs text-gray-500 mt-0.5">
             {editor.data
@@ -536,9 +563,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         </div>
 
-        {/* Action bar — one compact, icon-first row for both mobile and desktop.
-            On mobile it scrolls horizontally with arrow affordances; on desktop
-            it's short enough to just fit. */}
+        {/* Action bar */}
         <div className="relative max-w-full">
           <div className="bg-white border border-gray-200/70 rounded-2xl shadow-[0_2px_16px_rgba(15,23,42,0.06)] overflow-hidden">
             <div
@@ -560,9 +585,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
-              {/* Undo / Redo — Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z also work
-                  globally (see useProcessEditor), these buttons are the
-                  discoverable/tappable equivalent for mobile. */}
               <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   onClick={editor.undo}
@@ -590,9 +612,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
-              {/* Load from server — rendered through a portal (see below) so the
-                  toolbar's overflow-hidden / overflow-x-auto ancestors can't
-                  clip the dropdown panel */}
               <div className="relative shrink-0">
                 <button
                   ref={loadBtnRef}
@@ -719,7 +738,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
             </div>
           </div>
 
-          {/* Mobile scroll affordances — replace the old three-dot menu */}
           {canScrollLeft && (
             <button
               onClick={() => scrollToolbar("left")}
@@ -741,15 +759,13 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         </div>
       </div>
 
-      {/* CANVAS BOX — everything below is unchanged in behavior, just now
-          sized by flex-1 instead of filling the whole outer wrapper */}
+      {/* CANVAS BOX */}
       <main
         className="relative flex-1 min-h-0 w-full overflow-hidden bg-gray-50 rounded-2xl"
         style={{ userSelect: dragging ? "none" : "auto" }}
       >
-
         {/* ACTION POPUP */}
-        {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && (
+        {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && !moveParentMode && (
           <div
             data-action-popup
             className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-1.5 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto"
@@ -803,6 +819,39 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
                 {editor.selectedNodeId !== "root" && (
                   <>
+                    {/* ─── ORDER CHANGE TOOLS ─── */}
+                    <div className="flex items-center gap-0.5 border border-gray-200 rounded-lg px-1 py-0.5">
+                      <button
+                        onClick={() => editor.moveNodeUp(editor.selectedNodeId!)}
+                        disabled={!getNodeParentAndIndex(editor.selectedNodeId!) || getNodeParentAndIndex(editor.selectedNodeId!)!.index === 0}
+                        className="w-6 h-6 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Move up among siblings"
+                      >
+                        <IconArrowUp />
+                      </button>
+                      <button
+                        onClick={() => editor.moveNodeDown(editor.selectedNodeId!)}
+                        disabled={
+                          !getNodeParentAndIndex(editor.selectedNodeId!) ||
+                          getNodeParentAndIndex(editor.selectedNodeId!)!.index >=
+                            (getNodeParentAndIndex(editor.selectedNodeId!)!.parent?.children?.length ?? 0) - 1
+                        }
+                        className="w-6 h-6 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Move down among siblings"
+                      >
+                        <IconArrowDown />
+                      </button>
+                    </div>
+
+                    {/* ─── MOVE TO PARENT TOOL ─── */}
+                    <button
+                      onClick={() => setMoveParentMode(editor.selectedNodeId!)}
+                      className="px-2 py-1 rounded-lg bg-violet-50 text-violet-700 text-xs hover:bg-violet-100 transition-colors"
+                      title="Move this process under a different parent"
+                    >
+                      Move To…
+                    </button>
+
                     <button
                       onClick={() => editor.openAssignPopup(editor.selectedNodeId!)}
                       className="px-2 py-1 rounded-lg bg-teal-50 text-teal-700 text-xs hover:bg-teal-100 transition-colors"
@@ -883,6 +932,18 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
+        {/* MOVE-TO-PARENT MODE POPUP */}
+        {moveParentMode && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto">
+            <span className="text-sm font-medium text-violet-700 px-1">
+              Click the new parent node for “{moveParentLabel ?? "this process"}”…
+            </span>
+            <button onClick={() => setMoveParentMode(null)} className={`${btnGhost} h-7 px-2 text-xs`}>
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* PENDING RELATION POPUP */}
         {editor.pendingRelation && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto">
@@ -913,6 +974,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               didDragRef.current = false;
               return;
             }
+            if (moveParentMode) {
+              setMoveParentMode(null);
+              return;
+            }
             editor.clearSelection();
           }}
         >
@@ -925,23 +990,23 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           />
 
           {editor.error && (
-  <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-700 border border-red-200 rounded-xl px-4 py-3 text-sm shadow-md no-print max-w-[90vw] sm:max-w-md">
-    <div className="flex items-start gap-2">
-      <span className="flex-1">{editor.error}</span>
-    </div>
-    {editor.invalidUpload && (
-      <div className="mt-2 flex justify-end">
-        <button
-          onClick={editor.downloadInvalidUpload}
-          className="shrink-0 text-xs font-medium bg-white border border-red-200 text-red-700 rounded-lg px-2.5 py-1 hover:bg-red-100 transition-colors"
-          title="Download a correctly formatted sample file"
-        >
-          Download sample template
-        </button>
-      </div>
-    )}
-  </div>
-)}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-red-50 text-red-700 border border-red-200 rounded-xl px-4 py-3 text-sm shadow-md no-print max-w-[90vw] sm:max-w-md">
+              <div className="flex items-start gap-2">
+                <span className="flex-1">{editor.error}</span>
+              </div>
+              {editor.invalidUpload && (
+                <div className="mt-2 flex justify-end">
+                  <button
+                    onClick={editor.downloadInvalidUpload}
+                    className="shrink-0 text-xs font-medium bg-white border border-red-200 text-red-700 rounded-lg px-2.5 py-1 hover:bg-red-100 transition-colors"
+                    title="Download a correctly formatted sample file"
+                  >
+                    Download sample template
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {editor.warning && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] bg-amber-50 text-amber-700 border border-amber-200 rounded-xl px-4 py-2 text-sm shadow-md max-w-md text-center no-print">
@@ -1018,8 +1083,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 value={editor.editingValue}
                 onChange={(e) => editor.setEditingValue(e.target.value)}
                 onKeyDown={(e) => {
-                  // Ctrl/Cmd+Enter submits; plain Enter still inserts a
-                  // newline since this is a multi-line description field.
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault();
                     editor.submitEditor();
@@ -1268,11 +1331,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Save Workflow</h3>
 
-            {masterword && (
-              <div className="mb-4 text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
-                Saving into group <strong>{masterword}</strong>. A document can only belong to one group at a time — saving here moves it into this group.
-              </div>
-            )}
+            <div className="mb-4 text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+              Saving into group <strong>{displayGroup}</strong>. A document can only belong to one group at a time — saving here moves it into this group.
+            </div>
 
             <div className="flex gap-2 mb-4 bg-gray-100 rounded-xl p-1">
               <button
@@ -1347,14 +1408,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                         onChange={(e) => setWantMaster(e.target.checked)}
                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                       />
-                      {masterword
-                        ? `Set as the default workflow for group "${masterword}"`
-                        : "Set as the default (master) workflow everyone sees on load"}
+                      Set as the default workflow for group &quot;{displayGroup}&quot;
                     </label>
                     {wantMaster && (
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          {masterword ? "This group's master key" : "Master key"}
+                          This group&apos;s master key
                         </label>
                         <input
                           type="password"
@@ -1393,7 +1452,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         </div>
       )}
 
-      {/* AUTOSAVE PASSPHRASE PROMPT — asked once, then silent every 5 min */}
+      {/* AUTOSAVE PASSPHRASE PROMPT */}
       {autosavePromptOpen && (
         <div
           className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"

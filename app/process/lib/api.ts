@@ -12,10 +12,17 @@ export type CloudDocSummary = {
 
 export type CloudDocDetail = CloudDocSummary & {
   data: ProcessData;
-  // null when the doc isn't in a named group (i.e. it's on the default page)
-  group_masterword: string | null;
+  // Every document now belongs to a group, so this is always a string.
+  group_masterword: string;
 };
 
+export type GroupBootstrap = {
+  documents: CloudDocSummary[];
+  master: CloudDocDetail | null;
+};
+
+// Optional now — the group page should use fetchGroupBootstrap instead.
+// Keep only if you still need a global/admin list of all documents.
 export async function fetchCloudDocList(): Promise<CloudDocSummary[]> {
   const res = await fetch(`${API_BASE}/process-docs/`);
   if (!res.ok) throw new Error("Failed to fetch document list.");
@@ -28,14 +35,7 @@ export async function fetchCloudDoc(id: number): Promise<CloudDocDetail> {
   return res.json();
 }
 
-export async function fetchMasterDoc(): Promise<CloudDocDetail | null> {
-  const res = await fetch(`${API_BASE}/process-docs/master/`);
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error("Failed to fetch master document.");
-  return res.json();
-}
-
-/** Documents belonging to one named group — for a Load menu on /process/<masterword>. */
+/** Documents belonging to one named group — for the Load menu on /process/<masterword>. */
 export async function fetchGroupDocList(masterword: string): Promise<CloudDocSummary[]> {
   const res = await fetch(`${API_BASE}/process-docs/group/${encodeURIComponent(masterword)}/`);
   if (!res.ok) throw new Error("Failed to fetch group's document list.");
@@ -50,15 +50,24 @@ export async function fetchGroupMasterDoc(masterword: string): Promise<CloudDocD
   return res.json();
 }
 
+/**
+ * Single round-trip for group pages.
+ * Returns both the group's document list and its current master (if any).
+ */
+export async function fetchGroupBootstrap(masterword: string): Promise<GroupBootstrap> {
+  const res = await fetch(`${API_BASE}/process-docs/group/${encodeURIComponent(masterword)}/bootstrap/`);
+  if (!res.ok) throw new Error("Failed to fetch group data.");
+  return res.json();
+}
+
 export async function saveCloudDoc(params: {
   passphrase: string;
   person_name?: string;
   title?: string;
   is_master?: boolean;
   master_key?: string;
-  // Join/stay in this named group. Omit to leave the doc's current group
-  // (or lack of one) unchanged.
-  masterword?: string;
+  // Now required because every document belongs to a group.
+  masterword: string;
   data: ProcessData;
 }): Promise<CloudDocDetail> {
   const res = await fetch(`${API_BASE}/process-docs/save/`, {
