@@ -1,103 +1,368 @@
 {
-  "title": "AI Park Design Challenge — Al Safa 2 Park",
+  "title": "AI Park Design Challenge \u2014 Al Safa 2 Park",
   "type": "process",
-  "description": "Dubai Municipality AI Park Design Challenge — 15,000 sqm park redevelopment in Al Safa 2, AED 35M budget. Concept + Preliminary Design, 2-person team, free/open-source tools only. AI must be documented at every stage (worth 20% alone). Submission deadline extended to 21 Sep 2026 (was 15 Aug 2026). Portal opened 28 Jun 2026, query deadline 5 Aug 2026.",
+  "description": "Dubai Municipality AI Park Design Challenge \u2014 15,000 sqm park redevelopment in Al Safa 2, AED 35M budget. Concept + Preliminary Design. AI must be documented at every stage (worth 20% alone). Submission deadline extended to 21 Sep 2026 (was 15 Aug 2026). Portal opened 28 Jun 2026, query deadline 5 Aug 2026.",
   "width": 4200,
   "height": 480,
   "edgeStyles": {},
   "persons": [
-    { "id": "person-arun", "name": "Arun (Urban Planner / Architect)" },
-    { "id": "person-ali", "name": "Ali (Engineer)" }
+    {
+      "id": "person-arun",
+      "name": "Arun"
+    },
+    {
+      "id": "person-ali",
+      "name": "Ali"
+    }
   ],
   "children": [
     {
       "id": "brief-setup",
       "label": "Brief Intake & Setup",
-      "description": "Get grounded and locked in before touching design work.",
+      "description": "Understand the full competition context, constraints, and required toolset before starting any design work. Confirm team registration details and set up the AI documentation log that will run throughout the project.",
       "children": [
-        { "id": "read-schedules", "label": "Read Schedules 1–7", "description": "Site brief, deliverables, eligibility, evaluation matrix.", "children": [] },
-        { "id": "lock-tool-stack", "label": "Lock Free Tool Stack", "description": "QGIS, FreeCAD+BlenderBIM, Rhino+Grasshopper edu (Ladybug/Honeybee), ChatGPT/Gemini free tier, Stable Diffusion/Bing, Blender.", "children": [] },
-        { "id": "start-ai-log", "label": "Start AI Methodology Log", "description": "Date, tool, prompt, output, human correction, value added — from day one.", "children": [] },
-        { "id": "prep-team-docs", "label": "Prep Team Registration Info", "description": "Names, discipline, role, contact, Emirates ID, photo.", "children": [] }
+        {
+          "id": "read-design-brief",
+          "label": "Read Design Brief & Scope",
+          "description": "Review the complete brief including site information, project background, design scope, required park program, submission requirements, evaluation criteria, and timeline.",
+          "children": []
+        },
+        {
+          "id": "lock-tool-stack",
+          "label": "Tool Stack",
+          "description": "Confirm the softwares to be used: QGIS for GIS analysis, FreeCAD + Bonsai for BIM, Ladybug/Honeybee for environmental simulation, Inkscape for vector graphics,  ChatGPT/Deepseek for text-based AI support, Stable Diffusion/Bing for image generation, and Blender for visualization and animation.",
+          "children": []
+        },
+        {
+          "id": "start-ai-log",
+          "label": "Start AI Methodology Log",
+          "description": "Create a timestamped log template including date, AI tool used, prompt / input, raw output, human correction or override, and value added to the design process. This log is critical because the AI Methodology Report is worth 20% of the total evaluation.",
+          "children": []
+        },
+        {
+          "id": "prep-team-docs",
+          "label": "Prep Team Registration Info",
+          "description": "Gather required team information per the participation conditions: full name, organization/affiliation if any, discipline and expertise, role and responsibilities, contact information, Emirates ID (for UAE residents), and recent passport-size photograph.",
+          "children": []
+        }
       ]
     },
     {
       "id": "site-user-analysis",
       "label": "Site & User Analysis",
-      "description": "Understand the ground and the people before designing anything.",
+      "description": "Build a thorough understanding of the physical site, its urban context, climatic conditions, and the needs of the local community before generating design ideas.",
       "children": [
-        { "id": "site-walkthrough", "label": "On-Foot Site Audit", "description": "Photos, laser meter, Polycam scan.", "children": [] },
-        { "id": "gis-basemap", "label": "QGIS Basemap", "description": "OpenStreetMap + free satellite + open DEM.", "children": [] },
-        { "id": "climate-pull", "label": "Climate Data Pull", "description": "Open-Meteo API for sun, wind, temperature.", "children": [] },
-        { "id": "opportunities-constraints", "label": "Opportunities & Constraints Map", "description": "Synthesize audit + GIS + climate findings.", "children": [] },
-        { "id": "community-survey", "label": "Community Survey", "description": "Free Google Forms, ~30–50 respondents.", "children": [] },
-        { "id": "ai-personas", "label": "AI-Assisted Personas", "description": "Children, youth, families, older adults, People of Determination — human-reviewed.", "children": [] },
-        { "id": "accessibility-mapping", "label": "Accessibility Needs Mapping", "description": "Translate personas into concrete access requirements.", "children": [] }
+        {
+          "id": "site-walkthrough",
+          "label": "On-Foot Site Audit",
+          "description": "Visit the existing 15,000 sqm park in Al Safa 2. Photograph site conditions, record existing trees and vegetation, identify constraints (e.g., utilities, boundaries, hardscape), and document access points, sight lines, and current usage patterns. Use a laser meter and Polycam scan if available.",
+          "children": []
+        },
+        {
+          "id": "gis-basemap",
+          "label": "GIS Basemap",
+          "description": "Create a GIS basemap using OpenStreetMap, free satellite imagery, and an open DEM. Map the site boundary, surrounding land uses, road hierarchy, pedestrian connections, public transport access, and any nearby community facilities.",
+          "children": []
+        },
+        {
+          "id": "opportunities-constraints",
+          "label": "Opportunities & Constraints Map",
+          "description": "Synthesize the on-foot audit, GIS layers, and climate data into a clear spatial assessment. Identify areas suitable for active play, quiet zones, gathering spaces, and dense planting. Highlight constraints such as harsh solar exposure, noise sources, or limited access.",
+          "children": []
+        },
+        {
+          "id": "community-survey",
+          "label": "Community Survey",
+          "description": "Design and distribute a free Google Forms survey to approximately 30\u201350 residents and park users. Capture preferred activities, park usage times, accessibility needs, desired amenities, and community aspirations for the new park.",
+          "children": []
+        },
+        {
+          "id": "ai-personas",
+          "label": "AI-Assisted Personas",
+          "description": "Use AI to draft detailed personas for children, youth, families, older adults, and People of Determination. Each persona should include typical day journey, activity preferences, comfort needs, and accessibility challenges. Human-review every AI-generated persona to ensure realism and local relevance.",
+          "children": []
+        },
+        {
+          "id": "accessibility-mapping",
+          "label": "Accessibility Needs Mapping",
+          "description": "Translate the personas and community survey feedback into specific universal design and barrier-free access requirements. Map required accessible routes, rest areas, shaded seating, sensory-friendly zones, and inclusive play features.",
+          "children": []
+        }
       ]
     },
     {
-      "id": "ai-analysis-concept",
-      "label": "AI-Driven Analysis & Concept",
-      "description": "Core AI-scored stage — analysis into a chosen direction.",
+      "id": "ai-driven-analysis",
+      "label": "AI-Driven Analysis",
+      "description": "Use AI tools to analyse site, climate, and community data to inform the design direction. This stage produces evidence-based suitability maps and cross-checked criteria before any concept is developed.",
       "children": [
-        { "id": "suitability-overlay", "label": "QGIS Suitability Overlay", "description": "Weighted overlay for zones — play, quiet, gathering, planting.", "children": [] },
-        { "id": "ai-criteria-check", "label": "AI Criteria Cross-Check", "description": "Weight overlay against community priorities, log overrides.", "children": [] },
-        { "id": "ai-swot", "label": "AI-Assisted SWOT & Decision Log", "description": "2–3 candidate directions, human review, recorded reasoning.", "children": [] },
-        { "id": "ai-moodboards", "label": "AI Moodboards", "description": "3 directions via Stable Diffusion/Bing, prompt-refined.", "children": [] },
-        { "id": "vision-narrative", "label": "Design Vision & Narrative", "description": "Concept statement tying findings to identity.", "children": [] },
-        { "id": "concept-massing", "label": "Concept Massing (IFC)", "description": "Block chosen concept in shared FreeCAD/BlenderBIM model.", "children": [] },
-        { "id": "concept-strategies", "label": "Concept-Level Strategies", "description": "Landscape, sustainability, accessibility — draft resolution.", "children": [] }
+        {
+          "id": "suitability-overlay",
+          "label": "GIS Suitability Overlay",
+          "description": "Perform a weighted suitability analysis in GIS to identify the best locations for different functions: active play, quiet contemplation, community gathering, and planting. Weight criteria such as solar exposure, wind, noise, accessibility, and existing vegetation.",
+          "children": []
+        },
+        {
+          "id": "ai-criteria-check",
+          "label": "AI Criteria Cross-Check",
+          "description": "Use AI to cross-check the suitability overlay against community priorities and the competition evaluation criteria. Identify any conflicts or overridden decisions and log them in the AI methodology document.",
+          "children": []
+        },
+        {
+          "id": "analysis-decision-log",
+          "label": "Analysis Decision Log",
+          "description": "Compile the findings from suitability and criteria cross-check into a clear summary of spatial opportunities and constraints. Record decisions on which zones are most suitable for different functions and why.",
+          "children": [],
+          "successors": [
+            "ai-swot"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "concept-development",
+      "label": "Concept Development & Initial Planning",
+      "description": "Build on the analysis to generate creative concept directions, evaluate them, and develop the selected idea into an initial spatial and strategic framework.",
+      "children": [
+        {
+          "id": "ai-moodboards",
+          "label": "AI Moodboards (3 Directions)",
+          "description": "Generate three distinct concept directions using Stable Diffusion or Bing. Each direction should explore a different character: e.g., ecological oasis, active community hub, sensory landscape. Refine prompts iteratively and document how AI contributed to the creative exploration.",
+          "children": []
+        },
+        {
+          "id": "ai-swot",
+          "label": "AI-Assisted SWOT & Decision Log",
+          "description": "Run an AI-assisted SWOT analysis on each of the three concept directions. Compare them against site opportunities/constraints, community input, evaluation criteria, and budget feasibility. Select the final direction through a human decision, recording the reasoning and trade-offs.",
+          "children": [],
+          "successors": [
+            "detailed-masterplan"
+          ],
+          "predecessors": [
+            "analysis-decision-log"
+          ]
+        },
+        {
+          "id": "vision-narrative",
+          "label": "Design Vision & Narrative",
+          "description": "Write a concise but compelling design narrative that ties together the site analysis, community needs, local identity, and chosen concept. Explain the core idea and how it addresses the brief's objectives.",
+          "children": []
+        },
+        {
+          "id": "concept-massing",
+          "label": "Concept Massing (3D)",
+          "description": "Block out the chosen concept in a shared BIM model. Create a simplified massing model to test spatial organization, scale, building placement, shade structures, and open space relationships.",
+          "children": []
+        },
+        {
+          "id": "concept-diagrams",
+          "label": "Concept Diagrams",
+          "description": "Produce clear concept diagrams including zoning, circulation, green framework, activity distribution, shade strategy, and user flow. These diagrams will communicate the idea at a glance.",
+          "children": []
+        },
+        {
+          "id": "concept-strategies",
+          "label": "Concept-Level Strategies",
+          "description": "Draft preliminary strategies for landscape design, sustainability, and accessibility. These should be at concept resolution \u2014 enough to guide the preliminary design stage but not yet fully detailed.",
+          "children": []
+        }
       ]
     },
     {
       "id": "scenario-testing",
       "label": "Environmental Scenario Testing",
-      "description": "Simulate, interpret, and respond — not raw output alone.",
+      "description": "Incorporate environmental simulation results to test and refine the design idea. The goal is to ensure the concept works in Dubai's climate.",
       "children": [
-        { "id": "sun-shade-study", "label": "Ladybug Sun & Shade Study", "description": "Solar exposure and shading on the concept massing.", "children": [] },
-        { "id": "ai-comfort-cost", "label": "AI Comfort & ROM Cost Read", "description": "Plain-language commentary against AED 35M, human-verified.", "children": [] },
-        { "id": "design-response", "label": "Design Response to Findings", "description": "Adjust shading/planting/circulation; log what changed and why.", "children": [] }
+        {
+          "id": "design-response",
+          "label": "Design Response to Findings",
+          "description": "After sun and shade simulations are available, adjust the design accordingly. Modify shading devices, planting locations, or circulation routes to improve thermal comfort and usability. Log every change and the reason for it.",
+          "children": []
+        }
       ]
     },
     {
       "id": "preliminary-design",
       "label": "Preliminary Design Development",
-      "description": "Coordinated, buildable-resolution design package.",
+      "description": "Develop the selected concept into a coordinated preliminary design package. This includes detailed architectural and landscape planning that communicates the project's vision, functionality, and implementation potential.",
       "children": [
-        { "id": "detailed-masterplan", "label": "Detailed Masterplan & Flows", "description": "Spatial organization, zoning, user-journey diagrams.", "children": [] },
-        { "id": "landscape-planting", "label": "Landscape & Planting Plans", "description": "AI-shortlisted palette, verified for local availability.", "children": [] },
-        { "id": "play-social-spaces", "label": "Play, Community & Social Spaces", "description": "Playgrounds, plaza, picnic and seating areas.", "children": [] },
-        { "id": "circulation-access", "label": "Circulation & Accessibility", "description": "Pedestrian, jogging track, universal-access detailing.", "children": [] },
-        { "id": "amenities-commercial", "label": "Amenities & Commercial Map", "description": "Services plan plus Commercial & Service Facilities Map.", "children": [] },
-        { "id": "smart-tech-strategy", "label": "Smart Tech & Data Strategy", "description": "Monitoring and data-driven park management opportunities.", "children": [] },
-        { "id": "sustainability-detailed", "label": "Detailed Sustainability Strategy", "description": "Water, energy, nature-based solutions at full resolution.", "children": [] },
-        { "id": "feasibility-check", "label": "Feasibility & Budget Check", "description": "Cross-check scope/materials against AED 35M budget.", "children": [] },
-        { "id": "phasing-plan", "label": "Preliminary Phasing Plan", "description": "Implementation sequence and maintenance approach.", "children": [] }
+        {
+          "id": "detailed-masterplan",
+          "label": "Detailed Masterplan & Flows",
+          "description": "Produce a detailed masterplan showing spatial organization, zoning, activity areas, built elements, planting zones, and primary user flows. Ensure the masterplan responds to the indicative park program and AED 35M budget.",
+          "children": [],
+          "successors": [
+            "cadbim-drawings"
+          ],
+          "predecessors": [
+            "ai-swot"
+          ]
+        },
+        {
+          "id": "architecture-built-elements",
+          "label": "Architecture Planning of Built Elements",
+          "description": "Develop the architectural concept for key built elements: main entrance plaza and gateway feature, shade structures, pavilions, public restrooms, a caf\u00e9 or refreshment kiosk (if included), and any service/maintenance buildings. Define approximate sizes, materials, and relationships to outdoor spaces.",
+          "children": []
+        },
+        {
+          "id": "shade-structure-design",
+          "label": "Shade & Shelter Design",
+          "description": "Design integrated shade solutions such as pergolas, tensile structures, tree canopy clusters, or architectural canopies. Locate them along key walking routes, seating areas, and play zones to ensure year-round comfort.",
+          "children": []
+        },
+        {
+          "id": "landscape-planting",
+          "label": "Landscape & Planting Plans",
+          "description": "Develop the planting design using native and climate-responsive species. Use AI to shortlist a palette, then verify local availability. Include tree canopy layout, shrub and groundcover zones, and seasonal interest.",
+          "children": []
+        },
+        {
+          "id": "play-social-spaces",
+          "label": "Play, Community & Social Spaces",
+          "description": "Design detailed layouts for inclusive playgrounds for different age groups, a community plaza, family picnic areas, flexible event lawn, outdoor fitness stations, and social seating nodes. Ensure intergenerational interaction and universal access.",
+          "children": []
+        },
+        {
+          "id": "circulation-access",
+          "label": "Circulation & Accessibility",
+          "description": "Refine the pedestrian network, approximately 1 km jogging track, bicycle parking, drop-off zones, and universal access routes. Include service access and emergency vehicle access considerations.",
+          "children": []
+        },
+        {
+          "id": "amenities-commercial",
+          "label": "Amenities & Commercial Map",
+          "description": "Prepare a services plan and a Commercial & Service Facilities Map as required by the brief. Identify locations for food & beverage, retail kiosks, public restrooms, drinking fountains, information points, and waste/recycling stations.",
+          "children": []
+        },
+        {
+          "id": "sections-elevations",
+          "label": "Sections & Elevations",
+          "description": "Prepare key sections and elevations that explain the vertical design: changes in level, shade structure heights, built element elevations, and relationship of landscape layers.",
+          "children": [],
+          "successors": [
+            "cadbim-drawings"
+          ]
+        },
+        {
+          "id": "user-journey-diagrams",
+          "label": "User Journey & Experience Diagrams",
+          "description": "Create diagrams showing day-to-night user experiences, such as a family's visit, a jogger's route, or an older adult's restful walk. Show how the park supports a seamless experience throughout the day and across seasons.",
+          "children": []
+        },
+        {
+          "id": "material-palette",
+          "label": "Material & Landscape Palette",
+          "description": "Define the material palette, colors, finishes, and landscape design language. Include hardscape materials, shade structure finishes, site furniture, and planting character to create a cohesive and memorable identity.",
+          "children": []
+        },
+        {
+          "id": "phasing-plan",
+          "label": "Preliminary Phasing Plan",
+          "description": "Outline a simple implementation sequence that respects the AED 35M budget and allows the park to open in phases if needed. Include a basic maintenance approach for long-term viability.",
+          "children": []
+        }
       ]
     },
     {
       "id": "deliverables-assembly",
       "label": "Deliverables Assembly",
-      "description": "Package everything Schedule 2 requires — 16 items total.",
+      "description": "Compile all required submission materials in a clear, professional, and comprehensive package that meets the competition's deliverable list.",
       "children": [
-        { "id": "exec-summary", "label": "Executive Summary", "description": "Vision, concept, and key innovations.", "children": [] },
-        { "id": "narrative-analysis-docs", "label": "Narrative & Analysis Docs", "description": "Design narrative, site analysis, user/community analysis.", "children": [] },
-        { "id": "ai-methodology-report", "label": "AI Methodology Report", "description": "Compiled from the running AI log.", "children": [] },
-        { "id": "masterplan-landscape-docs", "label": "Masterplan & Landscape Docs", "description": "Masterplan, landscape plans, accessibility & sustainability strategies.", "children": [] },
-        { "id": "cadbim-drawings", "label": "CAD/BIM Drawings", "description": "Concept diagrams, sections, and elevations.", "children": [] },
-        { "id": "renders-video", "label": "Renders & Concept Video", "description": "Day/night renders, full presentation, 1-min AI-assisted animation.", "children": [] },
-        { "id": "supporting-materials", "label": "Additional Supporting Materials", "description": "Anything else needed to communicate the proposal.", "children": [] }
+        {
+          "id": "exec-summary",
+          "label": "Executive Summary",
+          "description": "Write a one-page executive summary that captures the design vision, concept, key innovations, and how AI was used to enhance the outcome.",
+          "children": []
+        },
+        {
+          "id": "narrative-analysis-docs",
+          "label": "Narrative & Analysis Docs Report",
+          "description": "Compile the design narrative, site analysis, opportunities and constraints assessment, user and community analysis, and accessibility strategy into a coherent report.",
+          "children": []
+        },
+        {
+          "id": "ai-methodology-report",
+          "label": "AI Methodology Report",
+          "description": "Transform the running AI log into a polished methodology report. Describe the tools, workflows, design alternatives explored, the value added by AI at each stage, and where human judgment was decisive.",
+          "children": []
+        },
+        {
+          "id": "masterplan-landscape-docs",
+          "label": "Masterplan & Landscape Docs",
+          "description": "Prepare the final masterplan, landscape plans, public realm plans, sustainability strategy, and accessibility strategy as required deliverables.",
+          "children": []
+        },
+        {
+          "id": "cadbim-drawings",
+          "label": "CAD/BIM Drawings",
+          "description": "Export concept diagrams, preliminary design drawings, sections, and elevations as CAD/BIM files from the shared model.",
+          "children": [],
+          "predecessors": [
+            "detailed-masterplan",
+            "sections-elevations"
+          ],
+          "assignedPersonIds": [
+            "person-arun"
+          ]
+        },
+        {
+          "id": "renders-video",
+          "label": "Renders & Concept Video",
+          "description": "Create high-quality day and night visualizations, aerial perspectives, and human-scale renders. Produce a one-minute AI-assisted concept animation that illustrates the design vision and user experience.",
+          "children": [
+            {
+              "id": "node-1786908457656-rxsi9d",
+              "label": "Concept Video",
+              "children": []
+            },
+            {
+              "id": "node-1786908403918-uturjr",
+              "label": "Day render images",
+              "children": []
+            },
+            {
+              "id": "node-1786908386782-eft1ia",
+              "label": "Night render images",
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "supporting-materials",
+          "label": "Additional Supporting Materials",
+          "description": "Add any extra drawings, diagrams, physical or digital models, or other materials that strengthen the proposal communication.",
+          "children": []
+        }
       ]
     },
     {
       "id": "submission",
       "label": "Final Review & Submission",
-      "description": "Score, tighten, and upload before the deadline.",
+      "description": "Perform a final quality check against the evaluation criteria, ensure all files are compliant, and upload before the deadline.",
       "children": [
-        { "id": "internal-scoring", "label": "Internal Evaluation-Matrix Review", "description": "Score against all 6 Schedule 7 criteria, fix weak spots.", "children": [] },
-        { "id": "finalize-team-info", "label": "Finalize Team Info", "description": "Confirm Schedule 3 details for portal registration.", "children": [] },
-        { "id": "review-ip-terms", "label": "Review IP Terms", "description": "Understand Schedule 6 rights transfer before submitting.", "children": [] },
-        { "id": "portal-upload", "label": "Upload to Portal", "description": "Submit complete package before 21 September 2026.", "children": [] }
+        {
+          "id": "internal-scoring",
+          "label": "Internal Evaluation-Matrix Review",
+          "description": "Self-score the entire submission against the official evaluation matrix: Innovation & Creativity (20%), Human-Centered Design & Sustainability (20%), AI Integration (20%), Design Quality & User Experience (15%), Feasibility & Implementation (20%), Presentation Quality (5%). Identify weak areas and improve them before final upload.",
+          "children": []
+        },
+        {
+          "id": "finalize-team-info",
+          "label": "Finalize Team Info",
+          "description": "Double-check all team registration details in the portal against the participation conditions.",
+          "children": []
+        },
+        {
+          "id": "review-ip-terms",
+          "label": "Review IP Terms",
+          "description": "Read the intellectual property and general terms carefully to understand the rights transferred for winning proposals and the usage rights granted for all submissions.",
+          "children": []
+        },
+        {
+          "id": "portal-upload",
+          "label": "Upload to Portal",
+          "description": "Upload the complete submission package to the official portal before the extended deadline of 21 September 2026. Verify successful upload and keep confirmation.",
+          "children": []
+        }
       ]
     }
   ],

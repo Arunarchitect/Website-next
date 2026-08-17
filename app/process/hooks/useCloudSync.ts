@@ -6,6 +6,8 @@ import {
   changeCloudPassphrase,
   fetchCloudDoc,
   fetchCloudDocList,
+  fetchGroupDocList,
+  fetchGroupMasterDoc,
   fetchMasterDoc,
   saveCloudDoc,
 } from "@/app/process/lib/api";
@@ -15,7 +17,14 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-export function useCloudSync(loadData: (data: ProcessData) => void) {
+/**
+ * `masterword`, when given, scopes this hook to one named group:
+ * - the list is that group's documents instead of everyone's
+ * - the initial load is that group's master instead of the default page's
+ * - saveToCloud auto-joins the doc to this group (sends `masterword`)
+ *   unless the caller explicitly overrides it in the params they pass
+ */
+export function useCloudSync(loadData: (data: ProcessData) => void, masterword?: string) {
   const [cloudList, setCloudList] = useState<CloudDocSummary[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState("");
@@ -26,7 +35,7 @@ export function useCloudSync(loadData: (data: ProcessData) => void) {
 
   const refreshList = async () => {
     try {
-      const list = await fetchCloudDocList();
+      const list = masterword ? await fetchGroupDocList(masterword) : await fetchCloudDocList();
       setCloudList(list);
     } catch (err) {
       console.error(err);
@@ -35,12 +44,13 @@ export function useCloudSync(loadData: (data: ProcessData) => void) {
 
   useEffect(() => {
     refreshList();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterword]);
 
   useEffect(() => {
     (async () => {
       try {
-        const master = await fetchMasterDoc();
+        const master = masterword ? await fetchGroupMasterDoc(masterword) : await fetchMasterDoc();
         if (master && master.data) {
           loadData(master.data);
         }
@@ -51,7 +61,7 @@ export function useCloudSync(loadData: (data: ProcessData) => void) {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [masterword]);
 
   const loadCloudDoc = async (id: number) => {
     setCloudLoading(true);
@@ -74,12 +84,16 @@ export function useCloudSync(loadData: (data: ProcessData) => void) {
     title?: string;
     is_master?: boolean;
     master_key?: string;
+    masterword?: string;
     data: ProcessData;
   }) => {
     setCloudLoading(true);
     setCloudError("");
     try {
-      const doc = await saveCloudDoc(params);
+      const doc = await saveCloudDoc({
+        masterword,
+        ...params,
+      });
       await refreshList();
       return doc;
     } catch (err: unknown) {
@@ -106,6 +120,7 @@ export function useCloudSync(loadData: (data: ProcessData) => void) {
   };
 
   return {
+    masterword,
     cloudList,
     cloudLoading,
     cloudError,

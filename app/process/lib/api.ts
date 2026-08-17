@@ -12,6 +12,8 @@ export type CloudDocSummary = {
 
 export type CloudDocDetail = CloudDocSummary & {
   data: ProcessData;
+  // null when the doc isn't in a named group (i.e. it's on the default page)
+  group_masterword: string | null;
 };
 
 export async function fetchCloudDocList(): Promise<CloudDocSummary[]> {
@@ -33,12 +35,30 @@ export async function fetchMasterDoc(): Promise<CloudDocDetail | null> {
   return res.json();
 }
 
+/** Documents belonging to one named group — for a Load menu on /process/<masterword>. */
+export async function fetchGroupDocList(masterword: string): Promise<CloudDocSummary[]> {
+  const res = await fetch(`${API_BASE}/process-docs/group/${encodeURIComponent(masterword)}/`);
+  if (!res.ok) throw new Error("Failed to fetch group's document list.");
+  return res.json();
+}
+
+/** The master document within one named group — what /process/<masterword> loads on mount. */
+export async function fetchGroupMasterDoc(masterword: string): Promise<CloudDocDetail | null> {
+  const res = await fetch(`${API_BASE}/process-docs/group/${encodeURIComponent(masterword)}/master/`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to fetch group's master document.");
+  return res.json();
+}
+
 export async function saveCloudDoc(params: {
   passphrase: string;
   person_name?: string;
   title?: string;
   is_master?: boolean;
   master_key?: string;
+  // Join/stay in this named group. Omit to leave the doc's current group
+  // (or lack of one) unchanged.
+  masterword?: string;
   data: ProcessData;
 }): Promise<CloudDocDetail> {
   const res = await fetch(`${API_BASE}/process-docs/save/`, {

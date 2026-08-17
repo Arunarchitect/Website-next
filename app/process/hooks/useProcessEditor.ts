@@ -5,7 +5,6 @@ import {
   Person,
   ProcessData,
   ProcessNode,
-  sanitizeProcessRelations,
   reverseEdgeExists,
 } from "@/app/process/lib/process-utils";
 import sampleProcess from "@/app/process/json/process.json";
