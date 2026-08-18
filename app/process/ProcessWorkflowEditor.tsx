@@ -89,6 +89,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [editingPersonName, setEditingPersonName] = useState("");
 
+  const [filterPersonId, setFilterPersonId] = useState<string | null>(null);
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
+
   const startRenamePerson = (id: string, currentName: string) => {
     setEditingPersonId(id);
     setEditingPersonName(currentName);
@@ -517,6 +520,33 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const rootNode = editor.rootNode;
   const displayGroup = masterword?.trim() || "Ungrouped";
 
+  // Helper: collect tasks assigned to a person, in depth-first tree order
+  const getPersonTasks = (personId: string): ProcessNode[] => {
+    if (!rootNode) return [];
+
+    const tasks: ProcessNode[] = [];
+
+    const traverse = (node: ProcessNode) => {
+      // Exclude the root container itself from “tasks”
+      if (node.id !== "root" && node.assignedPersonIds?.includes(personId)) {
+        tasks.push(node);
+      }
+      (node.children ?? []).forEach(traverse);
+    };
+
+    traverse(rootNode);
+    return tasks;
+  };
+
+  // Helper: whether a node (task) is fully complete
+  const isNodeFullyComplete = (node: ProcessNode): boolean => {
+    const children = node.children ?? [];
+    if (children.length === 0) {
+      return editor.completed.has(node.id);
+    }
+    return children.every(isNodeFullyComplete);
+  };
+
   // Compute the label for the node being moved (safe even if rootNode is null)
   const moveParentLabel = moveParentMode && rootNode ? findNodeById(rootNode, moveParentMode)?.label : null;
 
@@ -664,9 +694,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                   // cloudError is already set by the hook; keep menu open so it's visible
                                 }
                               }}
-                              className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${
-                                isCurrent ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "hover:bg-gray-50"
-                              }`}
+                              className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${isCurrent ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "hover:bg-gray-50"
+                                }`}
                             >
                               <span className="text-sm text-gray-800 flex items-center gap-1.5 min-w-0">
                                 <span className="truncate">{doc.title || "Untitled Workflow"}</span>
@@ -709,8 +738,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     : "Autosave every 5 minutes to the server"
                 }
                 className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${autosave.enabled
-                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    : "text-gray-600 hover:bg-gray-100"
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "text-gray-600 hover:bg-gray-100"
                   }`}
               >
                 {autosave.enabled ? "Auto: On" : "Autosave"}
@@ -834,7 +863,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                         disabled={
                           !getNodeParentAndIndex(editor.selectedNodeId!) ||
                           getNodeParentAndIndex(editor.selectedNodeId!)!.index >=
-                            (getNodeParentAndIndex(editor.selectedNodeId!)!.parent?.children?.length ?? 0) - 1
+                          (getNodeParentAndIndex(editor.selectedNodeId!)!.parent?.children?.length ?? 0) - 1
                         }
                         className="w-6 h-6 flex items-center justify-center rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                         title="Move down among siblings"
@@ -1203,7 +1232,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
             editor.setShowPersonManager(false);
           }}
         >
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">People</h3>
 
             <div className="flex gap-2 mb-4">
@@ -1252,15 +1284,134 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       {person.name}
                     </button>
                   )}
+
+                  {/* ─── NEW: Filter tasks button ─── */}
                   <button
-                    onClick={() => editor.deletePerson(person.id)}
-                    className="text-xs text-red-600 hover:text-red-700 font-medium shrink-0"
+                    type="button"
+                    onClick={() => {
+                      const next = filterPersonId === person.id ? null : person.id;
+                      setFilterPersonId(next);
+                      setExpandedTaskIds(new Set()); // reset expanded rows when switching filter
+                    }}
+                    className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${filterPersonId === person.id
+                        ? "bg-indigo-100 text-indigo-700"
+                        : "text-gray-500 hover:bg-gray-100"
+                      }`}
+                    title="Filter tasks assigned to this person"
+                  >
+                    Tasks
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (filterPersonId === person.id) {
+                        setFilterPersonId(null);
+                        setExpandedTaskIds(new Set());
+                      }
+                      editor.deletePerson(person.id);
+                    }}
+                    className="shrink-0 text-xs text-red-600 hover:text-red-700 font-medium"
                   >
                     Delete
                   </button>
                 </div>
               ))}
             </div>
+
+            {/* ─── NEW: Filtered task list for selected person ─── */}
+            {filterPersonId && (
+              <div className="mt-4 border-t border-gray-200 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-gray-800">
+                    Tasks assigned to {editor.persons.find((p) => p.id === filterPersonId)?.name ?? "person"}
+                  </h4>
+                  <button
+                    onClick={() => setFilterPersonId(null)}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {(() => {
+                  const tasks = getPersonTasks(filterPersonId);
+                  const completedCount = tasks.filter((t) => isNodeFullyComplete(t)).length;
+                  const totalCount = tasks.length;
+
+                  return (
+                    <>
+                      {/* Summary line */}
+                      <div className="mb-3 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg px-3 py-1.5">
+                        {completedCount} / {totalCount} task{totalCount === 1 ? "" : "s"} completed
+                      </div>
+
+                      {totalCount === 0 ? (
+                        <div className="text-sm text-gray-400 text-center py-4">No tasks assigned.</div>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto flex flex-col gap-1">
+                          {tasks.map((task) => {
+                            const isComplete = isNodeFullyComplete(task);
+                            const isExpanded = expandedTaskIds.has(task.id);
+
+                            return (
+                              <div
+                                key={task.id}
+                                className={`rounded-lg bg-gray-50 border ${isComplete ? "border-emerald-200" : "border-gray-100"
+                                  }`}
+                              >
+                                <div className="flex items-center justify-between px-2.5 py-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setExpandedTaskIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(task.id)) next.delete(task.id);
+                                        else next.add(task.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="flex-1 min-w-0 text-left text-sm text-gray-700 hover:text-indigo-700 flex items-center gap-1.5"
+                                  >
+                                    {/* Completion indicator */}
+                                    <span
+                                      className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isComplete
+                                          ? "bg-emerald-500 text-white"
+                                          : "bg-gray-200 text-gray-400"
+                                        }`}
+                                      title={isComplete ? "Completed" : "Not completed"}
+                                    >
+                                      {isComplete ? "✓" : "○"}
+                                    </span>
+
+                                    {/* Expand arrow */}
+                                    <span className="text-xs text-gray-400">
+                                      {isExpanded ? "▾" : "▸"}
+                                    </span>
+
+                                    <span className="truncate">{task.label}</span>
+                                  </button>
+                                </div>
+
+                                {isExpanded && task.description && (
+                                  <div className="px-2.5 pb-2 pt-0.5 text-xs text-gray-500 whitespace-pre-wrap">
+                                    {task.description}
+                                  </div>
+                                )}
+                                {isExpanded && !task.description && (
+                                  <div className="px-2.5 pb-2 pt-0.5 text-xs text-gray-400 italic">
+                                    No description
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
             <div className="flex justify-end mt-4">
               <button
