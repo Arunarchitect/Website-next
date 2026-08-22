@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { ProcessNode } from "@/app/process/lib/process-utils";
+import type { ProcessNode, Person } from "@/app/process/lib/process-utils";
 
 type ReportPdfButtonProps = {
   rootNode: ProcessNode | null;
   completed: Set<string>;
+  persons: Person[];
 };
 
 type FlatEntry = { node: ProcessNode; level: number; numberPath: number[] };
@@ -35,21 +36,33 @@ function headingStyle(level: number) {
 
 const RED: [number, number, number] = [190, 30, 30];
 const GRAY: [number, number, number] = [110, 110, 110];
+const LIGHT_GRAY: [number, number, number] = [160, 160, 160];
 const GREEN: [number, number, number] = [30, 130, 60];
+const TEAL: [number, number, number] = [15, 118, 110];
 const INK: [number, number, number] = [20, 20, 20];
 
-export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
+export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButtonProps) {
   const [open, setOpen] = useState(false);
   const [includeIndex, setIncludeIndex] = useState(true);
   const [indexDepth, setIndexDepth] = useState(2);
   const [includeDescriptions, setIncludeDescriptions] = useState(true);
   const [includeCompletion, setIncludeCompletion] = useState(true);
+  const [filterPersonIds, setFilterPersonIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const maxLevel = rootNode
     ? Math.max(1, ...flattenTree(rootNode).map((e) => e.level))
     : 1;
+
+  const togglePersonFilter = (id: string) => {
+    setFilterPersonIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const generate = async () => {
     if (!rootNode) return;
@@ -67,13 +80,24 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
       const contentWidth = pageWidth - marginX * 2;
       const contentBottom = pageHeight - marginBottom;
 
-      const entries = flattenTree(rootNode);
+      const allEntries = flattenTree(rootNode);
       const idToPath = new Map<string, string>();
-      entries.forEach((e) => idToPath.set(e.node.id, e.numberPath.join(".")));
+      allEntries.forEach((e) => idToPath.set(e.node.id, e.numberPath.join(".")));
+
+      const isFiltering = filterPersonIds.size > 0;
+
+      // When filtering, keep ONLY nodes directly assigned to one of the selected
+      // people — no parent/ancestor headings are pulled in for context anymore.
+      const entries = isFiltering
+        ? allEntries.filter((e) => (e.node.assignedPersonIds ?? []).some((pid) => filterPersonIds.has(pid)))
+        : allEntries;
+
+      const filterNames = persons.filter((p) => filterPersonIds.has(p.id)).map((p) => p.name);
+      const noMatches = isFiltering && entries.length === 0;
 
       const lineHeightFor = (fontSize: number) => fontSize * MM_PER_PT * LINE_MULT;
 
-      const wrap = (text: string, fontSize: number, weight: "normal" | "bold", width: number) => {
+      const wrap = (text: string, fontSize: number, weight: "normal" | "bold" | "italic", width: number) => {
         doc.setFont("helvetica", weight);
         doc.setFontSize(fontSize);
         return doc.splitTextToSize(text, width) as string[];
@@ -84,7 +108,7 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
         x: number,
         yStart: number,
         fontSize: number,
-        weight: "normal" | "bold",
+        weight: "normal" | "bold" | "italic",
         opts: { color?: [number, number, number]; underline?: boolean; align?: "left" | "center" } = {}
       ) => {
         let y = yStart;
@@ -110,8 +134,6 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
         return y;
       };
 
-      // pageOfEntry gets filled by whichever pass runs — first (dry) pass provides
-      // the numbers the second (draw) pass needs to print in the TOC.
       let resolvedPageOfEntry = new Map<string, number>();
 
       const renderDocument = (draw: boolean) => {
@@ -138,12 +160,22 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
           }
         };
 
-        // ---------- header (title + subtitle, top of page 1, no dedicated page) ----------
+        // ---------- header ----------
         const titleLines = wrap(rootNode.label || "Process Report", 17, "bold", contentWidth);
         const titleHeight = titleLines.length * lineHeightFor(17);
         ensureSpace(titleHeight);
         if (draw) y = drawLines(titleLines, marginX, y, 17, "bold");
         else y += titleHeight;
+
+        if (isFiltering) {
+          const filterLine = `Filtered for: ${filterNames.join(", ")}`;
+          const filterLines = wrap(filterLine, 11, "italic", contentWidth);
+          const filterHeight = filterLines.length * lineHeightFor(11);
+          ensureSpace(filterHeight + 0.5);
+          y += 0.5;
+          if (draw) y = drawLines(filterLines, marginX, y, 11, "italic", { color: TEAL });
+          else y += filterHeight;
+        }
 
         if (rootNode.description) {
           const descLines = wrap(rootNode.description, 9.5, "normal", contentWidth);
@@ -169,7 +201,7 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
         }
         y += 4;
 
-        // ---------- table of contents (right under the header, same page) ----------
+        // ---------- table of contents ----------
         if (includeIndex) {
           const tocLines = wrap("Table of Contents", 12, "bold", contentWidth);
           const tocHeight = tocLines.length * lineHeightFor(12);
@@ -237,7 +269,18 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
           y += 4;
         }
 
-        // ---------- content (flows continuously — breaks only on overflow) ----------
+        // ---------- "no tasks assigned" notice ----------
+        if (noMatches) {
+          const notice = `No processes are currently assigned to ${filterNames.join(", ")}.`;
+          const nLines = wrap(notice, 10, "italic", contentWidth);
+          const nHeight = nLines.length * lineHeightFor(10);
+          ensureSpace(nHeight + 3);
+          if (draw) y = drawLines(nLines, marginX, y, 10, "italic", { color: GRAY });
+          else y += nHeight;
+          y += 3;
+        }
+
+        // ---------- content ----------
         for (const entry of entries) {
           const { node, level } = entry;
           const style = headingStyle(level);
@@ -290,6 +333,20 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
             y += 1;
           }
 
+          const assignedNames = (node.assignedPersonIds ?? [])
+            .map((pid) => persons.find((p) => p.id === pid)?.name)
+            .filter((n): n is string => Boolean(n));
+          const hasAssignees = assignedNames.length > 0;
+          const assignedText = hasAssignees ? `Assigned: ${assignedNames.join(", ")}` : "Assigned: None";
+          const assignedWeight: "normal" | "italic" = hasAssignees ? "normal" : "italic";
+          const assignedColor: [number, number, number] = hasAssignees ? TEAL : LIGHT_GRAY;
+          const aLines = wrap(assignedText, 8.5, assignedWeight, contentWidth);
+          const aHeight = aLines.length * lineHeightFor(8.5);
+          ensureSpace(aHeight + 0.4);
+          if (draw) y = drawLines(aLines, marginX, y, 8.5, assignedWeight, { color: assignedColor });
+          else y += aHeight;
+          y += 0.4;
+
           if (node.predecessors && node.predecessors.length > 0) {
             const refs = node.predecessors.map((pid) => idToPath.get(pid)).filter((v): v is string => Boolean(v));
             if (refs.length > 0) {
@@ -308,10 +365,13 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
         return pageOfEntry;
       };
 
-      resolvedPageOfEntry = renderDocument(false); // dry run — learn every node's final page number
-      renderDocument(true); // real draw — TOC now prints the correct page numbers
+      resolvedPageOfEntry = renderDocument(false);
+      renderDocument(true);
 
-      doc.save(`${(rootNode.label || "process").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-report.pdf`);
+      const filenameBase = isFiltering
+        ? `${rootNode.label || "process"}-${filterNames.join("-")}`
+        : rootNode.label || "process";
+      doc.save(`${filenameBase.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-report.pdf`);
       setOpen(false);
     } catch (err) {
       console.error(err);
@@ -337,7 +397,7 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
           onClick={() => !busy && setOpen(false)}
         >
           <div
-            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4"
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4 max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Export PDF Report</h3>
@@ -389,11 +449,54 @@ export function ReportPdfButton({ rootNode, completed }: ReportPdfButtonProps) {
               Show completion status on leaf tasks
             </label>
 
+            <div className="mb-2 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-gray-700">
+                  Filter by assigned person (optional)
+                </label>
+                {filterPersonIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterPersonIds(new Set())}
+                    className="text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mb-2">
+                Leave empty to include everything. Select one or more to only print processes directly assigned to them — parent sections are not included.
+              </p>
+
+              {persons.length === 0 ? (
+                <div className="text-xs text-gray-400 py-2">No people added yet.</div>
+              ) : (
+                <div className="max-h-36 overflow-y-auto flex flex-col gap-1">
+                  {persons.map((p) => (
+                    <label
+                      key={p.id}
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm cursor-pointer ${
+                        filterPersonIds.has(p.id) ? "bg-teal-50 text-teal-700" : "text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={filterPersonIds.has(p.id)}
+                        onChange={() => togglePersonFilter(p.id)}
+                        className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      {p.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {error && (
-              <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">{error}</div>
+              <div className="mt-3 mb-1 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">{error}</div>
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setOpen(false)}
                 disabled={busy}

@@ -765,7 +765,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
               <ExportButtons printRef={printRef} setError={editor.setError} />
-              <ReportPdfButton rootNode={rootNode} completed={editor.completed} />
+              <ReportPdfButton rootNode={rootNode} completed={editor.completed} persons={editor.persons}/>
             </div>
           </div>
 
