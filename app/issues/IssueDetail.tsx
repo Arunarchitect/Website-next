@@ -197,7 +197,7 @@ export function IssueDetail({
       .then((opts) => { if (!cancelled) setAssigneeOptions(opts); })
       .finally(() => { if (!cancelled) setLoadingAssignees(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [isEditing, effectiveOrgId]);
 
   useEffect(() => {
@@ -221,7 +221,7 @@ export function IssueDetail({
       .then((opts) => { if (!cancelled) setDrawingOptions(opts); })
       .finally(() => { if (!cancelled) setLoadingDrawings(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [isEditing, effectiveProjectId]);
 
   useEffect(() => {

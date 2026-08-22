@@ -161,6 +161,37 @@ function extractValidationMessage(err: unknown, fallback: string): string {
 const PAGE_SIZE = 10;
 const EMPTY_STATS: IssueStats = { open: 0, in_progress: 0, resolved: 0, closed: 0, low: 0, medium: 0, high: 0, total: 0 };
 
+// ---------------------------------------------------------------------------
+// Filter persistence (sessionStorage) — keeps the filter bar, search, sort
+// and stat-chip selections intact when the user navigates to an issue and
+// back (either via the "Back to issues" button or the browser back button).
+// sessionStorage is scoped to the tab and clears when the tab closes, so it
+// won't leak stale filters into a brand-new session.
+// ---------------------------------------------------------------------------
+
+const FILTERS_STORAGE_KEY = "issues-filters-v1";
+
+interface PersistedFilters {
+  filterOrgId: number | "";
+  filterProjectId: number | "";
+  filterDeliverableId: number | "";
+  domainFilter: "all" | IssueDomain;
+  activeStatFilters: StatFilterKey[];
+  searchQuery: string;
+  sortField: SortField;
+  sortOrder: SortOrder;
+}
+
+function loadPersistedFilters(): Partial<PersistedFilters> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = sessionStorage.getItem(FILTERS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<PersistedFilters>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function IssuesPage() {
   const dispatch = useAppDispatch();
 
@@ -178,12 +209,14 @@ export default function IssuesPage() {
   // within the current org/project/domain/deliverable scope) --------------
   const [stats, setStats] = useState<IssueStats>(EMPTY_STATS);
 
-  const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>("all");
+  const [domainFilter, setDomainFilter] = useState<"all" | IssueDomain>(
+    () => loadPersistedFilters().domainFilter ?? "all"
+  );
   const [showNewIssueForm, setShowNewIssueForm] = useState(false);
 
   // --- Search ---------------------------------------------------------------
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searchQuery, setSearchQuery] = useState(() => loadPersistedFilters().searchQuery ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState(() => loadPersistedFilters().searchQuery ?? "");
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
@@ -191,13 +224,13 @@ export default function IssuesPage() {
   }, [searchQuery]);
 
   // --- Sort -------------------------------------------------------------
-  const [sortField, setSortField] = useState<SortField>("created");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
+  const [sortField, setSortField] = useState<SortField>(() => loadPersistedFilters().sortField ?? "created");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => loadPersistedFilters().sortOrder ?? "newest");
 
   // --- Organisation / Project / Deliverable filter cascade -----------------
-  const [filterOrgId, setFilterOrgId] = useState<number | "">("");
-  const [filterProjectId, setFilterProjectId] = useState<number | "">("");
-  const [filterDeliverableId, setFilterDeliverableId] = useState<number | "">("");
+  const [filterOrgId, setFilterOrgId] = useState<number | "">(() => loadPersistedFilters().filterOrgId ?? "");
+  const [filterProjectId, setFilterProjectId] = useState<number | "">(() => loadPersistedFilters().filterProjectId ?? "");
+  const [filterDeliverableId, setFilterDeliverableId] = useState<number | "">(() => loadPersistedFilters().filterDeliverableId ?? "");
 
   const [filterOrganisations, setFilterOrganisations] = useState<OrganisationSummary[]>([]);
   const [filterProjects, setFilterProjects] = useState<ProjectSummary[]>([]);
@@ -207,7 +240,25 @@ export default function IssuesPage() {
   const [loadingFilterProjects, setLoadingFilterProjects] = useState(false);
   const [loadingFilterDeliverables, setLoadingFilterDeliverables] = useState(false);
 
-  const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(new Set(["open"]));
+  const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(
+    () => new Set(loadPersistedFilters().activeStatFilters ?? ["open"])
+  );
+
+  // Guards so the org->project and project->deliverable cascade effects
+  // don't wipe out filters we just restored from sessionStorage on mount.
+  //
+  // These track the *previous value* rather than a "has this run before"
+  // boolean. A boolean flag flips to false after its first invocation and
+  // stays false — which breaks under React 18 Strict Mode, where React
+  // deliberately invokes every effect TWICE on the initial mount (mount ->
+  // cleanup -> mount again) to surface exactly this kind of bug. With a
+  // boolean, the 2nd invocation of the same mount would see "not first run
+  // anymore" and incorrectly clear the restored child filter. Comparing
+  // against the previous value is idempotent: replaying the effect with an
+  // unchanged value always reports "no change", no matter how many times
+  // it's replayed.
+  const prevOrgIdRef = useRef<number | "">(filterOrgId);
+  const prevProjectIdRef = useRef<number | "">(filterProjectId);
 
   useEffect(() => {
     const loadUserFromStorage = () => {
@@ -317,6 +368,28 @@ export default function IssuesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
+  // Persist filters to sessionStorage whenever they change, so a trip to
+  // the issue detail page and back (or a browser back-button press)
+  // restores exactly what was selected.
+  useEffect(() => {
+    const toSave: PersistedFilters = {
+      filterOrgId,
+      filterProjectId,
+      filterDeliverableId,
+      domainFilter,
+      activeStatFilters: Array.from(activeStatFilters),
+      searchQuery,
+      sortField,
+      sortOrder,
+    };
+    try {
+      sessionStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(toSave));
+    } catch {
+      // Ignore storage errors (e.g. private browsing quota) — persistence
+      // is a nice-to-have, not critical to the page working.
+    }
+  }, [filterOrgId, filterProjectId, filterDeliverableId, domainFilter, activeStatFilters, searchQuery, sortField, sortOrder]);
+
   // Load the organisation list once, for the filter bar.
   useEffect(() => {
     setLoadingFilterOrgs(true);
@@ -329,6 +402,7 @@ export default function IssuesPage() {
       setFilterProjectId("");
       setFilterDeliverables([]);
       setFilterDeliverableId("");
+      prevOrgIdRef.current = filterOrgId;
       return;
     }
     let cancelled = false;
@@ -336,9 +410,18 @@ export default function IssuesPage() {
     getOrganisationProjects(filterOrgId)
       .then((opts) => { if (!cancelled) setFilterProjects(opts); })
       .finally(() => { if (!cancelled) setLoadingFilterProjects(false); });
-    setFilterProjectId("");
-    setFilterDeliverables([]);
-    setFilterDeliverableId("");
+
+    // Only clear the child selections when the org actually changed to a
+    // DIFFERENT value (a real user pick) — not merely because this effect
+    // ran again with the same restored value (e.g. Strict Mode's double
+    // mount invocation in dev).
+    if (prevOrgIdRef.current !== filterOrgId) {
+      setFilterProjectId("");
+      setFilterDeliverables([]);
+      setFilterDeliverableId("");
+    }
+    prevOrgIdRef.current = filterOrgId;
+
     return () => { cancelled = true; };
   }, [filterOrgId]);
 
@@ -346,6 +429,7 @@ export default function IssuesPage() {
     if (!filterProjectId) {
       setFilterDeliverables([]);
       setFilterDeliverableId("");
+      prevProjectIdRef.current = filterProjectId;
       return;
     }
     let cancelled = false;
@@ -353,7 +437,14 @@ export default function IssuesPage() {
     getDeliverablesForProject(filterProjectId)
       .then((opts) => { if (!cancelled) setFilterDeliverables(opts); })
       .finally(() => { if (!cancelled) setLoadingFilterDeliverables(false); });
-    setFilterDeliverableId("");
+
+    // Same value-comparison guard as the org effect above, for the
+    // restored deliverable filter.
+    if (prevProjectIdRef.current !== filterProjectId) {
+      setFilterDeliverableId("");
+    }
+    prevProjectIdRef.current = filterProjectId;
+
     return () => { cancelled = true; };
   }, [filterProjectId]);
 
