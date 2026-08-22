@@ -30,3 +30,12 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+@keyframes importantPulse {
+  0%, 100% { background-color: rgba(239, 68, 68, 0.06); }
+  50%      { background-color: rgba(239, 68, 68, 0.20); }
+}
+
+.important-pulse {
+  animation: importantPulse 1.8s ease-in-out infinite;
+}

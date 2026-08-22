@@ -794,6 +794,38 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
+  const toggleImportant = (nodeId: string) => {
+    if (!data) return;
+    pushHistory();
+    setData((prev) => {
+      if (!prev) return prev;
+      const root: ProcessNode = {
+        id: "root",
+        label: prev.title,
+        description: prev.description,
+        type: "process",
+        width: prev.width,
+        height: prev.height,
+        children: prev.children ?? [],
+      };
+
+      const newRoot = updateNodeData(root, nodeId, (node) => ({
+        ...node,
+        important: !node.important,
+      }));
+
+      return {
+        ...prev,
+        title: newRoot.label,
+        description: newRoot.description,
+        type: newRoot.type,
+        width: newRoot.width,
+        height: newRoot.height,
+        children: newRoot.children,
+      };
+    });
+  };
+
   const openAssignPopup = (nodeId: string) => setAssignPopupNodeId(nodeId);
   const closeAssignPopup = () => setAssignPopupNodeId(null);
 
@@ -1137,7 +1169,7 @@ export function useProcessEditor(initialData: ProcessData) {
     // people
     persons, showPersonManager, setShowPersonManager,
     newPersonName, setNewPersonName, addPerson, deletePerson, renamePerson,
-    assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment,
+    assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment,toggleImportant,
     // schema validation fallback
     invalidUpload, downloadInvalidUpload,
     // undo / redo

@@ -18,6 +18,7 @@ export type ProcessNode = {
   successors?: string[];    // ids of successor nodes (same level)
   assignedPersonIds?: string[]; // ids into ProcessData.persons — NOT inherited by children
   children?: ProcessNode[];
+  important?: boolean;
 };
 
 export type ProcessData = {

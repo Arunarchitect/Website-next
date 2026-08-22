@@ -10,6 +10,7 @@ import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEd
 import { useCloudSync } from "@/app/process/hooks/useCloudSync";
 import { useAutosave } from "@/app/process/hooks/useAutoSave";
 import type { ProcessNode } from "@/app/process/lib/process-utils";
+import { ReportPdfButton } from "@/app/process/components/ReportPdfButton";
 
 const DRAG_THRESHOLD = 6;
 
@@ -764,6 +765,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
               <ExportButtons printRef={printRef} setError={editor.setError} />
+              <ReportPdfButton rootNode={rootNode} completed={editor.completed} />
             </div>
           </div>
 
@@ -887,6 +889,16 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       title="Assign or remove people for this process"
                     >
                       Assign People
+                    </button>
+                    <button
+                      onClick={() => editor.toggleImportant(editor.selectedNodeId!)}
+                      className={`px-2 py-1 rounded-lg text-xs transition-colors ${findNodeById(rootNode, editor.selectedNodeId!)?.important
+                          ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                          : "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                        }`}
+                      title="Mark this process as important"
+                    >
+                      {findNodeById(rootNode, editor.selectedNodeId!)?.important ? "★ Important" : "☆ Mark Important"}
                     </button>
                     <button
                       onClick={() => editor.duplicateNode(editor.selectedNodeId!)}
@@ -1294,8 +1306,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       setExpandedTaskIds(new Set()); // reset expanded rows when switching filter
                     }}
                     className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${filterPersonId === person.id
-                        ? "bg-indigo-100 text-indigo-700"
-                        : "text-gray-500 hover:bg-gray-100"
+                      ? "bg-indigo-100 text-indigo-700"
+                      : "text-gray-500 hover:bg-gray-100"
                       }`}
                     title="Filter tasks assigned to this person"
                   >
@@ -1375,8 +1387,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                     {/* Completion indicator */}
                                     <span
                                       className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isComplete
-                                          ? "bg-emerald-500 text-white"
-                                          : "bg-gray-200 text-gray-400"
+                                        ? "bg-emerald-500 text-white"
+                                        : "bg-gray-200 text-gray-400"
                                         }`}
                                       title={isComplete ? "Completed" : "Not completed"}
                                     >

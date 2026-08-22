@@ -188,10 +188,12 @@ export function ProcessContainer({
     <div
       ref={(el) => registerNodeRef(node.id, el)}
       data-node-id={node.id}
+      className={node.important ? "important-pulse" : undefined}
       onClick={(e) => {
         e.stopPropagation();
         onSelectNode(node.id);
       }}
+          
       style={{
         position: level === 0 ? undefined : "relative",
         zIndex: level === 0 ? undefined : 10,
@@ -209,11 +211,10 @@ export function ProcessContainer({
         padding: layout.padding,
         overflow: "hidden",
         cursor: "pointer",
-        boxShadow:
-          activeNodeId === node.id
-            ? "0 0 0 2px rgba(59,130,246,0.5)"
-            : "none",
-        transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+        boxShadow: [
+          activeNodeId === node.id ? "0 0 0 2px rgba(59,130,246,0.5)" : null,
+          node.important ? "0 0 0 2px rgba(217,119,6,0.45)" : null,
+        ].filter(Boolean).join(", ") || "none",
       }}
     >
       {/* TITLE ROW */}
@@ -255,6 +256,14 @@ export function ProcessContainer({
               {numberLabel}.
             </span>
           )}
+          {node.important && (
+  <span
+    title="Important"
+    style={{ color: "#D97706", marginRight: "5px" }}
+  >
+    ★
+  </span>
+)}
           {node.label}
         </div>
       </div>
