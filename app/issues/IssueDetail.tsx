@@ -13,8 +13,14 @@ import {
   getPriorityColor,
   getOrganisationMembers,
   getProjectDrawings,
+  getMyOrganisations,
+  getOrganisationProjects,
+  getDeliverablesForProject,
   AssigneeOption,
   DrawingOption,
+  OrganisationSummary,
+  ProjectSummary,
+  DeliverableOption,
 } from "./issueApi";
 import {
   Issue,
@@ -43,6 +49,7 @@ import {
   IssueHeader,
   IssueMeta,
   IssueEditForm,
+  IssueScopeEditFields,
   ScreenshotSection,
   ScreenshotHistory,
   LinkedDrawingsView,
@@ -160,18 +167,38 @@ export function IssueDetail({
   );
   const [drawingToAdd, setDrawingToAdd] = useState<number | "">("");
 
+  // --- Organisation / Project / Deliverable — edit-mode scope cascade -----
+  const [editOrgId, setEditOrgId] = useState<number | "">("");
+  const [editProjectId, setEditProjectId] = useState<number | "">("");
+  const [editDeliverableId, setEditDeliverableId] = useState<number | "">("");
+
+  const [editOrganisations, setEditOrganisations] = useState<OrganisationSummary[]>([]);
+  const [editProjects, setEditProjects] = useState<ProjectSummary[]>([]);
+  const [editDeliverables, setEditDeliverables] = useState<DeliverableOption[]>([]);
+
+  const [loadingEditOrgs, setLoadingEditOrgs] = useState(false);
+  const [loadingEditProjects, setLoadingEditProjects] = useState(false);
+  const [loadingEditDeliverables, setLoadingEditDeliverables] = useState(false);
+
   const issueProjectId = issue.project_id ?? issue.project;
   const issueOrganisationId = issue.organisationId;
 
+  // Falls back to the issue's saved org/project until the user changes the
+  // scope selects in edit mode — keeps assignee/drawing lookups correct
+  // whether or not org/project were touched this edit.
+  const effectiveOrgId = editOrgId || issueOrganisationId;
+  const effectiveProjectId = editProjectId || issueProjectId;
+
   useEffect(() => {
-    if (!isEditing || !issueOrganisationId) return;
+    if (!isEditing || !effectiveOrgId) return;
     let cancelled = false;
     setLoadingAssignees(true);
-    getOrganisationMembers(issueOrganisationId)
+    getOrganisationMembers(effectiveOrgId)
       .then((opts) => { if (!cancelled) setAssigneeOptions(opts); })
       .finally(() => { if (!cancelled) setLoadingAssignees(false); });
     return () => { cancelled = true; };
-  }, [isEditing, issueOrganisationId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, effectiveOrgId]);
 
   useEffect(() => {
     if (!showManageAccess || !issueOrganisationId) return;
@@ -184,23 +211,111 @@ export function IssueDetail({
   }, [showManageAccess, issueOrganisationId]);
 
   useEffect(() => {
-    if (!isEditing || !issueProjectId) {
+    if (!isEditing || !effectiveProjectId) {
       setDrawingOptions([]);
       return;
     }
     let cancelled = false;
     setLoadingDrawings(true);
-    getProjectDrawings(issueProjectId)
+    getProjectDrawings(effectiveProjectId)
       .then((opts) => { if (!cancelled) setDrawingOptions(opts); })
       .finally(() => { if (!cancelled) setLoadingDrawings(false); });
     return () => { cancelled = true; };
-  }, [isEditing, issueProjectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, effectiveProjectId]);
 
   useEffect(() => {
     if (isEditing) {
       setLinkedDocIds((issue.linkedDocuments || []).map((d) => d.id));
     }
   }, [isEditing, issue.linkedDocuments]);
+
+  // Initializes the Organisation / Project / Deliverable selects once when
+  // edit mode starts, seeded from the issue's current scope.
+  useEffect(() => {
+    if (!isEditing) return;
+    let cancelled = false;
+
+    const initScope = async () => {
+      setLoadingEditOrgs(true);
+      try {
+        const orgs = await getMyOrganisations();
+        if (!cancelled) setEditOrganisations(orgs);
+      } finally {
+        if (!cancelled) setLoadingEditOrgs(false);
+      }
+
+      const orgId = issueOrganisationId ?? "";
+      if (!cancelled) setEditOrgId(orgId);
+
+      if (orgId) {
+        setLoadingEditProjects(true);
+        try {
+          const projects = await getOrganisationProjects(orgId);
+          if (!cancelled) setEditProjects(projects);
+        } finally {
+          if (!cancelled) setLoadingEditProjects(false);
+        }
+      } else if (!cancelled) {
+        setEditProjects([]);
+      }
+
+      const projectId = issueProjectId ?? "";
+      if (!cancelled) setEditProjectId(projectId as number | "");
+
+      if (projectId) {
+        setLoadingEditDeliverables(true);
+        try {
+          const deliverables = await getDeliverablesForProject(projectId);
+          if (!cancelled) setEditDeliverables(deliverables);
+        } finally {
+          if (!cancelled) setLoadingEditDeliverables(false);
+        }
+      } else if (!cancelled) {
+        setEditDeliverables([]);
+      }
+
+      if (!cancelled) setEditDeliverableId(issue.deliverable ?? "");
+    };
+
+    initScope();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, issue.id]);
+
+  const handleEditOrgChange = async (newOrgId: number | "") => {
+    setEditOrgId(newOrgId);
+    setEditProjectId("");
+    setEditDeliverableId("");
+    setEditDeliverables([]);
+    if (!newOrgId) {
+      setEditProjects([]);
+      return;
+    }
+    setLoadingEditProjects(true);
+    try {
+      const projects = await getOrganisationProjects(newOrgId);
+      setEditProjects(projects);
+    } finally {
+      setLoadingEditProjects(false);
+    }
+  };
+
+  const handleEditProjectChange = async (newProjectId: number | "") => {
+    setEditProjectId(newProjectId);
+    setEditDeliverableId("");
+    if (!newProjectId) {
+      setEditDeliverables([]);
+      return;
+    }
+    setLoadingEditDeliverables(true);
+    try {
+      const deliverables = await getDeliverablesForProject(newProjectId);
+      setEditDeliverables(deliverables);
+    } finally {
+      setLoadingEditDeliverables(false);
+    }
+  };
 
   const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
   const isBim = isBimIssue(issue);
@@ -300,12 +415,20 @@ export function IssueDetail({
   const handleSave = async () => {
     try {
       setSaveError(null);
+
+      if (!editProjectId) {
+        setSaveError('Please select a project.');
+        return;
+      }
+
       const patch: IssuePatch = {
         title: form.title,
         description: form.description,
         status: form.status,
         priority: form.priority,
         dueDate: form.dueDate || undefined,
+        project_id: Number(editProjectId),
+        deliverable: editDeliverableId ? Number(editDeliverableId) : null,
       };
 
       if (form.assignedToId && typeof form.assignedToId === 'number') {
@@ -522,12 +645,29 @@ export function IssueDetail({
           />
 
           {isEditing && (
+            <IssueScopeEditFields
+              organisationId={editOrgId}
+              projectId={editProjectId}
+              deliverableId={editDeliverableId}
+              organisations={editOrganisations}
+              projects={editProjects}
+              deliverables={editDeliverables}
+              loadingOrganisations={loadingEditOrgs}
+              loadingProjects={loadingEditProjects}
+              loadingDeliverables={loadingEditDeliverables}
+              onOrganisationChange={handleEditOrgChange}
+              onProjectChange={handleEditProjectChange}
+              onDeliverableChange={setEditDeliverableId}
+            />
+          )}
+
+          {isEditing && (
             <IssueEditForm
               form={form}
               setForm={setForm}
               assigneeOptions={assigneeOptions}
               loadingAssignees={loadingAssignees}
-              issueOrganisationId={issueOrganisationId}
+              issueOrganisationId={effectiveOrgId}
               fallbackAssignedToLabel={issue.assignedTo ?? undefined}
             />
           )}
@@ -550,7 +690,7 @@ export function IssueDetail({
               loadingDrawings={loadingDrawings}
               drawingToAdd={drawingToAdd}
               setDrawingToAdd={setDrawingToAdd}
-              issueProjectId={issueProjectId}
+              issueProjectId={effectiveProjectId}
             />
           )}
 

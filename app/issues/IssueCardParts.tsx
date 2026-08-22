@@ -2,7 +2,15 @@
 
 import Image from "next/image";
 import { useState } from "react";   
-import { getPriorityColor, getStatusColor, AssigneeOption, DrawingOption } from "./issueApi";
+import {
+  getPriorityColor,
+  getStatusColor,
+  AssigneeOption,
+  DrawingOption,
+  OrganisationSummary,
+  ProjectSummary,
+  DeliverableOption,
+} from "./issueApi";
 import {
   Issue,
   IssueStatus,
@@ -357,6 +365,99 @@ export function IssueEditForm({
           value={form.dueDate}
           onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
         />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IssueScopeEditFields — Organisation / Project / Deliverable cascade for
+// edit mode. Organisation isn't a real Issue field (it's derived from
+// project.organisation on the backend) — it exists here purely to filter
+// the Project dropdown, mirroring the same cascade used in NewIssueForm
+// and the issues-list filter bar.
+// ---------------------------------------------------------------------------
+
+interface IssueScopeEditFieldsProps {
+  organisationId: number | "";
+  projectId: number | "";
+  deliverableId: number | "";
+  organisations: OrganisationSummary[];
+  projects: ProjectSummary[];
+  deliverables: DeliverableOption[];
+  loadingOrganisations: boolean;
+  loadingProjects: boolean;
+  loadingDeliverables: boolean;
+  onOrganisationChange: (id: number | "") => void;
+  onProjectChange: (id: number | "") => void;
+  onDeliverableChange: (id: number | "") => void;
+}
+
+export function IssueScopeEditFields({
+  organisationId,
+  projectId,
+  deliverableId,
+  organisations,
+  projects,
+  deliverables,
+  loadingOrganisations,
+  loadingProjects,
+  loadingDeliverables,
+  onOrganisationChange,
+  onProjectChange,
+  onDeliverableChange,
+}: IssueScopeEditFieldsProps) {
+  return (
+    <div className="form-row" style={{ marginTop: '10px', marginBottom: '4px' }}>
+      <div className="form-field">
+        <label>Organisation</label>
+        <select
+          className="field-select"
+          value={organisationId}
+          onChange={(e) => onOrganisationChange(e.target.value ? Number(e.target.value) : "")}
+          disabled={loadingOrganisations}
+        >
+          <option value="">
+            {loadingOrganisations ? 'Loading organisations…' : 'Select organisation'}
+          </option>
+          {organisations.map((org) => (
+            <option key={org.id} value={org.id}>{org.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="form-field">
+        <label>Project</label>
+        <select
+          className="field-select"
+          value={projectId}
+          onChange={(e) => onProjectChange(e.target.value ? Number(e.target.value) : "")}
+          disabled={!organisationId || loadingProjects}
+        >
+          <option value="">
+            {!organisationId ? 'Select an organisation first' : loadingProjects ? 'Loading projects…' : 'Select project'}
+          </option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>{project.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="form-field">
+        <label>Deliverable</label>
+        <select
+          className="field-select"
+          value={deliverableId}
+          onChange={(e) => onDeliverableChange(e.target.value ? Number(e.target.value) : "")}
+          disabled={!projectId || loadingDeliverables}
+        >
+          <option value="">
+            {!projectId ? 'Select a project first' : loadingDeliverables ? 'Loading deliverables…' : 'No deliverable (optional)'}
+          </option>
+          {deliverables.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
       </div>
     </div>
   );
@@ -1150,10 +1251,6 @@ export function ResolvePanel({
 }
 
 // ---------------------------------------------------------------------------
-// ActionsBar — edit/save/cancel/delete/resolve/add-comment
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // ActionsBar — edit/save/cancel/delete/resolve/add-comment/share
 // ---------------------------------------------------------------------------
 
@@ -1162,7 +1259,7 @@ interface ActionsBarProps {
   isCreator: boolean;
   canResolve: boolean;
   canManageAccess: boolean;
-  shareUrl?: string;                       // ← NEW
+  shareUrl?: string;
   onCancelEdit: () => void;
   onSave: () => void;
   onEdit: () => void;
@@ -1251,7 +1348,6 @@ export function ActionsBar({
             <i className="ti ti-message-plus" /> Add Comment
           </button>
 
-          {/* ← NEW SHARE BUTTON */}
           {shareUrl && (
             <button
               className="btn-outline"
@@ -1267,6 +1363,7 @@ export function ActionsBar({
     </div>
   );
 }
+
 // ---------------------------------------------------------------------------
 // AddCommentPanel — the single "post a comment, optionally with an image"
 // entry point. Both the text and (if provided) the image land on the same

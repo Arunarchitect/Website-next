@@ -60,6 +60,7 @@ interface NewIssueBase {
   status: IssueStatus;
   priority: IssuePriority;
   module: string;
+  deliverable?: number;
   linkedDocumentIds?: number[];
 }
 
@@ -611,7 +612,6 @@ function NewIssueForm({ onCreate, onCancel }: {
   onCreate: (input: NewIssueInput) => Promise<void>;
   onCancel: () => void;
 }) {
-  // --- unchanged from your original file ---
   const [domain, setDomain] = useState<IssueDomain>("other");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -637,6 +637,11 @@ function NewIssueForm({ onCreate, onCancel }: {
   const [availableDrawings, setAvailableDrawings] = useState<DrawingOption[]>([]);
   const [loadingDrawings, setLoadingDrawings] = useState(false);
   const [linkedDocumentIds, setLinkedDocumentIds] = useState<number[]>([]);
+
+  // --- Deliverable (new) ---------------------------------------------------
+  const [deliverableId, setDeliverableId] = useState<number | null>(null);
+  const [availableDeliverables, setAvailableDeliverables] = useState<DeliverableOption[]>([]);
+  const [loadingDeliverables, setLoadingDeliverables] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -704,6 +709,18 @@ function NewIssueForm({ onCreate, onCancel }: {
     return () => { cancelled = true; };
   }, [projectId]);
 
+  // Fetch deliverables whenever the selected project changes (new).
+  useEffect(() => {
+    if (!projectId) { setAvailableDeliverables([]); setDeliverableId(null); return; }
+    let cancelled = false;
+    setLoadingDeliverables(true);
+    getDeliverablesForProject(projectId)
+      .then((opts) => { if (!cancelled) setAvailableDeliverables(opts); })
+      .finally(() => { if (!cancelled) setLoadingDeliverables(false); });
+    setDeliverableId(null);
+    return () => { cancelled = true; };
+  }, [projectId]);
+
   const applyScreenshotFile = async (file: File) => {
     setUploadError(null);
     setUploadingImage(true);
@@ -756,6 +773,7 @@ function NewIssueForm({ onCreate, onCancel }: {
         status: "Open",
         priority,
         module: module.trim() || (domain === "bim" ? "Modeling" : "General"),
+        deliverable: deliverableId ?? undefined,
         linkedDocumentIds: linkedDocumentIds.length > 0 ? linkedDocumentIds : undefined,
       };
 
@@ -835,6 +853,23 @@ function NewIssueForm({ onCreate, onCancel }: {
           )}
           {filteredProjects.length === 0 && organisationId && !loadingProjects && (
             <div style={{ color: '#D43E3E', fontSize: '12px', marginTop: '4px' }}>No projects available in this organisation.</div>
+          )}
+        </div>
+
+        <div className="form-field">
+          <label>Deliverable</label>
+          {!projectId ? (
+            <div style={{ color: '#6B7280', fontSize: '14px', padding: '8px' }}>Select a project first</div>
+          ) : (
+            <select
+              className="field-select"
+              value={deliverableId ?? ''}
+              onChange={(e) => setDeliverableId(e.target.value ? Number(e.target.value) : null)}
+              disabled={loadingDeliverables}
+            >
+              <option value="">{loadingDeliverables ? 'Loading deliverables…' : 'No deliverable (optional)'}</option>
+              {availableDeliverables.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
           )}
         </div>
 
