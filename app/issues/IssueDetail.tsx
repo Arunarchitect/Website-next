@@ -7,7 +7,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
 import {
   getPriorityColor,
@@ -113,6 +113,34 @@ export function IssueDetail({
   typeof window !== "undefined"
     ? `${window.location.origin}/issues/${issue.id}`
     : "";
+
+  // ---------------------------------------------------------------------
+  // In-flight submission guards.
+  //
+  // Each of the four mutating actions below (save issue edit, resolve,
+  // add comment, edit comment) can be triggered by a button click. On a
+  // slow connection, or from an impatient double-click, the handler could
+  // previously be invoked a second time before the first request settled,
+  // firing the mutation twice.
+  //
+  // We use a *ref* as the actual re-entrancy lock because it's read/written
+  // synchronously — two clicks that happen within the same tick (before
+  // React has re-rendered with a disabled button) will still both see the
+  // ref's true value immediately. The paired *state* value exists purely
+  // to drive the UI (disabling buttons, showing a saving indicator) since
+  // refs don't trigger re-renders.
+  // ---------------------------------------------------------------------
+  const isSavingEditRef = useRef(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const isSavingResolveRef = useRef(false);
+  const [isSavingResolve, setIsSavingResolve] = useState(false);
+
+  const isSavingCommentRef = useRef(false);
+  const [isSavingComment, setIsSavingComment] = useState(false);
+
+  const isSavingCommentEditRef = useRef(false);
+  const [isSavingCommentEdit, setIsSavingCommentEdit] = useState(false);
 
   // Screenshot upload flows — one hook instance per independent upload site.
   const mainScreenshot = useScreenshotUpload(setSaveError, false);
@@ -364,8 +392,12 @@ export function IssueDetail({
     return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
 
+  // --- Add comment: guarded against double-submit -------------------------
   const handleAddComment = async () => {
     if (!commentText.trim()) return;
+    if (isSavingCommentRef.current) return; // already in flight — ignore re-click
+    isSavingCommentRef.current = true;
+    setIsSavingComment(true);
     try {
       setSaveError(null);
       await onAddComment(
@@ -375,14 +407,22 @@ export function IssueDetail({
       );
       setCommentText("");
       commentScreenshot.reset();
-      setShowCommentInput(false);
+      setShowCommentInput(false); // success -> close panel, so a further click needs the "add comment" button again
     } catch {
       setSaveError('Failed to add comment.');
+      // leave the panel open on failure so the user can retry without retyping
+    } finally {
+      isSavingCommentRef.current = false;
+      setIsSavingComment(false);
     }
   };
 
+  // --- Edit comment: guarded against double-submit -------------------------
   const handleEditComment = async (commentId: string, originalHadSnapshot: boolean) => {
     if (!editingCommentText.trim()) return;
+    if (isSavingCommentEditRef.current) return;
+    isSavingCommentEditRef.current = true;
+    setIsSavingCommentEdit(true);
     try {
       setSaveError(null);
       const removeSnapshot = originalHadSnapshot && !editingCommentHasExistingImage && !editingCommentScreenshotUpload.screenshot;
@@ -393,12 +433,15 @@ export function IssueDetail({
         editingCommentScreenshotUpload.screenshot ? editingCommentScreenshotUpload.format : undefined,
         removeSnapshot
       );
-      setEditingCommentId(null);
+      setEditingCommentId(null); // success -> closes the inline comment edit form
       setEditingCommentText("");
       editingCommentScreenshotUpload.reset();
       setEditingCommentHasExistingImage(false);
     } catch {
       setSaveError('Failed to edit comment.');
+    } finally {
+      isSavingCommentEditRef.current = false;
+      setIsSavingCommentEdit(false);
     }
   };
 
@@ -412,7 +455,11 @@ export function IssueDetail({
     }
   };
 
+  // --- Save issue edit: guarded against double-submit -----------------------
   const handleSave = async () => {
+    if (isSavingEditRef.current) return;
+    isSavingEditRef.current = true;
+    setIsSavingEdit(true);
     try {
       setSaveError(null);
 
@@ -460,7 +507,7 @@ export function IssueDetail({
       patch.linkedDocumentIds = linkedDocIds;
 
       await onSave(patch as Partial<Issue>);
-      setIsEditing(false);
+      setIsEditing(false); // success -> closes edit UI; re-entering requires clicking Edit again
       mainScreenshot.setScreenshot(null);
     } catch (err: unknown) {
       console.error('Save error:', err);
@@ -470,6 +517,9 @@ export function IssueDetail({
       } else {
         setSaveError('Failed to save changes. Please try again.');
       }
+    } finally {
+      isSavingEditRef.current = false;
+      setIsSavingEdit(false);
     }
   };
 
@@ -482,8 +532,12 @@ export function IssueDetail({
     setShowManageAccess(false);
   };
 
+  // --- Resolve issue: guarded against double-submit -------------------------
   const handleResolveConfirm = async () => {
     if (!resolutionText.trim()) return;
+    if (isSavingResolveRef.current) return;
+    isSavingResolveRef.current = true;
+    setIsSavingResolve(true);
     try {
       setSaveError(null);
       await onResolve(
@@ -493,10 +547,13 @@ export function IssueDetail({
       );
       setResolutionText("");
       resolutionScreenshot.reset();
-      setIsResolving(false);
+      setIsResolving(false); // success -> closes resolve UI; re-entering requires clicking Resolve again
     } catch (err: unknown) {
       console.error('Resolve error:', err);
       setSaveError('Failed to resolve issue. Please try again.');
+    } finally {
+      isSavingResolveRef.current = false;
+      setIsSavingResolve(false);
     }
   };
 
@@ -731,6 +788,7 @@ export function IssueDetail({
                 setEditingCommentHasExistingImage(false);
               }}
               onSaveEditComment={handleEditComment}
+              savingCommentEdit={isSavingCommentEdit}
             />
           )}
 
@@ -753,6 +811,7 @@ export function IssueDetail({
                 resolutionScreenshot.reset();
               }}
               onConfirmResolve={handleResolveConfirm}
+              isSaving={isSavingResolve}
             />
           )}
 
@@ -772,6 +831,7 @@ export function IssueDetail({
             onToggleResolve={() => setIsResolving((v) => !v)}
             onToggleCommentInput={() => setShowCommentInput((v) => !v)}
             onToggleManageAccess={() => setShowManageAccess((v) => !v)}
+            isSavingEdit={isSavingEdit}
           />
 
           {showManageAccess && (
@@ -807,6 +867,7 @@ export function IssueDetail({
                 commentScreenshot.reset();
               }}
               onAddComment={handleAddComment}
+              isSaving={isSavingComment}
             />
           )}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ProcessNode, Person } from "@/app/process/lib/process-utils";
 
 type ReportPdfButtonProps = {
@@ -22,6 +22,44 @@ function flattenTree(root: ProcessNode): FlatEntry[] {
   };
   walk(root, 1, []);
   return out;
+}
+
+// Removes any node whose id is in `excluded`, and — since we never recurse
+// into a removed node's children — everything underneath it comes along for
+// free. This is also why excluding a deep subprocess only drops that branch,
+// not its ancestors.
+function pruneExcluded(node: ProcessNode, excluded: Set<string>): ProcessNode {
+  const children = (node.children ?? [])
+    .filter((c) => !excluded.has(c.id))
+    .map((c) => pruneExcluded(c, excluded));
+  return { ...node, children };
+}
+
+// Flat list used purely to render the checkbox tree in the modal. Tracks
+// whether an ancestor is already excluded so we can gray the row out —
+// toggling it wouldn't change anything since its parent branch is gone.
+type SelectEntry = { node: ProcessNode; level: number; ancestorExcluded: boolean };
+
+function flattenForSelection(root: ProcessNode, excluded: Set<string>): SelectEntry[] {
+  const out: SelectEntry[] = [];
+  const walk = (node: ProcessNode, level: number, ancestorExcluded: boolean) => {
+    (node.children ?? []).forEach((child) => {
+      const selfExcluded = excluded.has(child.id);
+      out.push({ node: child, level, ancestorExcluded });
+      walk(child, level + 1, ancestorExcluded || selfExcluded);
+    });
+  };
+  walk(root, 0, false);
+  return out;
+}
+
+// A node is "complete" if it has no children and is in the completed set,
+// or if it has children and every one of them is complete. This lets the
+// checkbox appear on top-level / parent nodes too, not just leaf tasks.
+function isNodeComplete(node: ProcessNode, completed: Set<string>): boolean {
+  const children = node.children ?? [];
+  if (children.length === 0) return completed.has(node.id);
+  return children.every((c) => isNodeComplete(c, completed));
 }
 
 const MM_PER_PT = 0.3528;
@@ -48,6 +86,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
   const [includeDescriptions, setIncludeDescriptions] = useState(true);
   const [includeCompletion, setIncludeCompletion] = useState(true);
   const [filterPersonIds, setFilterPersonIds] = useState<Set<string>>(new Set());
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [showExcludePanel, setShowExcludePanel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -64,12 +104,31 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
     });
   };
 
+  const toggleExcluded = (id: string) => {
+    setExcludedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectionEntries = useMemo(
+    () => (rootNode ? flattenForSelection(rootNode, excludedIds) : []),
+    [rootNode, excludedIds]
+  );
+
   const generate = async () => {
     if (!rootNode) return;
     setBusy(true);
     setError("");
     try {
       const { jsPDF } = await import("jspdf");
+
+      // Cut out excluded branches before anything else touches the tree —
+      // numbering, TOC, and predecessor lookups all run against this pruned
+      // copy, so gaps close up automatically.
+      const effectiveRoot = excludedIds.size > 0 ? pruneExcluded(rootNode, excludedIds) : rootNode;
 
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -80,7 +139,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
       const contentWidth = pageWidth - marginX * 2;
       const contentBottom = pageHeight - marginBottom;
 
-      const allEntries = flattenTree(rootNode);
+      const allEntries = flattenTree(effectiveRoot);
       const idToPath = new Map<string, string>();
       allEntries.forEach((e) => idToPath.set(e.node.id, e.numberPath.join(".")));
 
@@ -161,7 +220,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
         };
 
         // ---------- header ----------
-        const titleLines = wrap(rootNode.label || "Process Report", 17, "bold", contentWidth);
+        const titleLines = wrap(effectiveRoot.label || "Process Report", 17, "bold", contentWidth);
         const titleHeight = titleLines.length * lineHeightFor(17);
         ensureSpace(titleHeight);
         if (draw) y = drawLines(titleLines, marginX, y, 17, "bold");
@@ -177,8 +236,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
           else y += filterHeight;
         }
 
-        if (rootNode.description) {
-          const descLines = wrap(rootNode.description, 9.5, "normal", contentWidth);
+        if (effectiveRoot.description) {
+          const descLines = wrap(effectiveRoot.description, 9.5, "normal", contentWidth);
           const descHeight = descLines.length * lineHeightFor(9.5);
           ensureSpace(descHeight + 1);
           y += 1;
@@ -190,6 +249,17 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
         ensureSpace(lineHeightFor(8));
         if (draw) y = drawLines([genLine], marginX, y, 8, "normal", { color: GRAY });
         else y += lineHeightFor(8);
+
+        // ---------- completion legend ----------
+        if (includeCompletion) {
+          const legendText = "Completion status: a blank box means not completed; a checked box means completed.";
+          const legendLines = wrap(legendText, 8.5, "italic", contentWidth);
+          const legendHeight = legendLines.length * lineHeightFor(8.5);
+          ensureSpace(legendHeight + 1);
+          y += 1;
+          if (draw) y = drawLines(legendLines, marginX, y, 8.5, "italic", { color: GRAY });
+          else y += legendHeight;
+        }
 
         y += 2.5;
         ensureSpace(2);
@@ -305,15 +375,49 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
           pageOfEntry.set(node.id, page);
           y += style.gapAfter;
 
-          const isLeaf = !(node.children && node.children.length > 0);
-          if (includeCompletion && isLeaf) {
-            const done = completed.has(node.id);
-            const status = done ? "Status: Completed" : "Status: Not completed";
-            const sLines = wrap(status, 8.5, "normal", contentWidth);
-            const sHeight = sLines.length * lineHeightFor(8.5);
-            ensureSpace(sHeight + 0.6);
-            if (draw) y = drawLines(sLines, marginX, y, 8.5, "normal", { color: done ? GREEN : GRAY });
-            else y += sHeight;
+          // ---------- completion checkbox (shown on every node, parent or leaf) ----------
+          if (includeCompletion) {
+            const done = isNodeComplete(node, completed);
+            const label = "Status of completion";
+            const fontSize = 8.5;
+            const boxSize = fontSize * MM_PER_PT * 0.95; // roughly matches text cap-height
+            const rowHeight = Math.max(lineHeightFor(fontSize), boxSize);
+
+            ensureSpace(rowHeight + 0.6);
+
+            if (draw) {
+              const boxX = marginX;
+              const boxY = y - boxSize * 0.85; // align box top with the text's cap-height
+
+              if (done) {
+                doc.setFillColor(...GREEN);
+                doc.setDrawColor(...GREEN);
+                doc.setLineWidth(0.25);
+                doc.rect(boxX, boxY, boxSize, boxSize, "FD");
+
+                // tick mark, drawn in white on top of the filled box
+                doc.setDrawColor(255, 255, 255);
+                doc.setLineWidth(0.4);
+                doc.line(boxX + boxSize * 0.22, boxY + boxSize * 0.55, boxX + boxSize * 0.42, boxY + boxSize * 0.76);
+                doc.line(boxX + boxSize * 0.42, boxY + boxSize * 0.76, boxX + boxSize * 0.8, boxY + boxSize * 0.22);
+              } else {
+                doc.setDrawColor(...GRAY);
+                doc.setLineWidth(0.25);
+                doc.rect(boxX, boxY, boxSize, boxSize, "D"); // blank/empty box
+              }
+              doc.setDrawColor(0);
+              doc.setLineWidth(0.2);
+
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(fontSize);
+              doc.setTextColor(...(done ? GREEN : GRAY));
+              doc.text(label, boxX + boxSize + 2, y);
+              doc.setTextColor(...INK);
+
+              y += rowHeight;
+            } else {
+              y += rowHeight;
+            }
             y += 0.6;
           }
 
@@ -369,8 +473,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
       renderDocument(true);
 
       const filenameBase = isFiltering
-        ? `${rootNode.label || "process"}-${filterNames.join("-")}`
-        : rootNode.label || "process";
+        ? `${effectiveRoot.label || "process"}-${filterNames.join("-")}`
+        : effectiveRoot.label || "process";
       doc.save(`${filenameBase.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-report.pdf`);
       setOpen(false);
     } catch (err) {
@@ -446,8 +550,71 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
                 onChange={(e) => setIncludeCompletion(e.target.checked)}
                 className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
               />
-              Show completion status on leaf tasks
+              Show completion status checkbox
             </label>
+
+            {/* ─── Exclude processes ─── */}
+            <div className="mb-2 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowExcludePanel((v) => !v)}
+                  className="text-sm font-medium text-gray-700 flex items-center gap-1"
+                >
+                  {showExcludePanel ? "▾" : "▸"} Exclude processes
+                  {excludedIds.size > 0 && (
+                    <span className="text-[10px] font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">
+                      {excludedIds.size} excluded
+                    </span>
+                  )}
+                </button>
+                {excludedIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setExcludedIds(new Set())}
+                    className="text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {showExcludePanel && (
+                <>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Uncheck a process to leave it out of the report. Its subprocesses are left out too. Numbers re-adjust automatically.
+                  </p>
+                  <div className="max-h-56 overflow-y-auto flex flex-col gap-0.5 border border-gray-100 rounded-lg p-2">
+                    {selectionEntries.map(({ node, level, ancestorExcluded }) => {
+                      const selfExcluded = excludedIds.has(node.id);
+                      const effectivelyExcluded = ancestorExcluded || selfExcluded;
+                      return (
+                        <label
+                          key={node.id}
+                          style={{ paddingLeft: level * 14 }}
+                          className={`flex items-center gap-2 px-1.5 py-1 rounded-md text-sm ${
+                            ancestorExcluded
+                              ? "text-gray-300 cursor-not-allowed"
+                              : effectivelyExcluded
+                              ? "text-red-500 cursor-pointer hover:bg-gray-50"
+                              : "text-gray-700 cursor-pointer hover:bg-gray-50"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!effectivelyExcluded}
+                            disabled={ancestorExcluded}
+                            onChange={() => toggleExcluded(node.id)}
+                            className="rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-40"
+                          />
+                          <span className="truncate">{node.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
 
             <div className="mb-2 pt-3 border-t border-gray-100">
               <div className="flex items-center justify-between mb-1.5">

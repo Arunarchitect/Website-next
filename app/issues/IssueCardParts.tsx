@@ -874,6 +874,8 @@ interface CommentEditState {
   onDiscardNewCommentImage: () => void;
   onCancelEditComment: () => void;
   onSaveEditComment: (commentId: string, originalHadSnapshot: boolean) => void;
+  /** True while a comment edit save is in flight — disables Save/Cancel on the editing comment so a slow request or a double-click can't post twice. */
+  savingCommentEdit: boolean;
 }
 
 interface CommentItemProps extends CommentEditState {
@@ -907,6 +909,7 @@ function CommentItem({
   onDiscardNewCommentImage,
   onCancelEditComment,
   onSaveEditComment,
+  savingCommentEdit,
   onStartEditComment,
   onDeleteComment,
   onImageClick,
@@ -923,6 +926,7 @@ function CommentItem({
             onChange={(e) => setEditingCommentText(e.target.value)}
             onPaste={onEditCommentPaste}
             rows={2}
+            disabled={savingCommentEdit}
           />
 
           <div className="comment-image-edit-section">
@@ -951,6 +955,7 @@ function CommentItem({
                   onClick={onRemoveCommentImage}
                   style={{ marginTop: '4px' }}
                   type="button"
+                  disabled={savingCommentEdit}
                 >
                   <i className="ti ti-trash" /> Remove image
                 </button>
@@ -975,6 +980,7 @@ function CommentItem({
                   className="btn-outline small danger"
                   onClick={onDiscardNewCommentImage}
                   type="button"
+                  disabled={savingCommentEdit}
                 >
                   <i className="ti ti-x" /> Discard
                 </button>
@@ -990,7 +996,7 @@ function CommentItem({
                 onDragOver={onEditCommentDragOver}
                 onDragLeave={onEditCommentDragLeave}
                 isDragging={editingCommentIsDragging}
-                processing={processingEditCommentScreenshot}
+                processing={processingEditCommentScreenshot || savingCommentEdit}
                 compact
                 label={editingCommentHasExistingImage ? 'Click, drag, or paste to replace' : undefined}
               />
@@ -1002,16 +1008,17 @@ function CommentItem({
               className="btn-outline small"
               onClick={onCancelEditComment}
               type="button"
+              disabled={savingCommentEdit}
             >
               Cancel
             </button>
             <button
               className="btn-primary small"
               onClick={() => onSaveEditComment(comment.id, !!comment.snapshot)}
-              disabled={!editingCommentText.trim()}
+              disabled={!editingCommentText.trim() || savingCommentEdit}
               type="button"
             >
-              Save
+              {savingCommentEdit ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>
@@ -1170,6 +1177,8 @@ interface ResolvePanelProps {
   processingResolutionScreenshot: boolean;
   onCancelResolve: () => void;
   onConfirmResolve: () => void;
+  /** True while the resolve request is in flight — disables Cancel/Confirm so a slow request or a double-click can't resolve twice. */
+  isSaving?: boolean;
 }
 
 export function ResolvePanel({
@@ -1187,6 +1196,7 @@ export function ResolvePanel({
   processingResolutionScreenshot,
   onCancelResolve,
   onConfirmResolve,
+  isSaving = false,
 }: ResolvePanelProps) {
   return (
     <div className="resolve-panel">
@@ -1197,6 +1207,7 @@ export function ResolvePanel({
         onChange={(e) => setResolutionText(e.target.value)}
         onPaste={onResolutionPaste}
         rows={2}
+        disabled={isSaving}
       />
 
       <div className="resolve-screenshot-upload" style={{ marginTop: 8 }}>
@@ -1214,6 +1225,7 @@ export function ResolvePanel({
               className="remove-btn"
               onClick={onRemoveResolutionScreenshot}
               type="button"
+              disabled={isSaving}
             >
               ✕
             </button>
@@ -1227,7 +1239,7 @@ export function ResolvePanel({
             onDragOver={onResolutionDragOver}
             onDragLeave={onResolutionDragLeave}
             isDragging={resolutionIsDragging}
-            processing={processingResolutionScreenshot}
+            processing={processingResolutionScreenshot || isSaving}
             compact
             label="Attach proof-of-fix screenshot (optional)"
           />
@@ -1239,11 +1251,17 @@ export function ResolvePanel({
           className="btn-outline"
           onClick={onCancelResolve}
           type="button"
+          disabled={isSaving}
         >
           Cancel
         </button>
-        <button className="btn-primary" onClick={onConfirmResolve} type="button">
-          <i className="ti ti-check" /> Confirm Resolve
+        <button
+          className="btn-primary"
+          onClick={onConfirmResolve}
+          type="button"
+          disabled={isSaving || !resolutionText.trim()}
+        >
+          <i className={`ti ${isSaving ? 'ti-loader' : 'ti-check'}`} /> {isSaving ? 'Resolving…' : 'Confirm Resolve'}
         </button>
       </div>
     </div>
@@ -1267,6 +1285,8 @@ interface ActionsBarProps {
   onToggleResolve: () => void;
   onToggleCommentInput: () => void;
   onToggleManageAccess: () => void;
+  /** True while the issue-edit save request is in flight — disables Cancel/Save so a slow request or a double-click can't save twice. */
+  isSavingEdit?: boolean;
 }
 
 export function ActionsBar({
@@ -1282,6 +1302,7 @@ export function ActionsBar({
   onToggleResolve,
   onToggleCommentInput,
   onToggleManageAccess,
+  isSavingEdit = false,
 }: ActionsBarProps) {
   const [copied, setCopied] = useState(false);
 
@@ -1315,9 +1336,11 @@ export function ActionsBar({
     <div className="issue-actions">
       {isEditing ? (
         <>
-          <button className="btn-outline" onClick={onCancelEdit}>Cancel</button>
-          <button className="btn-primary" onClick={onSave}>
-            <i className="ti ti-device-floppy" /> Save
+          <button className="btn-outline" onClick={onCancelEdit} disabled={isSavingEdit}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={onSave} disabled={isSavingEdit}>
+            <i className={`ti ${isSavingEdit ? 'ti-loader' : 'ti-device-floppy'}`} /> {isSavingEdit ? 'Saving…' : 'Save'}
           </button>
         </>
       ) : (
@@ -1387,6 +1410,8 @@ interface AddCommentPanelProps {
   processingCommentScreenshot: boolean;
   onCancelComment: () => void;
   onAddComment: () => void;
+  /** True while the add-comment request is in flight — disables Cancel/Post so a slow request or a double-click can't post twice. */
+  isSaving?: boolean;
 }
 
 export function AddCommentPanel({
@@ -1404,6 +1429,7 @@ export function AddCommentPanel({
   processingCommentScreenshot,
   onCancelComment,
   onAddComment,
+  isSaving = false,
 }: AddCommentPanelProps) {
   return (
     <div className="comment-input-panel" style={{ marginTop: '12px' }}>
@@ -1414,6 +1440,7 @@ export function AddCommentPanel({
         onChange={(e) => setCommentText(e.target.value)}
         onPaste={onCommentPaste}
         rows={2}
+        disabled={isSaving}
       />
 
       <div className="comment-image-upload" style={{ marginTop: 8 }}>
@@ -1431,6 +1458,7 @@ export function AddCommentPanel({
               className="remove-btn"
               onClick={onRemoveCommentScreenshot}
               type="button"
+              disabled={isSaving}
             >
               ✕
             </button>
@@ -1444,7 +1472,7 @@ export function AddCommentPanel({
             onDragOver={onCommentDragOver}
             onDragLeave={onCommentDragLeave}
             isDragging={commentIsDragging}
-            processing={processingCommentScreenshot}
+            processing={processingCommentScreenshot || isSaving}
             compact
             label="Add image (optional) — click, drag, or paste"
           />
@@ -1456,16 +1484,17 @@ export function AddCommentPanel({
           className="btn-outline"
           onClick={onCancelComment}
           type="button"
+          disabled={isSaving}
         >
           Cancel
         </button>
         <button
           className="btn-primary"
           onClick={onAddComment}
-          disabled={!commentText.trim()}
+          disabled={!commentText.trim() || isSaving}
           type="button"
         >
-          <i className="ti ti-send" /> Post Comment
+          <i className={`ti ${isSaving ? 'ti-loader' : 'ti-send'}`} /> {isSaving ? 'Posting…' : 'Post Comment'}
         </button>
       </div>
     </div>
