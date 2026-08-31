@@ -636,8 +636,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               </div>
               <button
                 onClick={() => editor.pasteNode(null)}
-                disabled={!editor.canPaste}
-                title={editor.canPaste ? "Paste into the main process" : "Copy a process first"}
+                title="Paste into the main process"
                 className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}
               >
                 Paste
@@ -855,9 +854,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 )}
                 <button
                   onClick={() => editor.pasteNode(editor.selectedNodeId)}
-                  disabled={!editor.canPaste}
                   className={`${btnGhost} h-7 px-2 text-xs`}
-                  title={editor.canPaste ? "Paste copied process inside this one" : "Copy a process first"}
+                  title="Paste copied process inside this one"
                 >
                   Paste
                 </button>

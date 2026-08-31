@@ -136,6 +136,38 @@ function getLeafIds(node: ProcessNode): string[] {
 
 export type Edge = { from: string; to: string };
 
+// ─── Clipboard payload shape/validation ───────────────────────────
+// We wrap the copied node in a small envelope so paste can tell "this
+// is one of our process nodes" apart from someone's random clipboard
+// text (URLs, other JSON, etc.) before trying to insert it into the tree.
+const CLIPBOARD_MARKER = "modelflick-process-node-v1";
+const CLIPBOARD_STORAGE_KEY = "modelflick:process-clipboard";
+
+type ClipboardEnvelope = { marker: typeof CLIPBOARD_MARKER; node: ProcessNode };
+
+function isProcessNodeShape(value: unknown): value is ProcessNode {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.id === "string" && typeof v.label === "string";
+}
+
+function parseClipboardEnvelope(text: string): ProcessNode | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed as Record<string, unknown>).marker === CLIPBOARD_MARKER &&
+      isProcessNodeShape((parsed as Record<string, unknown>).node)
+    ) {
+      return (parsed as ClipboardEnvelope).node;
+    }
+  } catch {
+    // not JSON, or not ours — treat as no usable clipboard content
+  }
+  return null;
+}
+
 // ─── Schema validation ────────────────────────────────────────────
 function validateNodeShape(node: unknown, path: string): string | null {
   if (!node || typeof node !== "object") return `${path} is not an object.`;
@@ -251,9 +283,6 @@ export function useProcessEditor(initialData: ProcessData) {
 
   // ─── Load tracking ───────────────────────────────────────────
   const [loadVersion, setLoadVersion] = useState(0);
-
-  // ─── Clipboard (copy / paste subtree) ─────────────────────────
-  const [clipboardNode, setClipboardNode] = useState<ProcessNode | null>(null);
 
   // ─── Undo / redo history ──────────────────────────────────────
   const [past, setPast] = useState<Snapshot[]>([]);
@@ -584,10 +613,33 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedNodeId(clone.id);
   };
 
-  // ─── Copy / Paste (clipboard subtree) ───────────────────────
-  // Copy: snapshots the node's structure (ids get regenerated at paste
-  // time, not here, so pasting the same clipboard twice never collides).
-  const copyNode = (id: string) => {
+  // ─── Copy / Paste (system clipboard, with localStorage fallback) ─
+  // Works across tabs AND across different browsers on the same
+  // machine, because navigator.clipboard reads/writes the OS-level
+  // clipboard rather than any per-browser storage. If clipboard
+  // permission is denied or unavailable (e.g. non-HTTPS during local
+  // dev), we transparently fall back to localStorage, which still
+  // covers same-browser-different-tab.
+  const writeClipboardFallback = (envelope: ClipboardEnvelope) => {
+    try {
+      window.localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(envelope));
+    } catch {
+      // localStorage unavailable (private mode, quota, etc.) — nothing
+      // more we can do; system clipboard write may still have worked.
+    }
+  };
+
+  const readClipboardFallback = (): ProcessNode | null => {
+    try {
+      const raw = window.localStorage.getItem(CLIPBOARD_STORAGE_KEY);
+      if (!raw) return null;
+      return parseClipboardEnvelope(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const copyNode = async (id: string) => {
     if (!data || id === "root") return;
 
     const rootRef: ProcessNode = {
@@ -603,14 +655,51 @@ export function useProcessEditor(initialData: ProcessData) {
     const target = findNodeById(rootRef, id);
     if (!target) return;
 
-    setClipboardNode(JSON.parse(JSON.stringify(target)) as ProcessNode);
+    const snapshot = JSON.parse(JSON.stringify(target)) as ProcessNode;
+    const envelope: ClipboardEnvelope = { marker: CLIPBOARD_MARKER, node: snapshot };
+    const payload = JSON.stringify(envelope);
+
+    // Always keep the fallback in sync, regardless of whether the
+    // system clipboard write succeeds.
+    writeClipboardFallback(envelope);
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(payload);
+      }
+    } catch {
+      // Permission denied or unsupported — the localStorage fallback
+      // above still lets paste work within this browser.
+    }
+
     showWarning(`"${target.label}" copied.`);
   };
 
-  // Paste: inserts a fresh-id clone of the clipboard as the LAST child of
-  // parentId. parentId === null (or "root") pastes into the main process.
-  const pasteNode = (parentId: string | null) => {
-    if (!data || !clipboardNode) return;
+  // Paste: inserts a fresh-id clone of the clipboard as the LAST child
+  // of parentId. parentId === null pastes into the main process.
+  const pasteNode = async (parentId: string | null) => {
+    if (!data) return;
+
+    let clipboardNode: ProcessNode | null = null;
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        const text = await navigator.clipboard.readText();
+        clipboardNode = parseClipboardEnvelope(text);
+      }
+    } catch {
+      // Permission denied, no read access, or nothing text-like on the
+      // clipboard — fall through to the localStorage fallback below.
+    }
+
+    if (!clipboardNode) {
+      clipboardNode = readClipboardFallback();
+    }
+
+    if (!clipboardNode) {
+      showWarning("Clipboard is empty or doesn't contain a copied process — copy a process first.");
+      return;
+    }
 
     const rootRef: ProcessNode = {
       id: "root",
@@ -669,10 +758,10 @@ export function useProcessEditor(initialData: ProcessData) {
       if (key === "c") {
         if (!sel || sel === "root") return;
         e.preventDefault();
-        copyNodeRef.current(sel);
+        void copyNodeRef.current(sel);
       } else {
         e.preventDefault();
-        pasteNodeRef.current(sel);
+        void pasteNodeRef.current(sel);
       }
     };
     window.addEventListener("keydown", handleCopyPasteKeys);
@@ -1116,7 +1205,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedEdge(null);
     setPendingRelation(null);
     setAssignPopupNodeId(null);
-    setClipboardNode(null);
     setEdgeStyles(
       new Map(
         Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
@@ -1277,7 +1365,7 @@ export function useProcessEditor(initialData: ProcessData) {
     undo, redo, canUndo, canRedo,
     // move operations
     moveNodeUp, moveNodeDown, moveNodeToParent,
-    // copy / paste
-    clipboardNode, copyNode, pasteNode, canPaste: clipboardNode !== null,
+    // copy / paste (async now — system clipboard + localStorage fallback)
+    copyNode, pasteNode,
   };
 }
