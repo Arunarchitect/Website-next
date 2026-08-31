@@ -634,6 +634,14 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   <IconRedo />
                 </button>
               </div>
+              <button
+                onClick={() => editor.pasteNode(null)}
+                disabled={!editor.canPaste}
+                title={editor.canPaste ? "Paste into the main process" : "Copy a process first"}
+                className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}
+              >
+                Paste
+              </button>
 
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
@@ -765,7 +773,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
               <ExportButtons printRef={printRef} setError={editor.setError} />
-              <ReportPdfButton rootNode={rootNode} completed={editor.completed} persons={editor.persons}/>
+              <ReportPdfButton rootNode={rootNode} completed={editor.completed} persons={editor.persons} />
             </div>
           </div>
 
@@ -835,6 +843,25 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   Edit Description
                 </button>
 
+                {/* ─── COPY / PASTE (buttons since mobile / no-keyboard users can't use Ctrl+C/V) ─── */}
+                {editor.selectedNodeId !== "root" && (
+                  <button
+                    onClick={() => editor.copyNode(editor.selectedNodeId!)}
+                    className="px-2 py-1 rounded-lg bg-cyan-50 text-cyan-700 text-xs hover:bg-cyan-100 transition-colors"
+                    title="Copy this process and its subprocesses"
+                  >
+                    Copy
+                  </button>
+                )}
+                <button
+                  onClick={() => editor.pasteNode(editor.selectedNodeId)}
+                  disabled={!editor.canPaste}
+                  className={`${btnGhost} h-7 px-2 text-xs`}
+                  title={editor.canPaste ? "Paste copied process inside this one" : "Copy a process first"}
+                >
+                  Paste
+                </button>
+
                 <button
                   onClick={() => editor.setPendingRelation({ fromId: editor.selectedNodeId!, mode: "successor" })}
                   className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs hover:bg-blue-100 transition-colors"
@@ -893,8 +920,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     <button
                       onClick={() => editor.toggleImportant(editor.selectedNodeId!)}
                       className={`px-2 py-1 rounded-lg text-xs transition-colors ${findNodeById(rootNode, editor.selectedNodeId!)?.important
-                          ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                          : "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                        : "bg-amber-50 text-amber-600 hover:bg-amber-100"
                         }`}
                       title="Mark this process as important"
                     >

@@ -252,6 +252,9 @@ export function useProcessEditor(initialData: ProcessData) {
   // ─── Load tracking ───────────────────────────────────────────
   const [loadVersion, setLoadVersion] = useState(0);
 
+  // ─── Clipboard (copy / paste subtree) ─────────────────────────
+  const [clipboardNode, setClipboardNode] = useState<ProcessNode | null>(null);
+
   // ─── Undo / redo history ──────────────────────────────────────
   const [past, setPast] = useState<Snapshot[]>([]);
   const [future, setFuture] = useState<Snapshot[]>([]);
@@ -262,10 +265,12 @@ export function useProcessEditor(initialData: ProcessData) {
   const completedRef = useRef(completed);
   const personsRef = useRef(persons);
   const edgeStylesRef = useRef(edgeStyles);
+  const selectedNodeIdRef = useRef(selectedNodeId);
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { completedRef.current = completed; }, [completed]);
   useEffect(() => { personsRef.current = persons; }, [persons]);
   useEffect(() => { edgeStylesRef.current = edgeStyles; }, [edgeStyles]);
+  useEffect(() => { selectedNodeIdRef.current = selectedNodeId; }, [selectedNodeId]);
 
   const captureSnapshot = (): Snapshot => ({
     data: dataRef.current ? (JSON.parse(JSON.stringify(dataRef.current)) as ProcessData) : null,
@@ -578,6 +583,101 @@ export function useProcessEditor(initialData: ProcessData) {
 
     setSelectedNodeId(clone.id);
   };
+
+  // ─── Copy / Paste (clipboard subtree) ───────────────────────
+  // Copy: snapshots the node's structure (ids get regenerated at paste
+  // time, not here, so pasting the same clipboard twice never collides).
+  const copyNode = (id: string) => {
+    if (!data || id === "root") return;
+
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    };
+
+    const target = findNodeById(rootRef, id);
+    if (!target) return;
+
+    setClipboardNode(JSON.parse(JSON.stringify(target)) as ProcessNode);
+    showWarning(`"${target.label}" copied.`);
+  };
+
+  // Paste: inserts a fresh-id clone of the clipboard as the LAST child of
+  // parentId. parentId === null (or "root") pastes into the main process.
+  const pasteNode = (parentId: string | null) => {
+    if (!data || !clipboardNode) return;
+
+    const rootRef: ProcessNode = {
+      id: "root",
+      label: data.title,
+      description: data.description,
+      type: data.type || "process",
+      width: data.width,
+      height: data.height,
+      children: data.children ?? [],
+    };
+
+    const targetParent = parentId ? findNodeById(rootRef, parentId) : rootRef;
+    if (!targetParent) {
+      showWarning("Target process not found.");
+      return;
+    }
+
+    const pasted = cloneSubtreeWithNewIds(clipboardNode);
+    const position = (targetParent.children ?? []).length;
+
+    const newRoot = addNodeToTree(rootRef, parentId, pasted, position);
+
+    pushHistory();
+    setData({
+      ...data,
+      title: newRoot.label,
+      description: newRoot.description,
+      type: newRoot.type,
+      width: newRoot.width,
+      height: newRoot.height,
+      children: newRoot.children,
+    });
+
+    setSelectedNodeId(pasted.id);
+  };
+
+  const copyNodeRef = useRef(copyNode);
+  const pasteNodeRef = useRef(pasteNode);
+  copyNodeRef.current = copyNode;
+  pasteNodeRef.current = pasteNode;
+
+  useEffect(() => {
+    const handleCopyPasteKeys = (e: KeyboardEvent) => {
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+      const key = e.key.toLowerCase();
+      if (key !== "c" && key !== "v") return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isEditableField = tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable;
+      if (isEditableField) return;
+
+      const sel = selectedNodeIdRef.current;
+
+      if (key === "c") {
+        if (!sel || sel === "root") return;
+        e.preventDefault();
+        copyNodeRef.current(sel);
+      } else {
+        e.preventDefault();
+        pasteNodeRef.current(sel);
+      }
+    };
+    window.addEventListener("keydown", handleCopyPasteKeys);
+    return () => window.removeEventListener("keydown", handleCopyPasteKeys);
+  }, []);
 
   // ─── Move node up/down among siblings ──────────────────────────
   // Helper: recursively swap a node with its previous/next sibling.
@@ -1016,6 +1116,7 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedEdge(null);
     setPendingRelation(null);
     setAssignPopupNodeId(null);
+    setClipboardNode(null);
     setEdgeStyles(
       new Map(
         Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
@@ -1169,12 +1270,14 @@ export function useProcessEditor(initialData: ProcessData) {
     // people
     persons, showPersonManager, setShowPersonManager,
     newPersonName, setNewPersonName, addPerson, deletePerson, renamePerson,
-    assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment,toggleImportant,
+    assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment, toggleImportant,
     // schema validation fallback
     invalidUpload, downloadInvalidUpload,
     // undo / redo
     undo, redo, canUndo, canRedo,
-    // new: move operations
+    // move operations
     moveNodeUp, moveNodeDown, moveNodeToParent,
+    // copy / paste
+    clipboardNode, copyNode, pasteNode, canPaste: clipboardNode !== null,
   };
 }
