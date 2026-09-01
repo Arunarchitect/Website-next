@@ -3,3 +3,8 @@ allowBuilds:
   core-js: false
   sharp: true
   unrs-resolver: false
+
+"overrides": {
+      "axios": ">=1.13.5",
+      "tar": ">=7.5.8"
+    }

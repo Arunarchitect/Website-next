@@ -46,9 +46,6 @@
     "typescript": "^5"
   },
   "pnpm": {
-    "overrides": {
-      "axios": ">=1.13.5",
-      "tar": ">=7.5.8"
-    }
+    
   }
 }

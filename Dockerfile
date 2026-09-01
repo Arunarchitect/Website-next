@@ -1,11 +1,12 @@
 # ---------- Builder ----------
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 
 WORKDIR /app
 
-RUN npm install -g pnpm
+# Pin pnpm to match your local version (avoids v10/v11 config-reading mismatches)
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Production-safe
 RUN pnpm install --frozen-lockfile
@@ -15,7 +16,7 @@ COPY . .
 RUN pnpm build
 
 # ---------- Runner ----------
-FROM node:20-slim AS runner
+FROM node:24-slim AS runner
 
 WORKDIR /app
 
