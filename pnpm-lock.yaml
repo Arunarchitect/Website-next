@@ -4,6 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  axios: '>=1.13.5'
+  tar: '>=7.5.8'
+
 importers:
 
   .:
