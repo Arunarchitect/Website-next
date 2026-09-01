@@ -1,7 +1,7 @@
 "use client";
 
 import "./page.css";
-import { useEffect, useRef, useState, useLayoutEffect } from "react";
+import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { ProcessContainer } from "@/app/process/components/ProcessContainer";
 import { RelationshipArrows } from "@/app/process/components/RelationshipArrows";
@@ -51,6 +51,37 @@ const IconArrowUp = () => (
 const IconArrowDown = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
 );
+const IconSearch = () => (
+  <IconWrap><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></IconWrap>
+);
+
+// ─── Search matching helpers ───
+// Operate on the raw children array (not the synthetic "root" wrapper)
+// so effects can depend on editor.data — a stable reference — instead
+// of the freshly-built rootNode object, which changes identity every
+// render and would otherwise cause a re-search loop.
+function nodeMatchesSearch(node: ProcessNode, lowerTerm: string): boolean {
+  return (
+    node.label.toLowerCase().includes(lowerTerm) ||
+    (node.description ?? "").toLowerCase().includes(lowerTerm)
+  );
+}
+
+function findMatchingNodeIds(children: ProcessNode[] | undefined, rawTerm: string): string[] {
+  const term = rawTerm.trim().toLowerCase();
+  if (!term || !children) return [];
+  const matches: string[] = [];
+  const traverse = (node: ProcessNode) => {
+    if (nodeMatchesSearch(node, term)) matches.push(node.id);
+    (node.children ?? []).forEach(traverse);
+  };
+  children.forEach(traverse);
+  return matches;
+}
+
+// Extra breathing room (in canvas-local px) around a fitted search box
+// so a single small node doesn't get zoomed in to fill the screen.
+const MATCH_BOX_PADDING = 140;
 
 export default function ProcessWorkflowEditor({ masterword }: { masterword?: string }) {
   // ─── Editing logic ───
@@ -348,12 +379,114 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     setPan({ x: 0, y: 0 });
   };
 
+  // Generic "fit this canvas-local box into the viewport" helper, used
+  // both for search results and (potentially) other future targeting.
+  // Unlike fitAllView, the resulting box isn't necessarily centered on
+  // the canvas's own center, so pan is computed explicitly.
+  const fitToBox = (left: number, top: number, width: number, height: number) => {
+    const canvas = canvasRef.current;
+    const viewport = viewportRef.current;
+    if (!canvas || !viewport || width <= 0 || height <= 0) return;
+
+    const previousTransform = canvas.style.transform;
+    canvas.style.transition = "none";
+    canvas.style.transform = "translate(-50%, -50%) scale(1)";
+    const contentRect = canvas.getBoundingClientRect();
+    canvas.style.transform = previousTransform;
+    canvas.style.transition = "";
+
+    if (contentRect.width === 0 || contentRect.height === 0) return;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const padding = 80;
+    const availableWidth = Math.max(viewportRect.width - padding * 2, 1);
+    const availableHeight = Math.max(viewportRect.height - padding * 2, 1);
+    const scaleX = availableWidth / width;
+    const scaleY = availableHeight / height;
+    const nextZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.15), 4);
+
+    const boxCenterX = left + width / 2;
+    const boxCenterY = top + height / 2;
+
+    setZoom(nextZoom);
+    setPan({
+      x: (contentRect.width / 2 - boxCenterX) * nextZoom,
+      y: (contentRect.height / 2 - boxCenterY) * nextZoom,
+    });
+  };
+
+  const fitToMatches = (ids: string[]) => {
+    const boxes = ids
+      .map((id) => nodePositions.get(id))
+      .filter((p): p is { x: number; y: number; width: number; height: number } => Boolean(p));
+    if (boxes.length === 0) return;
+
+    const left = Math.min(...boxes.map((b) => b.x)) - MATCH_BOX_PADDING;
+    const top = Math.min(...boxes.map((b) => b.y)) - MATCH_BOX_PADDING;
+    const right = Math.max(...boxes.map((b) => b.x + b.width)) + MATCH_BOX_PADDING;
+    const bottom = Math.max(...boxes.map((b) => b.y + b.height)) + MATCH_BOX_PADDING;
+
+    fitToBox(left, top, right - left, bottom - top);
+  };
+
   useEffect(() => {
     if (!editor.data) return;
     const frame = requestAnimationFrame(() => fitAllView());
+    // A newly loaded doc invalidates any in-progress search.
+    setSearchOpen(false);
+    setSearchTerm("");
+    setSearchMatches([]);
+    setActiveMatchIndex(null);
     return () => cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.loadVersion]);
+
+  // ─── Search ───
+  // Search only zooms/highlights — it never selects a node, so the
+  // Edit Title / Assign / Delete popup never pops up while searching.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchMatches, setSearchMatches] = useState<string[]>([]);
+  const [activeMatchIndex, setActiveMatchIndex] = useState<number | null>(null);
+
+  const matchedNodeIds = useMemo(() => new Set(searchMatches), [searchMatches]);
+  const activeMatchId = activeMatchIndex !== null ? searchMatches[activeMatchIndex] ?? null : null;
+
+  // Recompute matches whenever the term or the underlying data changes.
+  // Depending on editor.data (stable unless actually edited) rather than
+  // the freshly-built rootNode avoids a re-render loop.
+  useEffect(() => {
+    const matches = findMatchingNodeIds(editor.data?.children, searchTerm);
+    setSearchMatches(matches);
+    setActiveMatchIndex(null);
+  }, [searchTerm, editor.data]);
+
+  // Whenever the match set changes, fit ALL matches into view together
+  // and dismiss any stale node/edge selection popup that might be open.
+  useEffect(() => {
+    if (searchMatches.length === 0) return;
+    editor.clearSelection();
+    fitToMatches(searchMatches);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchMatches]);
+
+  // Step to one match at a time — zoom only, never selects the node.
+  const goToMatch = (index: number) => {
+    if (searchMatches.length === 0) return;
+    const wrapped = ((index % searchMatches.length) + searchMatches.length) % searchMatches.length;
+    setActiveMatchIndex(wrapped);
+    fitToMatches([searchMatches[wrapped]]);
+  };
+
+  const nextMatch = () => goToMatch(activeMatchIndex === null ? 0 : activeMatchIndex + 1);
+  const prevMatch = () => goToMatch(activeMatchIndex === null ? 0 : activeMatchIndex - 1);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchTerm("");
+    setSearchMatches([]);
+    setActiveMatchIndex(null);
+  };
 
   // ─── Pointer handlers ───
   useEffect(() => {
@@ -616,6 +749,23 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
+              <button
+                onClick={() => {
+                  if (searchOpen) {
+                    closeSearch();
+                  } else {
+                    editor.clearSelection();
+                    setSearchOpen(true);
+                  }
+                }}
+                title="Search processes"
+                className={`${btnGhost} w-8 h-8 shrink-0 sm:w-9 sm:h-9 ${searchOpen ? "bg-gray-100 text-gray-900" : ""}`}
+              >
+                <IconSearch />
+              </button>
+
+              <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
+
               <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   onClick={editor.undo}
@@ -802,6 +952,60 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         className="relative flex-1 min-h-0 w-full overflow-hidden bg-gray-50 rounded-2xl"
         style={{ userSelect: dragging ? "none" : "auto" }}
       >
+        {/* SEARCH BAR */}
+        {searchOpen && (
+          <div className="absolute top-4 right-4 z-[130] flex items-center gap-1.5 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print max-w-[92vw]">
+            <IconSearch />
+            <input
+              autoFocus
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (e.shiftKey) prevMatch();
+                  else nextMatch();
+                } else if (e.key === "Escape") {
+                  closeSearch();
+                }
+              }}
+              placeholder="Search processes…"
+              className="w-40 sm:w-56 border-0 focus:outline-none text-sm text-gray-800 placeholder:text-gray-400 bg-transparent"
+            />
+            <span className="text-xs text-gray-400 shrink-0 whitespace-nowrap min-w-[64px] text-right">
+              {searchTerm.trim() === ""
+                ? ""
+                : searchMatches.length === 0
+                ? "No matches"
+                : `${(activeMatchIndex ?? 0) + 1}/${searchMatches.length}`}
+            </span>
+            <button
+              onClick={prevMatch}
+              disabled={searchMatches.length === 0}
+              title="Previous match"
+              className={`${btnGhost} w-7 h-7 shrink-0`}
+            >
+              <IconArrowUp />
+            </button>
+            <button
+              onClick={nextMatch}
+              disabled={searchMatches.length === 0}
+              title="Next match"
+              className={`${btnGhost} w-7 h-7 shrink-0`}
+            >
+              <IconArrowDown />
+            </button>
+            <button
+              onClick={closeSearch}
+              className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs font-bold shrink-0"
+              title="Close search"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* ACTION POPUP */}
         {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && !moveParentMode && (
           <div
@@ -1110,6 +1314,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 onSelectNode={handleNodeClick}
                 persons={editor.persons}
                 onOpenAssignPopup={editor.openAssignPopup}
+                matchedNodeIds={matchedNodeIds}
+                activeMatchId={activeMatchId}
               />
               <RelationshipArrows
                 rootNode={rootNode}

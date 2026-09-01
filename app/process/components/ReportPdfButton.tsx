@@ -11,6 +11,11 @@ type ReportPdfButtonProps = {
 
 type FlatEntry = { node: ProcessNode; level: number; numberPath: number[] };
 
+// Walks the FULL, untouched tree. Numbering (numberPath) always reflects a
+// node's true position in the original hierarchy, regardless of whether it
+// or any of its ancestors are excluded from the report. This is what lets
+// an excluded parent's number (e.g. "2.2") simply be skipped over while an
+// included grandchild still prints its real path (e.g. "2.2.1").
 function flattenTree(root: ProcessNode): FlatEntry[] {
   const out: FlatEntry[] = [];
   const walk = (node: ProcessNode, level: number, numberPath: number[]) => {
@@ -24,20 +29,10 @@ function flattenTree(root: ProcessNode): FlatEntry[] {
   return out;
 }
 
-// Removes any node whose id is in `excluded`, and — since we never recurse
-// into a removed node's children — everything underneath it comes along for
-// free. This is also why excluding a deep subprocess only drops that branch,
-// not its ancestors.
-function pruneExcluded(node: ProcessNode, excluded: Set<string>): ProcessNode {
-  const children = (node.children ?? [])
-    .filter((c) => !excluded.has(c.id))
-    .map((c) => pruneExcluded(c, excluded));
-  return { ...node, children };
-}
-
-// Flat list used purely to render the checkbox tree in the modal. Tracks
-// whether an ancestor is already excluded so we can gray the row out —
-// toggling it wouldn't change anything since its parent branch is gone.
+// Flat list used purely to render the checkbox tree in the modal.
+// `ancestorExcluded` is kept only as an informational hint (to badge rows
+// that are "kept" despite a parent being excluded) — it no longer disables
+// anything, since inclusion is decided per-node, independent of ancestors.
 type SelectEntry = { node: ProcessNode; level: number; ancestorExcluded: boolean };
 
 function flattenForSelection(root: ProcessNode, excluded: Set<string>): SelectEntry[] {
@@ -51,6 +46,16 @@ function flattenForSelection(root: ProcessNode, excluded: Set<string>): SelectEn
   };
   walk(root, 0, false);
   return out;
+}
+
+// Every id in a node's own subtree, including the node itself. Used by the
+// "include/exclude all subprocesses beneath this" one-click buttons — lets
+// someone unselect-all, then click one button to pull in a whole branch at
+// once, while still being free to hand-toggle individual rows afterward.
+function collectSubtreeIds(node: ProcessNode): string[] {
+  const ids: string[] = [node.id];
+  (node.children ?? []).forEach((c) => ids.push(...collectSubtreeIds(c)));
+  return ids;
 }
 
 // A node is "complete" if it has no children and is in the completed set,
@@ -118,17 +123,40 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
     [rootNode, excludedIds]
   );
 
+  // "Select all" = nothing excluded (empty set). "Unselect all" = every
+  // selectable node excluded, so the user can hand-pick just a few
+  // subprocesses to include from a blank slate.
+  const selectAll = () => setExcludedIds(new Set());
+  const unselectAll = () => setExcludedIds(new Set(selectionEntries.map((e) => e.node.id)));
+
+  // One-click include/exclude for an entire branch (a node plus every
+  // subprocess beneath it), so after "Unselect all" someone can bring in a
+  // whole section at once instead of checking each row by hand — though
+  // individual rows stay toggleable either way, before or after.
+  const includeSubtree = (node: ProcessNode) => {
+    const ids = collectSubtreeIds(node);
+    setExcludedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+
+  const excludeSubtree = (node: ProcessNode) => {
+    const ids = collectSubtreeIds(node);
+    setExcludedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
   const generate = async () => {
     if (!rootNode) return;
     setBusy(true);
     setError("");
     try {
       const { jsPDF } = await import("jspdf");
-
-      // Cut out excluded branches before anything else touches the tree —
-      // numbering, TOC, and predecessor lookups all run against this pruned
-      // copy, so gaps close up automatically.
-      const effectiveRoot = excludedIds.size > 0 ? pruneExcluded(rootNode, excludedIds) : rootNode;
 
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -139,17 +167,26 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
       const contentWidth = pageWidth - marginX * 2;
       const contentBottom = pageHeight - marginBottom;
 
-      const allEntries = flattenTree(effectiveRoot);
+      // Numbering is always computed from the FULL, unmodified tree so a
+      // node's number reflects its true position no matter what's excluded.
+      const allEntries = flattenTree(rootNode);
       const idToPath = new Map<string, string>();
       allEntries.forEach((e) => idToPath.set(e.node.id, e.numberPath.join(".")));
 
       const isFiltering = filterPersonIds.size > 0;
 
-      // When filtering, keep ONLY nodes directly assigned to one of the selected
-      // people — no parent/ancestor headings are pulled in for context anymore.
-      const entries = isFiltering
-        ? allEntries.filter((e) => (e.node.assignedPersonIds ?? []).some((pid) => filterPersonIds.has(pid)))
-        : allEntries;
+      // What actually gets drawn: a node is excluded if unchecked (its
+      // ancestors' state doesn't matter — see flattenForSelection), and,
+      // when a person filter is active, must also be directly assigned to
+      // one of the selected people. Both filters apply simultaneously and
+      // independently, per entry.
+      const entries = allEntries.filter((e) => {
+        if (excludedIds.has(e.node.id)) return false;
+        if (isFiltering && !(e.node.assignedPersonIds ?? []).some((pid) => filterPersonIds.has(pid))) {
+          return false;
+        }
+        return true;
+      });
 
       const filterNames = persons.filter((p) => filterPersonIds.has(p.id)).map((p) => p.name);
       const noMatches = isFiltering && entries.length === 0;
@@ -220,7 +257,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
         };
 
         // ---------- header ----------
-        const titleLines = wrap(effectiveRoot.label || "Process Report", 17, "bold", contentWidth);
+        const titleLines = wrap(rootNode.label || "Process Report", 17, "bold", contentWidth);
         const titleHeight = titleLines.length * lineHeightFor(17);
         ensureSpace(titleHeight);
         if (draw) y = drawLines(titleLines, marginX, y, 17, "bold");
@@ -236,8 +273,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
           else y += filterHeight;
         }
 
-        if (effectiveRoot.description) {
-          const descLines = wrap(effectiveRoot.description, 9.5, "normal", contentWidth);
+        if (rootNode.description) {
+          const descLines = wrap(rootNode.description, 9.5, "normal", contentWidth);
           const descHeight = descLines.length * lineHeightFor(9.5);
           ensureSpace(descHeight + 1);
           y += 1;
@@ -252,7 +289,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
 
         // ---------- completion legend ----------
         if (includeCompletion) {
-          const legendText = "Completion status: a blank box means not completed; a checked box means completed.";
+          const legendText =
+            "Checked box legend: a checked box means the process has been completed / selected or have been supervised; a blank box means it has not been addressed.";
           const legendLines = wrap(legendText, 8.5, "italic", contentWidth);
           const legendHeight = legendLines.length * lineHeightFor(8.5);
           ensureSpace(legendHeight + 1);
@@ -378,7 +416,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
           // ---------- completion checkbox (shown on every node, parent or leaf) ----------
           if (includeCompletion) {
             const done = isNodeComplete(node, completed);
-            const label = "Status of completion";
+            const label = done ? "Checked" : "Not checked";
             const fontSize = 8.5;
             const boxSize = fontSize * MM_PER_PT * 0.95; // roughly matches text cap-height
             const rowHeight = Math.max(lineHeightFor(fontSize), boxSize);
@@ -473,8 +511,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
       renderDocument(true);
 
       const filenameBase = isFiltering
-        ? `${effectiveRoot.label || "process"}-${filterNames.join("-")}`
-        : effectiveRoot.label || "process";
+        ? `${rootNode.label || "process"}-${filterNames.join("-")}`
+        : rootNode.label || "process";
       doc.save(`${filenameBase.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-report.pdf`);
       setOpen(false);
     } catch (err) {
@@ -553,7 +591,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
               Show completion status checkbox
             </label>
 
-            {/* ─── Exclude processes ─── */}
+            {/* ─── Include / Exclude processes ─── */}
             <div className="mb-2 pt-3 border-t border-gray-100">
               <div className="flex items-center justify-between mb-1.5">
                 <button
@@ -561,54 +599,98 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
                   onClick={() => setShowExcludePanel((v) => !v)}
                   className="text-sm font-medium text-gray-700 flex items-center gap-1"
                 >
-                  {showExcludePanel ? "▾" : "▸"} Exclude processes
+                  {showExcludePanel ? "▾" : "▸"} Include / Exclude processes
                   {excludedIds.size > 0 && (
                     <span className="text-[10px] font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">
                       {excludedIds.size} excluded
                     </span>
                   )}
                 </button>
-                {excludedIds.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setExcludedIds(new Set())}
-                    className="text-xs text-gray-400 hover:text-gray-600"
-                  >
-                    Clear
-                  </button>
-                )}
               </div>
 
               {showExcludePanel && (
                 <>
                   <p className="text-xs text-gray-400 mb-2">
-                    Uncheck a process to leave it out of the report. Its subprocesses are left out too. Numbers re-adjust automatically.
+                    Uncheck a process to leave its own heading and content out of the report.
+                    Its numbering slot is preserved for any of its subprocesses that stay
+                    checked — so a subprocess like <span className="font-mono">2.2.1</span> can be
+                    included even if <span className="font-mono">2.2</span> itself is excluded.
+                    Pick processes one by one with the checkbox, or use{" "}
+                    <span className="font-medium text-gray-600">All</span> /{" "}
+                    <span className="font-medium text-gray-600">None</span> next to a process
+                    with subprocesses to include or exclude that whole branch in one click —
+                    handy right after Unselect all. This combines with the person filter below.
                   </p>
+
+                  <div className="flex items-center gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={selectAll}
+                      className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                    >
+                      Select all
+                    </button>
+                    <span className="text-gray-200">|</span>
+                    <button
+                      type="button"
+                      onClick={unselectAll}
+                      className="text-xs font-medium text-gray-500 hover:text-gray-700"
+                    >
+                      Unselect all
+                    </button>
+                  </div>
+
                   <div className="max-h-56 overflow-y-auto flex flex-col gap-0.5 border border-gray-100 rounded-lg p-2">
                     {selectionEntries.map(({ node, level, ancestorExcluded }) => {
                       const selfExcluded = excludedIds.has(node.id);
-                      const effectivelyExcluded = ancestorExcluded || selfExcluded;
+                      const keptDespiteParent = ancestorExcluded && !selfExcluded;
+                      const hasChildren = (node.children?.length ?? 0) > 0;
                       return (
-                        <label
+                        <div
                           key={node.id}
                           style={{ paddingLeft: level * 14 }}
-                          className={`flex items-center gap-2 px-1.5 py-1 rounded-md text-sm ${
-                            ancestorExcluded
-                              ? "text-gray-300 cursor-not-allowed"
-                              : effectivelyExcluded
-                              ? "text-red-500 cursor-pointer hover:bg-gray-50"
-                              : "text-gray-700 cursor-pointer hover:bg-gray-50"
-                          }`}
+                          className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-gray-50"
                         >
-                          <input
-                            type="checkbox"
-                            checked={!effectivelyExcluded}
-                            disabled={ancestorExcluded}
-                            onChange={() => toggleExcluded(node.id)}
-                            className="rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-40"
-                          />
-                          <span className="truncate">{node.label}</span>
-                        </label>
+                          <label
+                            className={`flex items-center gap-2 flex-1 min-w-0 text-sm cursor-pointer ${
+                              selfExcluded ? "text-red-500" : keptDespiteParent ? "text-teal-700" : "text-gray-700"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!selfExcluded}
+                              onChange={() => toggleExcluded(node.id)}
+                              className="rounded border-gray-300 text-red-600 focus:ring-red-500 shrink-0"
+                            />
+                            <span className="truncate">{node.label}</span>
+                            {keptDespiteParent && (
+                              <span className="shrink-0 text-[10px] font-medium text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded-full">
+                                kept — parent excluded
+                              </span>
+                            )}
+                          </label>
+
+                          {hasChildren && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => includeSubtree(node)}
+                                title={`Include "${node.label}" and every subprocess beneath it`}
+                                className="text-[10px] font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-1.5 py-0.5 rounded"
+                              >
+                                All
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => excludeSubtree(node)}
+                                title={`Exclude "${node.label}" and every subprocess beneath it`}
+                                className="text-[10px] font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-1.5 py-0.5 rounded"
+                              >
+                                None
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>

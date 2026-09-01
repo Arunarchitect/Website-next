@@ -111,6 +111,10 @@ type ProcessContainerProps = {
   persons: Person[];
   /** Opens the assign/unassign popup for this node. */
   onOpenAssignPopup: (nodeId: string) => void;
+  /** Node ids currently matching the search box, if any. */
+  matchedNodeIds?: Set<string>;
+  /** The single match currently focused via next/prev navigation. */
+  activeMatchId?: string | null;
 };
 
 export function ProcessContainer({
@@ -126,6 +130,8 @@ export function ProcessContainer({
   numberPath = [],
   persons,
   onOpenAssignPopup,
+  matchedNodeIds,
+  activeMatchId,
 }: ProcessContainerProps) {
   const children = node.children ?? [];
   const layout = getLayout(level);
@@ -134,6 +140,8 @@ export function ProcessContainer({
   const isCompleted = isNodeComplete(node, completed);
   const isPartial = isNodePartial(node, completed);
   const isParent = children.length > 0;
+  const isSearchMatch = matchedNodeIds?.has(node.id) ?? false;
+  const isActiveSearchMatch = activeMatchId === node.id;
 
   // Root (level 0) is the canvas container, not a numbered process itself.
   const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
@@ -198,7 +206,13 @@ export function ProcessContainer({
         position: level === 0 ? undefined : "relative",
         zIndex: level === 0 ? undefined : 10,
         background: color.background,
-        border: `1.5px solid ${activeNodeId === node.id ? "#3b82f6" : color.border}`,
+        border: `1.5px solid ${
+          activeNodeId === node.id
+            ? "#3b82f6"
+            : isSearchMatch
+            ? "#EAB308"
+            : color.border
+        }`,
         outline: isCompleted ? "2px solid #2F9E58" : "none",
         outlineOffset: "2px",
         borderRadius: level === 0 ? "18px" : "14px",
@@ -211,9 +225,15 @@ export function ProcessContainer({
         padding: layout.padding,
         overflow: "hidden",
         cursor: "pointer",
+        transition: "box-shadow 0.15s ease, border-color 0.15s ease",
         boxShadow: [
           activeNodeId === node.id ? "0 0 0 2px rgba(59,130,246,0.5)" : null,
           node.important ? "0 0 0 2px rgba(217,119,6,0.45)" : null,
+          isActiveSearchMatch
+            ? "0 0 0 3px rgba(234,88,12,0.9)"
+            : isSearchMatch
+            ? "0 0 0 2px rgba(234,179,8,0.7)"
+            : null,
         ].filter(Boolean).join(", ") || "none",
       }}
     >
@@ -357,6 +377,8 @@ export function ProcessContainer({
               numberPath={[...numberPath, index + 1]}
               persons={persons}
               onOpenAssignPopup={onOpenAssignPopup}
+              matchedNodeIds={matchedNodeIds}
+              activeMatchId={activeMatchId}
             />
           ))}
         </div>
