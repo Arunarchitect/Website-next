@@ -47,6 +47,7 @@ export interface ProductItem {
   base_price?: string | null;
   currency?: string | null;
   effective_price?: string | null;
+  status?: "pending" | "approved" | "rejected";
 }
 
 export interface Assignment {
@@ -59,6 +60,19 @@ export interface Assignment {
   client_confirmed: boolean;
   architect_confirmed: boolean;
   created_at: string;
+}
+
+export interface ProductSuggestionInput {
+  space: string;
+  category: string;
+  item: string;
+  manufacturer: string;
+  model_label: string;
+  base_price?: string;
+  currency?: string;
+  product_link?: string;
+  product_image?: File | null;
+  organisation: number;
 }
 
 export function roleToUiRole(role: MembershipRole): Role {
@@ -142,7 +156,8 @@ export async function getProductsByCategory(
   projectId: number,
   search?: string
 ): Promise<ProductItem[]> {
-  const params: any = { category, project: projectId };
+  const params: any = { project: projectId };
+  if (category) params.category = category;
   if (search) params.search = search;
   const res = await apiClient.get('/product/products/catalog/', { params });
   return unwrapList<ProductItem>(res.data);
@@ -179,4 +194,50 @@ export async function confirmAssignment(id: number, role: Role): Promise<Assignm
 
 export async function removeAssignment(id: number): Promise<void> {
   await apiClient.delete(`/product/assignments/${id}/`);
+}
+
+// ── Product suggestion (client proposes a new catalog product) ──────────
+export async function suggestProduct(input: ProductSuggestionInput): Promise<ProductItem> {
+  const fd = new FormData();
+  fd.append('space', input.space);
+  fd.append('category', input.category);
+  fd.append('item', input.item);
+  fd.append('manufacturer', input.manufacturer);
+  fd.append('model_label', input.model_label);
+  if (input.base_price) fd.append('base_price', input.base_price);
+  if (input.currency) fd.append('currency', input.currency);
+  if (input.product_link) fd.append('product_link', input.product_link);
+  if (input.product_image) fd.append('product_image', input.product_image);
+  fd.append('organisation', String(input.organisation));
+
+  const res = await apiClient.post('/product/products/suggest/', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+}
+
+// ── Space management (create/edit/delete spaces for a project) ──────────
+export async function createSpace(
+  projectId: number,
+  name: string,
+  required_categories: string[]
+): Promise<Space> {
+  const res = await apiClient.post('/product/spaces/', {
+    project: projectId,
+    name,
+    required_categories,
+  });
+  return res.data;
+}
+
+export async function updateSpace(
+  id: number,
+  data: Partial<Pick<Space, 'name' | 'required_categories'>>
+): Promise<Space> {
+  const res = await apiClient.patch(`/product/spaces/${id}/`, data);
+  return res.data;
+}
+
+export async function deleteSpace(id: number): Promise<void> {
+  await apiClient.delete(`/product/spaces/${id}/`);
 }

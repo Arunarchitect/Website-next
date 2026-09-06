@@ -977,8 +977,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               {searchTerm.trim() === ""
                 ? ""
                 : searchMatches.length === 0
-                ? "No matches"
-                : `${(activeMatchIndex ?? 0) + 1}/${searchMatches.length}`}
+                  ? "No matches"
+                  : `${(activeMatchIndex ?? 0) + 1}/${searchMatches.length}`}
             </span>
             <button
               onClick={prevMatch}
@@ -1547,6 +1547,13 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
                   <button
                     onClick={() => {
+                      const taskCount = getPersonTasks(person.id).length;
+                      const msg =
+                        taskCount > 0
+                          ? `Delete "${person.name}"? They'll be unassigned from ${taskCount} task${taskCount > 1 ? "s" : ""}.`
+                          : `Delete "${person.name}"?`;
+                      if (!window.confirm(msg)) return;
+
                       if (filterPersonId === person.id) {
                         setFilterPersonId(null);
                         setExpandedTaskIds(new Set());

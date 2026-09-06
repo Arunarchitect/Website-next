@@ -1,0 +1,110 @@
+/* Modelflick fixture & product assignment page — palette + component classes.
+   Layout/spacing keeps using Tailwind utilities in page.tsx; this file only
+   owns the color/border/shadow tokens so they live in one place. */
+
+.pf-page {
+  background: #EDEFEA;
+  color: #1C2521;
+}
+
+.pf-header {
+  border-bottom: 1px solid #DCE0D8;
+  background: rgba(237, 239, 234, 0.9);
+  backdrop-filter: blur(6px);
+}
+
+.pf-eyebrow { color: #6B7570; }
+.pf-muted { color: #6B7570; }
+.pf-faint { color: #8A938E; }
+
+.pf-role-badge { background: #2F6E62; color: #fff; }
+
+/* Org / category pills */
+.pf-pill {
+  background: #fff;
+  border: 1px solid #DCE0D8;
+  color: #1C2521;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.pf-pill:hover { border-color: #1C2521; }
+.pf-pill-active {
+  background: #1C2521;
+  border-color: #1C2521;
+  color: #fff;
+}
+.pf-pill-active:hover { border-color: #1C2521; }
+
+/* Space pills (accent color, distinct from org pills) */
+.pf-space-pill {
+  background: #fff;
+  border: 1px solid #DCE0D8;
+  color: #1C2521;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.pf-space-pill:hover { border-color: #2F6E62; }
+.pf-space-pill-active {
+  background: #2F6E62;
+  border-color: #2F6E62;
+  color: #fff;
+}
+
+.pf-badge-soft { background: #EDEFEA; color: #6B7570; }
+.pf-badge-soft-on-active { background: rgba(255, 255, 255, 0.2); color: #fff; }
+
+/* Requirement chips */
+.pf-req-confirmed { background: #E4EFEB; border-color: #2F6E62; color: #2F6E62; }
+.pf-req-pending { background: #F3E9D8; border-color: #B8802F; color: #8A5E20; }
+.pf-req-needed { background: #fff; border: 1px dashed #C7CDC3; color: #6B7570; }
+
+/* Project cards */
+.pf-project-card { border: 1px solid #DCE0D8; background: #fff; }
+.pf-project-card-active { border-color: #2F6E62; background: #fff; }
+.pf-project-card-inactive { border-color: #DCE0D8; background: rgba(255, 255, 255, 0.6); }
+.pf-project-card-inactive:hover { background: #fff; }
+.pf-badge-count { background: #B8802F; color: #fff; }
+
+/* Skeletons */
+.pf-skeleton { background: #DCE0D8; }
+.pf-skeleton-light { background: #E4E8E1; }
+
+/* Product card / row */
+.pf-card { border: 1px solid #DCE0D8; background: #fff; transition: box-shadow 0.15s ease; }
+.pf-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06); }
+.pf-row { border: 1px solid #DCE0D8; background: #fff; }
+.pf-empty-dashed { border: 1px dashed #C7CDC3; background: rgba(255, 255, 255, 0.5); color: #6B7570; }
+
+.pf-status-confirmed { background: #E4EFEB; color: #2F6E62; }
+.pf-status-pending { background: #F3E9D8; color: #8A5E20; }
+.pf-total-pill { background: #E4EFEB; color: #1C2521; }
+.pf-selected-badge { background: #2F6E62; color: #fff; }
+
+/* Buttons */
+.pf-btn-primary { background: #1C2521; color: #fff; }
+.pf-btn-accent { background: #2F6E62; color: #fff; }
+.pf-btn-outline { border: 1px solid #DCE0D8; color: #1C2521; background: #fff; }
+.pf-btn-outline:hover { background: #EDEFEA; }
+.pf-btn-outline-accent { border: 1px solid #2F6E62; color: #2F6E62; background: #fff; }
+.pf-btn-outline-accent:hover { background: #E4EFEB; }
+.pf-btn-danger-outline { border: 1px solid #DCE0D8; color: #6B7570; background: #fff; }
+.pf-btn-danger-outline:hover { border-color: #dc2626; color: #dc2626; }
+
+.pf-link { color: #2F6E62; background: none; border: none; padding: 0; cursor: pointer; }
+.pf-link:hover { text-decoration: underline; }
+
+/* Modal */
+.pf-modal-overlay { background: rgba(0, 0, 0, 0.4); }
+.pf-modal { background: #fff; }
+.pf-input { border: 1px solid #DCE0D8; }
+.pf-input:focus { border-color: #2F6E62; outline: none; }
+.pf-error-box { color: #dc2626; background: #fef2f2; border: 1px solid #fee2e2; }
+.pf-success-text { color: #2F6E62; }
+
+/* Category / space-filter checkbox chips (shared by the space-edit modal
+   and the "All spaces" filter) */
+.pf-checkbox-label { border: 1px solid #DCE0D8; background: #fff; color: #1C2521; }
+.pf-checkbox-label-active { border-color: #2F6E62; background: #E4EFEB; color: #2F6E62; }
+.pf-checkbox-input { accent-color: #2F6E62; }
+
+/* All-spaces summary table */
+.pf-table-head { background: #EDEFEA; }
+.pf-table-row:not(:last-child) { border-bottom: 1px solid #DCE0D8; }

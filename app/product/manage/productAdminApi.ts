@@ -4,6 +4,8 @@ import axios from 'axios';
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST;
 const API_URL = `${API_BASE_URL}/api`;
 
+export type ProductStatus = 'pending' | 'approved' | 'rejected';
+
 export interface DiscountTier {
   id: number;
   product: string;
@@ -60,6 +62,14 @@ export interface AdminProduct {
   ifc_model: IFCModel | null;
   project_pricing_rules: ProjectPricing[];
   organisation_pricing_rules: OrganisationPricing[];
+  // Review workflow
+  status: ProductStatus;
+  organisation: number | null;
+  organisation_name?: string | null;
+  uploaded_by: number | null;
+  reviewed_by: number | null;
+  reviewed_at: string | null;
+  rejection_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -208,4 +218,20 @@ export async function addOrganisationPricing(
 }
 export async function deleteOrganisationPricing(id: number): Promise<void> {
   await apiClient.delete(`/product/organisation-pricing/${id}/`);
+}
+
+// ── Review workflow (org admin) ──────────────────────────────────────────
+export async function getPendingProducts(): Promise<AdminProduct[]> {
+  const res = await apiClient.get('/product/products/pending/');
+  return unwrapList<AdminProduct>(res.data);
+}
+
+export async function approveProduct(id: string): Promise<AdminProduct> {
+  const res = await apiClient.post(`/product/products/${id}/approve/`);
+  return res.data;
+}
+
+export async function rejectProduct(id: string, rejection_reason: string): Promise<AdminProduct> {
+  const res = await apiClient.post(`/product/products/${id}/reject/`, { rejection_reason });
+  return res.data;
 }
