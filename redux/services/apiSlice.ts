@@ -5,6 +5,28 @@ import { Mutex } from "async-mutex";
 
 const mutex = new Mutex();
 
+// Redirects to the login page, preserving the current path/query as ?next=
+// so the user can be sent back here after they log in.
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+
+  const current = window.location.pathname + window.location.search;
+
+  // Don't attach a next param if we're already on the login page,
+  // or if there's nothing meaningful to return to (root path).
+  const shouldAttachNext = current && current !== '/' && !current.startsWith('/auth/login');
+
+  const target = shouldAttachNext
+    ? `/auth/login?next=${encodeURIComponent(current)}`
+    : '/auth/login';
+
+  // Avoid redirecting if we're already there (prevents redirect loops
+  // if multiple 401s fire in quick succession).
+  if (window.location.pathname + window.location.search !== target) {
+    window.location.href = target;
+  }
+}
+
 // Create base query with auth headers
 const baseQuery = fetchBaseQuery({
   baseUrl: `${process.env.NEXT_PUBLIC_HOST}/api`,
@@ -38,6 +60,7 @@ const baseQueryWithReauth: BaseQueryFn<
 
         if (!refresh) {
           api.dispatch(logout());
+          redirectToLogin();
           return result;
         }
 
@@ -53,9 +76,7 @@ const baseQueryWithReauth: BaseQueryFn<
 
         if (!refreshResult.data) {
           api.dispatch(logout());
-          if (typeof window !== 'undefined') {
-            window.location.href = '/auth/login';
-          }
+          redirectToLogin();
           return refreshResult;
         }
 

@@ -265,7 +265,8 @@ export default function ProductPage() {
   }
 
   useEffect(() => {
-    (async () => {
+  (async () => {
+    try {
       const entries = await getMyProductContext();
       const groups = groupByOrganisation(entries);
       setOrganisations(groups);
@@ -278,9 +279,15 @@ export default function ProductPage() {
           setRawRole(firstProject.role);
         }
       }
+    } catch (err) {
+      // 401s are handled by the apiClient response interceptor (redirect to login).
+      // Anything else, just log it so the page doesn't spin forever.
+      console.error('Failed to load product context:', err);
+    } finally {
       setLoadingContext(false);
-    })();
-  }, []);
+    }
+  })();
+}, []);
 
   const currentOrg = organisations.find((o) => o.id === orgId);
 

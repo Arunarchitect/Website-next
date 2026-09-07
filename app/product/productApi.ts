@@ -127,6 +127,26 @@ export const formatPrice = (item: ProductItem): string | null => {
   return `${item.currency || 'INR'} ${num.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 };
 
+// Redirects to the login page, preserving the current path/query as ?next=
+// so the user can be sent back here after they log in.
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+
+  const current = window.location.pathname + window.location.search;
+  const shouldAttachNext = current && current !== '/' && !current.startsWith('/auth/login');
+
+  const target = shouldAttachNext
+    ? `/auth/login?next=${encodeURIComponent(current)}`
+    : '/auth/login';
+
+  // Avoid redirecting if we're already there (prevents redirect loops
+  // if multiple 401s fire in quick succession, e.g. several parallel
+  // getSpaces/getAssignments/getProductsByCategory calls all failing at once).
+  if (window.location.pathname + window.location.search !== target) {
+    window.location.href = target;
+  }
+}
+
 const apiClient = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -138,6 +158,16 @@ apiClient.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      redirectToLogin();
+    }
+    return Promise.reject(error);
+  }
+);
 
 function unwrapList<T>(data: any): T[] {
   if (Array.isArray(data)) return data;
