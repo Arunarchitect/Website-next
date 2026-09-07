@@ -1,11 +1,8 @@
 "use client";
 
-// Standalone print trigger for a product list. Works for a single space
-// (no `space` on each row) or a combined multi-space report (each row
-// carries its space name, and the table gains a Space column). Opens a
-// separate window with its own minimal stylesheet, writes a simple table +
-// totals, then calls window.print() — "Save as PDF" is a print destination
-// in every modern browser, so no PDF library is needed.
+import { useState } from "react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 export interface PrintableRow {
   space?: string;
@@ -16,6 +13,7 @@ export interface PrintableRow {
   status: string;
   proposed_by: string;
   imageSrc?: string | null;
+  product_link?: string | null;
 }
 
 export interface PrintableTotal {
@@ -26,193 +24,477 @@ export interface PrintableTotal {
 interface ProductListPrintProps {
   orgName: string;
   projectName: string;
-  scopeLabel: string; // e.g. a space name, or "All spaces (3 selected)"
+  scopeLabel: string;
   rows: PrintableRow[];
   totals: PrintableTotal[];
   className?: string;
   label?: string;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
+/**
+ * Format total amount
+ */
 function formatTotalLine(t: PrintableTotal): string {
-  return `${t.currency} ${t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return `${t.currency} ${t.total.toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+  })}`;
 }
 
-async function preloadImages(rows: PrintableRow[]): Promise<Map<string, string>> {
-  const imageCache = new Map<string, string>();
+/**
+ * Load image using a proxy approach that avoids CORS issues
+ * Returns both the data URL and original dimensions
+ */
+async function loadImageForPdf(url: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  if (!url) return null;
 
-  await Promise.all(
-    rows.map(async (row) => {
-      if (!row.imageSrc) return;
-
+  // Try multiple approaches to load the image
+  const approaches = [
+    // Approach 1: Direct Image with crossOrigin
+    async () => {
+      return new Promise<{ dataUrl: string; width: number; height: number } | null>((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const maxSize = 300;
+            let width = img.naturalWidth;
+            let height = img.naturalHeight;
+            
+            // Maintain aspect ratio while limiting size
+            const aspectRatio = width / height;
+            if (width > height) {
+              if (width > maxSize) {
+                width = maxSize;
+                height = Math.round(width / aspectRatio);
+              }
+            } else {
+              if (height > maxSize) {
+                height = maxSize;
+                width = Math.round(height * aspectRatio);
+              }
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(null);
+              return;
+            }
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, width, height);
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            resolve({
+              dataUrl: canvas.toDataURL('image/png'),
+              width: img.naturalWidth,
+              height: img.naturalHeight
+            });
+          } catch {
+            console.error('Error processing image');
+            resolve(null);
+          }
+        };
+        
+        img.onerror = () => {
+          resolve(null);
+        };
+        
+        img.src = url;
+        
+        // Timeout after 5 seconds
+        setTimeout(() => resolve(null), 5000);
+      });
+    },
+    
+    // Approach 2: Use CORS proxy
+    async () => {
       try {
-        // Fetch the image as a blob to avoid CORS/auth issues
-        const response = await fetch(row.imageSrc);
-        if (response.ok) {
-          const blob = await response.blob();
-          const objectUrl = URL.createObjectURL(blob);
-          imageCache.set(row.imageSrc, objectUrl);
-        }
-      } catch (err) {
-        // Silently fail - image just won't show in print
-        console.warn(`Failed to preload image: ${row.imageSrc}`, err);
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) return null;
+        
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        
+        // Process the image
+        return new Promise<{ dataUrl: string; width: number; height: number } | null>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              const maxSize = 300;
+              let width = img.naturalWidth;
+              let height = img.naturalHeight;
+              
+              const aspectRatio = width / height;
+              if (width > height) {
+                if (width > maxSize) {
+                  width = maxSize;
+                  height = Math.round(width / aspectRatio);
+                }
+              } else {
+                if (height > maxSize) {
+                  height = maxSize;
+                  width = Math.round(height * aspectRatio);
+                }
+              }
+              
+              canvas.width = width;
+              canvas.height = height;
+              
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                resolve(null);
+                return;
+              }
+              
+              ctx.fillStyle = '#FFFFFF';
+              ctx.fillRect(0, 0, width, height);
+              ctx.drawImage(img, 0, 0, width, height);
+              
+              resolve({
+                dataUrl: canvas.toDataURL('image/png'),
+                width: img.naturalWidth,
+                height: img.naturalHeight
+              });
+            } catch {
+              resolve(null);
+            }
+          };
+          
+          img.onerror = () => resolve(null);
+          img.src = dataUrl;
+          
+          setTimeout(() => resolve(null), 5000);
+        });
+      } catch {
+        return null;
       }
-    })
-  );
-
-  return imageCache;
-}
-
-function buildPrintHtml(props: ProductListPrintProps, imageCache: Map<string, string>): string {
-  const { orgName, projectName, scopeLabel, rows, totals } = props;
-  const generatedAt = new Date().toLocaleString("en-IN");
-  const showSpaceColumn = rows.some((r) => r.space);
-
-  const rowsHtml = rows
-    .map((r) => {
-      const imageUrl = r.imageSrc ? imageCache.get(r.imageSrc) || r.imageSrc : null;
-      const imageHtml = imageUrl
-        ? `<td class="thumb"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(r.item)}" /></td>`
-        : `<td class="thumb"><div class="thumb-placeholder">—</div></td>`;
-
-      return `
-        <tr>
-          ${imageHtml}
-          ${showSpaceColumn ? `<td>${escapeHtml(r.space ?? "")}</td>` : ""}
-          <td>${escapeHtml(r.item)}</td>
-          <td>${escapeHtml(r.manufacturer)} — ${escapeHtml(r.model_label)}</td>
-          <td class="price">${r.priceLabel ? escapeHtml(r.priceLabel) : "—"}</td>
-          <td>${escapeHtml(r.status)}</td>
-          <td class="capitalize">${escapeHtml(r.proposed_by)}</td>
-        </tr>`;
-    })
-    .join("");
-
-  const totalsHtml = totals.length
-    ? totals.map((t) => `<div class="total-line">Total (${escapeHtml(t.currency)}): <strong>${formatTotalLine(t)}</strong></div>`).join("")
-    : `<div class="total-line">No priced items yet.</div>`;
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8" />
-<title>${escapeHtml(scopeLabel)} — Product list</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
-    color: #1C2521;
-    padding: 32px;
-    margin: 0;
-  }
-  header { margin-bottom: 24px; border-bottom: 2px solid #1C2521; padding-bottom: 16px; }
-  .eyebrow { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: #6B7570; margin: 0 0 4px 0; }
-  h1 { font-size: 20px; margin: 0 0 4px 0; }
-  .meta { font-size: 12px; color: #6B7570; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th, td { text-align: left; padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #DCE0D8; vertical-align: middle; }
-  th { background: #EDEFEA; font-weight: 600; }
-  td.price { font-weight: 600; white-space: nowrap; }
-  .capitalize { text-transform: capitalize; }
-  .thumb { width: 60px; text-align: center; }
-  /* In ProductListPrint.tsx, update the thumbnail styles */
-.thumb img {
-  width: 50px;
-  height: 50px;
-  object-fit: contain; /* Changed from cover to contain */
-  border-radius: 6px;
-  display: block;
-  margin: 0 auto;
-  background: #fff; /* Add white background for transparent images */
-}
-  .thumb-placeholder {
-    width: 50px;
-    height: 50px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #EDEFEA;
-    border-radius: 6px;
-    color: #8A938E;
-    font-size: 16px;
-    margin: 0 auto;
-  }
-  .totals { margin-top: 20px; text-align: right; }
-  .total-line { font-size: 14px; margin-top: 4px; }
-  footer { margin-top: 32px; font-size: 10px; color: #8A938E; }
-  @media print {
-    body { padding: 12mm; }
-    header { break-inside: avoid; }
-    .thumb img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  }
-</style>
-</head>
-<body>
-  <header>
-    <p class="eyebrow">${escapeHtml(orgName)} · ${escapeHtml(projectName)}</p>
-    <h1>Product list — ${escapeHtml(scopeLabel)}</h1>
-    <p class="meta">Generated ${escapeHtml(generatedAt)}</p>
-  </header>
-
-  ${rows.length
-      ? `<table>
-          <thead>
-            <tr>
-              <th class="thumb">Image</th>
-              ${showSpaceColumn ? "<th>Space</th>" : ""}
-              <th>Item</th><th>Manufacturer / Model</th><th>Price</th><th>Status</th><th>Proposed by</th>
-            </tr>
-          </thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-        <div class="totals">${totalsHtml}</div>`
-      : `<p>No products in this selection.</p>`
     }
+  ];
 
-  <footer>Modelflick — fixture &amp; product assignment</footer>
-</body>
-</html>`;
-}
-
-export async function printProductList(props: ProductListPrintProps) {
-  // Preload all images first to avoid CORS/auth issues
-  const imageCache = await preloadImages(props.rows);
-  const html = buildPrintHtml(props, imageCache);
-
-  const printWindow = window.open("", "_blank", "width=900,height=1000");
-  if (!printWindow) {
-    // Clean up object URLs if popup blocked
-    imageCache.forEach((url) => URL.revokeObjectURL(url));
-    return;
+  // Try each approach
+  for (const approach of approaches) {
+    try {
+      const result = await approach();
+      if (result) {
+        return result;
+      }
+    } catch {
+      console.warn('Image loading approach failed');
+    }
   }
 
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
+  return null;
+}
 
-  printWindow.onload = () => {
-    printWindow.focus();
-    printWindow.print();
-
-    // Clean up object URLs after print dialog closes
-    setTimeout(() => {
-      imageCache.forEach((url) => URL.revokeObjectURL(url));
-    }, 1000);
+// Define a type for the autoTable document with lastAutoTable property
+interface AutoTableDoc extends jsPDF {
+  lastAutoTable?: {
+    finalY: number;
   };
 }
 
+/**
+ * Generate the Product List PDF
+ */
+export async function generateProductListPdf(
+  props: ProductListPrintProps
+): Promise<void> {
+  const {
+    orgName,
+    projectName,
+    scopeLabel,
+    rows,
+    totals,
+  } = props;
+
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: "a4",
+  }) as AutoTableDoc;
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+
+  // ============================================================
+  // HEADER
+  // ============================================================
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(28, 37, 33);
+  doc.text("Product List", margin, margin + 5);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(107, 117, 112);
+  doc.text(`${orgName} · ${projectName}`, margin, margin + 12);
+  doc.text(`Scope: ${scopeLabel}`, margin, margin + 18);
+  doc.text(`Generated: ${new Date().toLocaleString("en-IN")}`, margin, margin + 24);
+
+  // ============================================================
+  // DETERMINE COLUMNS
+  // ============================================================
+  const showSpaceColumn = rows.some((row) => Boolean(row.space));
+  const showLinkColumn = rows.some((row) => Boolean(row.product_link));
+
+  const headers: string[] = [];
+  if (showSpaceColumn) headers.push("Space");
+  headers.push("Image", "Item", "Manufacturer / Model", "Price", "Status", "Proposed By");
+  if (showLinkColumn) headers.push("Product Link");
+
+  // ============================================================
+  // LOAD ALL PRODUCT IMAGES
+  // ============================================================
+  console.log("Loading product images...");
+  const images: Array<{ dataUrl: string; width: number; height: number } | null> = await Promise.all(
+    rows.map(async (row) => {
+      if (!row.imageSrc) return null;
+      const imageData = await loadImageForPdf(row.imageSrc);
+      if (!imageData) {
+        console.warn(`Failed to load image for ${row.item}: ${row.imageSrc}`);
+      }
+      return imageData;
+    })
+  );
+  
+  console.log(`Loaded ${images.filter(img => img !== null).length} of ${images.length} images`);
+
+  // ============================================================
+  // CREATE TABLE DATA
+  // ============================================================
+  const tableData = rows.map((row) => {
+    const values: string[] = [];
+    if (showSpaceColumn) values.push(row.space || "");
+    values.push(""); // Image placeholder
+    values.push(row.item);
+    values.push(`${row.manufacturer} - ${row.model_label}`);
+    values.push(row.priceLabel || "-");
+    values.push(row.status);
+    values.push(row.proposed_by);
+    if (showLinkColumn) values.push(""); // Empty string for link column - we'll draw it manually
+    return values;
+  });
+
+  // ============================================================
+  // IMAGE COLUMN INDEX
+  // ============================================================
+  const imageColumnIndex = showSpaceColumn ? 1 : 0;
+
+  // ============================================================
+  // GENERATE TABLE
+  // ============================================================
+  autoTable(doc, {
+    head: [headers],
+    body: tableData,
+    startY: margin + 30,
+    margin: { left: margin, right: margin, bottom: 20 },
+    styles: {
+      fontSize: 9,
+      cellPadding: 4,
+      overflow: "linebreak",
+      textColor: [28, 37, 33],
+      lineWidth: 0.1,
+      lineColor: [200, 200, 200],
+      valign: "middle",
+    },
+    headStyles: {
+      fillColor: [237, 239, 234],
+      textColor: [28, 37, 33],
+      fontStyle: "bold",
+      fontSize: 9.5,
+      valign: "middle",
+    },
+    alternateRowStyles: {
+      fillColor: [248, 249, 247],
+    },
+    columnStyles: {
+      [imageColumnIndex]: {
+        cellWidth: 30,
+        halign: "center",
+        valign: "middle",
+      },
+    },
+    didParseCell: (data) => {
+      if (data.section !== "body") return;
+
+      // Reserve height for images with more space
+      if (data.column.index === imageColumnIndex) {
+        if (images[data.row.index]) {
+          data.cell.styles.minCellHeight = 35;
+        }
+      }
+    },
+    didDrawCell: (data) => {
+      if (data.section !== "body") return;
+      const rowIndex = data.row.index;
+
+      // Draw image
+      if (data.column.index === imageColumnIndex) {
+        const imageData = images[rowIndex];
+        
+        if (imageData) {
+          try {
+            // Calculate available space
+            const maxWidth = data.cell.width - 6;
+            const maxHeight = data.cell.height - 6;
+            
+            // Get original aspect ratio
+            const aspectRatio = imageData.width / imageData.height;
+            
+            // Calculate dimensions that fit within available space while maintaining aspect ratio
+            let drawWidth = maxWidth;
+            let drawHeight = drawWidth / aspectRatio;
+            
+            // If height exceeds available space, scale down based on height
+            if (drawHeight > maxHeight) {
+              drawHeight = maxHeight;
+              drawWidth = drawHeight * aspectRatio;
+            }
+            
+            // Center the image in the cell
+            const x = data.cell.x + (data.cell.width - drawWidth) / 2;
+            const y = data.cell.y + (data.cell.height - drawHeight) / 2;
+            
+            // Add image with proper dimensions
+            doc.addImage(imageData.dataUrl, "PNG", x, y, drawWidth, drawHeight);
+          } catch {
+            console.error("Could not add image to PDF");
+          }
+        }
+      }
+
+      // Draw product link (only in link column)
+      if (showLinkColumn && data.column.index === headers.length - 1) {
+        const row = rows[rowIndex];
+        if (row?.product_link) {
+          try {
+            // Make the entire cell clickable
+            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
+              url: row.product_link,
+            });
+
+            // Draw the link text
+            const text = "View Link";
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(0, 0, 255);
+            
+            const x = data.cell.x + 3;
+            const y = data.cell.y + data.cell.height / 2 + 1;
+            
+            doc.text(text, x, y);
+            
+            // Underline
+            const textWidth = doc.getTextWidth(text);
+            doc.setDrawColor(0, 0, 255);
+            doc.setLineWidth(0.2);
+            doc.line(x, y + 0.7, x + textWidth, y + 0.7);
+            
+            // Reset state
+            doc.setTextColor(28, 37, 33);
+            doc.setDrawColor(0, 0, 0);
+            doc.setFont("helvetica", "normal");
+          } catch {
+            console.error("Failed to create PDF link");
+          }
+        }
+      }
+    },
+  });
+
+  // ============================================================
+  // TOTALS
+  // ============================================================
+  const finalY = doc.lastAutoTable?.finalY || pageHeight / 2;
+
+  if (totals.length > 0) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(28, 37, 33);
+
+    totals.forEach((total, index) => {
+      const yPos = finalY + 10 + index * 7;
+      doc.text(
+        `Total (${total.currency}): ${formatTotalLine(total)}`,
+        pageWidth - margin,
+        yPos,
+        { align: "right" }
+      );
+    });
+  } else {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(107, 117, 112);
+    doc.text("No priced items yet.", pageWidth - margin, finalY + 10, { align: "right" });
+  }
+
+  // ============================================================
+  // FOOTER
+  // ============================================================
+  const footerY = pageHeight - 10;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(138, 147, 142);
+  doc.text("Modelflick - Fixture & Product Assignment", margin, footerY);
+
+  // ============================================================
+  // SAVE PDF
+  // ============================================================
+  const safeScopeLabel = scopeLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  const filename = `product-list-${safeScopeLabel || "all-spaces"}.pdf`;
+  doc.save(filename);
+}
+
+// ================================================================
+// PRINT BUTTON
+// ================================================================
 export default function ProductListPrintButton(props: ProductListPrintProps) {
   const { className, label } = props;
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isGenerating) return;
+
+    setIsGenerating(true);
+
+    try {
+      await generateProductListPdf(props);
+    } catch {
+      console.error("Failed to generate PDF");
+      alert("Failed to generate PDF. Please try again.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
-    <button onClick={() => printProductList(props)} className={className}>
-      {label ?? "Print / Save as PDF"}
+    <button
+      type="button"
+      onClick={handleClick}
+      className={className}
+      disabled={isGenerating}
+    >
+      {isGenerating ? "Generating..." : label ?? "Download PDF"}
     </button>
   );
 }

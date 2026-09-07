@@ -112,6 +112,23 @@ function formatTotal(t: { currency: string; total: number }): string {
   return `${t.currency} ${t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+// Small reusable clickable product-link element used across every list
+// (assigned list, all-spaces table, all-spaces mobile cards, catalog cards).
+function ProductLink({ href, className }: { href?: string | null; className?: string }) {
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className={className ?? "pf-link text-xs underline underline-offset-2"}
+    >
+      Product link
+    </a>
+  );
+}
+
 // ── Skeletons ────────────────────────────────────────────────────────────
 function SkeletonPill() {
   return <div className="pf-skeleton h-9 w-28 rounded-full animate-pulse flex-shrink-0" />;
@@ -401,6 +418,7 @@ export default function ProductPage() {
           status: statusLabel(a),
           proposed_by: a.proposed_by,
           imageSrc: getImageSource(item.product_image),
+          product_link: item.product_link || null,
         };
       }),
     [assignmentsForSpace, pricedProduct]
@@ -435,6 +453,7 @@ export default function ProductPage() {
           status: statusLabel(a),
           proposed_by: a.proposed_by,
           imageSrc: getImageSource(item.product_image),
+          product_link: item.product_link || null,
         };
       }),
     [summaryAssignments, pricedProduct, spaceNameById]
@@ -998,6 +1017,12 @@ export default function ProductPage() {
                             <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
                             <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
                             {price && <div className="text-sm font-medium mt-1">{price}</div>}
+                            {item.product_link && (
+                              <ProductLink
+                                href={item.product_link}
+                                className="pf-link text-xs underline underline-offset-2 mt-1 inline-block"
+                              />
+                            )}
                           </div>
                         </div>
                         <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0">
@@ -1176,6 +1201,7 @@ export default function ProductPage() {
                         <th className="text-left px-4 py-2 font-medium">Manufacturer / Model</th>
                         <th className="text-left px-4 py-2 font-medium">Price</th>
                         <th className="text-left px-4 py-2 font-medium">Status</th>
+                        <th className="text-left px-4 py-2 font-medium">Link</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1189,6 +1215,20 @@ export default function ProductPage() {
                             <td className="px-4 py-2 pf-muted">{item.manufacturer} — {item.model_label}</td>
                             <td className="px-4 py-2 font-medium">{price ?? "—"}</td>
                             <td className="px-4 py-2">{statusLabel(a)}</td>
+                            <td className="px-4 py-2">
+                              {item.product_link ? (
+                                <a
+                                  href={item.product_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="pf-link underline underline-offset-2"
+                                >
+                                  View
+                                </a>
+                              ) : (
+                                <span className="pf-faint">—</span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -1207,6 +1247,12 @@ export default function ProductPage() {
                           {price && <span className="text-sm font-medium flex-shrink-0">{price}</span>}
                         </div>
                         <div className="pf-muted text-xs mt-0.5 truncate">{item.manufacturer} — {item.model_label}</div>
+                        {item.product_link && (
+                          <ProductLink
+                            href={item.product_link}
+                            className="pf-link text-[11px] underline underline-offset-2 inline-block mt-0.5"
+                          />
+                        )}
                         <div className="flex items-center justify-between gap-2 mt-1.5">
                           <span className="pf-badge-soft text-[11px] px-2 py-0.5 rounded-full">
                             {spaceNameById.get(a.space) ?? "—"}
@@ -1312,9 +1358,10 @@ export default function ProductPage() {
                         <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
                         {price && <div className="text-sm font-medium mt-1">{price}</div>}
                         {item.product_link && (
-                          <a href={item.product_link} target="_blank" className="pf-link text-xs underline underline-offset-2">
-                            Product link
-                          </a>
+                          <ProductLink
+                            href={item.product_link}
+                            className="pf-link text-xs underline underline-offset-2 inline-block mt-0.5"
+                          />
                         )}
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {stats ? (
