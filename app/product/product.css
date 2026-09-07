@@ -145,3 +145,140 @@ a[aria-disabled="true"] {
 .touch-manipulation {
   touch-action: manipulation;
 }
+
+
+/* Add these styles to your product.css file */
+
+/* ─── Scrollable row with arrows ─────────────────────────────────────── */
+.pf-scroll-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pf-scroll-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #DCE0D8;
+  color: #1C2521;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+}
+
+.pf-scroll-arrow:hover {
+  background: #EDEFEA;
+  border-color: #1C2521;
+}
+
+.pf-scroll-arrow-left {
+  left: -8px;
+}
+
+.pf-scroll-arrow-right {
+  right: -8px;
+}
+
+/* Hide arrows on desktop where content usually fits */
+@media (min-width: 640px) {
+  .pf-scroll-arrow {
+    display: none;
+  }
+}
+
+/* Update scroll row to work better with wrapper */
+.pf-scroll-wrapper .pf-scroll-row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Simple scroll buttons for mobile */
+.pf-scroll-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #DCE0D8;
+  color: #1C2521;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+}
+
+.pf-scroll-btn:hover {
+  background: #EDEFEA;
+  border-color: #1C2521;
+}
+
+.pf-scroll-btn:active {
+  transform: scale(0.95);
+}
+
+/* Scrollable section with side arrows */
+.pf-scroll-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pf-scroll-arrow {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #DCE0D8;
+  color: #1C2521;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
+  touch-action: manipulation;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.pf-scroll-arrow:hover {
+  background: #EDEFEA;
+  border-color: #1C2521;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.pf-scroll-arrow:active {
+  transform: scale(0.95);
+}
+
+.pf-scroll-arrow-left {
+  order: -1;
+}
+
+.pf-scroll-arrow-right {
+  order: 1;
+}
+
+.pf-scroll-container .pf-scroll-row {
+  flex: 1;
+  min-width: 0;
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Fraunces, Inter } from "next/font/google";
 import "./product.css";
 import ProductListPrintButton from "./ProductListPrint";
@@ -53,9 +53,6 @@ const EMPTY_SPACE_FORM = {
   required_categories: [] as string[],
 };
 
-// Shape of the error payloads our API returns on validation failures.
-// Kept intentionally loose (all optional) since different endpoints
-// surface different fields.
 type ApiError = {
   response?: {
     data?: {
@@ -98,7 +95,6 @@ function useDebounced<T>(value: T, delay = 300): T {
   return debounced;
 }
 
-// Sum effective (discounted) price per currency across a set of products.
 function sumByCurrency(products: ProductItem[]): { currency: string; total: number }[] {
   const totals = new Map<string, number>();
   products.forEach((item) => {
@@ -145,12 +141,73 @@ function SkeletonRow() {
   );
 }
 
+// ── Scrollable section with arrow buttons ────────────────────────────────
+interface ScrollableSectionProps {
+  children: React.ReactNode;
+  itemCount: number;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  className?: string;
+}
+
+function ScrollableSection({ children, itemCount, scrollRef, className = "" }: ScrollableSectionProps) {
+  const [showArrows, setShowArrows] = useState(false);
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      const el = scrollRef.current;
+      if (el) {
+        setShowArrows(el.scrollWidth > el.clientWidth);
+      }
+    };
+    
+    checkOverflow();
+    window.addEventListener("resize", checkOverflow);
+    
+    return () => {
+      window.removeEventListener("resize", checkOverflow);
+    };
+  }, [scrollRef, itemCount]);
+
+  const scrollBy = (dir: 1 | -1) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * 280, behavior: "smooth" });
+  };
+
+  return (
+    <div className="pf-scroll-container">
+      {showArrows && (
+        <button
+          onClick={() => scrollBy(-1)}
+          className="pf-scroll-arrow pf-scroll-arrow-left"
+          aria-label="Scroll left"
+        >
+          ‹
+        </button>
+      )}
+      <div ref={scrollRef} className={`pf-scroll-row flex gap-3 overflow-x-auto ${className}`}>
+        {children}
+      </div>
+      {showArrows && (
+        <button
+          onClick={() => scrollBy(1)}
+          className="pf-scroll-arrow pf-scroll-arrow-right"
+          aria-label="Scroll right"
+        >
+          ›
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function ProductPage() {
   const [organisations, setOrganisations] = useState<OrganisationGroup[]>([]);
   const [orgId, setOrgId] = useState<number | null>(null);
   const [projectId, setProjectId] = useState<number | null>(null);
   const [role, setRole] = useState<Role>("architect");
   const [rawRole, setRawRole] = useState<string>("");
+  const [projectSearch, setProjectSearch] = useState("");
 
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceId, setSpaceId] = useState<number | null>(null);
@@ -171,8 +228,6 @@ export default function ProductPage() {
   const [suggestForm, setSuggestForm] = useState(EMPTY_SUGGESTION);
   const [suggestSuccess, setSuggestSuccess] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
-  // When set, the suggest modal is in "edit an existing pending suggestion"
-  // mode instead of "create a new suggestion" mode.
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
 
   const [showSpaceModal, setShowSpaceModal] = useState(false);
@@ -183,16 +238,13 @@ export default function ProductPage() {
   const [decliningNoteId, setDecliningNoteId] = useState<number | null>(null);
   const [declineNoteText, setDeclineNoteText] = useState("");
 
-  // ─── Click-guard ──────────────────────────────────────────────────────
-  // Every button that fires a network request is keyed by a unique string
-  // (e.g. `confirm-42`, `decline-42`, `save-space-7`). While that key is
-  // "busy" only the button that owns it disables itself — a slow request
-  // or an impatient double/triple tap on the SAME button can never fire
-  // twice, but unrelated buttons (a different assignment, a different
-  // space) stay fully usable. runExclusive() is the single choke point:
-  // it no-ops if the key is already running and always clears the key in
-  // a `finally`, so a rejected request can't leave a button stuck.
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
+
+  // Refs for scrollable sections
+  const orgScrollRef = useRef<HTMLDivElement>(null);
+  const projectScrollRef = useRef<HTMLDivElement>(null);
+  const spaceScrollRef = useRef<HTMLDivElement>(null);
+  const summaryScrollRef = useRef<HTMLDivElement>(null);
 
   function isBusy(key: string) {
     return busyKeys.has(key);
@@ -232,8 +284,14 @@ export default function ProductPage() {
 
   const currentOrg = organisations.find((o) => o.id === orgId);
 
-  // View-only mode: members and managers can only view, filter, and print
   const isViewOnly = rawRole === "member" || rawRole === "manager";
+
+  const filteredProjects = useMemo(() => {
+    if (!currentOrg) return [];
+    const term = projectSearch.trim().toLowerCase();
+    if (!term) return currentOrg.projects;
+    return currentOrg.projects.filter((p) => p.name.toLowerCase().includes(term));
+  }, [currentOrg, projectSearch]);
 
   function handleSelectProject(pid: number, projRole: Role, raw: string) {
     setProjectId(pid);
@@ -243,6 +301,7 @@ export default function ProductPage() {
 
   function handleSelectOrg(oid: number) {
     setOrgId(oid);
+    setProjectSearch("");
     const org = organisations.find((o) => o.id === oid);
     const firstProject = org?.projects[0];
     if (firstProject) {
@@ -340,7 +399,6 @@ export default function ProductPage() {
     [assignmentsForSpace, pricedProduct]
   );
 
-
   const spaceNameById = useMemo(() => {
     const map = new Map<number, string>();
     spaces.forEach((s) => map.set(s.id, s.name));
@@ -357,7 +415,7 @@ export default function ProductPage() {
     [summaryAssignments, pricedProduct]
   );
 
-   const summaryPrintRows = useMemo(
+  const summaryPrintRows = useMemo(
     () =>
       summaryAssignments.map((a) => {
         const item = pricedProduct(a.product_detail);
@@ -505,17 +563,9 @@ export default function ProductPage() {
     setShowSuggestModal(true);
   }
 
-  // Opens the same modal pre-filled with an existing pending suggestion's
-  // details, in "edit" mode. Only ever called for items where
-  // canWithdraw is true (role === "client" && status === "pending"), so
-  // there's no separate permission check needed here — the button that
-  // triggers this already gates on that.
   function openEditSuggestion(item: ProductItem) {
     setEditingProductId(item.id);
     setSuggestForm({
-      // The original free-text "space" the client typed isn't part of the
-      // catalog item, so it can't be pre-filled here — it isn't editable
-      // in this flow (the field is hidden while editing, see modal below).
       space: "",
       category: item.category,
       item: item.item,
@@ -602,9 +652,6 @@ export default function ProductPage() {
 
   async function handleWithdrawSuggestion(id: string) {
     await runExclusive(`withdraw-${id}`, async () => {
-      // Optimistically remove it from the catalog right away so the card
-      // disappears instantly instead of waiting on the request — if the
-      // delete fails server-side, put it back.
       const previous = catalogAll;
       setCatalogAll((prev) => prev.filter((p) => p.id !== id));
       try {
@@ -628,6 +675,13 @@ export default function ProductPage() {
     setSpaceForm({ name: space.name, required_categories: [...space.required_categories] });
     setSpaceError(null);
     setShowSpaceModal(true);
+  }
+
+  function openEditSelectedSpace() {
+    const space = spaces.find((s) => s.id === spaceId);
+    if (space) {
+      openEditSpace(space);
+    }
   }
 
   function closeSpaceModal() {
@@ -709,11 +763,11 @@ export default function ProductPage() {
         )}
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-6 sm:py-10 space-y-8 sm:space-y-12">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-6 sm:py-10 space-y-8 sm:space-y-10">
         {/* Organisation */}
         <section>
           <p className="pf-muted text-sm mb-3">Organisation</p>
-          <div className="pf-scroll-row flex gap-2.5 sm:gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
+          <ScrollableSection scrollRef={orgScrollRef} itemCount={organisations.length}>
             {loadingContext ? (
               <>
                 <SkeletonPill /><SkeletonPill /><SkeletonPill />
@@ -731,39 +785,54 @@ export default function ProductPage() {
                 </button>
               ))
             )}
-          </div>
+          </ScrollableSection>
         </section>
 
-        {/* Project — active ones (has_assignments) surface first, highlighted */}
+        {/* Project with search */}
         {!loadingContext && currentOrg && (
           <section>
-            <p className="pf-muted text-sm mb-3">Project</p>
-            <div className="pf-scroll-row flex gap-3 sm:gap-4 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
-              {currentOrg.projects.map((p) => {
-                const active = p.id === projectId;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => handleSelectProject(p.id, roleToUiRole(p.role), p.role)}
-                    className={`touch-manipulation relative text-left flex-shrink-0 min-w-[190px] sm:min-w-[220px] rounded-2xl border px-4 sm:px-5 py-3.5 sm:py-4 ${
-                      active ? "pf-project-card-active" : "pf-project-card-inactive"
-                    }`}
-                  >
-                    {p.has_assignments && (
-                      <span className="pf-badge-count absolute -top-2 -right-2 text-[10px] px-2 py-0.5 rounded-full shadow-sm">
-                        {p.assignment_count} item{p.assignment_count === 1 ? "" : "s"}
-                      </span>
-                    )}
-                    <span className="font-[var(--font-display)] text-base sm:text-lg block truncate">{p.name}</span>
-                    <span className="pf-muted text-xs capitalize">Your role: {p.role}</span>
-                  </button>
-                );
-              })}
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <p className="pf-muted text-sm">Project</p>
+              {currentOrg.projects.length > 5 && (
+                <input
+                  type="text"
+                  value={projectSearch}
+                  onChange={(e) => setProjectSearch(e.target.value)}
+                  placeholder="Search projects…"
+                  className="pf-input px-3 py-1.5 rounded-full text-xs w-40 sm:w-48"
+                />
+              )}
             </div>
+            <ScrollableSection scrollRef={projectScrollRef} itemCount={filteredProjects.length}>
+              {filteredProjects.length === 0 ? (
+                <p className="pf-muted text-sm">No projects match &quot;{projectSearch}&quot;.</p>
+              ) : (
+                filteredProjects.map((p) => {
+                  const active = p.id === projectId;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleSelectProject(p.id, roleToUiRole(p.role), p.role)}
+                      className={`touch-manipulation relative text-left flex-shrink-0 min-w-[190px] sm:min-w-[220px] rounded-2xl border px-4 sm:px-5 py-3.5 sm:py-4 ${
+                        active ? "pf-project-card-active" : "pf-project-card-inactive"
+                      }`}
+                    >
+                      {p.has_assignments && (
+                        <span className="pf-badge-count absolute -top-2 -right-2 text-[10px] px-2 py-0.5 rounded-full shadow-sm">
+                          {p.assignment_count} item{p.assignment_count === 1 ? "" : "s"}
+                        </span>
+                      )}
+                      <span className="font-[var(--font-display)] text-base sm:text-lg block truncate">{p.name}</span>
+                      <span className="pf-muted text-xs capitalize">Your role: {p.role}</span>
+                    </button>
+                  );
+                })
+              )}
+            </ScrollableSection>
           </section>
         )}
 
-        {/* Spaces — with add / edit / delete */}
+        {/* Spaces with unified edit button */}
         {projectId && (
           <section>
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -771,16 +840,26 @@ export default function ProductPage() {
                 {loadingProjectData ? "Loading spaces…" : `Spaces · ${fullySpecifiedCount} of ${spaces.length} fully specified`}
               </p>
               {!isViewOnly && (
-                <button
-                  onClick={openAddSpace}
-                  className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-1.5 text-sm flex-shrink-0"
-                >
-                  Add space
-                </button>
+                <div className="flex gap-2">
+                  {spaceId && spaces.length > 0 && (
+                    <button
+                      onClick={openEditSelectedSpace}
+                      className="touch-manipulation pf-btn-outline rounded-full px-4 py-1.5 text-sm flex-shrink-0"
+                    >
+                      Edit selected
+                    </button>
+                  )}
+                  <button
+                    onClick={openAddSpace}
+                    className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-1.5 text-sm flex-shrink-0"
+                  >
+                    Add space
+                  </button>
+                </div>
               )}
             </div>
 
-            <div className="pf-scroll-row flex gap-2.5 sm:gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
+            <ScrollableSection scrollRef={spaceScrollRef} itemCount={spaces.length}>
               {loadingProjectData ? (
                 <><SkeletonPill /><SkeletonPill /><SkeletonPill /></>
               ) : spaces.length === 0 ? (
@@ -792,33 +871,24 @@ export default function ProductPage() {
                   const active = s.id === spaceId;
                   const prog = spaceProgress(s);
                   return (
-                    <div key={s.id} className="flex items-stretch gap-1.5 flex-shrink-0">
-                      <button
-                        onClick={() => setSpaceId(s.id)}
-                        className={`touch-manipulation flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${
-                          active ? "pf-space-pill-active" : "pf-space-pill"
-                        }`}
-                      >
-                        {s.name}
-                        {prog.total > 0 && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "pf-badge-soft-on-active" : "pf-badge-soft"}`}>
-                            {prog.confirmed}/{prog.total}
-                          </span>
-                        )}
-                      </button>
-                      {!isViewOnly && (
-                        <button
-                          onClick={() => openEditSpace(s)}
-                          className="touch-manipulation pf-btn-outline rounded-full px-3 py-2 sm:py-2.5 text-xs flex-shrink-0"
-                        >
-                          Edit
-                        </button>
+                    <button
+                      key={s.id}
+                      onClick={() => setSpaceId(s.id)}
+                      className={`touch-manipulation flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${
+                        active ? "pf-space-pill-active" : "pf-space-pill"
+                      }`}
+                    >
+                      {s.name}
+                      {prog.total > 0 && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "pf-badge-soft-on-active" : "pf-badge-soft"}`}>
+                          {prog.confirmed}/{prog.total}
+                        </span>
                       )}
-                    </div>
+                    </button>
                   );
                 })
               )}
-            </div>
+            </ScrollableSection>
           </section>
         )}
 
@@ -914,7 +984,7 @@ export default function ProductPage() {
                           <img
                             src={getImageSource(item.product_image)}
                             alt={item.item}
-                            className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover flex-shrink-0"
+                            className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-contain bg-white flex-shrink-0"
                           />
                           <div className="flex-1 min-w-0">
                             <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight truncate">{item.item}</div>
@@ -974,7 +1044,6 @@ export default function ProductPage() {
                         </div>
                       </div>
 
-                      {/* Reason shown to both sides once this item has been declined. */}
                       {a.declined && a.declined_note && (
                         <div className="pf-empty-dashed rounded-xl px-4 py-2.5 text-sm">
                           <span className="pf-faint text-xs uppercase tracking-wide block mb-0.5">Decline note</span>
@@ -982,7 +1051,6 @@ export default function ProductPage() {
                         </div>
                       )}
 
-                      {/* Inline "add an optional note" box, opened by the Decline button above. */}
                       {noteBoxOpen && (
                         <div className="pf-empty-dashed rounded-xl px-4 py-3 space-y-2">
                           <label className="text-xs pf-muted block">
@@ -1022,7 +1090,7 @@ export default function ProductPage() {
           </section>
         )}
 
-        {/* All spaces — combined list, filterable by space, printable */}
+        {/* All spaces combined list */}
         {projectId && spaces.length > 0 && (
           <section>
             <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
@@ -1051,7 +1119,7 @@ export default function ProductPage() {
                   <button onClick={clearSummarySpaces} className="touch-manipulation pf-link">Clear</button>
                 </div>
               </div>
-              <div className="pf-scroll-row flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
+              <ScrollableSection scrollRef={summaryScrollRef} itemCount={spaces.length}>
                 {spaces.map((s) => {
                   const checked = summarySpaceIds.has(s.id);
                   return (
@@ -1071,7 +1139,7 @@ export default function ProductPage() {
                     </label>
                   );
                 })}
-              </div>
+              </ScrollableSection>
             </div>
 
             {summaryTotals.length > 0 && (
@@ -1092,7 +1160,6 @@ export default function ProductPage() {
               </div>
             ) : (
               <div className="pf-row rounded-2xl overflow-hidden">
-                {/* Desktop / tablet: table */}
                 <div className="pf-table-wrap overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1122,7 +1189,6 @@ export default function ProductPage() {
                   </table>
                 </div>
 
-                {/* Mobile: stacked cards, same data */}
                 <div className="pf-summary-cards">
                   {summaryAssignments.map((a) => {
                     const item = pricedProduct(a.product_detail);
@@ -1214,12 +1280,6 @@ export default function ProductPage() {
                   const price = formatPrice(item);
                   const count = selectedCountsForSpace.get(item.id) ?? 0;
                   const isPending = item.status === "pending";
-                  // Editing and withdrawing a suggestion share the same
-                  // permission: the client who can see it as "not approved
-                  // yet" is the only one allowed to touch it, and only
-                  // while it's still pending. Once an admin approves it
-                  // (status flips away from "pending"), both buttons stop
-                  // showing — same as the existing withdraw behaviour.
                   const canWithdraw = !isViewOnly && role === "client" && isPending;
                   const proposeKey = `propose-${item.id}`;
                   const withdrawKey = `withdraw-${item.id}`;
@@ -1227,8 +1287,14 @@ export default function ProductPage() {
                   const isWithdrawing = isBusy(withdrawKey);
                   return (
                     <div key={item.id} className="pf-card rounded-2xl overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={getImageSource(item.product_image)} alt={item.item} className="w-full h-36 sm:h-40 object-cover" />
+                      <div className="w-full h-36 sm:h-40 bg-white flex items-center justify-center p-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={getImageSource(item.product_image)}
+                          alt={item.item}
+                          className="max-w-full max-h-full object-contain"
+                        />
+                      </div>
                       <div className="p-3.5 sm:p-4">
                         <div className="font-[var(--font-display)] text-base truncate">{item.item}</div>
                         {isPending && (
@@ -1306,7 +1372,7 @@ export default function ProductPage() {
         )}
       </main>
 
-      {/* ── Suggest / edit-a-product modal ──────────────────────────────── */}
+      {/* Modals remain the same */}
       {showSuggestModal && !isViewOnly && (
         <div
           className="pf-modal-overlay fixed inset-0 flex items-end sm:items-center justify-center z-20 px-0 sm:px-4"
@@ -1472,7 +1538,6 @@ export default function ProductPage() {
         </div>
       )}
 
-      {/* ── Space manager modal (add / edit / delete) ────────────────────── */}
       {showSpaceModal && !isViewOnly && (
         <div
           className="pf-modal-overlay fixed inset-0 flex items-end sm:items-center justify-center z-20 px-0 sm:px-4"

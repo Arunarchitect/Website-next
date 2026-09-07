@@ -1,7 +1,7 @@
 "use client";
 
 import "./page.css";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   AdminProduct,
   ProductFormValues,
@@ -103,6 +103,116 @@ function statusBadgeClass(status: AdminProduct["status"]) {
   if (status === "approved") return "pm-badge pm-badge-approved";
   if (status === "rejected") return "pm-badge pm-badge-rejected";
   return "pm-badge pm-badge-pending";
+}
+
+// ─── Styled file chooser ───────────────────────────────────────────────
+// Wraps a hidden native <input type="file"> with a nicer pill button +
+// filename/thumbnail preview. Also listens for paste (Ctrl+V) so a file
+// copied from the OS file explorer, or an image copied from anywhere,
+// can be dropped in without opening the browse dialog.
+type FileChooserProps = {
+  id: string;
+  accept: string;
+  disabled?: boolean;
+  onFileSelected: (file: File) => void;
+  file?: File | null;
+  existingPreviewUrl?: string | null;
+  placeholder: string;
+  hint?: string;
+  variant?: "image" | "file";
+};
+
+function FileChooser({
+  id,
+  accept,
+  disabled,
+  onFileSelected,
+  file,
+  existingPreviewUrl,
+  placeholder,
+  hint = "or paste with Ctrl+V",
+  variant = "file",
+}: FileChooserProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (variant !== "image" || !file) {
+      setObjectUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setObjectUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, variant]);
+
+  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (disabled) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === "file") {
+        const pasted = item.getAsFile();
+        if (pasted) {
+          onFileSelected(pasted);
+          e.preventDefault();
+          break;
+        }
+      }
+    }
+  }
+
+  const previewSrc = variant === "image" ? objectUrl || existingPreviewUrl || null : null;
+
+  return (
+    <div
+      className={`pm-file-chooser${focused ? " pm-file-chooser-focused" : ""}${
+        disabled ? " pm-file-chooser-disabled" : ""
+      }`}
+      tabIndex={disabled ? -1 : 0}
+      onPaste={handlePaste}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+    >
+      {variant === "image" && (
+        <div className="pm-file-thumb-wrap">
+          {previewSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={previewSrc} alt="" className="pm-file-thumb" />
+          ) : (
+            <span className="pm-file-thumb-placeholder">No image</span>
+          )}
+        </div>
+      )}
+      <div className="pm-file-chooser-main">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => inputRef.current?.click()}
+          className="pm-file-button"
+        >
+          {placeholder}
+        </button>
+        <span className="pm-file-name">{file ? file.name : "No file chosen"}</span>
+        <span className="pm-file-hint">{hint}</span>
+      </div>
+      <input
+        ref={inputRef}
+        id={id}
+        type="file"
+        accept={accept}
+        disabled={disabled}
+        className="pm-file-input-hidden"
+        onChange={(e) => {
+          const selected = e.target.files?.[0];
+          if (selected) onFileSelected(selected);
+          e.target.value = "";
+        }}
+      />
+    </div>
+  );
 }
 
 export default function ProductManagePage() {
@@ -552,16 +662,17 @@ export default function ProductManagePage() {
               </button>
             </div>
           ) : (
-            <input
-              type="file"
-              accept=".ifc,.ifczip,.ifcxml"
-              disabled={isBusy(uploadIfcKey)}
-              className="text-xs mt-1 disabled:opacity-40"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleUploadIfc(p.id, file);
-              }}
-            />
+            <div className="mt-1">
+              <FileChooser
+                id={`ifc-input-${p.id}`}
+                accept=".ifc,.ifczip,.ifcxml"
+                disabled={isBusy(uploadIfcKey)}
+                placeholder={isBusy(uploadIfcKey) ? "Uploading…" : "Choose IFC file"}
+                hint="or paste with Ctrl+V"
+                variant="file"
+                onFileSelected={(file) => handleUploadIfc(p.id, file)}
+              />
+            </div>
           )}
         </div>
       </>
@@ -796,15 +907,19 @@ export default function ProductManagePage() {
                             className="border border-[#DCE0D8] rounded-lg px-3 py-2"
                           />
                         </label>
-                        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                          Product image
-                          <input
-                            type="file"
+                        <div className="flex flex-col gap-1 text-sm sm:col-span-2">
+                          <span>Product image</span>
+                          <FileChooser
+                            id="product-image-input"
                             accept="image/*"
-                            onChange={(e) => setForm({ ...form, product_image: e.target.files?.[0] ?? null })}
-                            className="text-sm"
+                            variant="image"
+                            placeholder="Choose image"
+                            hint="or paste with Ctrl+V"
+                            file={form.product_image}
+                            existingPreviewUrl={editingProduct ? getImageSource(editingProduct.product_image) : null}
+                            onFileSelected={(file) => setForm({ ...form, product_image: file })}
                           />
-                        </label>
+                        </div>
                       </div>
                       <div className="flex gap-3">
                         <button

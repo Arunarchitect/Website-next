@@ -47,11 +47,11 @@ function formatTotalLine(t: PrintableTotal): string {
 
 async function preloadImages(rows: PrintableRow[]): Promise<Map<string, string>> {
   const imageCache = new Map<string, string>();
-  
+
   await Promise.all(
     rows.map(async (row) => {
       if (!row.imageSrc) return;
-      
+
       try {
         // Fetch the image as a blob to avoid CORS/auth issues
         const response = await fetch(row.imageSrc);
@@ -66,7 +66,7 @@ async function preloadImages(rows: PrintableRow[]): Promise<Map<string, string>>
       }
     })
   );
-  
+
   return imageCache;
 }
 
@@ -81,7 +81,7 @@ function buildPrintHtml(props: ProductListPrintProps, imageCache: Map<string, st
       const imageHtml = imageUrl
         ? `<td class="thumb"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(r.item)}" /></td>`
         : `<td class="thumb"><div class="thumb-placeholder">—</div></td>`;
-      
+
       return `
         <tr>
           ${imageHtml}
@@ -122,14 +122,16 @@ function buildPrintHtml(props: ProductListPrintProps, imageCache: Map<string, st
   td.price { font-weight: 600; white-space: nowrap; }
   .capitalize { text-transform: capitalize; }
   .thumb { width: 60px; text-align: center; }
-  .thumb img {
-    width: 50px;
-    height: 50px;
-    object-fit: cover;
-    border-radius: 6px;
-    display: block;
-    margin: 0 auto;
-  }
+  /* In ProductListPrint.tsx, update the thumbnail styles */
+.thumb img {
+  width: 50px;
+  height: 50px;
+  object-fit: contain; /* Changed from cover to contain */
+  border-radius: 6px;
+  display: block;
+  margin: 0 auto;
+  background: #fff; /* Add white background for transparent images */
+}
   .thumb-placeholder {
     width: 50px;
     height: 50px;
@@ -159,8 +161,7 @@ function buildPrintHtml(props: ProductListPrintProps, imageCache: Map<string, st
     <p class="meta">Generated ${escapeHtml(generatedAt)}</p>
   </header>
 
-  ${
-    rows.length
+  ${rows.length
       ? `<table>
           <thead>
             <tr>
@@ -173,7 +174,7 @@ function buildPrintHtml(props: ProductListPrintProps, imageCache: Map<string, st
         </table>
         <div class="totals">${totalsHtml}</div>`
       : `<p>No products in this selection.</p>`
-  }
+    }
 
   <footer>Modelflick — fixture &amp; product assignment</footer>
 </body>
@@ -184,22 +185,22 @@ export async function printProductList(props: ProductListPrintProps) {
   // Preload all images first to avoid CORS/auth issues
   const imageCache = await preloadImages(props.rows);
   const html = buildPrintHtml(props, imageCache);
-  
+
   const printWindow = window.open("", "_blank", "width=900,height=1000");
   if (!printWindow) {
     // Clean up object URLs if popup blocked
     imageCache.forEach((url) => URL.revokeObjectURL(url));
     return;
   }
-  
+
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
-  
+
   printWindow.onload = () => {
     printWindow.focus();
     printWindow.print();
-    
+
     // Clean up object URLs after print dialog closes
     setTimeout(() => {
       imageCache.forEach((url) => URL.revokeObjectURL(url));

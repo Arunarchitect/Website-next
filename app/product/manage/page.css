@@ -165,3 +165,109 @@
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
 }
+
+/* ─── Styled file choosers (product image / IFC upload) ─────────── */
+/* Custom wrapper around a hidden native <input type="file">. Focusable
+   (tabIndex) so it can catch a Ctrl+V paste of a copied file/image
+   without needing the browse dialog open. */
+.pm-file-chooser {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px dashed var(--pm-border);
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: #FAFBF9;
+  outline: none;
+  cursor: default;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+.pm-file-chooser:hover {
+  border-color: #B7C2BC;
+}
+.pm-file-chooser-focused {
+  border-color: #2F6E62;
+  background: #F1F7F5;
+  box-shadow: 0 0 0 3px rgba(47, 110, 98, 0.12);
+}
+.pm-file-chooser-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pm-file-thumb-wrap {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #EDEFEA;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pm-file-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pm-file-thumb-placeholder {
+  font-size: 0.5625rem;
+  color: var(--pm-muted);
+  text-align: center;
+  padding: 0 0.25rem;
+}
+
+.pm-file-chooser-main {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.pm-file-button {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #fff;
+  background: #2F6E62;
+  border-radius: 9999px;
+  padding: 0.4rem 0.875rem;
+  flex-shrink: 0;
+  transition: background-color 120ms ease;
+}
+.pm-file-button:hover:not(:disabled) {
+  background: #275B51;
+}
+.pm-file-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pm-file-name {
+  font-size: 0.75rem;
+  color: var(--pm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+.pm-file-hint {
+  font-size: 0.6875rem;
+  color: var(--pm-muted);
+  white-space: nowrap;
+}
+
+.pm-file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
