@@ -15,6 +15,7 @@ export interface PrintableRow {
   priceLabel: string | null;
   status: string;
   proposed_by: string;
+  imageSrc?: string | null;
 }
 
 export interface PrintableTotal {
@@ -44,23 +45,54 @@ function formatTotalLine(t: PrintableTotal): string {
   return `${t.currency} ${t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
-function buildPrintHtml(props: ProductListPrintProps): string {
+async function preloadImages(rows: PrintableRow[]): Promise<Map<string, string>> {
+  const imageCache = new Map<string, string>();
+  
+  await Promise.all(
+    rows.map(async (row) => {
+      if (!row.imageSrc) return;
+      
+      try {
+        // Fetch the image as a blob to avoid CORS/auth issues
+        const response = await fetch(row.imageSrc);
+        if (response.ok) {
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          imageCache.set(row.imageSrc, objectUrl);
+        }
+      } catch (err) {
+        // Silently fail - image just won't show in print
+        console.warn(`Failed to preload image: ${row.imageSrc}`, err);
+      }
+    })
+  );
+  
+  return imageCache;
+}
+
+function buildPrintHtml(props: ProductListPrintProps, imageCache: Map<string, string>): string {
   const { orgName, projectName, scopeLabel, rows, totals } = props;
   const generatedAt = new Date().toLocaleString("en-IN");
   const showSpaceColumn = rows.some((r) => r.space);
 
   const rowsHtml = rows
-    .map(
-      (r) => `
+    .map((r) => {
+      const imageUrl = r.imageSrc ? imageCache.get(r.imageSrc) || r.imageSrc : null;
+      const imageHtml = imageUrl
+        ? `<td class="thumb"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(r.item)}" /></td>`
+        : `<td class="thumb"><div class="thumb-placeholder">—</div></td>`;
+      
+      return `
         <tr>
+          ${imageHtml}
           ${showSpaceColumn ? `<td>${escapeHtml(r.space ?? "")}</td>` : ""}
           <td>${escapeHtml(r.item)}</td>
           <td>${escapeHtml(r.manufacturer)} — ${escapeHtml(r.model_label)}</td>
           <td class="price">${r.priceLabel ? escapeHtml(r.priceLabel) : "—"}</td>
           <td>${escapeHtml(r.status)}</td>
           <td class="capitalize">${escapeHtml(r.proposed_by)}</td>
-        </tr>`
-    )
+        </tr>`;
+    })
     .join("");
 
   const totalsHtml = totals.length
@@ -85,16 +117,38 @@ function buildPrintHtml(props: ProductListPrintProps): string {
   h1 { font-size: 20px; margin: 0 0 4px 0; }
   .meta { font-size: 12px; color: #6B7570; }
   table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-  th, td { text-align: left; padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #DCE0D8; }
+  th, td { text-align: left; padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #DCE0D8; vertical-align: middle; }
   th { background: #EDEFEA; font-weight: 600; }
   td.price { font-weight: 600; white-space: nowrap; }
   .capitalize { text-transform: capitalize; }
+  .thumb { width: 60px; text-align: center; }
+  .thumb img {
+    width: 50px;
+    height: 50px;
+    object-fit: cover;
+    border-radius: 6px;
+    display: block;
+    margin: 0 auto;
+  }
+  .thumb-placeholder {
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #EDEFEA;
+    border-radius: 6px;
+    color: #8A938E;
+    font-size: 16px;
+    margin: 0 auto;
+  }
   .totals { margin-top: 20px; text-align: right; }
   .total-line { font-size: 14px; margin-top: 4px; }
   footer { margin-top: 32px; font-size: 10px; color: #8A938E; }
   @media print {
     body { padding: 12mm; }
     header { break-inside: avoid; }
+    .thumb img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 </head>
@@ -110,6 +164,7 @@ function buildPrintHtml(props: ProductListPrintProps): string {
       ? `<table>
           <thead>
             <tr>
+              <th class="thumb">Image</th>
               ${showSpaceColumn ? "<th>Space</th>" : ""}
               <th>Item</th><th>Manufacturer / Model</th><th>Price</th><th>Status</th><th>Proposed by</th>
             </tr>
@@ -125,16 +180,30 @@ function buildPrintHtml(props: ProductListPrintProps): string {
 </html>`;
 }
 
-export function printProductList(props: ProductListPrintProps) {
-  const html = buildPrintHtml(props);
+export async function printProductList(props: ProductListPrintProps) {
+  // Preload all images first to avoid CORS/auth issues
+  const imageCache = await preloadImages(props.rows);
+  const html = buildPrintHtml(props, imageCache);
+  
   const printWindow = window.open("", "_blank", "width=900,height=1000");
-  if (!printWindow) return; // popup blocked — caller can surface a message if desired
+  if (!printWindow) {
+    // Clean up object URLs if popup blocked
+    imageCache.forEach((url) => URL.revokeObjectURL(url));
+    return;
+  }
+  
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
+  
   printWindow.onload = () => {
     printWindow.focus();
     printWindow.print();
+    
+    // Clean up object URLs after print dialog closes
+    setTimeout(() => {
+      imageCache.forEach((url) => URL.revokeObjectURL(url));
+    }, 1000);
   };
 }
 

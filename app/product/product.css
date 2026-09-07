@@ -79,14 +79,19 @@
 .pf-selected-badge { background: #2F6E62; color: #fff; }
 
 /* Buttons */
-.pf-btn-primary { background: #1C2521; color: #fff; }
-.pf-btn-accent { background: #2F6E62; color: #fff; }
-.pf-btn-outline { border: 1px solid #DCE0D8; color: #1C2521; background: #fff; }
+.pf-btn-primary { background: #1C2521; color: #fff; transition: opacity 0.15s ease; }
+.pf-btn-accent { background: #2F6E62; color: #fff; transition: opacity 0.15s ease; }
+.pf-btn-outline { border: 1px solid #DCE0D8; color: #1C2521; background: #fff; transition: background-color 0.15s ease; }
 .pf-btn-outline:hover { background: #EDEFEA; }
-.pf-btn-outline-accent { border: 1px solid #2F6E62; color: #2F6E62; background: #fff; }
+.pf-btn-outline-accent { border: 1px solid #2F6E62; color: #2F6E62; background: #fff; transition: background-color 0.15s ease; }
 .pf-btn-outline-accent:hover { background: #E4EFEB; }
-.pf-btn-danger-outline { border: 1px solid #DCE0D8; color: #6B7570; background: #fff; }
+.pf-btn-danger-outline { border: 1px solid #DCE0D8; color: #6B7570; background: #fff; transition: border-color 0.15s ease, color 0.15s ease; }
 .pf-btn-danger-outline:hover { border-color: #dc2626; color: #dc2626; }
+
+button:disabled,
+a[aria-disabled="true"] {
+  cursor: not-allowed;
+}
 
 .pf-link { color: #2F6E62; background: none; border: none; padding: 0; cursor: pointer; }
 .pf-link:hover { text-decoration: underline; }
@@ -96,6 +101,7 @@
 .pf-modal { background: #fff; }
 .pf-input { border: 1px solid #DCE0D8; }
 .pf-input:focus { border-color: #2F6E62; outline: none; }
+.pf-input:disabled { background: #F5F6F3; }
 .pf-error-box { color: #dc2626; background: #fef2f2; border: 1px solid #fee2e2; }
 .pf-success-text { color: #2F6E62; }
 
@@ -105,6 +111,37 @@
 .pf-checkbox-label-active { border-color: #2F6E62; background: #E4EFEB; color: #2F6E62; }
 .pf-checkbox-input { accent-color: #2F6E62; }
 
-/* All-spaces summary table */
+/* All-spaces summary table (desktop/tablet) vs. stacked cards (mobile) */
 .pf-table-head { background: #EDEFEA; }
 .pf-table-row:not(:last-child) { border-bottom: 1px solid #DCE0D8; }
+
+.pf-table-wrap { display: none; }
+.pf-summary-cards { display: block; }
+@media (min-width: 640px) {
+  .pf-table-wrap { display: block; }
+  .pf-summary-cards { display: none; }
+}
+.pf-summary-card {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #DCE0D8;
+}
+.pf-summary-card:last-child { border-bottom: none; }
+
+/* ─── Mobile scroll rows ─────────────────────────────────────────────── */
+/* Org / project / space pill rows scroll horizontally with a light snap
+   on phones (where sm:flex-wrap hasn't kicked in yet), instead of wrapping
+   into a cramped multi-line block. */
+.pf-scroll-row {
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.pf-scroll-row::-webkit-scrollbar { display: none; }
+.pf-scroll-row > * { scroll-snap-align: start; }
+
+/* Prevents the double-tap-to-zoom delay on touch devices for anything
+   marked touch-manipulation (all clickable buttons/links on this page) —
+   removes a source of accidental double-fires on mobile taps. */
+.touch-manipulation {
+  touch-action: manipulation;
+}

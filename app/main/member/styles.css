@@ -1212,3 +1212,115 @@
     font-size: 13px;
   }
 }
+
+
+/* Products button styles */
+.user-profile-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.btn-products {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--blue);
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.03em;
+}
+
+.btn-products:hover {
+  background: var(--blue-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-products:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.btn-products i {
+  font-size: 16px;
+}
+
+/* Products CTA section */
+.products-cta-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+  background: rgba(44, 95, 138, 0.03);
+  border: 1px solid rgba(44, 95, 138, 0.15);
+  border-radius: 4px;
+}
+
+.btn-products-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(44, 95, 138, 0.2);
+  align-self: flex-start;
+  font-family: var(--font-display), sans-serif;
+}
+
+.btn-products-primary:hover {
+  background: linear-gradient(135deg, var(--blue-deep), var(--blue));
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(44, 95, 138, 0.3);
+}
+
+.btn-products-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(44, 95, 138, 0.2);
+}
+
+.btn-products-primary i {
+  font-size: 18px;
+}
+
+.products-cta-description {
+  margin: 0;
+  font-size: 13px;
+  color: var(--slate);
+  font-family: var(--font-mono), monospace;
+  letter-spacing: 0.03em;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .user-profile-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  
+  .btn-products {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .btn-products-primary {
+    width: 100%;
+    justify-content: center;
+  }
+}

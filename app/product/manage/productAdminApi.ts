@@ -90,7 +90,9 @@ export interface ProductFormValues {
 // ─── Admin scope: orgs/projects THIS user administers ──────────────────
 // Used to populate dropdowns for project/org pricing instead of free-text
 // IDs, so a user can only ever attach pricing to something they actually
-// administer.
+// administer. The manage page also uses this to HIDE pricing rows that
+// belong to organisations/projects the current user does not administer —
+// they should not be visible, let alone editable, to anyone else.
 export interface AdminOrganisation {
   id: number;
   name: string;
@@ -225,6 +227,16 @@ export async function addProjectPricing(
   const res = await apiClient.post('/product/project-pricing/', { ...data, product: productId, project: projectId });
   return res.data;
 }
+
+export async function updateProjectPricing(
+  id: number,
+  projectId: number,
+  data: Partial<Pick<ProjectPricing, 'discounted_price' | 'discount_percentage' | 'notes'>>
+): Promise<ProjectPricing> {
+  const res = await apiClient.patch(`/product/project-pricing/${id}/`, { ...data, project: projectId });
+  return res.data;
+}
+
 export async function deleteProjectPricing(id: number): Promise<void> {
   await apiClient.delete(`/product/project-pricing/${id}/`);
 }
@@ -237,6 +249,16 @@ export async function addOrganisationPricing(
   const res = await apiClient.post('/product/organisation-pricing/', { ...data, product: productId, organisation: organisationId });
   return res.data;
 }
+
+export async function updateOrganisationPricing(
+  id: number,
+  organisationId: number,
+  data: Partial<Pick<OrganisationPricing, 'discounted_price' | 'discount_percentage'>>
+): Promise<OrganisationPricing> {
+  const res = await apiClient.patch(`/product/organisation-pricing/${id}/`, { ...data, organisation: organisationId });
+  return res.data;
+}
+
 export async function deleteOrganisationPricing(id: number): Promise<void> {
   await apiClient.delete(`/product/organisation-pricing/${id}/`);
 }

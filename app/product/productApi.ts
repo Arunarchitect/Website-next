@@ -241,6 +241,32 @@ export async function suggestProduct(input: ProductSuggestionInput): Promise<Pro
   return res.data;
 }
 
+// Edit an existing suggestion. Server-side this should only be permitted
+// while the product is still `status === "pending"` — once an org admin
+// approves it, the backend should reject further edits from the client
+// (mirrors the existing rule for deleteProductSuggestion). Only send the
+// fields that changed; omit product_image entirely if the client didn't
+// pick a new file so the existing image isn't cleared.
+export async function updateProductSuggestion(
+  id: string,
+  input: Partial<Omit<ProductSuggestionInput, 'space' | 'organisation'>>
+): Promise<ProductItem> {
+  const fd = new FormData();
+  if (input.category !== undefined) fd.append('category', input.category);
+  if (input.item !== undefined) fd.append('item', input.item);
+  if (input.manufacturer !== undefined) fd.append('manufacturer', input.manufacturer);
+  if (input.model_label !== undefined) fd.append('model_label', input.model_label);
+  if (input.base_price !== undefined) fd.append('base_price', input.base_price);
+  if (input.currency !== undefined) fd.append('currency', input.currency);
+  if (input.product_link !== undefined) fd.append('product_link', input.product_link);
+  if (input.product_image) fd.append('product_image', input.product_image);
+
+  const res = await apiClient.patch(`/product/products/${id}/`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+}
+
 // Withdraw a product from the catalog. Server-side (CanDeleteProduct) only
 // allows this for an org admin (any status) or for the original suggester
 // while the product is still pending — once an org admin approves it, the

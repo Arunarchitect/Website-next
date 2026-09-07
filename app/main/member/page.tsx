@@ -54,8 +54,6 @@ const normalizePriority = (priority: string): string => {
   return priorityMap[priority?.toLowerCase?.()] || priority;
 };
 
-
-
 export default function MemberDashboardPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -154,11 +152,8 @@ export default function MemberDashboardPage() {
     fetchAssignedToMe();
   }, [selectedOrganisation, loadingOrganisations, currentUser]);
 
-
   useEffect(() => {
     if (loadingOrganisations) return;
-
-    
 
     const fetchMeetingsCount = async () => {
       try {
@@ -232,6 +227,10 @@ export default function MemberDashboardPage() {
             <i className="ti ti-bug" aria-hidden="true" />
             <span>Issues</span>
           </Link>
+          <Link href="/product" className="member-nav-link">
+            <i className="ti ti-package" aria-hidden="true" />
+            <span>Products</span>
+          </Link>
         </nav>
       </header>
 
@@ -249,6 +248,18 @@ export default function MemberDashboardPage() {
               <i className="ti ti-user-check" />
               Member
             </span>
+          </div>
+          {/* Products button */}
+          <div className="user-profile-actions">
+            <button
+              onClick={() => router.push("/product")}
+              className="btn-products"
+              aria-label="Go to Products page"
+            >
+              <i className="ti ti-package" aria-hidden="true" />
+              <span>Products</span>
+              <i className="ti ti-arrow-right" aria-hidden="true" />
+            </button>
           </div>
         </div>
       )}
@@ -321,6 +332,22 @@ export default function MemberDashboardPage() {
                 <p className="stat-value">{loadingMeetings ? "—" : upcomingMeetingsCount}</p>
               </div>
             </Link>
+          </div>
+
+          {/* Products button */}
+          <div className="products-cta-section">
+            <button
+              onClick={() => router.push("/product")}
+              className="btn-products-primary"
+              aria-label="Go to Products page"
+            >
+              <i className="ti ti-package" aria-hidden="true" />
+              <span>View Products</span>
+              <i className="ti ti-arrow-right" aria-hidden="true" />
+            </button>
+            <p className="products-cta-description">
+              Browse and view product fixtures assigned to your projects
+            </p>
           </div>
 
           {error && (

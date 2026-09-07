@@ -26,6 +26,7 @@ import {
   declineAssignment,
   undeclineAssignment,
   suggestProduct,
+  updateProductSuggestion,
   deleteProductSuggestion,
   createSpace,
   updateSpace,
@@ -117,13 +118,13 @@ function formatTotal(t: { currency: string; total: number }): string {
 
 // ── Skeletons ────────────────────────────────────────────────────────────
 function SkeletonPill() {
-  return <div className="pf-skeleton h-9 w-28 rounded-full animate-pulse" />;
+  return <div className="pf-skeleton h-9 w-28 rounded-full animate-pulse flex-shrink-0" />;
 }
 function SkeletonCard() {
   return (
     <div className="pf-card rounded-2xl overflow-hidden">
-      <div className="pf-skeleton-light w-full h-40 animate-pulse" />
-      <div className="p-4 space-y-2">
+      <div className="pf-skeleton-light w-full h-36 sm:h-40 animate-pulse" />
+      <div className="p-3.5 sm:p-4 space-y-2">
         <div className="pf-skeleton-light h-4 w-3/4 rounded animate-pulse" />
         <div className="pf-skeleton-light h-3 w-1/2 rounded animate-pulse" />
         <div className="pf-skeleton-light h-3 w-1/3 rounded animate-pulse" />
@@ -134,8 +135,8 @@ function SkeletonCard() {
 }
 function SkeletonRow() {
   return (
-    <div className="pf-row flex items-center gap-5 rounded-2xl px-5 py-4">
-      <div className="pf-skeleton-light w-20 h-20 rounded-xl animate-pulse flex-shrink-0" />
+    <div className="pf-row flex items-center gap-4 sm:gap-5 rounded-2xl px-4 sm:px-5 py-4">
+      <div className="pf-skeleton-light w-16 h-16 sm:w-20 sm:h-20 rounded-xl animate-pulse flex-shrink-0" />
       <div className="flex-1 space-y-2">
         <div className="pf-skeleton-light h-4 w-1/2 rounded animate-pulse" />
         <div className="pf-skeleton-light h-3 w-1/3 rounded animate-pulse" />
@@ -168,23 +169,48 @@ export default function ProductPage() {
 
   const [showSuggestModal, setShowSuggestModal] = useState(false);
   const [suggestForm, setSuggestForm] = useState(EMPTY_SUGGESTION);
-  const [suggesting, setSuggesting] = useState(false);
   const [suggestSuccess, setSuggestSuccess] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  // When set, the suggest modal is in "edit an existing pending suggestion"
+  // mode instead of "create a new suggestion" mode.
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
 
   const [showSpaceModal, setShowSpaceModal] = useState(false);
   const [editingSpaceId, setEditingSpaceId] = useState<number | null>(null);
   const [spaceForm, setSpaceForm] = useState(EMPTY_SPACE_FORM);
-  const [savingSpace, setSavingSpace] = useState(false);
   const [spaceError, setSpaceError] = useState<string | null>(null);
-  const [deletingSpaceId, setDeletingSpaceId] = useState<number | null>(null);
 
-  const [decliningId, setDecliningId] = useState<number | null>(null);
   const [decliningNoteId, setDecliningNoteId] = useState<number | null>(null);
   const [declineNoteText, setDeclineNoteText] = useState("");
-  const [undecliningId, setUndecliningId] = useState<number | null>(null);
 
-  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+  // ─── Click-guard ──────────────────────────────────────────────────────
+  // Every button that fires a network request is keyed by a unique string
+  // (e.g. `confirm-42`, `decline-42`, `save-space-7`). While that key is
+  // "busy" only the button that owns it disables itself — a slow request
+  // or an impatient double/triple tap on the SAME button can never fire
+  // twice, but unrelated buttons (a different assignment, a different
+  // space) stay fully usable. runExclusive() is the single choke point:
+  // it no-ops if the key is already running and always clears the key in
+  // a `finally`, so a rejected request can't leave a button stuck.
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
+
+  function isBusy(key: string) {
+    return busyKeys.has(key);
+  }
+
+  async function runExclusive(key: string, fn: () => Promise<void>) {
+    if (busyKeys.has(key)) return;
+    setBusyKeys((prev) => new Set(prev).add(key));
+    try {
+      await fn();
+    } finally {
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -205,6 +231,9 @@ export default function ProductPage() {
   }, []);
 
   const currentOrg = organisations.find((o) => o.id === orgId);
+
+  // View-only mode: members and managers can only view, filter, and print
+  const isViewOnly = rawRole === "member" || rawRole === "manager";
 
   function handleSelectProject(pid: number, projRole: Role, raw: string) {
     setProjectId(pid);
@@ -305,10 +334,12 @@ export default function ProductPage() {
           priceLabel: formatPrice(item),
           status: statusLabel(a),
           proposed_by: a.proposed_by,
+          imageSrc: getImageSource(item.product_image),
         };
       }),
     [assignmentsForSpace, pricedProduct]
   );
+
 
   const spaceNameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -326,7 +357,7 @@ export default function ProductPage() {
     [summaryAssignments, pricedProduct]
   );
 
-  const summaryPrintRows = useMemo(
+   const summaryPrintRows = useMemo(
     () =>
       summaryAssignments.map((a) => {
         const item = pricedProduct(a.product_detail);
@@ -338,6 +369,7 @@ export default function ProductPage() {
           priceLabel: formatPrice(item),
           status: statusLabel(a),
           proposed_by: a.proposed_by,
+          imageSrc: getImageSource(item.product_image),
         };
       }),
     [summaryAssignments, pricedProduct, spaceNameById]
@@ -419,18 +451,24 @@ export default function ProductPage() {
 
   async function handleProposeItem(itemId: string) {
     if (!projectId || !spaceId) return;
-    const created = await proposeAssignment(projectId, spaceId, itemId, role);
-    setAssignments((prev) => [...prev, created]);
+    await runExclusive(`propose-${itemId}`, async () => {
+      const created = await proposeAssignment(projectId, spaceId, itemId, role);
+      setAssignments((prev) => [...prev, created]);
+    });
   }
 
   async function handleConfirm(id: number) {
-    const updated = await confirmAssignment(id, role);
-    setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    await runExclusive(`confirm-${id}`, async () => {
+      const updated = await confirmAssignment(id, role);
+      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    });
   }
 
   async function handleRemove(id: number) {
-    await removeAssignment(id);
-    setAssignments((prev) => prev.filter((a) => a.id !== id));
+    await runExclusive(`remove-${id}`, async () => {
+      await removeAssignment(id);
+      setAssignments((prev) => prev.filter((a) => a.id !== id));
+    });
   }
 
   function openDeclineNote(id: number) {
@@ -444,96 +482,138 @@ export default function ProductPage() {
   }
 
   async function handleDecline(id: number, note: string) {
-    setDecliningId(id);
-    try {
+    await runExclusive(`decline-${id}`, async () => {
       const updated = await declineAssignment(id, note);
       setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
       setDecliningNoteId(null);
       setDeclineNoteText("");
-    } finally {
-      setDecliningId(null);
-    }
+    });
   }
 
   async function handleUndoDecline(id: number) {
-    setUndecliningId(id);
-    try {
+    await runExclusive(`undecline-${id}`, async () => {
       const updated = await undeclineAssignment(id);
       setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
-    } finally {
-      setUndecliningId(null);
-    }
+    });
   }
 
   function openSuggestModal() {
+    setEditingProductId(null);
     setSuggestForm({ ...EMPTY_SUGGESTION, category: categoryId });
     setSuggestSuccess(false);
     setSuggestError(null);
     setShowSuggestModal(true);
   }
 
+  // Opens the same modal pre-filled with an existing pending suggestion's
+  // details, in "edit" mode. Only ever called for items where
+  // canWithdraw is true (role === "client" && status === "pending"), so
+  // there's no separate permission check needed here — the button that
+  // triggers this already gates on that.
+  function openEditSuggestion(item: ProductItem) {
+    setEditingProductId(item.id);
+    setSuggestForm({
+      // The original free-text "space" the client typed isn't part of the
+      // catalog item, so it can't be pre-filled here — it isn't editable
+      // in this flow (the field is hidden while editing, see modal below).
+      space: "",
+      category: item.category,
+      item: item.item,
+      manufacturer: item.manufacturer,
+      model_label: item.model_label,
+      base_price: item.base_price ? String(item.base_price) : "",
+      currency: item.currency || "INR",
+      product_link: item.product_link || "",
+      product_image: null,
+    });
+    setSuggestSuccess(false);
+    setSuggestError(null);
+    setShowSuggestModal(true);
+  }
+
   function closeSuggestModal() {
+    if (isBusy("suggest-submit")) return;
     setShowSuggestModal(false);
     setSuggestForm(EMPTY_SUGGESTION);
     setSuggestError(null);
+    setEditingProductId(null);
   }
 
   async function handleSuggestSubmit() {
-    if (!orgId) {
+    if (!editingProductId && !orgId) {
       setSuggestError("No organisation context found — pick a project first.");
       return;
     }
-    if (!suggestForm.item || !suggestForm.manufacturer || !suggestForm.model_label || !suggestForm.space) {
+    const missingSpace = !editingProductId && !suggestForm.space;
+    if (!suggestForm.item || !suggestForm.manufacturer || !suggestForm.model_label || missingSpace) {
       setSuggestError("Space, item, manufacturer and model are required.");
       return;
     }
-    setSuggesting(true);
-    setSuggestError(null);
-    try {
-      await suggestProduct({
-        space: suggestForm.space,
-        category: suggestForm.category,
-        item: suggestForm.item,
-        manufacturer: suggestForm.manufacturer,
-        model_label: suggestForm.model_label,
-        base_price: suggestForm.base_price || undefined,
-        currency: suggestForm.currency || undefined,
-        product_link: suggestForm.product_link || undefined,
-        product_image: suggestForm.product_image,
-        organisation: orgId,
-      });
-      setSuggestSuccess(true);
-      setSuggestForm(EMPTY_SUGGESTION);
-      if (projectId) {
-        setLoadingCatalog(true);
-        const all = await getProductsByCategory("", projectId);
-        setCatalogAll(all);
-        setLoadingCatalog(false);
+    await runExclusive("suggest-submit", async () => {
+      setSuggestError(null);
+      try {
+        if (editingProductId) {
+          const updated = await updateProductSuggestion(editingProductId, {
+            category: suggestForm.category,
+            item: suggestForm.item,
+            manufacturer: suggestForm.manufacturer,
+            model_label: suggestForm.model_label,
+            base_price: suggestForm.base_price || undefined,
+            currency: suggestForm.currency || undefined,
+            product_link: suggestForm.product_link || undefined,
+            product_image: suggestForm.product_image,
+          });
+          setCatalogAll((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        } else if (orgId) {
+          await suggestProduct({
+            space: suggestForm.space,
+            category: suggestForm.category,
+            item: suggestForm.item,
+            manufacturer: suggestForm.manufacturer,
+            model_label: suggestForm.model_label,
+            base_price: suggestForm.base_price || undefined,
+            currency: suggestForm.currency || undefined,
+            product_link: suggestForm.product_link || undefined,
+            product_image: suggestForm.product_image,
+            organisation: orgId,
+          });
+          if (projectId) {
+            setLoadingCatalog(true);
+            const all = await getProductsByCategory("", projectId);
+            setCatalogAll(all);
+            setLoadingCatalog(false);
+          }
+        }
+        setSuggestSuccess(true);
+        setSuggestForm(EMPTY_SUGGESTION);
+      } catch (err: unknown) {
+        setSuggestError(
+          getErrorMessage(
+            err,
+            "organisation",
+            editingProductId
+              ? "Couldn't update the suggestion. Please check the details and try again."
+              : "Couldn't submit the suggestion. Please check the details and try again."
+          )
+        );
       }
-    } catch (err: unknown) {
-      setSuggestError(
-        getErrorMessage(err, "organisation", "Couldn't submit the suggestion. Please check the details and try again.")
-      );
-    } finally {
-      setSuggesting(false);
-    }
+    });
   }
 
   async function handleWithdrawSuggestion(id: string) {
-    setWithdrawingId(id);
-    // Optimistically remove it from the catalog right away so the card
-    // disappears instantly instead of waiting on the request — if the
-    // delete fails server-side, put it back.
-    const previous = catalogAll;
-    setCatalogAll((prev) => prev.filter((p) => p.id !== id));
-    try {
-      await deleteProductSuggestion(id);
-    } catch (err) {
-      setCatalogAll(previous);
-      throw err;
-    } finally {
-      setWithdrawingId(null);
-    }
+    await runExclusive(`withdraw-${id}`, async () => {
+      // Optimistically remove it from the catalog right away so the card
+      // disappears instantly instead of waiting on the request — if the
+      // delete fails server-side, put it back.
+      const previous = catalogAll;
+      setCatalogAll((prev) => prev.filter((p) => p.id !== id));
+      try {
+        await deleteProductSuggestion(id);
+      } catch (err) {
+        setCatalogAll(previous);
+        throw err;
+      }
+    });
   }
 
   function openAddSpace() {
@@ -551,6 +631,8 @@ export default function ProductPage() {
   }
 
   function closeSpaceModal() {
+    const savingKey = editingSpaceId ? `save-space-${editingSpaceId}` : "save-space-new";
+    if (isBusy(savingKey) || (editingSpaceId && isBusy(`delete-space-${editingSpaceId}`))) return;
     setShowSpaceModal(false);
     setEditingSpaceId(null);
     setSpaceForm(EMPTY_SPACE_FORM);
@@ -572,59 +654,66 @@ export default function ProductPage() {
       setSpaceError("Give the space a name.");
       return;
     }
-    setSavingSpace(true);
-    setSpaceError(null);
-    try {
-      if (editingSpaceId) {
-        await updateSpace(editingSpaceId, {
-          name: spaceForm.name.trim(),
-          required_categories: spaceForm.required_categories,
-        });
-        await reloadProjectData(projectId, editingSpaceId);
-      } else {
-        const created = await createSpace(projectId, spaceForm.name.trim(), spaceForm.required_categories);
-        await reloadProjectData(projectId, created.id);
+    const key = editingSpaceId ? `save-space-${editingSpaceId}` : "save-space-new";
+    await runExclusive(key, async () => {
+      setSpaceError(null);
+      try {
+        if (editingSpaceId) {
+          await updateSpace(editingSpaceId, {
+            name: spaceForm.name.trim(),
+            required_categories: spaceForm.required_categories,
+          });
+          await reloadProjectData(projectId, editingSpaceId);
+        } else {
+          const created = await createSpace(projectId, spaceForm.name.trim(), spaceForm.required_categories);
+          await reloadProjectData(projectId, created.id);
+        }
+        setShowSpaceModal(false);
+        setEditingSpaceId(null);
+        setSpaceForm(EMPTY_SPACE_FORM);
+      } catch (err: unknown) {
+        setSpaceError(getErrorMessage(err, "name", "Couldn't save the space. Please try again."));
       }
-      closeSpaceModal();
-    } catch (err: unknown) {
-      setSpaceError(
-        getErrorMessage(err, "name", "Couldn't save the space. Please try again.")
-      );
-    } finally {
-      setSavingSpace(false);
-    }
+    });
   }
 
   async function handleDeleteSpace(id: number) {
     if (!projectId) return;
-    setDeletingSpaceId(id);
-    try {
+    await runExclusive(`delete-space-${id}`, async () => {
       await deleteSpace(id);
       await reloadProjectData(projectId, spaceId === id ? null : spaceId);
-    } finally {
-      setDeletingSpaceId(null);
-    }
+      setShowSpaceModal(false);
+      setEditingSpaceId(null);
+      setSpaceForm(EMPTY_SPACE_FORM);
+    });
   }
+
+  const savingSpaceKey = editingSpaceId ? `save-space-${editingSpaceId}` : "save-space-new";
+  const savingSpace = isBusy(savingSpaceKey);
+  const deletingSpace = editingSpaceId ? isBusy(`delete-space-${editingSpaceId}`) : false;
+  const suggesting = isBusy("suggest-submit");
 
   return (
     <div className={`${display.variable} ${body.variable} pf-page min-h-screen font-[var(--font-body)]`}>
-      <header className="pf-header px-6 sm:px-10 py-5 flex items-center justify-between sticky top-0 z-10">
-        <div>
+      <header className="pf-header px-4 sm:px-6 lg:px-10 py-3.5 sm:py-5 flex items-center justify-between gap-3 flex-wrap sticky top-0 z-10">
+        <div className="min-w-0">
           <p className="pf-eyebrow text-xs tracking-wide">Modelflick</p>
-          <h1 className="font-[var(--font-display)] text-xl sm:text-2xl font-medium">Fixture & product assignment</h1>
+          <h1 className="font-[var(--font-display)] text-lg sm:text-2xl font-medium leading-tight truncate">
+            Fixture &amp; product assignment
+          </h1>
         </div>
         {!loadingContext && organisations.length > 0 && (
-          <span className="pf-role-badge px-4 py-1.5 rounded-full text-sm capitalize">
-            Viewing as: {role}
+          <span className="pf-role-badge px-3.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm capitalize flex-shrink-0">
+            {role}
           </span>
         )}
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 sm:px-10 py-10 space-y-12">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-6 sm:py-10 space-y-8 sm:space-y-12">
         {/* Organisation */}
         <section>
           <p className="pf-muted text-sm mb-3">Organisation</p>
-          <div className="flex gap-3 flex-wrap">
+          <div className="pf-scroll-row flex gap-2.5 sm:gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
             {loadingContext ? (
               <>
                 <SkeletonPill /><SkeletonPill /><SkeletonPill />
@@ -636,7 +725,7 @@ export default function ProductPage() {
                 <button
                   key={org.id}
                   onClick={() => handleSelectOrg(org.id)}
-                  className={`rounded-full px-5 py-2.5 text-sm border ${org.id === orgId ? "pf-pill-active" : "pf-pill"}`}
+                  className={`touch-manipulation flex-shrink-0 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${org.id === orgId ? "pf-pill-active" : "pf-pill"}`}
                 >
                   {org.name}
                 </button>
@@ -649,14 +738,14 @@ export default function ProductPage() {
         {!loadingContext && currentOrg && (
           <section>
             <p className="pf-muted text-sm mb-3">Project</p>
-            <div className="flex gap-4 overflow-x-auto pb-1">
+            <div className="pf-scroll-row flex gap-3 sm:gap-4 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
               {currentOrg.projects.map((p) => {
                 const active = p.id === projectId;
                 return (
                   <button
                     key={p.id}
                     onClick={() => handleSelectProject(p.id, roleToUiRole(p.role), p.role)}
-                    className={`relative text-left min-w-[220px] rounded-2xl border px-5 py-4 ${
+                    className={`touch-manipulation relative text-left flex-shrink-0 min-w-[190px] sm:min-w-[220px] rounded-2xl border px-4 sm:px-5 py-3.5 sm:py-4 ${
                       active ? "pf-project-card-active" : "pf-project-card-inactive"
                     }`}
                   >
@@ -665,7 +754,7 @@ export default function ProductPage() {
                         {p.assignment_count} item{p.assignment_count === 1 ? "" : "s"}
                       </span>
                     )}
-                    <span className="font-[var(--font-display)] text-lg block">{p.name}</span>
+                    <span className="font-[var(--font-display)] text-base sm:text-lg block truncate">{p.name}</span>
                     <span className="pf-muted text-xs capitalize">Your role: {p.role}</span>
                   </button>
                 );
@@ -681,27 +770,32 @@ export default function ProductPage() {
               <p className="pf-muted text-sm">
                 {loadingProjectData ? "Loading spaces…" : `Spaces · ${fullySpecifiedCount} of ${spaces.length} fully specified`}
               </p>
-              <button onClick={openAddSpace} className="pf-btn-outline-accent rounded-full px-4 py-1.5 text-sm">
-                Add space
-              </button>
+              {!isViewOnly && (
+                <button
+                  onClick={openAddSpace}
+                  className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-1.5 text-sm flex-shrink-0"
+                >
+                  Add space
+                </button>
+              )}
             </div>
 
-            <div className="flex gap-3 flex-wrap">
+            <div className="pf-scroll-row flex gap-2.5 sm:gap-3 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
               {loadingProjectData ? (
                 <><SkeletonPill /><SkeletonPill /><SkeletonPill /></>
               ) : spaces.length === 0 ? (
-                <div className="pf-empty-dashed rounded-2xl px-6 py-6 text-sm text-center w-full">
-                  No spaces yet for this project. Add one (e.g. &quot;Master Bedroom&quot;, &quot;Kitchen&quot;) to start assigning products.
+                <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-6 text-sm text-center w-full">
+                  No spaces yet for this project. {isViewOnly ? "" : "Add one (e.g. \"Master Bedroom\", \"Kitchen\") to start assigning products."}
                 </div>
               ) : (
                 spaces.map((s) => {
                   const active = s.id === spaceId;
                   const prog = spaceProgress(s);
                   return (
-                    <div key={s.id} className="flex items-stretch gap-1.5">
+                    <div key={s.id} className="flex items-stretch gap-1.5 flex-shrink-0">
                       <button
                         onClick={() => setSpaceId(s.id)}
-                        className={`flex items-center gap-2 rounded-full px-5 py-2.5 text-sm border ${
+                        className={`touch-manipulation flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${
                           active ? "pf-space-pill-active" : "pf-space-pill"
                         }`}
                       >
@@ -712,12 +806,14 @@ export default function ProductPage() {
                           </span>
                         )}
                       </button>
-                      <button
-                        onClick={() => openEditSpace(s)}
-                        className="pf-btn-outline rounded-full px-3 py-2.5 text-xs flex-shrink-0"
-                      >
-                        Edit
-                      </button>
+                      {!isViewOnly && (
+                        <button
+                          onClick={() => openEditSpace(s)}
+                          className="touch-manipulation pf-btn-outline rounded-full px-3 py-2 sm:py-2.5 text-xs flex-shrink-0"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
                   );
                 })
@@ -728,7 +824,7 @@ export default function ProductPage() {
 
         {!loadingProjectData && requirements.length > 0 && (
           <section>
-            <h2 className="font-[var(--font-display)] text-xl mb-3">What {currentSpaceName || "this space"} needs</h2>
+            <h2 className="font-[var(--font-display)] text-lg sm:text-xl mb-3">What {currentSpaceName || "this space"} needs</h2>
             <div className="flex flex-wrap gap-2">
               {requirements.map((r) => {
                 const style =
@@ -737,7 +833,7 @@ export default function ProductPage() {
                   <button
                     key={r.category.id}
                     onClick={() => setCategoryId(r.category.id)}
-                    className={`rounded-full border px-4 py-2 text-sm ${style}`}
+                    className={`touch-manipulation rounded-full border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm ${style}`}
                   >
                     {r.category.label}
                     <span className="ml-2 text-xs opacity-80 capitalize">{r.status === "needed" ? "not selected" : r.status}</span>
@@ -751,7 +847,7 @@ export default function ProductPage() {
         {projectId && (
           <section>
             <div className="flex items-baseline justify-between mb-1 flex-wrap gap-2">
-              <h2 className="font-[var(--font-display)] text-xl">Assigned to {currentSpaceName || "—"}</h2>
+              <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Assigned to {currentSpaceName || "—"}</h2>
               <div className="flex items-center gap-3">
                 <span className="pf-muted text-sm">{assignmentsForSpace.length} item{assignmentsForSpace.length === 1 ? "" : "s"}</span>
                 {assignmentsForSpace.length > 0 && (
@@ -762,7 +858,7 @@ export default function ProductPage() {
                     rows={printRows}
                     totals={spaceTotals}
                     className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
-                    label="Print this space"
+                    label="Print"
                   />
                 )}
               </div>
@@ -781,11 +877,11 @@ export default function ProductPage() {
             {loadingProjectData ? (
               <div className="space-y-3"><SkeletonRow /><SkeletonRow /></div>
             ) : !spaceId ? (
-              <div className="pf-empty-dashed rounded-2xl px-6 py-10 text-center text-sm">
+              <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
                 Add a space above, then select it to start assigning products.
               </div>
             ) : assignmentsForSpace.length === 0 ? (
-              <div className="pf-empty-dashed rounded-2xl px-6 py-10 text-center text-sm">
+              <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
                 Nothing assigned yet. Choose an item from the catalog below.
               </div>
             ) : (
@@ -794,65 +890,87 @@ export default function ProductPage() {
                   const item = pricedProduct(a.product_detail);
                   const price = formatPrice(item);
                   const bothConfirmed = a.client_confirmed && a.architect_confirmed;
-                  const canConfirm = !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
+                  const canConfirm = !isViewOnly && !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
 
                   const isProposer = a.proposed_by === role;
-                  const canHardDelete = isProposer;
-                  const canDecline = !isProposer && !a.declined;
-                  const canUndoDecline = a.declined && a.declined_by === role;
-                  const isDeclining = decliningId === a.id;
-                  const isUndeclining = undecliningId === a.id;
+                  const canHardDelete = !isViewOnly && isProposer;
+                  const canDecline = !isViewOnly && !isProposer && !a.declined;
+                  const canUndoDecline = !isViewOnly && a.declined && a.declined_by === role;
+                  const confirmKey = `confirm-${a.id}`;
+                  const removeKey = `remove-${a.id}`;
+                  const declineKey = `decline-${a.id}`;
+                  const undeclineKey = `undecline-${a.id}`;
+                  const isConfirming = isBusy(confirmKey);
+                  const isRemoving = isBusy(removeKey);
+                  const isDeclining = isBusy(declineKey);
+                  const isUndeclining = isBusy(undeclineKey);
                   const noteBoxOpen = decliningNoteId === a.id;
 
                   return (
-                    <div key={a.id} className="pf-row flex flex-col gap-3 rounded-2xl px-5 py-4">
-                      <div className="flex items-center gap-5">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={getImageSource(item.product_image)} alt={item.item} className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="font-[var(--font-display)] text-lg leading-tight truncate">{item.item}</div>
-                          <div className="pf-muted text-sm">{item.manufacturer} — {item.model_label}</div>
-                          <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
-                          {price && <div className="text-sm font-medium mt-1">{price}</div>}
+                    <div key={a.id} className="pf-row flex flex-col gap-3 rounded-2xl px-4 sm:px-5 py-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
+                        <div className="flex items-center gap-4 min-w-0">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={getImageSource(item.product_image)}
+                            alt={item.item}
+                            className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover flex-shrink-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight truncate">{item.item}</div>
+                            <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
+                            <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
+                            {price && <div className="text-sm font-medium mt-1">{price}</div>}
+                          </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0">
                           <span className={`text-xs px-3 py-1 rounded-full whitespace-nowrap ${
                             a.declined ? "pf-btn-danger-outline" : bothConfirmed ? "pf-status-confirmed" : "pf-status-pending"
                           }`}>
                             {statusLabel(a)}
                           </span>
-                          <div className="flex gap-2">
-                            {canConfirm && (
-                              <button onClick={() => handleConfirm(a.id)} className="pf-btn-accent text-xs rounded-full px-3 py-1.5">
-                                Confirm
-                              </button>
-                            )}
-                            {canHardDelete && (
-                              <button onClick={() => handleRemove(a.id)} className="pf-btn-outline text-xs rounded-full px-3 py-1.5">
-                                Remove
-                              </button>
-                            )}
-                            {canDecline && !noteBoxOpen && (
-                              <button
-                                onClick={() => openDeclineNote(a.id)}
-                                className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
-                              >
-                                Decline
-                              </button>
-                            )}
-                            {canUndoDecline && (
-                              <button
-                                onClick={() => handleUndoDecline(a.id)}
-                                disabled={isUndeclining}
-                                className="pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
-                              >
-                                {isUndeclining ? "Undoing…" : "Undo decline"}
-                              </button>
-                            )}
-                            {!canHardDelete && !canDecline && !canUndoDecline && a.declined && (
-                              <span className="pf-faint text-xs px-3 py-1.5">Declined</span>
-                            )}
-                          </div>
+                          {!isViewOnly && (
+                            <div className="flex gap-2 flex-wrap justify-end">
+                              {canConfirm && (
+                                <button
+                                  onClick={() => handleConfirm(a.id)}
+                                  disabled={isConfirming}
+                                  className="touch-manipulation pf-btn-accent text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+                                >
+                                  {isConfirming ? "Confirming…" : "Confirm"}
+                                </button>
+                              )}
+                              {canHardDelete && (
+                                <button
+                                  onClick={() => handleRemove(a.id)}
+                                  disabled={isRemoving}
+                                  className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+                                >
+                                  {isRemoving ? "Removing…" : "Remove"}
+                                </button>
+                              )}
+                              {canDecline && !noteBoxOpen && (
+                                <button
+                                  onClick={() => openDeclineNote(a.id)}
+                                  className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5"
+                                >
+                                  Decline
+                                </button>
+                              )}
+                              {canUndoDecline && (
+                                <button
+                                  onClick={() => handleUndoDecline(a.id)}
+                                  disabled={isUndeclining}
+                                  className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+                                >
+                                  {isUndeclining ? "Undoing…" : "Undo decline"}
+                                </button>
+                              )}
+                              {!canHardDelete && !canDecline && !canUndoDecline && a.declined && (
+                                <span className="pf-faint text-xs px-3 py-1.5">Declined</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -874,21 +992,22 @@ export default function ProductPage() {
                             value={declineNoteText}
                             onChange={(e) => setDeclineNoteText(e.target.value)}
                             rows={2}
+                            disabled={isDeclining}
                             placeholder="e.g. Over budget for this space, or doesn't match the finish."
-                            className="pf-input rounded-lg px-3 py-2 text-sm w-full"
+                            className="pf-input rounded-lg px-3 py-2 text-sm w-full disabled:opacity-60"
                           />
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleDecline(a.id, declineNoteText)}
                               disabled={isDeclining}
-                              className="pf-btn-accent text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
+                              className="touch-manipulation pf-btn-accent text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
                             >
                               {isDeclining ? "Declining…" : "Confirm decline"}
                             </button>
                             <button
                               onClick={cancelDeclineNote}
                               disabled={isDeclining}
-                              className="pf-btn-outline text-xs rounded-full px-4 py-1.5"
+                              className="touch-manipulation pf-btn-outline text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
                             >
                               Cancel
                             </button>
@@ -907,7 +1026,7 @@ export default function ProductPage() {
         {projectId && spaces.length > 0 && (
           <section>
             <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
-              <h2 className="font-[var(--font-display)] text-xl">All spaces</h2>
+              <h2 className="font-[var(--font-display)] text-lg sm:text-xl">All spaces</h2>
               <div className="flex items-center gap-3">
                 <span className="pf-muted text-sm">{summaryAssignments.length} item{summaryAssignments.length === 1 ? "" : "s"}</span>
                 {summaryAssignments.length > 0 && (
@@ -918,7 +1037,7 @@ export default function ProductPage() {
                     rows={summaryPrintRows}
                     totals={summaryTotals}
                     className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
-                    label="Print this list"
+                    label="Print"
                   />
                 )}
               </div>
@@ -928,17 +1047,17 @@ export default function ProductPage() {
               <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <span className="pf-muted text-sm">Include spaces</span>
                 <div className="flex gap-3 text-sm">
-                  <button onClick={selectAllSummarySpaces} className="pf-link">Select all</button>
-                  <button onClick={clearSummarySpaces} className="pf-link">Clear</button>
+                  <button onClick={selectAllSummarySpaces} className="touch-manipulation pf-link">Select all</button>
+                  <button onClick={clearSummarySpaces} className="touch-manipulation pf-link">Clear</button>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="pf-scroll-row flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
                 {spaces.map((s) => {
                   const checked = summarySpaceIds.has(s.id);
                   return (
                     <label
                       key={s.id}
-                      className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer ${
+                      className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer flex-shrink-0 whitespace-nowrap ${
                         checked ? "pf-checkbox-label-active" : "pf-checkbox-label"
                       }`}
                     >
@@ -966,39 +1085,65 @@ export default function ProductPage() {
             )}
 
             {summaryAssignments.length === 0 ? (
-              <div className="pf-empty-dashed rounded-2xl px-6 py-10 text-center text-sm">
+              <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
                 {summarySpaceIds.size === 0
                   ? "No spaces selected above."
                   : "No products assigned in the selected spaces yet."}
               </div>
             ) : (
               <div className="pf-row rounded-2xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="pf-table-head">
-                      <th className="text-left px-4 py-2 font-medium">Space</th>
-                      <th className="text-left px-4 py-2 font-medium">Item</th>
-                      <th className="text-left px-4 py-2 font-medium">Manufacturer / Model</th>
-                      <th className="text-left px-4 py-2 font-medium">Price</th>
-                      <th className="text-left px-4 py-2 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryAssignments.map((a) => {
-                      const item = pricedProduct(a.product_detail);
-                      const price = formatPrice(item);
-                      return (
-                        <tr key={a.id} className="pf-table-row">
-                          <td className="px-4 py-2">{spaceNameById.get(a.space) ?? "—"}</td>
-                          <td className="px-4 py-2">{item.item}</td>
-                          <td className="px-4 py-2 pf-muted">{item.manufacturer} — {item.model_label}</td>
-                          <td className="px-4 py-2 font-medium">{price ?? "—"}</td>
-                          <td className="px-4 py-2">{statusLabel(a)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                {/* Desktop / tablet: table */}
+                <div className="pf-table-wrap overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="pf-table-head">
+                        <th className="text-left px-4 py-2 font-medium">Space</th>
+                        <th className="text-left px-4 py-2 font-medium">Item</th>
+                        <th className="text-left px-4 py-2 font-medium">Manufacturer / Model</th>
+                        <th className="text-left px-4 py-2 font-medium">Price</th>
+                        <th className="text-left px-4 py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summaryAssignments.map((a) => {
+                        const item = pricedProduct(a.product_detail);
+                        const price = formatPrice(item);
+                        return (
+                          <tr key={a.id} className="pf-table-row">
+                            <td className="px-4 py-2">{spaceNameById.get(a.space) ?? "—"}</td>
+                            <td className="px-4 py-2">{item.item}</td>
+                            <td className="px-4 py-2 pf-muted">{item.manufacturer} — {item.model_label}</td>
+                            <td className="px-4 py-2 font-medium">{price ?? "—"}</td>
+                            <td className="px-4 py-2">{statusLabel(a)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile: stacked cards, same data */}
+                <div className="pf-summary-cards">
+                  {summaryAssignments.map((a) => {
+                    const item = pricedProduct(a.product_detail);
+                    const price = formatPrice(item);
+                    return (
+                      <div key={a.id} className="pf-summary-card">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-sm truncate">{item.item}</span>
+                          {price && <span className="text-sm font-medium flex-shrink-0">{price}</span>}
+                        </div>
+                        <div className="pf-muted text-xs mt-0.5 truncate">{item.manufacturer} — {item.model_label}</div>
+                        <div className="flex items-center justify-between gap-2 mt-1.5">
+                          <span className="pf-badge-soft text-[11px] px-2 py-0.5 rounded-full">
+                            {spaceNameById.get(a.space) ?? "—"}
+                          </span>
+                          <span className="pf-faint text-[11px]">{statusLabel(a)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </section>
@@ -1007,33 +1152,39 @@ export default function ProductPage() {
         {projectId && (
           <section>
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-              <h2 className="font-[var(--font-display)] text-xl">Catalog</h2>
-              <div className="flex gap-3 flex-wrap items-center">
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search manufacturer, item, model…"
-                  className="pf-input px-4 py-2 rounded-full text-sm w-64"
-                />
+              <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Catalog</h2>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 sm:items-center mb-4">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search manufacturer, item, model…"
+                className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm w-full sm:w-64"
+              />
+              <div className="flex gap-2.5 sm:gap-3 flex-wrap items-center">
                 <select
                   value={categoryId}
                   onChange={(e) => setCategoryId(e.target.value)}
-                  className="pf-input px-4 py-2 rounded-full text-sm"
+                  className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm flex-1 sm:flex-none min-w-0"
                 >
                   {CATEGORIES.map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
                   ))}
                 </select>
-                {role === "client" && (
-                  <button onClick={openSuggestModal} className="pf-btn-outline-accent rounded-full px-4 py-2 text-sm whitespace-nowrap">
+                {!isViewOnly && role === "client" && (
+                  <button
+                    onClick={openSuggestModal}
+                    className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-2.5 sm:py-2 text-sm whitespace-nowrap"
+                  >
                     Suggest a product
                   </button>
                 )}
-                {rawRole === "admin" && (
+                {!isViewOnly && rawRole === "admin" && (
                   <Link
                     href="/product/manage"
-                    className="pf-btn-outline-accent rounded-full px-4 py-2 text-sm whitespace-nowrap"
+                    className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-2.5 sm:py-2 text-sm whitespace-nowrap"
                   >
                     Manage catalog
                   </Link>
@@ -1045,14 +1196,14 @@ export default function ProductPage() {
               <p className="pf-muted text-sm mb-4">Select or add a space above to enable choosing items.</p>
             )}
 
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
               {loadingCatalog ? (
                 Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
               ) : items.length === 0 ? (
                 <div className="col-span-full text-center py-10 space-y-3">
                   <p className="pf-muted text-sm">No matching products.</p>
-                  {role === "client" && (
-                    <button onClick={openSuggestModal} className="pf-btn-primary text-sm rounded-full px-5 py-2.5">
+                  {!isViewOnly && role === "client" && (
+                    <button onClick={openSuggestModal} className="touch-manipulation pf-btn-primary text-sm rounded-full px-5 py-2.5">
                       Can&apos;t find it? Suggest a product
                     </button>
                   )}
@@ -1063,20 +1214,29 @@ export default function ProductPage() {
                   const price = formatPrice(item);
                   const count = selectedCountsForSpace.get(item.id) ?? 0;
                   const isPending = item.status === "pending";
-                  const canWithdraw = role === "client" && isPending;
-                  const isWithdrawing = withdrawingId === item.id;
+                  // Editing and withdrawing a suggestion share the same
+                  // permission: the client who can see it as "not approved
+                  // yet" is the only one allowed to touch it, and only
+                  // while it's still pending. Once an admin approves it
+                  // (status flips away from "pending"), both buttons stop
+                  // showing — same as the existing withdraw behaviour.
+                  const canWithdraw = !isViewOnly && role === "client" && isPending;
+                  const proposeKey = `propose-${item.id}`;
+                  const withdrawKey = `withdraw-${item.id}`;
+                  const isProposing = isBusy(proposeKey);
+                  const isWithdrawing = isBusy(withdrawKey);
                   return (
                     <div key={item.id} className="pf-card rounded-2xl overflow-hidden">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={getImageSource(item.product_image)} alt={item.item} className="w-full h-40 object-cover" />
-                      <div className="p-4">
-                        <div className="font-[var(--font-display)] text-base">{item.item}</div>
+                      <img src={getImageSource(item.product_image)} alt={item.item} className="w-full h-36 sm:h-40 object-cover" />
+                      <div className="p-3.5 sm:p-4">
+                        <div className="font-[var(--font-display)] text-base truncate">{item.item}</div>
                         {isPending && (
                           <div className="pf-status-pending inline-block text-[10px] px-2 py-0.5 rounded-full mt-1">
                             Not approved yet — visible only to you
                           </div>
                         )}
-                        <div className="pf-muted text-sm">{item.manufacturer} — {item.model_label}</div>
+                        <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
                         {price && <div className="text-sm font-medium mt-1">{price}</div>}
                         {item.product_link && (
                           <a href={item.product_link} target="_blank" className="pf-link text-xs underline underline-offset-2">
@@ -1099,29 +1259,42 @@ export default function ProductPage() {
                             <span className="pf-selected-badge text-xs px-2 py-0.5 rounded-full">Added ×{count}</span>
                           )}
                         </div>
-                        <button
-                          onClick={() => handleProposeItem(item.id)}
-                          disabled={!spaceId}
-                          className="pf-btn-primary mt-3 w-full text-sm rounded-full py-2 disabled:opacity-40"
-                        >
-                          {!spaceId
-                            ? "Add a space first"
-                            : count > 0
-                            ? role === "client"
-                              ? "Add another"
-                              : "Suggest another"
-                            : role === "client"
-                            ? "Select for this space"
-                            : "Suggest for this space"}
-                        </button>
-                        {canWithdraw && (
+                        {!isViewOnly && (
                           <button
-                            onClick={() => handleWithdrawSuggestion(item.id)}
-                            disabled={isWithdrawing}
-                            className="pf-btn-danger-outline mt-2 w-full text-xs rounded-full py-1.5 disabled:opacity-50"
+                            onClick={() => handleProposeItem(item.id)}
+                            disabled={!spaceId || isProposing}
+                            className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
                           >
-                            {isWithdrawing ? "Withdrawing…" : "Withdraw suggestion"}
+                            {!spaceId
+                              ? "Add a space first"
+                              : isProposing
+                              ? "Adding…"
+                              : count > 0
+                              ? role === "client"
+                                ? "Add another"
+                                : "Suggest another"
+                              : role === "client"
+                              ? "Select for this space"
+                              : "Suggest for this space"}
                           </button>
+                        )}
+                        {canWithdraw && (
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              onClick={() => openEditSuggestion(item)}
+                              disabled={isWithdrawing}
+                              className="touch-manipulation pf-btn-outline flex-1 text-xs rounded-full py-1.5 disabled:opacity-50"
+                            >
+                              Edit suggestion
+                            </button>
+                            <button
+                              onClick={() => handleWithdrawSuggestion(item.id)}
+                              disabled={isWithdrawing}
+                              className="touch-manipulation pf-btn-danger-outline flex-1 text-xs rounded-full py-1.5 disabled:opacity-50"
+                            >
+                              {isWithdrawing ? "Withdrawing…" : "Withdraw"}
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1133,53 +1306,79 @@ export default function ProductPage() {
         )}
       </main>
 
-      {/* ── Suggest-a-product modal ─────────────────────────────────────── */}
-      {showSuggestModal && (
-        <div className="pf-modal-overlay fixed inset-0 flex items-center justify-center z-20 px-4">
-          <div className="pf-modal rounded-2xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      {/* ── Suggest / edit-a-product modal ──────────────────────────────── */}
+      {showSuggestModal && !isViewOnly && (
+        <div
+          className="pf-modal-overlay fixed inset-0 flex items-end sm:items-center justify-center z-20 px-0 sm:px-4"
+          onClick={closeSuggestModal}
+        >
+          <div
+            className="pf-modal rounded-t-2xl sm:rounded-2xl max-w-lg w-full p-5 sm:p-6 space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
-              <h3 className="font-[var(--font-display)] text-xl">Suggest a product</h3>
-              <button onClick={closeSuggestModal} className="pf-btn-outline text-xs rounded-full px-3 py-1.5">Close</button>
+              <h3 className="font-[var(--font-display)] text-lg sm:text-xl">
+                {editingProductId ? "Edit suggestion" : "Suggest a product"}
+              </h3>
+              <button
+                onClick={closeSuggestModal}
+                disabled={suggesting}
+                className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+              >
+                Close
+              </button>
             </div>
 
             {suggestSuccess ? (
               <div className="text-center py-8 space-y-3">
                 <p className="pf-success-text text-sm">
-                  Thanks — your suggestion now shows in the catalog for you, marked as not
-                  approved yet. Once an admin at your organisation approves it, it becomes
-                  visible to everyone. You can withdraw it yourself any time before then.
+                  {editingProductId
+                    ? "Your changes have been saved. It still shows as not approved yet, and an admin will review the updated details before it becomes visible to everyone."
+                    : "Thanks — your suggestion now shows in the catalog for you, marked as not approved yet. Once an admin at your organisation approves it, it becomes visible to everyone. You can withdraw or edit it yourself any time before then."}
                 </p>
-                <button onClick={closeSuggestModal} className="pf-btn-primary text-sm rounded-full px-5 py-2.5">
+                <button onClick={closeSuggestModal} className="touch-manipulation pf-btn-primary text-sm rounded-full px-5 py-2.5">
                   Close
                 </button>
               </div>
             ) : (
               <>
                 <p className="pf-muted text-xs">
-                  Not in the catalog yet? Add the details below — it&apos;ll appear in your
-                  catalog right away (marked as pending), and an admin at{" "}
-                  <span className="font-medium">{currentOrg?.name || "your organisation"}</span> will review it before others can see it.
+                  {editingProductId ? (
+                    <>
+                      Update the details below — this only applies while your suggestion is
+                      still pending. Once an admin approves it, it can no longer be edited
+                      from here.
+                    </>
+                  ) : (
+                    <>
+                      Not in the catalog yet? Add the details below — it&apos;ll appear in your
+                      catalog right away (marked as pending), and an admin at{" "}
+                      <span className="font-medium">{currentOrg?.name || "your organisation"}</span> will review it before others can see it.
+                    </>
+                  )}
                 </p>
 
                 {suggestError && (
                   <p className="pf-error-box text-xs rounded-lg px-3 py-2">{suggestError}</p>
                 )}
 
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <label className="flex flex-col gap-1 text-sm">
-                    Space
-                    <input
-                      value={suggestForm.space}
-                      onChange={(e) => setSuggestForm({ ...suggestForm, space: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
-                    />
-                  </label>
+                <fieldset disabled={suggesting} className="grid sm:grid-cols-2 gap-3 disabled:opacity-60">
+                  {!editingProductId && (
+                    <label className="flex flex-col gap-1 text-sm">
+                      Space
+                      <input
+                        value={suggestForm.space}
+                        onChange={(e) => setSuggestForm({ ...suggestForm, space: e.target.value })}
+                        className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
+                      />
+                    </label>
+                  )}
                   <label className="flex flex-col gap-1 text-sm">
                     Category
                     <select
                       value={suggestForm.category}
                       onChange={(e) => setSuggestForm({ ...suggestForm, category: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     >
                       {CATEGORIES.map((c) => (
                         <option key={c.id} value={c.id}>{c.label}</option>
@@ -1191,7 +1390,7 @@ export default function ProductPage() {
                     <input
                       value={suggestForm.item}
                       onChange={(e) => setSuggestForm({ ...suggestForm, item: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
@@ -1199,7 +1398,7 @@ export default function ProductPage() {
                     <input
                       value={suggestForm.manufacturer}
                       onChange={(e) => setSuggestForm({ ...suggestForm, manufacturer: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
@@ -1207,7 +1406,7 @@ export default function ProductPage() {
                     <input
                       value={suggestForm.model_label}
                       onChange={(e) => setSuggestForm({ ...suggestForm, model_label: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
@@ -1216,7 +1415,7 @@ export default function ProductPage() {
                       type="number"
                       value={suggestForm.base_price}
                       onChange={(e) => setSuggestForm({ ...suggestForm, base_price: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
@@ -1224,7 +1423,7 @@ export default function ProductPage() {
                     <select
                       value={suggestForm.currency}
                       onChange={(e) => setSuggestForm({ ...suggestForm, currency: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     >
                       <option value="INR">INR</option>
                       <option value="USD">USD</option>
@@ -1237,11 +1436,11 @@ export default function ProductPage() {
                     <input
                       value={suggestForm.product_link}
                       onChange={(e) => setSuggestForm({ ...suggestForm, product_link: e.target.value })}
-                      className="pf-input rounded-lg px-3 py-2"
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                    Photo (optional)
+                    {editingProductId ? "Replace photo (optional)" : "Photo (optional)"}
                     <input
                       type="file"
                       accept="image/*"
@@ -1249,17 +1448,21 @@ export default function ProductPage() {
                       className="text-sm"
                     />
                   </label>
-                </div>
+                </fieldset>
 
                 <div className="flex gap-3 pt-2">
                   <button
                     onClick={handleSuggestSubmit}
                     disabled={suggesting}
-                    className="pf-btn-accent text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+                    className="touch-manipulation pf-btn-accent text-sm rounded-full px-5 py-2.5 disabled:opacity-50 flex-1 sm:flex-none"
                   >
-                    {suggesting ? "Submitting…" : "Submit suggestion"}
+                    {suggesting ? "Saving…" : editingProductId ? "Save changes" : "Submit suggestion"}
                   </button>
-                  <button onClick={closeSuggestModal} className="pf-btn-outline text-sm rounded-full px-5 py-2.5">
+                  <button
+                    onClick={closeSuggestModal}
+                    disabled={suggesting}
+                    className="touch-manipulation pf-btn-outline text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+                  >
                     Cancel
                   </button>
                 </div>
@@ -1270,67 +1473,85 @@ export default function ProductPage() {
       )}
 
       {/* ── Space manager modal (add / edit / delete) ────────────────────── */}
-      {showSpaceModal && (
-        <div className="pf-modal-overlay fixed inset-0 flex items-center justify-center z-20 px-4">
-          <div className="pf-modal rounded-2xl max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      {showSpaceModal && !isViewOnly && (
+        <div
+          className="pf-modal-overlay fixed inset-0 flex items-end sm:items-center justify-center z-20 px-0 sm:px-4"
+          onClick={closeSpaceModal}
+        >
+          <div
+            className="pf-modal rounded-t-2xl sm:rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 max-h-[92vh] sm:max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
-              <h3 className="font-[var(--font-display)] text-xl">{editingSpaceId ? "Edit space" : "Add space"}</h3>
-              <button onClick={closeSpaceModal} className="pf-btn-outline text-xs rounded-full px-3 py-1.5">Close</button>
+              <h3 className="font-[var(--font-display)] text-lg sm:text-xl">{editingSpaceId ? "Edit space" : "Add space"}</h3>
+              <button
+                onClick={closeSpaceModal}
+                disabled={savingSpace || deletingSpace}
+                className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+              >
+                Close
+              </button>
             </div>
 
             {spaceError && (
               <p className="pf-error-box text-xs rounded-lg px-3 py-2">{spaceError}</p>
             )}
 
-            <label className="flex flex-col gap-1 text-sm">
-              Space name
-              <input
-                value={spaceForm.name}
-                onChange={(e) => setSpaceForm({ ...spaceForm, name: e.target.value })}
-                placeholder="e.g. Master Bedroom"
-                className="pf-input rounded-lg px-3 py-2"
-              />
-            </label>
+            <fieldset disabled={savingSpace || deletingSpace} className="space-y-4 disabled:opacity-60">
+              <label className="flex flex-col gap-1 text-sm">
+                Space name
+                <input
+                  value={spaceForm.name}
+                  onChange={(e) => setSpaceForm({ ...spaceForm, name: e.target.value })}
+                  placeholder="e.g. Master Bedroom"
+                  className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
+                />
+              </label>
 
-            <div className="flex flex-col gap-2 text-sm">
-              <span>Required categories</span>
-              <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((c) => {
-                  const active = spaceForm.required_categories.includes(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => toggleSpaceCategory(c.id)}
-                      className={`text-xs px-3 py-1.5 rounded-full border ${active ? "pf-checkbox-label-active" : "pf-checkbox-label"}`}
-                    >
-                      {c.label}
-                    </button>
-                  );
-                })}
+              <div className="flex flex-col gap-2 text-sm">
+                <span>Required categories</span>
+                <div className="flex flex-wrap gap-2">
+                  {CATEGORIES.map((c) => {
+                    const active = spaceForm.required_categories.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => toggleSpaceCategory(c.id)}
+                        className={`touch-manipulation text-xs px-3 py-1.5 rounded-full border ${active ? "pf-checkbox-label-active" : "pf-checkbox-label"}`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            </fieldset>
 
-            <div className="flex items-center justify-between gap-3 pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
               <div className="flex gap-3">
                 <button
                   onClick={handleSaveSpace}
-                  disabled={savingSpace}
-                  className="pf-btn-accent text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+                  disabled={savingSpace || deletingSpace}
+                  className="touch-manipulation pf-btn-accent text-sm rounded-full px-5 py-2.5 disabled:opacity-50 flex-1 sm:flex-none"
                 >
                   {savingSpace ? "Saving…" : editingSpaceId ? "Save changes" : "Add space"}
                 </button>
-                <button onClick={closeSpaceModal} className="pf-btn-outline text-sm rounded-full px-5 py-2.5">
+                <button
+                  onClick={closeSpaceModal}
+                  disabled={savingSpace || deletingSpace}
+                  className="touch-manipulation pf-btn-outline text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+                >
                   Cancel
                 </button>
               </div>
               {editingSpaceId && (
                 <button
                   onClick={() => handleDeleteSpace(editingSpaceId)}
-                  disabled={deletingSpaceId === editingSpaceId}
-                  className="pf-btn-danger-outline text-xs rounded-full px-4 py-2"
+                  disabled={savingSpace || deletingSpace}
+                  className="touch-manipulation pf-btn-danger-outline text-xs rounded-full px-4 py-2"
                 >
-                  {deletingSpaceId === editingSpaceId ? "Deleting…" : "Delete space"}
+                  {deletingSpace ? "Deleting…" : "Delete space"}
                 </button>
               )}
             </div>

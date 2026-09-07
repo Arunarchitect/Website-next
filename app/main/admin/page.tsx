@@ -198,6 +198,10 @@ export default function MainAdminPage() {
             <i className="ti ti-bug" aria-hidden="true" />
             <span>Issues</span>
           </Link>
+          <Link href="/product" className="admin-nav-link">
+            <i className="ti ti-package" aria-hidden="true" />
+            <span>Products</span>
+          </Link>
         </nav>
       </header>
 
