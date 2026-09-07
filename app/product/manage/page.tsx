@@ -1,5 +1,6 @@
 "use client";
 
+import "./page.css";
 import { Fragment, useEffect, useState } from "react";
 import {
   AdminProduct,
@@ -7,6 +8,7 @@ import {
   DiscountTier,
   ProjectPricing,
   OrganisationPricing,
+  AdminScope,
   getImageSource,
   getAdminProducts,
   createProduct,
@@ -23,6 +25,7 @@ import {
   getPendingProducts,
   approveProduct,
   rejectProduct,
+  getAdminScope,
 } from "./productAdminApi";
 import { CATEGORIES } from "../productApi";
 
@@ -37,6 +40,40 @@ const EMPTY_FORM: ProductFormValues = {
   cost_price: "",
   product_link: "",
   product_image: null,
+};
+
+const EMPTY_ADMIN_SCOPE: AdminScope = { organisations: [], projects: [] };
+
+type PricingMode = "percentage" | "fixed";
+
+type ProjectPricingFormState = {
+  project: string;
+  mode: PricingMode;
+  discount_percentage: string;
+  discounted_price: string;
+  notes: string;
+};
+
+const EMPTY_PROJECT_PRICING_FORM: ProjectPricingFormState = {
+  project: "",
+  mode: "percentage",
+  discount_percentage: "",
+  discounted_price: "",
+  notes: "",
+};
+
+type OrgPricingFormState = {
+  organisation: string;
+  mode: PricingMode;
+  discount_percentage: string;
+  discounted_price: string;
+};
+
+const EMPTY_ORG_PRICING_FORM: OrgPricingFormState = {
+  organisation: "",
+  mode: "percentage",
+  discount_percentage: "",
+  discounted_price: "",
 };
 
 // Shape of the error payloads our API returns on failure. Kept loose
@@ -60,10 +97,10 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-function statusBadgeStyle(status: AdminProduct["status"]) {
-  if (status === "approved") return "bg-[#E4EFEB] text-[#2F6E62]";
-  if (status === "rejected") return "bg-red-50 text-red-600";
-  return "bg-[#F3E9D8] text-[#8A5E20]";
+function statusBadgeClass(status: AdminProduct["status"]) {
+  if (status === "approved") return "pm-badge pm-badge-approved";
+  if (status === "rejected") return "pm-badge pm-badge-rejected";
+  return "pm-badge pm-badge-pending";
 }
 
 export default function ProductManagePage() {
@@ -83,6 +120,23 @@ export default function ProductManagePage() {
   const [form, setForm] = useState<ProductFormValues>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Orgs/projects the logged-in user actually administers — populates the
+  // pricing dropdowns below instead of asking for a raw numeric ID.
+  const [adminScope, setAdminScope] = useState<AdminScope>(EMPTY_ADMIN_SCOPE);
+  const [scopeLoading, setScopeLoading] = useState(true);
+
+  // Project pricing modal
+  const [projectPricingModal, setProjectPricingModal] = useState<{ productId: string } | null>(null);
+  const [projectPricingForm, setProjectPricingForm] = useState<ProjectPricingFormState>(EMPTY_PROJECT_PRICING_FORM);
+  const [projectPricingSaving, setProjectPricingSaving] = useState(false);
+  const [projectPricingError, setProjectPricingError] = useState("");
+
+  // Organisation pricing modal
+  const [orgPricingModal, setOrgPricingModal] = useState<{ productId: string } | null>(null);
+  const [orgPricingForm, setOrgPricingForm] = useState<OrgPricingFormState>(EMPTY_ORG_PRICING_FORM);
+  const [orgPricingSaving, setOrgPricingSaving] = useState(false);
+  const [orgPricingError, setOrgPricingError] = useState("");
 
   async function refresh() {
     setLoading(true);
@@ -110,6 +164,20 @@ export default function ProductManagePage() {
   useEffect(() => {
     if (view === "pending") refreshPending();
   }, [view]);
+
+  useEffect(() => {
+    (async () => {
+      setScopeLoading(true);
+      try {
+        const scope = await getAdminScope();
+        setAdminScope(scope);
+      } catch {
+        setAdminScope(EMPTY_ADMIN_SCOPE);
+      } finally {
+        setScopeLoading(false);
+      }
+    })();
+  }, []);
 
   function startEdit(p: AdminProduct) {
     setEditingId(p.id);
@@ -189,18 +257,50 @@ export default function ProductManagePage() {
     await refresh();
   }
 
-  async function handleAddProjectPricing(productId: string) {
-    const projectId = Number(prompt("Project ID") || "0");
-    if (!projectId) return;
-    const discount_percentage = prompt("Discount % (leave blank to set a fixed price instead)") || "";
-    const discounted_price = discount_percentage ? "" : prompt("Fixed discounted price") || "";
-    const notes = prompt("Notes (optional)") || "";
-    await addProjectPricing(productId ? productId.toString() : productId, projectId, {
-      discount_percentage: discount_percentage || null,
-      discounted_price: discounted_price || null,
-      notes: notes || null,
-    });
-    await refresh();
+  // ─── Project pricing (dropdown modal, scoped to admin's own orgs) ────
+  function openProjectPricingModal(productId: string) {
+    setProjectPricingForm(EMPTY_PROJECT_PRICING_FORM);
+    setProjectPricingError("");
+    setProjectPricingModal({ productId });
+  }
+
+  function closeProjectPricingModal() {
+    setProjectPricingModal(null);
+    setProjectPricingError("");
+  }
+
+  async function submitProjectPricing() {
+    if (!projectPricingModal) return;
+    if (!projectPricingForm.project) {
+      setProjectPricingError("Choose a project.");
+      return;
+    }
+    const value =
+      projectPricingForm.mode === "percentage"
+        ? projectPricingForm.discount_percentage
+        : projectPricingForm.discounted_price;
+    if (!value) {
+      setProjectPricingError(
+        projectPricingForm.mode === "percentage" ? "Enter a discount %." : "Enter a fixed price."
+      );
+      return;
+    }
+
+    setProjectPricingSaving(true);
+    setProjectPricingError("");
+    try {
+      await addProjectPricing(projectPricingModal.productId, Number(projectPricingForm.project), {
+        discount_percentage: projectPricingForm.mode === "percentage" ? projectPricingForm.discount_percentage : null,
+        discounted_price: projectPricingForm.mode === "fixed" ? projectPricingForm.discounted_price : null,
+        notes: projectPricingForm.notes || null,
+      });
+      closeProjectPricingModal();
+      await refresh();
+    } catch (err: unknown) {
+      setProjectPricingError(getErrorMessage(err, "Couldn't add project pricing."));
+    } finally {
+      setProjectPricingSaving(false);
+    }
   }
 
   async function handleDeleteProjectPricing(id: number) {
@@ -208,16 +308,44 @@ export default function ProductManagePage() {
     await refresh();
   }
 
-  async function handleAddOrgPricing(productId: string) {
-    const organisationId = Number(prompt("Organisation ID") || "0");
-    if (!organisationId) return;
-    const discount_percentage = prompt("Discount % (leave blank to set a fixed price instead)") || "";
-    const discounted_price = discount_percentage ? "" : prompt("Fixed discounted price") || "";
-    await addOrganisationPricing(productId, organisationId, {
-      discount_percentage: discount_percentage || null,
-      discounted_price: discounted_price || null,
-    });
-    await refresh();
+  // ─── Organisation pricing (dropdown modal, scoped to admin's own orgs) ─
+  function openOrgPricingModal(productId: string) {
+    setOrgPricingForm(EMPTY_ORG_PRICING_FORM);
+    setOrgPricingError("");
+    setOrgPricingModal({ productId });
+  }
+
+  function closeOrgPricingModal() {
+    setOrgPricingModal(null);
+    setOrgPricingError("");
+  }
+
+  async function submitOrgPricing() {
+    if (!orgPricingModal) return;
+    if (!orgPricingForm.organisation) {
+      setOrgPricingError("Choose an organisation.");
+      return;
+    }
+    const value = orgPricingForm.mode === "percentage" ? orgPricingForm.discount_percentage : orgPricingForm.discounted_price;
+    if (!value) {
+      setOrgPricingError(orgPricingForm.mode === "percentage" ? "Enter a discount %." : "Enter a fixed price.");
+      return;
+    }
+
+    setOrgPricingSaving(true);
+    setOrgPricingError("");
+    try {
+      await addOrganisationPricing(orgPricingModal.productId, Number(orgPricingForm.organisation), {
+        discount_percentage: orgPricingForm.mode === "percentage" ? orgPricingForm.discount_percentage : null,
+        discounted_price: orgPricingForm.mode === "fixed" ? orgPricingForm.discounted_price : null,
+      });
+      closeOrgPricingModal();
+      await refresh();
+    } catch (err: unknown) {
+      setOrgPricingError(getErrorMessage(err, "Couldn't add organisation pricing."));
+    } finally {
+      setOrgPricingSaving(false);
+    }
   }
 
   async function handleDeleteOrgPricing(id: number) {
@@ -253,15 +381,92 @@ export default function ProductManagePage() {
     }
   }
 
+  const inputBase = "w-full border border-[#DCE0D8] rounded-lg px-3 py-2 text-sm";
+
+  // Shared row-action buttons, used by both the desktop table and mobile cards.
+  function ProductRowActions({ p }: { p: AdminProduct }) {
+    return (
+      <>
+        <button
+          onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
+          className="text-xs text-[#2F6E62] underline"
+        >
+          {expandedId === p.id ? "Hide" : "Details"}
+        </button>
+        <button onClick={() => startEdit(p)} className="text-xs text-[#2F6E62] underline">
+          Edit
+        </button>
+        <button onClick={() => handleDelete(p.id)} className="text-xs text-red-600 underline">
+          Delete
+        </button>
+      </>
+    );
+  }
+
+  // Shared expanded-details panel (discount tiers + IFC model), used by
+  // both the desktop table row and the mobile card.
+  function ProductDetailsPanel({ p }: { p: AdminProduct }) {
+    return (
+      <>
+        {p.status === "rejected" && p.rejection_reason && (
+          <p className="text-xs text-red-600">Rejected: {p.rejection_reason}</p>
+        )}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-[#4B5650]">Discount tiers</span>
+            <button onClick={() => handleAddTier(p.id)} className="text-xs text-[#2F6E62] underline">
+              + Add tier
+            </button>
+          </div>
+          {p.discount_tiers.length === 0 ? (
+            <p className="text-xs text-[#8A938E]">None</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {p.discount_tiers.map((t: DiscountTier) => (
+                <span key={t.id} className="text-xs bg-white border border-[#DCE0D8] rounded-full px-3 py-1 flex items-center gap-2">
+                  {t.tier_name} ({t.min_quantity}-{t.max_quantity}: {t.discount_percentage}%)
+                  <button onClick={() => handleDeleteTier(t.id)} className="text-red-500">×</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <span className="text-xs font-medium text-[#4B5650]">IFC model file</span>
+          {p.ifc_model ? (
+            <div className="text-xs mt-1 flex items-center gap-3 flex-wrap">
+              <a href={getImageSource(p.ifc_model.file)} target="_blank" className="text-[#2F6E62] underline">
+                {p.ifc_model.file_name}
+              </a>
+              <span className="text-[#8A938E]">{p.ifc_model.file_size_mb} MB</span>
+              <button onClick={() => handleDeleteIfc(p.ifc_model!.id)} className="text-red-500">Remove</button>
+            </div>
+          ) : (
+            <input
+              type="file"
+              accept=".ifc,.ifczip,.ifcxml"
+              className="text-xs mt-1"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUploadIfc(p.id, file);
+              }}
+            />
+          )}
+        </div>
+      </>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#F5F6F3] text-[#1C2521] px-6 sm:px-10 py-8">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className="pm-page min-h-screen bg-[#F5F6F3] text-[#1C2521] px-4 sm:px-6 lg:px-10 py-6 sm:py-8">
+      <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
         <header className="flex items-center justify-between flex-wrap gap-4">
           <div>
             <p className="text-xs text-[#6B7570]">Modelflick</p>
-            <h1 className="text-2xl font-semibold">Product management</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold">Product management</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="pm-header-actions">
             <div className="flex bg-white border border-[#DCE0D8] rounded-full p-1">
               <button
                 onClick={() => setView("catalog")}
@@ -307,7 +512,7 @@ export default function ProductManagePage() {
             ) : (
               <div className="divide-y divide-[#EDEFEA]">
                 {pending.map((p) => (
-                  <div key={p.id} className="flex items-start gap-4 px-5 py-4">
+                  <div key={p.id} className="flex items-start gap-4 px-4 sm:px-5 py-4 flex-wrap sm:flex-nowrap">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={getImageSource(p.product_image)}
@@ -317,9 +522,7 @@ export default function ProductManagePage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium">{p.item}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${statusBadgeStyle(p.status)}`}>
-                          {p.status}
-                        </span>
+                        <span className={statusBadgeClass(p.status)}>{p.status}</span>
                       </div>
                       <p className="text-sm text-[#6B7570]">
                         {p.manufacturer} — {p.model_label} · {p.category}
@@ -334,18 +537,18 @@ export default function ProductManagePage() {
                         </a>
                       )}
                     </div>
-                    <div className="flex gap-2 flex-shrink-0">
+                    <div className="flex gap-2 flex-shrink-0 w-full sm:w-auto">
                       <button
                         onClick={() => handleApprove(p.id)}
                         disabled={reviewingId === p.id}
-                        className="text-xs bg-[#2F6E62] text-white rounded-full px-4 py-2 disabled:opacity-50"
+                        className="text-xs bg-[#2F6E62] text-white rounded-full px-4 py-2 disabled:opacity-50 flex-1 sm:flex-none"
                       >
                         {reviewingId === p.id ? "…" : "Approve"}
                       </button>
                       <button
                         onClick={() => handleReject(p.id)}
                         disabled={reviewingId === p.id}
-                        className="text-xs border border-red-200 text-red-600 rounded-full px-4 py-2 disabled:opacity-50"
+                        className="text-xs border border-red-200 text-red-600 rounded-full px-4 py-2 disabled:opacity-50 flex-1 sm:flex-none"
                       >
                         Reject
                       </button>
@@ -365,13 +568,13 @@ export default function ProductManagePage() {
             />
 
             {editingId && (
-              <div className="border border-[#DCE0D8] bg-white rounded-2xl p-6 space-y-4">
+              <div className="border border-[#DCE0D8] bg-white rounded-2xl p-4 sm:p-6 space-y-4">
                 <h2 className="text-lg font-medium">{editingId === "new" ? "New product" : "Edit product"}</h2>
 
-                <div className="flex gap-2 border-b border-[#EDEFEA]">
+                <div className="flex gap-2 border-b border-[#EDEFEA] overflow-x-auto">
                   <button
                     onClick={() => setActiveTab("details")}
-                    className={`text-sm px-3 py-2 border-b-2 -mb-px ${
+                    className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${
                       activeTab === "details" ? "border-[#2F6E62] text-[#2F6E62] font-medium" : "border-transparent text-[#6B7570]"
                     }`}
                   >
@@ -381,7 +584,7 @@ export default function ProductManagePage() {
                     onClick={() => setActiveTab("pricing")}
                     disabled={editingId === "new"}
                     title={editingId === "new" ? "Save the product first" : undefined}
-                    className={`text-sm px-3 py-2 border-b-2 -mb-px disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
                       activeTab === "pricing" ? "border-[#2F6E62] text-[#2F6E62] font-medium" : "border-transparent text-[#6B7570]"
                     }`}
                   >
@@ -502,10 +705,21 @@ export default function ProductManagePage() {
 
                 {activeTab === "pricing" && editingProduct && (
                   <div className="space-y-6">
+                    {!scopeLoading && adminScope.organisations.length === 0 && (
+                      <div className="pm-scope-warning">
+                        You don&apos;t administer any organisation yet, so there&apos;s nothing to attach project or
+                        organisation pricing to.
+                      </div>
+                    )}
+
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium">Project pricing overrides</span>
-                        <button onClick={() => handleAddProjectPricing(editingProduct.id)} className="text-xs text-[#2F6E62] underline">
+                        <button
+                          onClick={() => openProjectPricingModal(editingProduct.id)}
+                          disabled={adminScope.projects.length === 0}
+                          className="text-xs text-[#2F6E62] underline disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
                           + Add
                         </button>
                       </div>
@@ -513,15 +727,21 @@ export default function ProductManagePage() {
                         <p className="text-xs text-[#8A938E]">None — base_price applies unless overridden here.</p>
                       ) : (
                         <div className="space-y-2">
-                          {editingProduct.project_pricing_rules.map((pp: ProjectPricing) => (
-                            <div key={pp.id} className="flex items-center justify-between text-xs bg-[#F5F6F3] border border-[#DCE0D8] rounded-lg px-3 py-2">
-                              <span>
-                                Project #{pp.project} — {pp.discounted_price ? `fixed ${pp.discounted_price}` : `${pp.discount_percentage}% off`}
-                                {pp.notes ? ` · ${pp.notes}` : ""}
-                              </span>
-                              <button onClick={() => handleDeleteProjectPricing(pp.id)} className="text-red-500">Remove</button>
-                            </div>
-                          ))}
+                          {editingProduct.project_pricing_rules.map((pp: ProjectPricing) => {
+                            const projectMeta = adminScope.projects.find((proj) => proj.id === pp.project);
+                            return (
+                              <div key={pp.id} className="pm-rule-chip">
+                                <span>
+                                  {projectMeta ? projectMeta.name : `Project #${pp.project}`} —{" "}
+                                  {pp.discounted_price ? `fixed ${pp.discounted_price}` : `${pp.discount_percentage}% off`}
+                                  {pp.notes ? ` · ${pp.notes}` : ""}
+                                </span>
+                                <button onClick={() => handleDeleteProjectPricing(pp.id)} className="text-red-500 shrink-0">
+                                  Remove
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -529,7 +749,11 @@ export default function ProductManagePage() {
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium">Organisation pricing overrides</span>
-                        <button onClick={() => handleAddOrgPricing(editingProduct.id)} className="text-xs text-[#2F6E62] underline">
+                        <button
+                          onClick={() => openOrgPricingModal(editingProduct.id)}
+                          disabled={adminScope.organisations.length === 0}
+                          className="text-xs text-[#2F6E62] underline disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
                           + Add
                         </button>
                       </div>
@@ -537,15 +761,21 @@ export default function ProductManagePage() {
                         <p className="text-xs text-[#8A938E]">None.</p>
                       ) : (
                         <div className="space-y-2">
-                          {editingProduct.organisation_pricing_rules.map((op: OrganisationPricing) => (
-                            <div key={op.id} className="flex items-center justify-between text-xs bg-[#F5F6F3] border border-[#DCE0D8] rounded-lg px-3 py-2">
-                              <span>
-                                Org #{op.organisation} — {op.discounted_price ? `fixed ${op.discounted_price}` : `${op.discount_percentage}% off`}
-                                {!op.is_active && " (inactive)"}
-                              </span>
-                              <button onClick={() => handleDeleteOrgPricing(op.id)} className="text-red-500">Remove</button>
-                            </div>
-                          ))}
+                          {editingProduct.organisation_pricing_rules.map((op: OrganisationPricing) => {
+                            const orgMeta = adminScope.organisations.find((o) => o.id === op.organisation);
+                            return (
+                              <div key={op.id} className="pm-rule-chip">
+                                <span>
+                                  {orgMeta ? orgMeta.name : `Org #${op.organisation}`} —{" "}
+                                  {op.discounted_price ? `fixed ${op.discounted_price}` : `${op.discount_percentage}% off`}
+                                  {!op.is_active && " (inactive)"}
+                                </span>
+                                <button onClick={() => handleDeleteOrgPricing(op.id)} className="text-red-500 shrink-0">
+                                  Remove
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -564,111 +794,279 @@ export default function ProductManagePage() {
               ) : products.length === 0 ? (
                 <div className="p-10 text-center text-sm text-[#6B7570]">No products found.</div>
               ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-[#F5F6F3] text-left text-[#6B7570]">
-                    <tr>
-                      <th className="px-4 py-3"></th>
-                      <th className="px-4 py-3">Item</th>
-                      <th className="px-4 py-3">Manufacturer / Model</th>
-                      <th className="px-4 py-3">Category</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Price</th>
-                      <th className="px-4 py-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {products.map((p) => (
-                      <Fragment key={p.id}>
-                        <tr className="border-t border-[#EDEFEA]">
-                          <td className="px-4 py-3">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={getImageSource(p.product_image)} alt={p.item} className="w-10 h-10 rounded-lg object-cover" />
-                          </td>
-                          <td className="px-4 py-3">{p.item}</td>
-                          <td className="px-4 py-3">{p.manufacturer} — {p.model_label}</td>
-                          <td className="px-4 py-3 text-xs">{p.category}</td>
-                          <td className="px-4 py-3">
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${statusBadgeStyle(p.status)}`}>
-                              {p.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">{p.base_price ? `${p.currency} ${p.base_price}` : "—"}</td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
-                              className="text-xs text-[#2F6E62] underline mr-3"
-                            >
-                              {expandedId === p.id ? "Hide" : "Details"}
-                            </button>
-                            <button onClick={() => startEdit(p)} className="text-xs text-[#2F6E62] underline mr-3">
-                              Edit
-                            </button>
-                            <button onClick={() => handleDelete(p.id)} className="text-xs text-red-600 underline">
-                              Delete
-                            </button>
-                          </td>
+                <>
+                  {/* ─── Desktop table (>=768px) ─── */}
+                  <div className="pm-table-wrap overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#F5F6F3] text-left text-[#6B7570]">
+                        <tr>
+                          <th className="px-4 py-3"></th>
+                          <th className="px-4 py-3">Item</th>
+                          <th className="px-4 py-3">Manufacturer / Model</th>
+                          <th className="px-4 py-3">Category</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Price</th>
+                          <th className="px-4 py-3"></th>
                         </tr>
-                        {expandedId === p.id && (
-                          <tr className="bg-[#F9FAF8] border-t border-[#EDEFEA]">
-                            <td colSpan={7} className="px-6 py-4 space-y-4">
-                              {p.status === "rejected" && p.rejection_reason && (
-                                <p className="text-xs text-red-600">Rejected: {p.rejection_reason}</p>
-                              )}
-                              <div>
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-[#4B5650]">Discount tiers</span>
-                                  <button onClick={() => handleAddTier(p.id)} className="text-xs text-[#2F6E62] underline">
-                                    + Add tier
-                                  </button>
-                                </div>
-                                {p.discount_tiers.length === 0 ? (
-                                  <p className="text-xs text-[#8A938E]">None</p>
-                                ) : (
-                                  <div className="flex flex-wrap gap-2">
-                                    {p.discount_tiers.map((t: DiscountTier) => (
-                                      <span key={t.id} className="text-xs bg-white border border-[#DCE0D8] rounded-full px-3 py-1 flex items-center gap-2">
-                                        {t.tier_name} ({t.min_quantity}-{t.max_quantity}: {t.discount_percentage}%)
-                                        <button onClick={() => handleDeleteTier(t.id)} className="text-red-500">×</button>
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
+                      </thead>
+                      <tbody>
+                        {products.map((p) => (
+                          <Fragment key={p.id}>
+                            <tr className="border-t border-[#EDEFEA]">
+                              <td className="px-4 py-3">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={getImageSource(p.product_image)} alt={p.item} className="w-10 h-10 rounded-lg object-cover" />
+                              </td>
+                              <td className="px-4 py-3">{p.item}</td>
+                              <td className="px-4 py-3">{p.manufacturer} — {p.model_label}</td>
+                              <td className="px-4 py-3 text-xs">{p.category}</td>
+                              <td className="px-4 py-3">
+                                <span className={statusBadgeClass(p.status)}>{p.status}</span>
+                              </td>
+                              <td className="px-4 py-3">{p.base_price ? `${p.currency} ${p.base_price}` : "—"}</td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
+                                <ProductRowActions p={p} />
+                              </td>
+                            </tr>
+                            {expandedId === p.id && (
+                              <tr className="bg-[#F9FAF8] border-t border-[#EDEFEA]">
+                                <td colSpan={7} className="px-6 py-4 space-y-4">
+                                  <ProductDetailsPanel p={p} />
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
-                              <div>
-                                <span className="text-xs font-medium text-[#4B5650]">IFC model file</span>
-                                {p.ifc_model ? (
-                                  <div className="text-xs mt-1 flex items-center gap-3">
-                                    <a href={getImageSource(p.ifc_model.file)} target="_blank" className="text-[#2F6E62] underline">
-                                      {p.ifc_model.file_name}
-                                    </a>
-                                    <span className="text-[#8A938E]">{p.ifc_model.file_size_mb} MB</span>
-                                    <button onClick={() => handleDeleteIfc(p.ifc_model!.id)} className="text-red-500">Remove</button>
-                                  </div>
-                                ) : (
-                                  <input
-                                    type="file"
-                                    accept=".ifc,.ifczip,.ifcxml"
-                                    className="text-xs mt-1"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) handleUploadIfc(p.id, file);
-                                    }}
-                                  />
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                  {/* ─── Mobile cards (<768px) ─── */}
+                  <div className="pm-card-list">
+                    {products.map((p) => (
+                      <div key={p.id} className="pm-card">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={getImageSource(p.product_image)} alt={p.item} className="pm-card-thumb" />
+                        <div className="pm-card-body">
+                          <div className="pm-card-title-row">
+                            <span className="font-medium">{p.item}</span>
+                            <span className={statusBadgeClass(p.status)}>{p.status}</span>
+                          </div>
+                          <p className="pm-card-meta">{p.manufacturer} — {p.model_label} · {p.category}</p>
+                          <p className="pm-card-meta">{p.base_price ? `${p.currency} ${p.base_price}` : "No price set"}</p>
+                          <div className="pm-card-actions">
+                            <ProductRowActions p={p} />
+                          </div>
+                          {expandedId === p.id && (
+                            <div className="pm-card-details">
+                              <ProductDetailsPanel p={p} />
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                </>
               )}
             </div>
           </>
         )}
       </div>
+
+      {/* ─── Add Project Pricing modal ─── */}
+      {projectPricingModal && (
+        <div
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={closeProjectPricingModal}
+        >
+          <div
+            className="pm-modal-scroll bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Add project pricing</h3>
+
+            {projectPricingError && (
+              <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">
+                {projectPricingError}
+              </div>
+            )}
+
+            <label className="flex flex-col gap-1 text-sm mb-3">
+              Project
+              <select
+                value={projectPricingForm.project}
+                onChange={(e) => setProjectPricingForm({ ...projectPricingForm, project: e.target.value })}
+                className={inputBase}
+              >
+                <option value="">Select a project…</option>
+                {adminScope.projects.map((proj) => (
+                  <option key={proj.id} value={proj.id}>
+                    {proj.name} ({proj.organisation_name})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-gray-400 -mt-2 mb-3">
+              Only projects under organisations you administer are listed.
+            </p>
+
+            <div className="pm-segmented mb-3">
+              <button
+                type="button"
+                data-active={projectPricingForm.mode === "percentage"}
+                onClick={() => setProjectPricingForm({ ...projectPricingForm, mode: "percentage" })}
+              >
+                Discount %
+              </button>
+              <button
+                type="button"
+                data-active={projectPricingForm.mode === "fixed"}
+                onClick={() => setProjectPricingForm({ ...projectPricingForm, mode: "fixed" })}
+              >
+                Fixed price
+              </button>
+            </div>
+
+            {projectPricingForm.mode === "percentage" ? (
+              <label className="flex flex-col gap-1 text-sm mb-3">
+                Discount percentage
+                <input
+                  type="number"
+                  value={projectPricingForm.discount_percentage}
+                  onChange={(e) => setProjectPricingForm({ ...projectPricingForm, discount_percentage: e.target.value })}
+                  className={inputBase}
+                  placeholder="e.g. 10"
+                />
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1 text-sm mb-3">
+                Fixed discounted price
+                <input
+                  type="number"
+                  value={projectPricingForm.discounted_price}
+                  onChange={(e) => setProjectPricingForm({ ...projectPricingForm, discounted_price: e.target.value })}
+                  className={inputBase}
+                  placeholder="e.g. 9500"
+                />
+              </label>
+            )}
+
+            <label className="flex flex-col gap-1 text-sm mb-4">
+              Notes (optional)
+              <input
+                value={projectPricingForm.notes}
+                onChange={(e) => setProjectPricingForm({ ...projectPricingForm, notes: e.target.value })}
+                className={inputBase}
+              />
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={closeProjectPricingModal} className="border border-[#DCE0D8] text-sm rounded-full px-5 py-2.5">
+                Cancel
+              </button>
+              <button
+                onClick={submitProjectPricing}
+                disabled={projectPricingSaving}
+                className="bg-[#2F6E62] text-white text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+              >
+                {projectPricingSaving ? "Saving…" : "Add"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Add Organisation Pricing modal ─── */}
+      {orgPricingModal && (
+        <div
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={closeOrgPricingModal}
+        >
+          <div
+            className="pm-modal-scroll bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Add organisation pricing</h3>
+
+            {orgPricingError && (
+              <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">
+                {orgPricingError}
+              </div>
+            )}
+
+            <label className="flex flex-col gap-1 text-sm mb-3">
+              Organisation
+              <select
+                value={orgPricingForm.organisation}
+                onChange={(e) => setOrgPricingForm({ ...orgPricingForm, organisation: e.target.value })}
+                className={inputBase}
+              >
+                <option value="">Select an organisation…</option>
+                {adminScope.organisations.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-gray-400 -mt-2 mb-3">Only organisations you administer are listed.</p>
+
+            <div className="pm-segmented mb-3">
+              <button
+                type="button"
+                data-active={orgPricingForm.mode === "percentage"}
+                onClick={() => setOrgPricingForm({ ...orgPricingForm, mode: "percentage" })}
+              >
+                Discount %
+              </button>
+              <button
+                type="button"
+                data-active={orgPricingForm.mode === "fixed"}
+                onClick={() => setOrgPricingForm({ ...orgPricingForm, mode: "fixed" })}
+              >
+                Fixed price
+              </button>
+            </div>
+
+            {orgPricingForm.mode === "percentage" ? (
+              <label className="flex flex-col gap-1 text-sm mb-4">
+                Discount percentage
+                <input
+                  type="number"
+                  value={orgPricingForm.discount_percentage}
+                  onChange={(e) => setOrgPricingForm({ ...orgPricingForm, discount_percentage: e.target.value })}
+                  className={inputBase}
+                  placeholder="e.g. 10"
+                />
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1 text-sm mb-4">
+                Fixed discounted price
+                <input
+                  type="number"
+                  value={orgPricingForm.discounted_price}
+                  onChange={(e) => setOrgPricingForm({ ...orgPricingForm, discounted_price: e.target.value })}
+                  className={inputBase}
+                  placeholder="e.g. 9500"
+                />
+              </label>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button onClick={closeOrgPricingModal} className="border border-[#DCE0D8] text-sm rounded-full px-5 py-2.5">
+                Cancel
+              </button>
+              <button
+                onClick={submitOrgPricing}
+                disabled={orgPricingSaving}
+                className="bg-[#2F6E62] text-white text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+              >
+                {orgPricingSaving ? "Saving…" : "Add"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

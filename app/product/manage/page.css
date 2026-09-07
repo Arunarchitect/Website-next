@@ -1,0 +1,154 @@
+/* Product management page — layout & responsive rules not covered by
+   inline Tailwind utility classes. Keeping these here (rather than long
+   Tailwind chains repeated in JSX) keeps the component readable. */
+
+.pm-page {
+  --pm-border: #DCE0D8;
+  --pm-bg: #F5F6F3;
+  --pm-ink: #1C2521;
+  --pm-muted: #6B7570;
+}
+
+/* ─── Status badges ─────────────────────────────────────────────── */
+.pm-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+.pm-badge-approved { background: #E4EFEB; color: #2F6E62; }
+.pm-badge-rejected { background: #FEF2F2; color: #DC2626; }
+.pm-badge-pending  { background: #F3E9D8; color: #8A5E20; }
+
+/* ─── Header actions wrap nicely on narrow screens ──────────────── */
+.pm-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+@media (max-width: 480px) {
+  .pm-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* ─── Desktop table / mobile card toggle ────────────────────────── */
+/* Below 768px the data table is hard to use (cramped columns, tiny
+   tap targets), so we render the same data as stacked cards instead
+   of forcing horizontal scroll. */
+.pm-table-wrap { display: none; }
+.pm-card-list { display: block; }
+
+@media (min-width: 768px) {
+  .pm-table-wrap { display: block; }
+  .pm-card-list { display: none; }
+}
+
+.pm-card {
+  border-bottom: 1px solid #EDEFEA;
+  padding: 1rem;
+  display: flex;
+  gap: 0.75rem;
+}
+.pm-card:last-child { border-bottom: none; }
+
+.pm-card-thumb {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.pm-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.pm-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pm-card-meta {
+  font-size: 0.75rem;
+  color: var(--pm-muted);
+  margin-top: 0.125rem;
+}
+
+.pm-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+
+.pm-card-details {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--pm-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ─── Pricing rule chip (used in both details panel and modals) ──── */
+.pm-rule-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  background: var(--pm-bg);
+  border: 1px solid var(--pm-border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+/* ─── Modals ─────────────────────────────────────────────────────── */
+/* Prevents a tall pricing/edit modal from overflowing the viewport on
+   short mobile screens (landscape phones especially). */
+.pm-modal-scroll {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+/* Segmented control for percentage-vs-fixed pricing mode */
+.pm-segmented {
+  display: flex;
+  background: var(--pm-bg);
+  border-radius: 0.75rem;
+  padding: 0.25rem;
+  gap: 0.25rem;
+}
+.pm-segmented button {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--pm-muted);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.pm-segmented button[data-active="true"] {
+  background: #fff;
+  color: var(--pm-ink);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+/* ─── Empty-scope notice (user admins no orgs) ──────────────────── */
+.pm-scope-warning {
+  font-size: 0.75rem;
+  color: #8A5E20;
+  background: #FBF3E4;
+  border: 1px solid #F0DDB4;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}

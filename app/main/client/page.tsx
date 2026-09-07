@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./styles.css";
-import { getCurrentUser, getAreacalcRole, getClientProjects } from "./clientApi";
-import { User, ClientProject } from "./types";
+import { getCurrentUser, getAreacalcRole } from "./clientApi";
+import { User } from "./types";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -21,23 +21,19 @@ const mono = IBM_Plex_Mono({
 export default function DashClientPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ClientProject[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const [user, role, projectList] = await Promise.all([
+        const [user, role] = await Promise.all([
           getCurrentUser(),
           getAreacalcRole(),
-          getClientProjects(),
         ]);
         setCurrentUser(user);
         setAreacalcRole(role);
-        setProjects(projectList);
         console.log('👤 Client user:', user?.email);
         console.log('📐 Areacalc role:', role);
-        console.log('📁 Client projects:', projectList.length);
       } catch (error) {
         console.error('Error fetching user data:', error);
       } finally {
@@ -80,20 +76,12 @@ export default function DashClientPage() {
           <span className="client-brand-text">Client Portal</span>
         </div>
         <nav className="client-nav">
-          <Link href="/new/dash/dashnormal" className="client-nav-link">
-            <i className="ti ti-layout-dashboard" aria-hidden="true" />
-            <span>Dashboard</span>
-          </Link>
           {areacalcRole && areacalcRole !== 'anonymous' && (
             <Link href="/tools/areacalc" className="client-nav-link">
               <i className="ti ti-ruler-measure" aria-hidden="true" />
               <span>Areacalc</span>
             </Link>
           )}
-          <Link href="/issues" className="client-nav-link">
-            <i className="ti ti-bug" aria-hidden="true" />
-            <span>Issues</span>
-          </Link>
           <span className="client-role-badge">
             <i className="ti ti-shield" aria-hidden="true" />
             Client
@@ -139,36 +127,22 @@ export default function DashClientPage() {
         <div className="loading-text">Loading your workspace…</div>
       ) : (
         <>
-          {/* Projects */}
-          <p className="section-label">My Projects</p>
-          <div className="client-projects-grid">
-            {projects.length > 0 ? (
-              projects.map((project) => (
-                <Link
-                  key={project.id}
-                  href={`/new/projectdash/${project.id}`}
-                  className="client-project-card"
-                >
-                  <div className="client-project-info">
-                    <p className="client-project-name">{project.name}</p>
-                    <p className="client-project-meta">
-                      {project.location} · {project.project_type}
-                    </p>
-                    <span className="client-project-status">
-                      {project.status_display}
-                    </span>
-                  </div>
-                  <i className="ti ti-arrow-right" aria-hidden="true" />
-                </Link>
-              ))
-            ) : (
-              <div className="client-empty-state">
-                <i className="ti ti-folder-off" aria-hidden="true" />
-                <p>No projects assigned to you yet.</p>
-                <p>Contact your organisation admin for access.</p>
-              </div>
-            )}
-          </div>
+          <p className="section-label">Get Started</p>
+          <Link href="/product" className="client-product-card">
+            <div className="client-section-icon-wrapper">
+              <i className="ti ti-shopping-bag" aria-hidden="true" />
+            </div>
+            <div className="client-section-info">
+              <p className="client-section-label">Product Selection</p>
+              <p className="client-section-description">
+                Browse and choose the products available to your account.
+              </p>
+            </div>
+            <span className="client-product-btn-go">
+              Go
+              <i className="ti ti-arrow-right" aria-hidden="true" />
+            </span>
+          </Link>
         </>
       )}
     </main>

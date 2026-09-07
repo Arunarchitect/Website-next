@@ -60,6 +60,10 @@ export interface Assignment {
   client_confirmed: boolean;
   architect_confirmed: boolean;
   created_at: string;
+  declined: boolean;
+  declined_by: Role | null;
+  declined_at: string | null;
+  declined_note: string | null;
 }
 
 export interface ProductSuggestionInput {
@@ -192,8 +196,29 @@ export async function confirmAssignment(id: number, role: Role): Promise<Assignm
   return res.data;
 }
 
+// Hard delete. Server-side (CanModifyAssignment) only allows this for the
+// original proposer or an org admin — everyone else gets a 403 and should
+// call declineAssignment instead.
 export async function removeAssignment(id: number): Promise<void> {
   await apiClient.delete(`/product/assignments/${id}/`);
+}
+
+// Soft "no" from the party that did NOT propose the assignment — flips
+// declined/declined_by/declined_at instead of deleting the row. `note` is
+// an optional short explanation, visible to both sides afterwards.
+export async function declineAssignment(id: number, note?: string): Promise<Assignment> {
+  const res = await apiClient.post(`/product/assignments/${id}/decline/`, {
+    note: note?.trim() || undefined,
+  });
+  return res.data;
+}
+
+// Reverses a decline. Server-side (CanModifyAssignment) only allows this
+// for the UI role that actually declined the assignment — stays available
+// until the original proposer permanently removes it via removeAssignment.
+export async function undeclineAssignment(id: number): Promise<Assignment> {
+  const res = await apiClient.post(`/product/assignments/${id}/undecline/`);
+  return res.data;
 }
 
 // ── Product suggestion (client proposes a new catalog product) ──────────
@@ -214,6 +239,14 @@ export async function suggestProduct(input: ProductSuggestionInput): Promise<Pro
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return res.data;
+}
+
+// Withdraw a product from the catalog. Server-side (CanDeleteProduct) only
+// allows this for an org admin (any status) or for the original suggester
+// while the product is still pending — once an org admin approves it, the
+// client can no longer remove it themselves.
+export async function deleteProductSuggestion(id: string): Promise<void> {
+  await apiClient.delete(`/product/products/${id}/`);
 }
 
 // ── Space management (create/edit/delete spaces for a project) ──────────

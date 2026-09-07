@@ -23,7 +23,10 @@ import {
   proposeAssignment,
   confirmAssignment,
   removeAssignment,
+  declineAssignment,
+  undeclineAssignment,
   suggestProduct,
+  deleteProductSuggestion,
   createSpace,
   updateSpace,
   deleteSpace,
@@ -76,6 +79,10 @@ function getErrorMessage(err: unknown, field: "organisation" | "name", fallback:
 }
 
 function statusLabel(a: Assignment): string {
+  if (a.declined) {
+    const decliner = a.declined_by === "client" ? "Client" : "Architect";
+    return `Declined by ${decliner}`;
+  }
   if (a.client_confirmed && a.architect_confirmed) return "Confirmed";
   const waitingOn = a.proposed_by === "client" ? "architect" : "client";
   return `Awaiting ${waitingOn} confirmation`;
@@ -142,10 +149,6 @@ export default function ProductPage() {
   const [orgId, setOrgId] = useState<number | null>(null);
   const [projectId, setProjectId] = useState<number | null>(null);
   const [role, setRole] = useState<Role>("architect");
-  // Raw backend role for the active project: "admin" | "manager" | "member" | "client".
-  // `role` above is the simplified UI role (architect/client) and can't tell
-  // an org admin apart from a manager or member, so we track this separately
-  // for anything that's admin-only (e.g. the catalog management page).
   const [rawRole, setRawRole] = useState<string>("");
 
   const [spaces, setSpaces] = useState<Space[]>([]);
@@ -155,28 +158,20 @@ export default function ProductPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounced(searchTerm, 250);
 
-  // Which spaces are included in the "All spaces" summary list/print below.
-  // Defaults to every space in the project; the person can uncheck any to
-  // exclude it from the combined list and total.
   const [summarySpaceIds, setSummarySpaceIds] = useState<Set<number>>(new Set());
 
-  // Full priced catalog for the current project — single source of truth for
-  // pricing (base + discount-adjusted effective_price). Catalog grid,
-  // per-space list, and the all-spaces summary all read prices from here.
   const [catalogAll, setCatalogAll] = useState<ProductItem[]>([]);
 
   const [loadingContext, setLoadingContext] = useState(true);
   const [loadingProjectData, setLoadingProjectData] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
 
-  // ── Suggest-a-product modal state ──────────────────────────────────────
   const [showSuggestModal, setShowSuggestModal] = useState(false);
   const [suggestForm, setSuggestForm] = useState(EMPTY_SUGGESTION);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestSuccess, setSuggestSuccess] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
 
-  // ── Space manager modal state (add / edit / delete a space) ─────────────
   const [showSpaceModal, setShowSpaceModal] = useState(false);
   const [editingSpaceId, setEditingSpaceId] = useState<number | null>(null);
   const [spaceForm, setSpaceForm] = useState(EMPTY_SPACE_FORM);
@@ -184,7 +179,13 @@ export default function ProductPage() {
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [deletingSpaceId, setDeletingSpaceId] = useState<number | null>(null);
 
-  // Initial: fetch org/project context only — fastest possible first paint
+  const [decliningId, setDecliningId] = useState<number | null>(null);
+  const [decliningNoteId, setDecliningNoteId] = useState<number | null>(null);
+  const [declineNoteText, setDeclineNoteText] = useState("");
+  const [undecliningId, setUndecliningId] = useState<number | null>(null);
+
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       const entries = await getMyProductContext();
@@ -225,13 +226,12 @@ export default function ProductPage() {
     }
   }
 
-  // Spaces + assignments load together (parallel, not sequential)
   async function reloadProjectData(pid: number, keepSpaceId?: number | null) {
     setLoadingProjectData(true);
     const [s, a] = await Promise.all([getSpaces(pid), getAssignments(pid)]);
     setSpaces(s);
     setAssignments(a);
-    setSummarySpaceIds(new Set(s.map((sp) => sp.id))); // reset filter to "all" on reload
+    setSummarySpaceIds(new Set(s.map((sp) => sp.id)));
     if (keepSpaceId && s.some((sp) => sp.id === keepSpaceId)) {
       setSpaceId(keepSpaceId);
     } else {
@@ -245,10 +245,6 @@ export default function ProductPage() {
     reloadProjectData(projectId);
   }, [projectId]);
 
-  // Full priced catalog for the project — fetched once per project (no
-  // category/search filter), so it carries the discount-adjusted
-  // effective_price for every approved product, not just the ones
-  // currently visible in the grid.
   useEffect(() => {
     if (!projectId) {
       setCatalogAll([]);
@@ -262,21 +258,17 @@ export default function ProductPage() {
     })();
   }, [projectId]);
 
-  // Lookup: product id -> priced product (with effective_price/currency).
   const priceIndex = useMemo(() => {
     const map: Record<string, ProductItem> = {};
     catalogAll.forEach((p) => { map[p.id] = p; });
     return map;
   }, [catalogAll]);
 
-  // Merge an assignment's embedded product_detail with the priced catalog
-  // entry so displayed price always reflects the current discount.
   const pricedProduct = useCallback(
     (item: ProductItem): ProductItem => priceIndex[item.id] ?? item,
     [priceIndex]
   );
 
-  // Catalog grid: filter the priced catalog client-side by category + search.
   const items = useMemo(() => {
     const term = debouncedSearch.trim().toLowerCase();
     return catalogAll.filter((p) => {
@@ -318,7 +310,6 @@ export default function ProductPage() {
     [assignmentsForSpace, pricedProduct]
   );
 
-  // ── All-spaces summary (filterable by which spaces are included) ────────
   const spaceNameById = useMemo(() => {
     const map = new Map<number, string>();
     spaces.forEach((s) => map.set(s.id, s.name));
@@ -420,8 +411,6 @@ export default function ProductPage() {
     return map;
   }, [assignments]);
 
-  // How many times each product has already been added to the current
-  // space — a space can hold more than one of the same product.
   const selectedCountsForSpace = useMemo(() => {
     const map = new Map<string, number>();
     assignmentsForSpace.forEach((a) => map.set(a.product, (map.get(a.product) ?? 0) + 1));
@@ -444,7 +433,38 @@ export default function ProductPage() {
     setAssignments((prev) => prev.filter((a) => a.id !== id));
   }
 
-  // ── Suggest-a-product modal ──────────────────────────────────────────
+  function openDeclineNote(id: number) {
+    setDecliningNoteId(id);
+    setDeclineNoteText("");
+  }
+
+  function cancelDeclineNote() {
+    setDecliningNoteId(null);
+    setDeclineNoteText("");
+  }
+
+  async function handleDecline(id: number, note: string) {
+    setDecliningId(id);
+    try {
+      const updated = await declineAssignment(id, note);
+      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      setDecliningNoteId(null);
+      setDeclineNoteText("");
+    } finally {
+      setDecliningId(null);
+    }
+  }
+
+  async function handleUndoDecline(id: number) {
+    setUndecliningId(id);
+    try {
+      const updated = await undeclineAssignment(id);
+      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    } finally {
+      setUndecliningId(null);
+    }
+  }
+
   function openSuggestModal() {
     setSuggestForm({ ...EMPTY_SUGGESTION, category: categoryId });
     setSuggestSuccess(false);
@@ -484,6 +504,12 @@ export default function ProductPage() {
       });
       setSuggestSuccess(true);
       setSuggestForm(EMPTY_SUGGESTION);
+      if (projectId) {
+        setLoadingCatalog(true);
+        const all = await getProductsByCategory("", projectId);
+        setCatalogAll(all);
+        setLoadingCatalog(false);
+      }
     } catch (err: unknown) {
       setSuggestError(
         getErrorMessage(err, "organisation", "Couldn't submit the suggestion. Please check the details and try again.")
@@ -493,7 +519,23 @@ export default function ProductPage() {
     }
   }
 
-  // ── Space manager modal ──────────────────────────────────────────────
+  async function handleWithdrawSuggestion(id: string) {
+    setWithdrawingId(id);
+    // Optimistically remove it from the catalog right away so the card
+    // disappears instantly instead of waiting on the request — if the
+    // delete fails server-side, put it back.
+    const previous = catalogAll;
+    setCatalogAll((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await deleteProductSuggestion(id);
+    } catch (err) {
+      setCatalogAll(previous);
+      throw err;
+    } finally {
+      setWithdrawingId(null);
+    }
+  }
+
   function openAddSpace() {
     setEditingSpaceId(null);
     setSpaceForm(EMPTY_SPACE_FORM);
@@ -752,32 +794,107 @@ export default function ProductPage() {
                   const item = pricedProduct(a.product_detail);
                   const price = formatPrice(item);
                   const bothConfirmed = a.client_confirmed && a.architect_confirmed;
-                  const canConfirm = (role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed);
+                  const canConfirm = !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
+
+                  const isProposer = a.proposed_by === role;
+                  const canHardDelete = isProposer;
+                  const canDecline = !isProposer && !a.declined;
+                  const canUndoDecline = a.declined && a.declined_by === role;
+                  const isDeclining = decliningId === a.id;
+                  const isUndeclining = undecliningId === a.id;
+                  const noteBoxOpen = decliningNoteId === a.id;
+
                   return (
-                    <div key={a.id} className="pf-row flex items-center gap-5 rounded-2xl px-5 py-4">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={getImageSource(item.product_image)} alt={item.item} className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-[var(--font-display)] text-lg leading-tight truncate">{item.item}</div>
-                        <div className="pf-muted text-sm">{item.manufacturer} — {item.model_label}</div>
-                        <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
-                        {price && <div className="text-sm font-medium mt-1">{price}</div>}
-                      </div>
-                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                        <span className={`text-xs px-3 py-1 rounded-full whitespace-nowrap ${bothConfirmed ? "pf-status-confirmed" : "pf-status-pending"}`}>
-                          {statusLabel(a)}
-                        </span>
-                        <div className="flex gap-2">
-                          {canConfirm && (
-                            <button onClick={() => handleConfirm(a.id)} className="pf-btn-accent text-xs rounded-full px-3 py-1.5">
-                              Confirm
-                            </button>
-                          )}
-                          <button onClick={() => handleRemove(a.id)} className="pf-btn-outline text-xs rounded-full px-3 py-1.5">
-                            Remove
-                          </button>
+                    <div key={a.id} className="pf-row flex flex-col gap-3 rounded-2xl px-5 py-4">
+                      <div className="flex items-center gap-5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={getImageSource(item.product_image)} alt={item.item} className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-[var(--font-display)] text-lg leading-tight truncate">{item.item}</div>
+                          <div className="pf-muted text-sm">{item.manufacturer} — {item.model_label}</div>
+                          <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
+                          {price && <div className="text-sm font-medium mt-1">{price}</div>}
+                        </div>
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                          <span className={`text-xs px-3 py-1 rounded-full whitespace-nowrap ${
+                            a.declined ? "pf-btn-danger-outline" : bothConfirmed ? "pf-status-confirmed" : "pf-status-pending"
+                          }`}>
+                            {statusLabel(a)}
+                          </span>
+                          <div className="flex gap-2">
+                            {canConfirm && (
+                              <button onClick={() => handleConfirm(a.id)} className="pf-btn-accent text-xs rounded-full px-3 py-1.5">
+                                Confirm
+                              </button>
+                            )}
+                            {canHardDelete && (
+                              <button onClick={() => handleRemove(a.id)} className="pf-btn-outline text-xs rounded-full px-3 py-1.5">
+                                Remove
+                              </button>
+                            )}
+                            {canDecline && !noteBoxOpen && (
+                              <button
+                                onClick={() => openDeclineNote(a.id)}
+                                className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
+                              >
+                                Decline
+                              </button>
+                            )}
+                            {canUndoDecline && (
+                              <button
+                                onClick={() => handleUndoDecline(a.id)}
+                                disabled={isUndeclining}
+                                className="pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+                              >
+                                {isUndeclining ? "Undoing…" : "Undo decline"}
+                              </button>
+                            )}
+                            {!canHardDelete && !canDecline && !canUndoDecline && a.declined && (
+                              <span className="pf-faint text-xs px-3 py-1.5">Declined</span>
+                            )}
+                          </div>
                         </div>
                       </div>
+
+                      {/* Reason shown to both sides once this item has been declined. */}
+                      {a.declined && a.declined_note && (
+                        <div className="pf-empty-dashed rounded-xl px-4 py-2.5 text-sm">
+                          <span className="pf-faint text-xs uppercase tracking-wide block mb-0.5">Decline note</span>
+                          {a.declined_note}
+                        </div>
+                      )}
+
+                      {/* Inline "add an optional note" box, opened by the Decline button above. */}
+                      {noteBoxOpen && (
+                        <div className="pf-empty-dashed rounded-xl px-4 py-3 space-y-2">
+                          <label className="text-xs pf-muted block">
+                            Optional note — let {a.proposed_by === "client" ? "the client" : "the architect"} know why
+                          </label>
+                          <textarea
+                            value={declineNoteText}
+                            onChange={(e) => setDeclineNoteText(e.target.value)}
+                            rows={2}
+                            placeholder="e.g. Over budget for this space, or doesn't match the finish."
+                            className="pf-input rounded-lg px-3 py-2 text-sm w-full"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleDecline(a.id, declineNoteText)}
+                              disabled={isDeclining}
+                              className="pf-btn-accent text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
+                            >
+                              {isDeclining ? "Declining…" : "Confirm decline"}
+                            </button>
+                            <button
+                              onClick={cancelDeclineNote}
+                              disabled={isDeclining}
+                              className="pf-btn-outline text-xs rounded-full px-4 py-1.5"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -945,12 +1062,20 @@ export default function ProductPage() {
                   const stats = itemStats.get(item.id);
                   const price = formatPrice(item);
                   const count = selectedCountsForSpace.get(item.id) ?? 0;
+                  const isPending = item.status === "pending";
+                  const canWithdraw = role === "client" && isPending;
+                  const isWithdrawing = withdrawingId === item.id;
                   return (
                     <div key={item.id} className="pf-card rounded-2xl overflow-hidden">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={getImageSource(item.product_image)} alt={item.item} className="w-full h-40 object-cover" />
                       <div className="p-4">
                         <div className="font-[var(--font-display)] text-base">{item.item}</div>
+                        {isPending && (
+                          <div className="pf-status-pending inline-block text-[10px] px-2 py-0.5 rounded-full mt-1">
+                            Not approved yet — visible only to you
+                          </div>
+                        )}
                         <div className="pf-muted text-sm">{item.manufacturer} — {item.model_label}</div>
                         {price && <div className="text-sm font-medium mt-1">{price}</div>}
                         {item.product_link && (
@@ -989,6 +1114,15 @@ export default function ProductPage() {
                             ? "Select for this space"
                             : "Suggest for this space"}
                         </button>
+                        {canWithdraw && (
+                          <button
+                            onClick={() => handleWithdrawSuggestion(item.id)}
+                            disabled={isWithdrawing}
+                            className="pf-btn-danger-outline mt-2 w-full text-xs rounded-full py-1.5 disabled:opacity-50"
+                          >
+                            {isWithdrawing ? "Withdrawing…" : "Withdraw suggestion"}
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1011,7 +1145,9 @@ export default function ProductPage() {
             {suggestSuccess ? (
               <div className="text-center py-8 space-y-3">
                 <p className="pf-success-text text-sm">
-                  Thanks — your suggestion has been sent to the organisation admin for review.
+                  Thanks — your suggestion now shows in the catalog for you, marked as not
+                  approved yet. Once an admin at your organisation approves it, it becomes
+                  visible to everyone. You can withdraw it yourself any time before then.
                 </p>
                 <button onClick={closeSuggestModal} className="pf-btn-primary text-sm rounded-full px-5 py-2.5">
                   Close
@@ -1020,8 +1156,9 @@ export default function ProductPage() {
             ) : (
               <>
                 <p className="pf-muted text-xs">
-                  Not in the catalog yet? Add the details below — an admin at{" "}
-                  <span className="font-medium">{currentOrg?.name || "your organisation"}</span> will review it before it appears for others.
+                  Not in the catalog yet? Add the details below — it&apos;ll appear in your
+                  catalog right away (marked as pending), and an admin at{" "}
+                  <span className="font-medium">{currentOrg?.name || "your organisation"}</span> will review it before others can see it.
                 </p>
 
                 {suggestError && (

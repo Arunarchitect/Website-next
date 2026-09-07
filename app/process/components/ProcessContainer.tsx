@@ -37,8 +37,8 @@ export function CompletionCheckbox({
         checked
           ? "Mark as incomplete"
           : locked
-          ? "Complete all subprocesses first"
-          : "Mark as complete"
+            ? "Complete all subprocesses first"
+            : "Mark as complete"
       }
       title={locked && !checked ? "Complete all subprocesses first" : undefined}
       onPointerDown={(event) => event.stopPropagation()}
@@ -201,18 +201,17 @@ export function ProcessContainer({
         e.stopPropagation();
         onSelectNode(node.id);
       }}
-          
+
       style={{
         position: level === 0 ? undefined : "relative",
         zIndex: level === 0 ? undefined : 10,
         background: color.background,
-        border: `1.5px solid ${
-          activeNodeId === node.id
+        border: `1.5px solid ${activeNodeId === node.id
             ? "#3b82f6"
             : isSearchMatch
-            ? "#EAB308"
-            : color.border
-        }`,
+              ? "#EAB308"
+              : color.border
+          }`,
         outline: isCompleted ? "2px solid #2F9E58" : "none",
         outlineOffset: "2px",
         borderRadius: level === 0 ? "18px" : "14px",
@@ -232,8 +231,8 @@ export function ProcessContainer({
           isActiveSearchMatch
             ? "0 0 0 3px rgba(234,88,12,0.9)"
             : isSearchMatch
-            ? "0 0 0 2px rgba(234,179,8,0.7)"
-            : null,
+              ? "0 0 0 2px rgba(234,179,8,0.7)"
+              : null,
         ].filter(Boolean).join(", ") || "none",
       }}
     >
@@ -277,13 +276,13 @@ export function ProcessContainer({
             </span>
           )}
           {node.important && (
-  <span
-    title="Important"
-    style={{ color: "#D97706", marginRight: "5px" }}
-  >
-    ★
-  </span>
-)}
+            <span
+              title="Important"
+              style={{ color: "#D97706", marginRight: "5px" }}
+            >
+              ★
+            </span>
+          )}
           {node.label}
         </div>
       </div>
@@ -298,7 +297,7 @@ export function ProcessContainer({
             fontSize: layout.descriptionSize,
             lineHeight: 1.4,
             textAlign: "left",
-            whiteSpace: "normal",
+            whiteSpace: "pre-wrap",   // ← changed from "normal"
             overflowWrap: "break-word",
             wordBreak: "normal",
             hyphens: "auto",

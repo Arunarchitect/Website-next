@@ -87,6 +87,27 @@ export interface ProductFormValues {
   product_image?: File | null;
 }
 
+// ─── Admin scope: orgs/projects THIS user administers ──────────────────
+// Used to populate dropdowns for project/org pricing instead of free-text
+// IDs, so a user can only ever attach pricing to something they actually
+// administer.
+export interface AdminOrganisation {
+  id: number;
+  name: string;
+}
+
+export interface AdminProject {
+  id: number;
+  name: string;
+  organisation: number;
+  organisation_name: string;
+}
+
+export interface AdminScope {
+  organisations: AdminOrganisation[];
+  projects: AdminProject[];
+}
+
 const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') return null;
   return (
@@ -233,5 +254,11 @@ export async function approveProduct(id: string): Promise<AdminProduct> {
 
 export async function rejectProduct(id: string, rejection_reason: string): Promise<AdminProduct> {
   const res = await apiClient.post(`/product/products/${id}/reject/`, { rejection_reason });
+  return res.data;
+}
+
+// ── Admin scope (orgs/projects this user administers) ───────────────────
+export async function getAdminScope(): Promise<AdminScope> {
+  const res = await apiClient.get('/product/admin-scope/');
   return res.data;
 }
