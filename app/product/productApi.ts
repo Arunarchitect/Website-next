@@ -155,6 +155,56 @@ export const formatPrice = (item: ProductItem): string | null => {
   return `${item.currency || 'INR'} ${num.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 };
 
+/**
+ * Structured price comparison for a product: the "final" price the person
+ * actually pays (effective_price, falling back to base_price when there's
+ * no override) versus the catalog/MRP price (base_price).
+ *
+ * - `differs` is true only when both values are present and numerically
+ *   different — this is what should gate showing the struck-through MRP
+ *   and the +/- badge at all.
+ * - `diffPct` is signed: positive means the effective price is HIGHER than
+ *   MRP (mark it up, "+X%"), negative means it's LOWER ("-X%", a discount).
+ *   It's null whenever there's nothing meaningful to compare against
+ *   (missing base price, or base price of 0).
+ */
+export interface PriceInfo {
+  currency: string;
+  effective: number | null;
+  base: number | null;
+  differs: boolean;
+  diffPct: number | null;
+}
+
+export const getPriceInfo = (item: ProductItem): PriceInfo => {
+  const currency = item.currency || 'INR';
+
+  const baseRaw = item.base_price;
+  const effectiveRaw = item.effective_price ?? item.base_price;
+
+  const base =
+    baseRaw !== null && baseRaw !== undefined && baseRaw !== '' ? Number(baseRaw) : null;
+  const effective =
+    effectiveRaw !== null && effectiveRaw !== undefined && effectiveRaw !== ''
+      ? Number(effectiveRaw)
+      : null;
+
+  const validBase = base !== null && !Number.isNaN(base);
+  const validEffective = effective !== null && !Number.isNaN(effective);
+
+  const differs = validBase && validEffective && base !== effective;
+  const diffPct =
+    differs && validBase && base !== 0 ? ((effective! - base!) / base!) * 100 : null;
+
+  return {
+    currency,
+    effective: validEffective ? (effective as number) : null,
+    base: validBase ? (base as number) : null,
+    differs: !!differs,
+    diffPct,
+  };
+};
+
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
 

@@ -78,6 +78,10 @@
 .pf-total-pill { background: #E4EFEB; color: #1C2521; }
 .pf-selected-badge { background: #2F6E62; color: #fff; }
 
+/* Price block — final price vs struck-through MRP + %-diff badge */
+.pf-price-up { color: #B8802F; }   /* effective price is HIGHER than MRP */
+.pf-price-down { color: #2F6E62; } /* effective price is LOWER than MRP (a discount) */
+
 /* Buttons */
 .pf-btn-primary { background: #1C2521; color: #fff; transition: opacity 0.15s ease; }
 .pf-btn-accent { background: #2F6E62; color: #fff; transition: opacity 0.15s ease; }
@@ -127,18 +131,6 @@ a[aria-disabled="true"] {
 }
 .pf-summary-card:last-child { border-bottom: none; }
 
-/* ─── Mobile scroll rows ─────────────────────────────────────────────── */
-/* Org / project / space pill rows scroll horizontally with a light snap
-   on phones (where sm:flex-wrap hasn't kicked in yet), instead of wrapping
-   into a cramped multi-line block. */
-.pf-scroll-row {
-  scroll-snap-type: x proximity;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.pf-scroll-row::-webkit-scrollbar { display: none; }
-.pf-scroll-row > * { scroll-snap-align: start; }
-
 /* Prevents the double-tap-to-zoom delay on touch devices for anything
    marked touch-manipulation (all clickable buttons/links on this page) —
    removes a source of accidental double-fires on mobile taps. */
@@ -146,139 +138,30 @@ a[aria-disabled="true"] {
   touch-action: manipulation;
 }
 
-
-/* Add these styles to your product.css file */
-
-/* ─── Scrollable row with arrows ─────────────────────────────────────── */
-.pf-scroll-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
+/* ─── Horizontal scroll rows (org / project / space / filter-space pills) ──
+   Arrow buttons were removed in favour of a plain, always-visible thin
+   scrollbar so people can see and grab it directly, on touch and desktop
+   alike, instead of hunting for tap targets on either edge. */
+.pf-scroll-row {
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px; /* room for the scrollbar so it doesn't clip content */
+  scrollbar-width: thin;                 /* Firefox */
+  scrollbar-color: #C7CDC3 transparent;  /* Firefox */
 }
+.pf-scroll-row > * { scroll-snap-align: start; }
 
-.pf-scroll-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 5;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: #fff;
-  border: 1px solid #DCE0D8;
-  color: #1C2521;
-  font-size: 18px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.15s ease;
-  touch-action: manipulation;
+/* WebKit / Chromium / Safari scrollbar styling */
+.pf-scroll-row::-webkit-scrollbar {
+  height: 6px;
 }
-
-.pf-scroll-arrow:hover {
-  background: #EDEFEA;
-  border-color: #1C2521;
+.pf-scroll-row::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-.pf-scroll-arrow-left {
-  left: -8px;
+.pf-scroll-row::-webkit-scrollbar-thumb {
+  background: #C7CDC3;
+  border-radius: 999px;
 }
-
-.pf-scroll-arrow-right {
-  right: -8px;
-}
-
-/* Hide arrows on desktop where content usually fits */
-@media (min-width: 640px) {
-  .pf-scroll-arrow {
-    display: none;
-  }
-}
-
-/* Update scroll row to work better with wrapper */
-.pf-scroll-wrapper .pf-scroll-row {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Simple scroll buttons for mobile */
-.pf-scroll-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: #fff;
-  border: 1px solid #DCE0D8;
-  color: #1C2521;
-  font-size: 18px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.15s ease;
-  touch-action: manipulation;
-}
-
-.pf-scroll-btn:hover {
-  background: #EDEFEA;
-  border-color: #1C2521;
-}
-
-.pf-scroll-btn:active {
-  transform: scale(0.95);
-}
-
-/* Scrollable section with side arrows */
-.pf-scroll-container {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.pf-scroll-arrow {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #fff;
-  border: 1px solid #DCE0D8;
-  color: #1C2521;
-  font-size: 20px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.15s ease;
-  touch-action: manipulation;
-  flex-shrink: 0;
-  z-index: 5;
-}
-
-.pf-scroll-arrow:hover {
-  background: #EDEFEA;
-  border-color: #1C2521;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.pf-scroll-arrow:active {
-  transform: scale(0.95);
-}
-
-.pf-scroll-arrow-left {
-  order: -1;
-}
-
-.pf-scroll-arrow-right {
-  order: 1;
-}
-
-.pf-scroll-container .pf-scroll-row {
-  flex: 1;
-  min-width: 0;
+.pf-scroll-row::-webkit-scrollbar-thumb:hover {
+  background: #9AA39B;
 }

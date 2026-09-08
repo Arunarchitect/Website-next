@@ -14,6 +14,7 @@ import {
   CATEGORIES,
   getImageSource,
   formatPrice,
+  getPriceInfo,
   roleToUiRole,
   groupByOrganisation,
   getMyProductContext,
@@ -113,12 +114,17 @@ function formatTotal(t: { currency: string; total: number }): string {
   return `${t.currency} ${t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+function formatCurrencyValue(currency: string, value: number): string {
+  return `${currency} ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
 // Small reusable clickable product-link element used across every list
 // (assigned list, catalog cards).
 function ProductLink({ href, className }: { href?: string | null; className?: string }) {
   if (!href) return null;
   return (
     <a
+    
       href={href}
       target="_blank"
       rel="noopener noreferrer"
@@ -127,6 +133,39 @@ function ProductLink({ href, className }: { href?: string | null; className?: st
     >
       Product link
     </a>
+  );
+}
+
+// ── Price block ──────────────────────────────────────────────────────────
+// Shows the final (effective) price prominently. If a base price (MRP) is
+// also present and differs from the effective price, the MRP is shown
+// underneath in small, struck-through text, alongside a +X% / -X% badge
+// showing how the final price compares to it. When base and effective are
+// the same, the MRP line is shown plain (no strike, no badge) since there's
+// nothing to call out.
+function PriceBlock({ item, className }: { item: ProductItem; className?: string }) {
+  const info = getPriceInfo(item);
+  if (info.effective === null) return null;
+
+  const effectiveLabel = formatCurrencyValue(info.currency, info.effective);
+  const baseLabel = info.base !== null ? formatCurrencyValue(info.currency, info.base) : null;
+  const pctLabel = info.diffPct !== null ? `${info.diffPct > 0 ? "+" : ""}${info.diffPct.toFixed(1)}%` : null;
+  const pctClass = info.diffPct !== null && info.diffPct < 0 ? "pf-price-down" : "pf-price-up";
+
+  return (
+    <div className={className ?? "mt-1"}>
+      <span className="text-sm font-medium">
+        {effectiveLabel}
+        {info.differs && pctLabel && (
+          <span className={`ml-1.5 text-xs font-semibold ${pctClass}`}>{pctLabel}</span>
+        )}
+      </span>
+      {baseLabel && (
+        <div className="pf-faint text-xs mt-0.5">
+          {info.differs ? <span className="line-through">{baseLabel}</span> : <span>{baseLabel}</span>} MRP
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -159,62 +198,22 @@ function SkeletonRow() {
   );
 }
 
-// ── Scrollable section with arrow buttons ────────────────────────────────
+// ── Scrollable section ───────────────────────────────────────────────────
+// A horizontally scrollable row with a plain, always-visible thin
+// scrollbar (see .pf-scroll-row in product.css) instead of left/right
+// arrow buttons — works the same on touch and with a mouse/trackpad, and
+// doesn't need overflow-detection JS to decide whether to show controls.
 interface ScrollableSectionProps {
   children: React.ReactNode;
-  itemCount: number;
+  itemCount?: number;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   className?: string;
 }
 
-function ScrollableSection({ children, itemCount, scrollRef, className = "" }: ScrollableSectionProps) {
-  const [showArrows, setShowArrows] = useState(false);
-
-  useEffect(() => {
-    const checkOverflow = () => {
-      const el = scrollRef.current;
-      if (el) {
-        setShowArrows(el.scrollWidth > el.clientWidth);
-      }
-    };
-
-    checkOverflow();
-    window.addEventListener("resize", checkOverflow);
-
-    return () => {
-      window.removeEventListener("resize", checkOverflow);
-    };
-  }, [scrollRef, itemCount]);
-
-  const scrollBy = (dir: 1 | -1) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollBy({ left: dir * 280, behavior: "smooth" });
-  };
-
+function ScrollableSection({ children, scrollRef, className = "" }: ScrollableSectionProps) {
   return (
-    <div className="pf-scroll-container">
-      {showArrows && (
-        <button
-          onClick={() => scrollBy(-1)}
-          className="pf-scroll-arrow pf-scroll-arrow-left"
-          aria-label="Scroll left"
-        >
-          ‹
-        </button>
-      )}
-      <div ref={scrollRef} className={`pf-scroll-row flex gap-3 overflow-x-auto ${className}`}>
-        {children}
-      </div>
-      {showArrows && (
-        <button
-          onClick={() => scrollBy(1)}
-          className="pf-scroll-arrow pf-scroll-arrow-right"
-          aria-label="Scroll right"
-        >
-          ›
-        </button>
-      )}
+    <div ref={scrollRef} className={`pf-scroll-row flex gap-3 overflow-x-auto ${className}`}>
+      {children}
     </div>
   );
 }
@@ -1109,7 +1108,6 @@ export default function ProductPage() {
               <div className="space-y-3">
                 {filteredAssignments.map((a) => {
                   const item = pricedProduct(a.product_detail);
-                  const price = formatPrice(item);
                   const bothConfirmed = a.client_confirmed && a.architect_confirmed;
                   const canConfirm = !isViewOnly && !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
 
@@ -1147,7 +1145,7 @@ export default function ProductPage() {
                             <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight truncate">{item.item}</div>
                             <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
                             <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
-                            {price && <div className="text-sm font-medium mt-1">{price}</div>}
+                            <PriceBlock item={item} />
                             {item.product_link && (
                               <ProductLink
                                 href={item.product_link}
@@ -1375,7 +1373,6 @@ export default function ProductPage() {
               ) : (
                 items.map((item) => {
                   const stats = itemStats.get(item.id);
-                  const price = formatPrice(item);
                   const count = selectedCountsForSpace.get(item.id) ?? 0;
                   const isPending = item.status === "pending";
                   const canWithdraw = !isViewOnly && role === "client" && isPending;
@@ -1402,7 +1399,7 @@ export default function ProductPage() {
                           </div>
                         )}
                         <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
-                        {price && <div className="text-sm font-medium mt-1">{price}</div>}
+                        <PriceBlock item={item} />
                         {item.product_link && (
                           <ProductLink
                             href={item.product_link}
