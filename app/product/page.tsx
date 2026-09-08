@@ -469,7 +469,7 @@ export default function ProductPage() {
           priceLabel: formatPrice(item),
           status: statusLabel(a),
           proposed_by: a.proposed_by,
-          imageSrc: getImageSource(item.product_image),
+          imageSrc: getImageSource(item, { preferThumbnail: true }),
           product_link: item.product_link || null,
           proposerNote: a.proposer_note || null,
           declinedNote: a.declined ? a.declined_note || null : null,
@@ -1136,7 +1136,7 @@ export default function ProductPage() {
                         <div className="flex items-center gap-4 min-w-0">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={getImageSource(item.product_image)}
+                            src={getImageSource(item)}
                             alt={item.item}
                             className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-contain bg-white flex-shrink-0"
                           />
@@ -1389,7 +1389,7 @@ export default function ProductPage() {
                       <div className="w-full h-36 sm:h-40 bg-white flex items-center justify-center p-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={getImageSource(item.product_image)}
+                          src={getImageSource(item)}
                           alt={item.item}
                           className="max-w-full max-h-full object-contain"
                         />

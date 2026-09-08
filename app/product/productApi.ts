@@ -44,6 +44,11 @@ export interface ProductItem {
   model_label: string;
   product_link?: string;
   product_image?: string | null;
+  // Small, pre-resized (server-generated) copy of product_image. Used for
+  // the PDF export where download speed on mobile matters far more than
+  // pixel-perfect resolution. The full-size product_image remains what the
+  // catalog/assigned list UI displays, so on-screen clarity is unaffected.
+  thumbnail_url?: string | null;
   base_price?: string | null;
   currency?: string | null;
   effective_price?: string | null;
@@ -57,9 +62,6 @@ export interface Assignment {
   product: string;
   product_detail: ProductItem;
   proposed_by: Role;
-  // Note from whoever proposed this assignment (client or architect),
-  // explaining why they picked this product for this space. Only the
-  // proposer can ever set this — see proposeAssignment.
   proposer_note: string | null;
   client_confirmed: boolean;
   architect_confirmed: boolean;
@@ -87,8 +89,6 @@ export function roleToUiRole(role: MembershipRole): Role {
   return role === 'client' ? 'client' : 'architect';
 }
 
-// Backend already returns entries sorted (active projects first); grouping
-// preserves that order since a Map keeps first-seen insertion order.
 export function groupByOrganisation(entries: MyContextEntry[]): OrganisationGroup[] {
   const map = new Map<number, OrganisationGroup>();
   for (const e of entries) {
@@ -116,7 +116,31 @@ const getAuthToken = (): string | null => {
   );
 };
 
-export const getImageSource = (path?: string | null): string => {
+/**
+ * Resolves a usable image URL for a product.
+ *
+ * By default (preferThumbnail=false) this favours the full-resolution
+ * product_image — used everywhere the person is actually looking at the
+ * picture (catalog cards, assigned-list thumbnails), so on-screen clarity
+ * is never reduced.
+ *
+ * Pass { preferThumbnail: true } for contexts where download size matters
+ * more than resolution — currently just the PDF export, where a small
+ * server-generated thumbnail is plenty legible on paper/screen and loads
+ * far faster on mobile networks than the original upload.
+ *
+ * Either way, falls back to whichever of the two is actually present, so
+ * nothing breaks for older rows that don't have a thumbnail yet.
+ */
+export const getImageSource = (
+  item?: { product_image?: string | null; thumbnail_url?: string | null } | null,
+  opts?: { preferThumbnail?: boolean }
+): string => {
+  const preferThumbnail = opts?.preferThumbnail ?? false;
+  const path = preferThumbnail
+    ? item?.thumbnail_url || item?.product_image
+    : item?.product_image || item?.thumbnail_url;
+
   if (!path) return '/images/test.jpg';
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
   const base = API_BASE_URL || 'http://localhost:8000';
@@ -131,8 +155,6 @@ export const formatPrice = (item: ProductItem): string | null => {
   return `${item.currency || 'INR'} ${num.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 };
 
-// Redirects to the login page, preserving the current path/query as ?next=
-// so the user can be sent back here after they log in.
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
 
@@ -143,9 +165,6 @@ function redirectToLogin() {
     ? `/auth/login?next=${encodeURIComponent(current)}`
     : '/auth/login';
 
-  // Avoid redirecting if we're already there (prevents redirect loops
-  // if multiple 401s fire in quick succession, e.g. several parallel
-  // getSpaces/getAssignments/getProductsByCategory calls all failing at once).
   if (window.location.pathname + window.location.search !== target) {
     window.location.href = target;
   }
@@ -208,10 +227,6 @@ export async function getAssignments(projectId: number, spaceId?: number): Promi
   return unwrapList<Assignment>(res.data);
 }
 
-// `note` here is the PROPOSER's own note (why they picked this product for
-// this space) — it is stored as proposer_note and is only ever settable by
-// whoever is doing the proposing (client or architect, matching `role`).
-// The other party can only ever add a declined_note, via declineAssignment.
 export async function proposeAssignment(
   projectId: number,
   spaceId: number,
@@ -236,18 +251,10 @@ export async function confirmAssignment(id: number, role: Role): Promise<Assignm
   return res.data;
 }
 
-// Hard delete. Server-side (CanModifyAssignment) only allows this for the
-// original proposer or an org admin — everyone else gets a 403 and should
-// call declineAssignment instead.
 export async function removeAssignment(id: number): Promise<void> {
   await apiClient.delete(`/product/assignments/${id}/`);
 }
 
-// Soft "no" from the party that did NOT propose the assignment — flips
-// declined/declined_by/declined_at instead of deleting the row. `note` is
-// an optional short explanation, visible to both sides afterwards. This is
-// the ONLY note the non-proposing party can ever attach — they can never
-// set proposer_note.
 export async function declineAssignment(id: number, note?: string): Promise<Assignment> {
   const res = await apiClient.post(`/product/assignments/${id}/decline/`, {
     note: note?.trim() || undefined,
@@ -255,19 +262,11 @@ export async function declineAssignment(id: number, note?: string): Promise<Assi
   return res.data;
 }
 
-// Reverses a decline. Server-side (CanModifyAssignment) only allows this
-// for the UI role that actually declined the assignment — stays available
-// until the original proposer permanently removes it via removeAssignment.
 export async function undeclineAssignment(id: number): Promise<Assignment> {
   const res = await apiClient.post(`/product/assignments/${id}/undecline/`);
   return res.data;
 }
 
-// Add or change the proposer's own note on an assignment, any time after
-// creation — not just at propose time. Server-side (CanModifyAssignment)
-// only allows this for the UI role that originally proposed the
-// assignment; the other party can never call this and can only ever add
-// their own declined_note via declineAssignment.
 export async function editAssignmentNote(id: number, note: string): Promise<Assignment> {
   const res = await apiClient.post(`/product/assignments/${id}/edit_note/`, {
     note: note.trim() || undefined,
@@ -275,7 +274,6 @@ export async function editAssignmentNote(id: number, note: string): Promise<Assi
   return res.data;
 }
 
-// ── Product suggestion (client proposes a new catalog product) ──────────
 export async function suggestProduct(input: ProductSuggestionInput): Promise<ProductItem> {
   const fd = new FormData();
   fd.append('space', input.space);
@@ -295,12 +293,6 @@ export async function suggestProduct(input: ProductSuggestionInput): Promise<Pro
   return res.data;
 }
 
-// Edit an existing suggestion. Server-side this should only be permitted
-// while the product is still `status === "pending"` — once an org admin
-// approves it, the backend should reject further edits from the client
-// (mirrors the existing rule for deleteProductSuggestion). Only send the
-// fields that changed; omit product_image entirely if the client didn't
-// pick a new file so the existing image isn't cleared.
 export async function updateProductSuggestion(
   id: string,
   input: Partial<Omit<ProductSuggestionInput, 'space' | 'organisation'>>
@@ -321,15 +313,10 @@ export async function updateProductSuggestion(
   return res.data;
 }
 
-// Withdraw a product from the catalog. Server-side (CanDeleteProduct) only
-// allows this for an org admin (any status) or for the original suggester
-// while the product is still pending — once an org admin approves it, the
-// client can no longer remove it themselves.
 export async function deleteProductSuggestion(id: string): Promise<void> {
   await apiClient.delete(`/product/products/${id}/`);
 }
 
-// ── Space management (create/edit/delete spaces for a project) ──────────
 export async function createSpace(
   projectId: number,
   name: string,
