@@ -57,6 +57,10 @@ export interface Assignment {
   product: string;
   product_detail: ProductItem;
   proposed_by: Role;
+  // Note from whoever proposed this assignment (client or architect),
+  // explaining why they picked this product for this space. Only the
+  // proposer can ever set this — see proposeAssignment.
+  proposer_note: string | null;
   client_confirmed: boolean;
   architect_confirmed: boolean;
   created_at: string;
@@ -204,17 +208,23 @@ export async function getAssignments(projectId: number, spaceId?: number): Promi
   return unwrapList<Assignment>(res.data);
 }
 
+// `note` here is the PROPOSER's own note (why they picked this product for
+// this space) — it is stored as proposer_note and is only ever settable by
+// whoever is doing the proposing (client or architect, matching `role`).
+// The other party can only ever add a declined_note, via declineAssignment.
 export async function proposeAssignment(
   projectId: number,
   spaceId: number,
   productId: string,
-  role: Role
+  role: Role,
+  note?: string
 ): Promise<Assignment> {
   const res = await apiClient.post('/product/assignments/', {
     project: projectId,
     space: spaceId,
     product: productId,
     proposed_by: role,
+    proposer_note: note?.trim() || undefined,
     client_confirmed: role === 'client',
     architect_confirmed: role === 'architect',
   });
@@ -235,7 +245,9 @@ export async function removeAssignment(id: number): Promise<void> {
 
 // Soft "no" from the party that did NOT propose the assignment — flips
 // declined/declined_by/declined_at instead of deleting the row. `note` is
-// an optional short explanation, visible to both sides afterwards.
+// an optional short explanation, visible to both sides afterwards. This is
+// the ONLY note the non-proposing party can ever attach — they can never
+// set proposer_note.
 export async function declineAssignment(id: number, note?: string): Promise<Assignment> {
   const res = await apiClient.post(`/product/assignments/${id}/decline/`, {
     note: note?.trim() || undefined,
@@ -248,6 +260,18 @@ export async function declineAssignment(id: number, note?: string): Promise<Assi
 // until the original proposer permanently removes it via removeAssignment.
 export async function undeclineAssignment(id: number): Promise<Assignment> {
   const res = await apiClient.post(`/product/assignments/${id}/undecline/`);
+  return res.data;
+}
+
+// Add or change the proposer's own note on an assignment, any time after
+// creation — not just at propose time. Server-side (CanModifyAssignment)
+// only allows this for the UI role that originally proposed the
+// assignment; the other party can never call this and can only ever add
+// their own declined_note via declineAssignment.
+export async function editAssignmentNote(id: number, note: string): Promise<Assignment> {
+  const res = await apiClient.post(`/product/assignments/${id}/edit_note/`, {
+    note: note.trim() || undefined,
+  });
   return res.data;
 }
 

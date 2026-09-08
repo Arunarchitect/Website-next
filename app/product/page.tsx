@@ -25,6 +25,7 @@ import {
   removeAssignment,
   declineAssignment,
   undeclineAssignment,
+  editAssignmentNote,
   suggestProduct,
   updateProductSuggestion,
   deleteProductSuggestion,
@@ -113,7 +114,7 @@ function formatTotal(t: { currency: string; total: number }): string {
 }
 
 // Small reusable clickable product-link element used across every list
-// (assigned list, all-spaces table, all-spaces mobile cards, catalog cards).
+// (assigned list, catalog cards).
 function ProductLink({ href, className }: { href?: string | null; className?: string }) {
   if (!href) return null;
   return (
@@ -176,10 +177,10 @@ function ScrollableSection({ children, itemCount, scrollRef, className = "" }: S
         setShowArrows(el.scrollWidth > el.clientWidth);
       }
     };
-    
+
     checkOverflow();
     window.addEventListener("resize", checkOverflow);
-    
+
     return () => {
       window.removeEventListener("resize", checkOverflow);
     };
@@ -233,7 +234,13 @@ export default function ProductPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounced(searchTerm, 250);
 
-  const [summarySpaceIds, setSummarySpaceIds] = useState<Set<number>>(new Set());
+  // Filters for the unified "Assigned products" list below (space
+  // multi-select, category, and its own search box — independent from the
+  // catalog browsing controls above).
+  const [filterSpaceIds, setFilterSpaceIds] = useState<Set<number>>(new Set());
+  const [filterCategory, setFilterCategory] = useState<string>("");
+  const [filterSearch, setFilterSearch] = useState("");
+  const debouncedFilterSearch = useDebounced(filterSearch, 250);
 
   const [catalogAll, setCatalogAll] = useState<ProductItem[]>([]);
 
@@ -252,8 +259,23 @@ export default function ProductPage() {
   const [spaceForm, setSpaceForm] = useState(EMPTY_SPACE_FORM);
   const [spaceError, setSpaceError] = useState<string | null>(null);
 
+  // Proposer note — shown only to the person doing the proposing (client OR
+  // architect, whichever `role` currently is), right before the assignment
+  // is created. The other party never sees this input; they only ever get
+  // the decline-note box below.
+  const [proposingNoteId, setProposingNoteId] = useState<string | null>(null);
+  const [proposeNoteText, setProposeNoteText] = useState("");
+
   const [decliningNoteId, setDecliningNoteId] = useState<number | null>(null);
   const [declineNoteText, setDeclineNoteText] = useState("");
+
+  // Editing an already-created assignment's own proposer_note. Distinct
+  // from proposingNoteId above (which is for the note written at the
+  // moment of creating a NEW assignment) — this one opens from the
+  // "Add note" / "Edit note" button on an existing row, and is only ever
+  // shown to the proposer of that row.
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [editNoteText, setEditNoteText] = useState("");
 
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
 
@@ -261,7 +283,7 @@ export default function ProductPage() {
   const orgScrollRef = useRef<HTMLDivElement>(null);
   const projectScrollRef = useRef<HTMLDivElement>(null);
   const spaceScrollRef = useRef<HTMLDivElement>(null);
-  const summaryScrollRef = useRef<HTMLDivElement>(null);
+  const filterSpaceScrollRef = useRef<HTMLDivElement>(null);
 
   function isBusy(key: string) {
     return busyKeys.has(key);
@@ -343,7 +365,7 @@ export default function ProductPage() {
     const [s, a] = await Promise.all([getSpaces(pid), getAssignments(pid)]);
     setSpaces(s);
     setAssignments(a);
-    setSummarySpaceIds(new Set(s.map((sp) => sp.id)));
+    setFilterSpaceIds(new Set(s.map((sp) => sp.id)));
     if (keepSpaceId && s.some((sp) => sp.id === keepSpaceId)) {
       setSpaceId(keepSpaceId);
     } else {
@@ -394,6 +416,10 @@ export default function ProductPage() {
     });
   }, [catalogAll, categoryId, debouncedSearch]);
 
+  // Assignments scoped to the single currently-selected space — used only
+  // to drive the catalog's "Added ×N" badge and requirement chips below,
+  // not for display as a list of its own (see the unified filtered list
+  // further down).
   const assignmentsForSpace = useMemo(
     () => assignments.filter((a) => a.project === projectId && a.space === spaceId),
     [assignments, projectId, spaceId]
@@ -401,48 +427,39 @@ export default function ProductPage() {
   const currentSpaceName = spaces.find((s) => s.id === spaceId)?.name ?? "";
   const currentProjectName = currentOrg?.projects.find((p) => p.id === projectId)?.name ?? "";
 
-  const spaceTotals = useMemo(
-    () => sumByCurrency(assignmentsForSpace.map((a) => pricedProduct(a.product_detail))),
-    [assignmentsForSpace, pricedProduct]
-  );
-
-  const printRows = useMemo(
-    () =>
-      assignmentsForSpace.map((a) => {
-        const item = pricedProduct(a.product_detail);
-        return {
-          item: item.item,
-          manufacturer: item.manufacturer,
-          model_label: item.model_label,
-          priceLabel: formatPrice(item),
-          status: statusLabel(a),
-          proposed_by: a.proposed_by,
-          imageSrc: getImageSource(item.product_image),
-          product_link: item.product_link || null,
-        };
-      }),
-    [assignmentsForSpace, pricedProduct]
-  );
-
   const spaceNameById = useMemo(() => {
     const map = new Map<number, string>();
     spaces.forEach((s) => map.set(s.id, s.name));
     return map;
   }, [spaces]);
 
-  const summaryAssignments = useMemo(
-    () => assignments.filter((a) => a.project === projectId && summarySpaceIds.has(a.space)),
-    [assignments, projectId, summarySpaceIds]
+  // ── Unified "Assigned products" list ────────────────────────────────
+  // One list for the whole project, filtered by space(s), category, and
+  // free-text search. When every space is selected this shows everything
+  // assigned across the project.
+  const filteredAssignments = useMemo(() => {
+    const term = debouncedFilterSearch.trim().toLowerCase();
+    return assignments.filter((a) => {
+      if (a.project !== projectId) return false;
+      if (!filterSpaceIds.has(a.space)) return false;
+      const item = pricedProduct(a.product_detail);
+      if (filterCategory && item.category !== filterCategory) return false;
+      if (term) {
+        const hay = `${item.item} ${item.manufacturer} ${item.model_label}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [assignments, projectId, filterSpaceIds, filterCategory, debouncedFilterSearch, pricedProduct]);
+
+  const filteredTotals = useMemo(
+    () => sumByCurrency(filteredAssignments.map((a) => pricedProduct(a.product_detail))),
+    [filteredAssignments, pricedProduct]
   );
 
-  const summaryTotals = useMemo(
-    () => sumByCurrency(summaryAssignments.map((a) => pricedProduct(a.product_detail))),
-    [summaryAssignments, pricedProduct]
-  );
-
-  const summaryPrintRows = useMemo(
+  const filteredPrintRows = useMemo(
     () =>
-      summaryAssignments.map((a) => {
+      filteredAssignments.map((a) => {
         const item = pricedProduct(a.product_detail);
         return {
           space: spaceNameById.get(a.space) ?? "—",
@@ -454,21 +471,30 @@ export default function ProductPage() {
           proposed_by: a.proposed_by,
           imageSrc: getImageSource(item.product_image),
           product_link: item.product_link || null,
+          proposerNote: a.proposer_note || null,
+          declinedNote: a.declined ? a.declined_note || null : null,
         };
       }),
-    [summaryAssignments, pricedProduct, spaceNameById]
+    [filteredAssignments, pricedProduct, spaceNameById]
   );
 
-  const summaryScopeLabel = useMemo(() => {
-    if (spaces.length === 0) return "All spaces";
-    if (summarySpaceIds.size === spaces.length) return "All spaces";
-    if (summarySpaceIds.size === 0) return "No spaces selected";
-    const names = spaces.filter((s) => summarySpaceIds.has(s.id)).map((s) => s.name);
-    return names.join(", ");
-  }, [spaces, summarySpaceIds]);
+  const filterScopeLabel = useMemo(() => {
+    const spaceLabel = (() => {
+      if (spaces.length === 0) return "All spaces";
+      if (filterSpaceIds.size === spaces.length) return "All spaces";
+      if (filterSpaceIds.size === 0) return "No spaces selected";
+      return spaces.filter((s) => filterSpaceIds.has(s.id)).map((s) => s.name).join(", ");
+    })();
+    const catLabel = filterCategory ? CATEGORIES.find((c) => c.id === filterCategory)?.label : null;
+    const searchLabel = filterSearch.trim() ? `Search: "${filterSearch.trim()}"` : null;
+    const parts = [spaceLabel];
+    if (catLabel) parts.push(catLabel);
+    if (searchLabel) parts.push(searchLabel);
+    return parts.join(" · ");
+  }, [spaces, filterSpaceIds, filterCategory, filterSearch]);
 
-  function toggleSummarySpace(id: number) {
-    setSummarySpaceIds((prev) => {
+  function toggleFilterSpace(id: number) {
+    setFilterSpaceIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -476,12 +502,12 @@ export default function ProductPage() {
     });
   }
 
-  function selectAllSummarySpaces() {
-    setSummarySpaceIds(new Set(spaces.map((s) => s.id)));
+  function selectAllFilterSpaces() {
+    setFilterSpaceIds(new Set(spaces.map((s) => s.id)));
   }
 
-  function clearSummarySpaces() {
-    setSummarySpaceIds(new Set());
+  function clearFilterSpaces() {
+    setFilterSpaceIds(new Set());
   }
 
   function spaceProgress(space: Space) {
@@ -533,11 +559,29 @@ export default function ProductPage() {
     return map;
   }, [assignmentsForSpace]);
 
-  async function handleProposeItem(itemId: string) {
+  // ── Propose-note flow ──────────────────────────────────────────────────
+  // Opens the inline note box for THIS caller's own proposal. Whoever is
+  // currently acting (client or architect, per `role`) is the only one who
+  // can ever fill in proposer_note for the assignment they're about to
+  // create — the other side only ever writes a decline note, later.
+  function openProposeNote(itemId: string) {
+    if (!spaceId) return;
+    setProposingNoteId(itemId);
+    setProposeNoteText("");
+  }
+
+  function cancelProposeNote() {
+    setProposingNoteId(null);
+    setProposeNoteText("");
+  }
+
+  async function handleProposeItem(itemId: string, note?: string) {
     if (!projectId || !spaceId) return;
     await runExclusive(`propose-${itemId}`, async () => {
-      const created = await proposeAssignment(projectId, spaceId, itemId, role);
+      const created = await proposeAssignment(projectId, spaceId, itemId, role, note);
       setAssignments((prev) => [...prev, created]);
+      setProposingNoteId(null);
+      setProposeNoteText("");
     });
   }
 
@@ -578,6 +622,29 @@ export default function ProductPage() {
     await runExclusive(`undecline-${id}`, async () => {
       const updated = await undeclineAssignment(id);
       setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+    });
+  }
+
+  // Opens the note editor for an EXISTING assignment — only ever called
+  // from the proposer's own row (gated by isProposer at render time).
+  // Pre-fills with whatever note is already there so it reads as "edit",
+  // not "overwrite blind".
+  function openEditNote(a: Assignment) {
+    setEditingNoteId(a.id);
+    setEditNoteText(a.proposer_note ?? "");
+  }
+
+  function cancelEditNote() {
+    setEditingNoteId(null);
+    setEditNoteText("");
+  }
+
+  async function handleSaveNote(id: number, note: string) {
+    await runExclusive(`edit-note-${id}`, async () => {
+      const updated = await editAssignmentNote(id, note);
+      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      setEditingNoteId(null);
+      setEditNoteText("");
     });
   }
 
@@ -940,19 +1007,22 @@ export default function ProductPage() {
           </section>
         )}
 
+        {/* ── Unified assigned-products list ──────────────────────────
+            One list for the whole project — filter by space(s), category
+            and free text instead of two separate lists. */}
         {projectId && (
           <section>
             <div className="flex items-baseline justify-between mb-1 flex-wrap gap-2">
-              <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Assigned to {currentSpaceName || "—"}</h2>
+              <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Assigned products</h2>
               <div className="flex items-center gap-3">
-                <span className="pf-muted text-sm">{assignmentsForSpace.length} item{assignmentsForSpace.length === 1 ? "" : "s"}</span>
-                {assignmentsForSpace.length > 0 && (
+                <span className="pf-muted text-sm">{filteredAssignments.length} item{filteredAssignments.length === 1 ? "" : "s"}</span>
+                {filteredAssignments.length > 0 && (
                   <ProductListPrintButton
                     orgName={currentOrg?.name ?? ""}
                     projectName={currentProjectName}
-                    scopeLabel={currentSpaceName || "Space"}
-                    rows={printRows}
-                    totals={spaceTotals}
+                    scopeLabel={filterScopeLabel}
+                    rows={filteredPrintRows}
+                    totals={filteredTotals}
                     className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
                     label="Print"
                   />
@@ -960,9 +1030,62 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {spaceTotals.length > 0 && (
+            <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 sm:items-center mt-4 mb-3">
+              <input
+                type="text"
+                value={filterSearch}
+                onChange={(e) => setFilterSearch(e.target.value)}
+                placeholder="Search manufacturer, item, model…"
+                className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm w-full sm:w-64"
+              />
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm w-full sm:w-auto"
+              >
+                <option value="">All categories</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {spaces.length > 0 && (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <span className="pf-muted text-sm">Spaces</span>
+                  <div className="flex gap-3 text-sm">
+                    <button onClick={selectAllFilterSpaces} className="touch-manipulation pf-link">Select all</button>
+                    <button onClick={clearFilterSpaces} className="touch-manipulation pf-link">Clear</button>
+                  </div>
+                </div>
+                <ScrollableSection scrollRef={filterSpaceScrollRef} itemCount={spaces.length}>
+                  {spaces.map((s) => {
+                    const checked = filterSpaceIds.has(s.id);
+                    return (
+                      <label
+                        key={s.id}
+                        className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer flex-shrink-0 whitespace-nowrap ${
+                          checked ? "pf-checkbox-label-active" : "pf-checkbox-label"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleFilterSpace(s.id)}
+                          className="pf-checkbox-input"
+                        />
+                        {s.name}
+                      </label>
+                    );
+                  })}
+                </ScrollableSection>
+              </div>
+            )}
+
+            {filteredTotals.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
-                {spaceTotals.map((t) => (
+                {filteredTotals.map((t) => (
                   <span key={t.currency} className="pf-total-pill text-sm font-medium rounded-full px-3 py-1">
                     Total: {formatTotal(t)}
                   </span>
@@ -972,17 +1095,19 @@ export default function ProductPage() {
 
             {loadingProjectData ? (
               <div className="space-y-3"><SkeletonRow /><SkeletonRow /></div>
-            ) : !spaceId ? (
+            ) : spaces.length === 0 ? (
               <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
-                Add a space above, then select it to start assigning products.
+                Add a space above, then assign products to it.
               </div>
-            ) : assignmentsForSpace.length === 0 ? (
+            ) : filteredAssignments.length === 0 ? (
               <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
-                Nothing assigned yet. Choose an item from the catalog below.
+                {filterSpaceIds.size === 0
+                  ? "No spaces selected above."
+                  : "Nothing matches this filter yet."}
               </div>
             ) : (
               <div className="space-y-3">
-                {assignmentsForSpace.map((a) => {
+                {filteredAssignments.map((a) => {
                   const item = pricedProduct(a.product_detail);
                   const price = formatPrice(item);
                   const bothConfirmed = a.client_confirmed && a.architect_confirmed;
@@ -996,11 +1121,14 @@ export default function ProductPage() {
                   const removeKey = `remove-${a.id}`;
                   const declineKey = `decline-${a.id}`;
                   const undeclineKey = `undecline-${a.id}`;
+                  const editNoteKey = `edit-note-${a.id}`;
                   const isConfirming = isBusy(confirmKey);
                   const isRemoving = isBusy(removeKey);
                   const isDeclining = isBusy(declineKey);
                   const isUndeclining = isBusy(undeclineKey);
+                  const isSavingNote = isBusy(editNoteKey);
                   const noteBoxOpen = decliningNoteId === a.id;
+                  const editNoteBoxOpen = editingNoteId === a.id;
 
                   return (
                     <div key={a.id} className="pf-row flex flex-col gap-3 rounded-2xl px-4 sm:px-5 py-4">
@@ -1013,6 +1141,9 @@ export default function ProductPage() {
                             className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-contain bg-white flex-shrink-0"
                           />
                           <div className="flex-1 min-w-0">
+                            <span className="pf-badge-soft text-[11px] px-2 py-0.5 rounded-full inline-block mb-1">
+                              {spaceNameById.get(a.space) ?? "—"}
+                            </span>
                             <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight truncate">{item.item}</div>
                             <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
                             <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
@@ -1051,6 +1182,18 @@ export default function ProductPage() {
                                   {isRemoving ? "Removing…" : "Remove"}
                                 </button>
                               )}
+                              {/* Note button — only the proposer of THIS
+                                  assignment ever sees this; it's how they
+                                  add or change their own proposer_note
+                                  after the fact, any time. */}
+                              {isProposer && !editNoteBoxOpen && (
+                                <button
+                                  onClick={() => openEditNote(a)}
+                                  className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5"
+                                >
+                                  {a.proposer_note ? "Edit note" : "Add note"}
+                                </button>
+                              )}
                               {canDecline && !noteBoxOpen && (
                                 <button
                                   onClick={() => openDeclineNote(a.id)}
@@ -1076,6 +1219,54 @@ export default function ProductPage() {
                         </div>
                       </div>
 
+                      {/* Proposer's own note — written at propose time or
+                          any time after via "Add note"/"Edit note" above.
+                          Only the proposer can ever write it; both parties
+                          can see it. Hidden while the edit box (below) is
+                          open so the two don't show at once. */}
+                      {a.proposer_note && !editNoteBoxOpen && (
+                        <div className="pf-empty-dashed rounded-xl px-4 py-2.5 text-sm">
+                          <span className="pf-faint text-xs uppercase tracking-wide block mb-0.5">
+                            Note from {a.proposed_by === "client" ? "client" : "architect"}
+                          </span>
+                          {a.proposer_note}
+                        </div>
+                      )}
+
+                      {editNoteBoxOpen && (
+                        <div className="pf-empty-dashed rounded-xl px-4 py-3 space-y-2">
+                          <label className="text-xs pf-muted block">
+                            Your note — visible to {a.proposed_by === "client" ? "the architect" : "the client"} too
+                          </label>
+                          <textarea
+                            value={editNoteText}
+                            onChange={(e) => setEditNoteText(e.target.value)}
+                            rows={2}
+                            disabled={isSavingNote}
+                            placeholder="e.g. Matches the finish we discussed."
+                            className="pf-input rounded-lg px-3 py-2 text-sm w-full disabled:opacity-60"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleSaveNote(a.id, editNoteText)}
+                              disabled={isSavingNote}
+                              className="touch-manipulation pf-btn-accent text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
+                            >
+                              {isSavingNote ? "Saving…" : "Save note"}
+                            </button>
+                            <button
+                              onClick={cancelEditNote}
+                              disabled={isSavingNote}
+                              className="touch-manipulation pf-btn-outline text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Decline note — only ever written by the OTHER side,
+                          via the decline action below. */}
                       {a.declined && a.declined_note && (
                         <div className="pf-empty-dashed rounded-xl px-4 py-2.5 text-sm">
                           <span className="pf-faint text-xs uppercase tracking-wide block mb-0.5">Decline note</span>
@@ -1117,152 +1308,6 @@ export default function ProductPage() {
                     </div>
                   );
                 })}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* All spaces combined list */}
-        {projectId && spaces.length > 0 && (
-          <section>
-            <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
-              <h2 className="font-[var(--font-display)] text-lg sm:text-xl">All spaces</h2>
-              <div className="flex items-center gap-3">
-                <span className="pf-muted text-sm">{summaryAssignments.length} item{summaryAssignments.length === 1 ? "" : "s"}</span>
-                {summaryAssignments.length > 0 && (
-                  <ProductListPrintButton
-                    orgName={currentOrg?.name ?? ""}
-                    projectName={currentProjectName}
-                    scopeLabel={summaryScopeLabel}
-                    rows={summaryPrintRows}
-                    totals={summaryTotals}
-                    className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
-                    label="Print"
-                  />
-                )}
-              </div>
-            </div>
-
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                <span className="pf-muted text-sm">Include spaces</span>
-                <div className="flex gap-3 text-sm">
-                  <button onClick={selectAllSummarySpaces} className="touch-manipulation pf-link">Select all</button>
-                  <button onClick={clearSummarySpaces} className="touch-manipulation pf-link">Clear</button>
-                </div>
-              </div>
-              <ScrollableSection scrollRef={summaryScrollRef} itemCount={spaces.length}>
-                {spaces.map((s) => {
-                  const checked = summarySpaceIds.has(s.id);
-                  return (
-                    <label
-                      key={s.id}
-                      className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer flex-shrink-0 whitespace-nowrap ${
-                        checked ? "pf-checkbox-label-active" : "pf-checkbox-label"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSummarySpace(s.id)}
-                        className="pf-checkbox-input"
-                      />
-                      {s.name}
-                    </label>
-                  );
-                })}
-              </ScrollableSection>
-            </div>
-
-            {summaryTotals.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-2">
-                {summaryTotals.map((t) => (
-                  <span key={t.currency} className="pf-total-pill text-sm font-medium rounded-full px-3 py-1">
-                    Total: {formatTotal(t)}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {summaryAssignments.length === 0 ? (
-              <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
-                {summarySpaceIds.size === 0
-                  ? "No spaces selected above."
-                  : "No products assigned in the selected spaces yet."}
-              </div>
-            ) : (
-              <div className="pf-row rounded-2xl overflow-hidden">
-                <div className="pf-table-wrap overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="pf-table-head">
-                        <th className="text-left px-4 py-2 font-medium">Space</th>
-                        <th className="text-left px-4 py-2 font-medium">Item</th>
-                        <th className="text-left px-4 py-2 font-medium">Manufacturer / Model</th>
-                        <th className="text-left px-4 py-2 font-medium">Price</th>
-                        <th className="text-left px-4 py-2 font-medium">Status</th>
-                        <th className="text-left px-4 py-2 font-medium">Link</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summaryAssignments.map((a) => {
-                        const item = pricedProduct(a.product_detail);
-                        const price = formatPrice(item);
-                        return (
-                          <tr key={a.id} className="pf-table-row">
-                            <td className="px-4 py-2">{spaceNameById.get(a.space) ?? "—"}</td>
-                            <td className="px-4 py-2">{item.item}</td>
-                            <td className="px-4 py-2 pf-muted">{item.manufacturer} — {item.model_label}</td>
-                            <td className="px-4 py-2 font-medium">{price ?? "—"}</td>
-                            <td className="px-4 py-2">{statusLabel(a)}</td>
-                            <td className="px-4 py-2">
-                              {item.product_link ? (
-                                <a
-                                  href={item.product_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="pf-link underline underline-offset-2"
-                                >
-                                  View
-                                </a>
-                              ) : (
-                                <span className="pf-faint">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="pf-summary-cards">
-                  {summaryAssignments.map((a) => {
-                    const item = pricedProduct(a.product_detail);
-                    const price = formatPrice(item);
-                    return (
-                      <div key={a.id} className="pf-summary-card">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-sm truncate">{item.item}</span>
-                          {price && <span className="text-sm font-medium flex-shrink-0">{price}</span>}
-                        </div>
-                        <div className="pf-muted text-xs mt-0.5 truncate">{item.manufacturer} — {item.model_label}</div>
-                        {item.product_link && (
-                          <ProductLink
-                            href={item.product_link}
-                            className="pf-link text-[11px] underline underline-offset-2 inline-block mt-0.5"
-                          />
-                        )}
-                        <div className="flex items-center justify-between gap-2 mt-1.5">
-                          <span className="pf-badge-soft text-[11px] px-2 py-0.5 rounded-full">
-                            {spaceNameById.get(a.space) ?? "—"}
-                          </span>
-                          <span className="pf-faint text-[11px]">{statusLabel(a)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             )}
           </section>
@@ -1338,6 +1383,7 @@ export default function ProductPage() {
                   const withdrawKey = `withdraw-${item.id}`;
                   const isProposing = isBusy(proposeKey);
                   const isWithdrawing = isBusy(withdrawKey);
+                  const noteBoxOpen = proposingNoteId === item.id;
                   return (
                     <div key={item.id} className="pf-card rounded-2xl overflow-hidden">
                       <div className="w-full h-36 sm:h-40 bg-white flex items-center justify-center p-2">
@@ -1379,24 +1425,65 @@ export default function ProductPage() {
                             <span className="pf-selected-badge text-xs px-2 py-0.5 rounded-full">Added ×{count}</span>
                           )}
                         </div>
+
+                        {/* Propose flow: clicking the main action opens an
+                            inline note box for the CURRENT role only — a
+                            client proposing writes their own note here; an
+                            architect proposing writes theirs. Whoever is NOT
+                            the proposer never sees this box, only the
+                            decline-note box on the resulting assignment. */}
                         {!isViewOnly && (
-                          <button
-                            onClick={() => handleProposeItem(item.id)}
-                            disabled={!spaceId || isProposing}
-                            className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
-                          >
-                            {!spaceId
-                              ? "Add a space first"
-                              : isProposing
-                              ? "Adding…"
-                              : count > 0
-                              ? role === "client"
-                                ? "Add another"
-                                : "Suggest another"
-                              : role === "client"
-                              ? "Select for this space"
-                              : "Suggest for this space"}
-                          </button>
+                          noteBoxOpen ? (
+                            <div className="mt-3 space-y-2">
+                              <label className="text-xs pf-muted block">
+                                Optional note — why this pick for {currentSpaceName || "this space"}?
+                              </label>
+                              <textarea
+                                value={proposeNoteText}
+                                onChange={(e) => setProposeNoteText(e.target.value)}
+                                rows={2}
+                                disabled={isProposing}
+                                placeholder={
+                                  role === "client"
+                                    ? "e.g. Matches the finish we discussed."
+                                    : "e.g. Fits the budget and lead time for this space."
+                                }
+                                className="pf-input rounded-lg px-3 py-2 text-sm w-full disabled:opacity-60"
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleProposeItem(item.id, proposeNoteText)}
+                                  disabled={isProposing}
+                                  className="touch-manipulation pf-btn-primary flex-1 text-xs rounded-full py-2 disabled:opacity-50"
+                                >
+                                  {isProposing ? "Adding…" : "Add"}
+                                </button>
+                                <button
+                                  onClick={cancelProposeNote}
+                                  disabled={isProposing}
+                                  className="touch-manipulation pf-btn-outline flex-1 text-xs rounded-full py-2 disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => openProposeNote(item.id)}
+                              disabled={!spaceId}
+                              className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
+                            >
+                              {!spaceId
+                                ? "Add a space first"
+                                : count > 0
+                                ? role === "client"
+                                  ? "Add another"
+                                  : "Suggest another"
+                                : role === "client"
+                                ? "Select for this space"
+                                : "Suggest for this space"}
+                            </button>
+                          )
                         )}
                         {canWithdraw && (
                           <div className="mt-2 flex gap-2">

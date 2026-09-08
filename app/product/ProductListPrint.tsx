@@ -14,6 +14,11 @@ export interface PrintableRow {
   proposed_by: string;
   imageSrc?: string | null;
   product_link?: string | null;
+  // Proposer's own note (why they picked this item) and, if the assignment
+  // was declined, the decliner's note — both optional, both printed when
+  // present.
+  proposerNote?: string | null;
+  declinedNote?: string | null;
 }
 
 export interface PrintableTotal {
@@ -206,6 +211,22 @@ interface AutoTableDoc extends jsPDF {
 }
 
 /**
+ * Build the display string for the Notes column: proposer's note (labeled
+ * with who proposed it) and, if declined, the decline note — each on its
+ * own line, only included when present.
+ */
+function buildNotesText(row: PrintableRow): string {
+  const parts: string[] = [];
+  if (row.proposerNote) {
+    parts.push(`Note (${row.proposed_by}): ${row.proposerNote}`);
+  }
+  if (row.declinedNote) {
+    parts.push(`Declined: ${row.declinedNote}`);
+  }
+  return parts.join("\n");
+}
+
+/**
  * Generate the Product List PDF
  */
 export async function generateProductListPdf(
@@ -228,31 +249,37 @@ export async function generateProductListPdf(
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 15;
+  const generatedAt = new Date().toLocaleString("en-IN");
 
-  // ============================================================
-  // HEADER
-  // ============================================================
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(28, 37, 33);
-  doc.text("Product List", margin, margin + 5);
+  // Header is drawn once, on page 1 only — repeating it on every page
+  // pushed useful table rows down for no benefit. The essentials (org,
+  // project, scope, page number) travel instead via the compact footer
+  // that's drawn on every page after the table.
+  function drawHeader() {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(28, 37, 33);
+    doc.text("Product List", margin, margin + 5);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(107, 117, 112);
-  doc.text(`${orgName} · ${projectName}`, margin, margin + 12);
-  doc.text(`Scope: ${scopeLabel}`, margin, margin + 18);
-  doc.text(`Generated: ${new Date().toLocaleString("en-IN")}`, margin, margin + 24);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(107, 117, 112);
+    doc.text(`${orgName} · ${projectName}`, margin, margin + 12);
+    doc.text(`Scope: ${scopeLabel}  ·  Generated: ${generatedAt}`, margin, margin + 18);
+  }
+  drawHeader();
 
   // ============================================================
   // DETERMINE COLUMNS
   // ============================================================
   const showSpaceColumn = rows.some((row) => Boolean(row.space));
   const showLinkColumn = rows.some((row) => Boolean(row.product_link));
+  const showNotesColumn = rows.some((row) => Boolean(row.proposerNote) || Boolean(row.declinedNote));
 
-  const headers: string[] = [];
+  const headers: string[] = ["#"];
   if (showSpaceColumn) headers.push("Space");
   headers.push("Image", "Item", "Manufacturer / Model", "Price", "Status", "Proposed By");
+  if (showNotesColumn) headers.push("Notes");
   if (showLinkColumn) headers.push("Product Link");
 
   // ============================================================
@@ -275,8 +302,8 @@ export async function generateProductListPdf(
   // ============================================================
   // CREATE TABLE DATA
   // ============================================================
-  const tableData = rows.map((row) => {
-    const values: string[] = [];
+  const tableData = rows.map((row, index) => {
+    const values: string[] = [String(index + 1)];
     if (showSpaceColumn) values.push(row.space || "");
     values.push(""); // Image placeholder
     values.push(row.item);
@@ -284,6 +311,7 @@ export async function generateProductListPdf(
     values.push(row.priceLabel || "-");
     values.push(row.status);
     values.push(row.proposed_by);
+    if (showNotesColumn) values.push(buildNotesText(row));
     if (showLinkColumn) values.push(""); // Empty string for link column - we'll draw it manually
     return values;
   });
@@ -291,7 +319,8 @@ export async function generateProductListPdf(
   // ============================================================
   // IMAGE COLUMN INDEX
   // ============================================================
-  const imageColumnIndex = showSpaceColumn ? 1 : 0;
+  // Shifted by 1 to account for the leading "#" numbering column.
+  const imageColumnIndex = showSpaceColumn ? 2 : 1;
 
   // ============================================================
   // GENERATE TABLE
@@ -299,8 +328,11 @@ export async function generateProductListPdf(
   autoTable(doc, {
     head: [headers],
     body: tableData,
-    startY: margin + 30,
-    margin: { left: margin, right: margin, bottom: 20 },
+    startY: margin + 24,
+    margin: { left: margin, right: margin, top: margin + 24, bottom: 20 },
+    didDrawPage: () => {
+      drawHeader();
+    },
     styles: {
       fontSize: 9,
       cellPadding: 4,
@@ -326,6 +358,15 @@ export async function generateProductListPdf(
         halign: "center",
         valign: "middle",
       },
+      ...(showNotesColumn
+        ? {
+            [headers.indexOf("Notes")]: {
+              cellWidth: 45,
+              fontSize: 8,
+              valign: "top",
+            },
+          }
+        : {}),
     },
     didParseCell: (data) => {
       if (data.section !== "body") return;
@@ -449,6 +490,21 @@ export async function generateProductListPdf(
   doc.setFontSize(8);
   doc.setTextColor(138, 147, 142);
   doc.text("Modelflick - Fixture & Product Assignment", margin, footerY);
+
+  // ============================================================
+  // PAGE NUMBERS
+  // ============================================================
+  // Total page count is only known once the table has finished laying
+  // out, so this runs as a final pass over every page rather than inside
+  // didDrawPage.
+  const totalPages = doc.getNumberOfPages(); // FIXED: Changed from doc.internal.getNumberOfPages()
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(138, 147, 142);
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, footerY, { align: "right" });
+  }
 
   // ============================================================
   // SAVE PDF
