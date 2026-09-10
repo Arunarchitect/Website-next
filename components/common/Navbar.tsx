@@ -18,6 +18,7 @@ import {
   fetchAreacalcRole,
   resolveDestination,
 } from "@/lib/resolveUserDestination";
+import { NotificationBell } from "@/app/issues/notificationBell";
 
 function Spinner() {
   return (
@@ -156,6 +157,7 @@ export default function Navbar() {
       {donateLink(isMobile)}
       {aboutLink(isMobile)}
       {dashboardLink(isMobile)}
+      {!isMobile && <NotificationBell />}
       <NavLink isMobile={isMobile} onClick={handleLogout}>
         Logout
       </NavLink>

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";   
+import { useState } from "react";
 import {
   getPriorityColor,
   getStatusColor,
@@ -20,7 +20,6 @@ import {
 } from "./issueTypes";
 import {
   getDrawingIcon,
-  linkifyText,
   NonBimIssue,
   STATUS_OPTIONS,
   PRIORITY_OPTIONS,
@@ -29,6 +28,9 @@ import {
 } from "./issueCardHelpers";
 import { ClassificationBadge } from "./IssueCardAccessParts";
 import { ExpandableText } from "./ExpandableText";
+
+import { MentionTextarea } from "./MentionTextarea";
+import { renderCommentContent } from "./commentTextRenderer";
 
 // Derived rather than imported: the original component never named this
 // shape explicitly, it just indexed into `issue.linkedDocuments`.
@@ -349,7 +351,7 @@ export function IssueEditForm({
               <option value={form.assignedToId}>
                 {fallbackAssignedToLabel || `User #${form.assignedToId}`}
               </option>
-          )}
+            )}
         </select>
         {loadingAssignees && <span className="file-hint">Loading people…</span>}
         {!loadingAssignees && assigneeOptions.length === 0 && issueOrganisationId && (
@@ -577,8 +579,8 @@ export function ScreenshotSection({
               newScreenshot
                 ? 'Click, drag, or paste to change again'
                 : hasScreenshot
-                ? 'Click, drag, or paste to replace'
-                : undefined
+                  ? 'Click, drag, or paste to replace'
+                  : undefined
             }
           />
 
@@ -856,6 +858,7 @@ export function LinkedDrawingsEdit({
 // ---------------------------------------------------------------------------
 
 interface CommentEditState {
+  organisationId: number | string;
   editingCommentId: string | null;
   editingCommentText: string;
   setEditingCommentText: (v: string) => void;
@@ -891,6 +894,7 @@ interface CommentItemProps extends CommentEditState {
 function CommentItem({
   comment,
   isAuthor,
+  organisationId,
   editingCommentId,
   editingCommentText,
   setEditingCommentText,
@@ -920,13 +924,12 @@ function CommentItem({
     return (
       <div className="comment-item">
         <div className="comment-edit-mode">
-          <textarea
-            className="field-input"
+          <MentionTextarea
+            organisationId={organisationId}
             value={editingCommentText}
-            onChange={(e) => setEditingCommentText(e.target.value)}
+            onChange={setEditingCommentText}
             onPaste={onEditCommentPaste}
             rows={2}
-            disabled={savingCommentEdit}
           />
 
           <div className="comment-image-edit-section">
@@ -1037,7 +1040,7 @@ function CommentItem({
       </div>
       <ExpandableText
         text={comment.text}
-        linkify={linkifyText}
+        linkify={renderCommentContent}
         className="comment-text"
         wordLimit={40}
       />
@@ -1396,6 +1399,7 @@ export function ActionsBar({
 // ---------------------------------------------------------------------------
 
 interface AddCommentPanelProps {
+  organisationId: number | string;
   commentText: string;
   setCommentText: (v: string) => void;
   commentPreview: string | null;
@@ -1415,6 +1419,7 @@ interface AddCommentPanelProps {
 }
 
 export function AddCommentPanel({
+  organisationId,
   commentText,
   setCommentText,
   commentPreview,
@@ -1433,14 +1438,13 @@ export function AddCommentPanel({
 }: AddCommentPanelProps) {
   return (
     <div className="comment-input-panel" style={{ marginTop: '12px' }}>
-      <textarea
-        className="field-input"
-        placeholder="Add a comment… (you can paste an image here too)"
+      <MentionTextarea
+        organisationId={organisationId}
         value={commentText}
-        onChange={(e) => setCommentText(e.target.value)}
+        onChange={setCommentText}
         onPaste={onCommentPaste}
+        placeholder="Add a comment… (paste an image, or type @ to mention someone)"
         rows={2}
-        disabled={isSaving}
       />
 
       <div className="comment-image-upload" style={{ marginTop: 8 }}>

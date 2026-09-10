@@ -753,6 +753,7 @@ export function IssueDetail({
 
           {!isEditing && (
             <CommentsList
+              organisationId={issueOrganisationId ?? ''}
               totalCommentCount={issue.comments.length}
               commentSortOrder={commentSortOrder}
               onSortChange={onSortChange}
@@ -849,6 +850,7 @@ export function IssueDetail({
 
           {showCommentInput && (
             <AddCommentPanel
+              organisationId={issueOrganisationId ?? ''}
               commentText={commentText}
               setCommentText={setCommentText}
               commentPreview={commentScreenshot.preview}

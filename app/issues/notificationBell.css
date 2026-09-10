@@ -1,0 +1,99 @@
+.notif-bell-wrapper { position: relative; }
+
+.notif-bell-btn {
+  position: relative;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  padding: 6px;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+}
+
+.notif-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #D43E3E;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.notif-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-height: 420px;
+  background: var(--bg, #fff);
+  border: 1px solid var(--line, #e2e2e2);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+}
+
+.notif-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line, #e2e2e2);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.notif-mark-all {
+  background: none;
+  border: none;
+  color: #4A8B6B;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.notif-panel-list { overflow-y: auto; flex: 1; }
+
+.notif-empty {
+  padding: 24px 14px;
+  text-align: center;
+  color: var(--slate, #6B7280);
+  font-size: 13px;
+}
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line, #f0f0f0);
+  cursor: pointer;
+}
+
+.notif-item:hover { background: rgba(0, 0, 0, 0.03); }
+.notif-item-unread { background: rgba(74, 139, 107, 0.06); }
+.notif-item-priority .notif-item-message { font-weight: 600; }
+
+.notif-item-body { flex: 1; min-width: 0; }
+.notif-item-message { font-size: 13px; margin: 0 0 2px 0; line-height: 1.4; }
+.notif-item-time { font-size: 11px; color: var(--slate, #6B7280); }
+
+.notif-item-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--slate, #6B7280);
+  font-size: 13px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.notif-item-delete:hover { color: #D43E3E; }

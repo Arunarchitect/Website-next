@@ -1,3 +1,5 @@
+// app/issues/ExpandableText.tsx
+
 "use client";
 
 import { useState } from "react";

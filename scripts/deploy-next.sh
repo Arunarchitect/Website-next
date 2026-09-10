@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================
+# TMUX AUTO-START + AUTO-ATTACH + AUTO-EXIT
+# ============================================================
+SESSION_NAME="next"
+if [ -z "${TMUX:-}" ]; then
+  tmux new-session -d -A -s "$SESSION_NAME" "bash '$0'"
+  echo "Started tmux session '$SESSION_NAME'. Attaching..."
+  tmux attach -t "$SESSION_NAME"
+  exit 0
+fi
+
+cleanup() {
+  kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  tmux kill-session -t "$(tmux display-message -p '#S')" 2>/dev/null || true
+}
+trap cleanup EXIT
+# ============================================================
+
+# ============================================================
+# CONFIG — adjust these to match your server layout
+# ============================================================
+APP_DIR="$HOME/apps/Website-next"
+NGINX_CONF="/etc/nginx/sites-available/modelflick.com"
+BLUE_PORT=3001
+GREEN_PORT=3002
+HEALTHCHECK_PATH="/"          # change if you have a dedicated /health route
+HEALTHCHECK_RETRIES=15
+HEALTHCHECK_DELAY=2           # seconds between retries
+
+# ============================================================
+# COLORS FOR OUTPUT
+# ============================================================
+GREEN_C='\033[0;32m'; RED_C='\033[0;31m'; YELLOW_C='\033[1;33m'; NC='\033[0m'
+log()  { echo -e "${GREEN_C}[deploy]${NC} $1"; }
+warn() { echo -e "${YELLOW_C}[deploy]${NC} $1"; }
+err()  { echo -e "${RED_C}[deploy]${NC} $1" >&2; }
+
+# ============================================================
+# 1. CACHE SUDO PASSWORD ONCE, KEEP IT ALIVE FOR THE WHOLE SCRIPT
+# ============================================================
+log "Requesting sudo access (you'll only be asked once)..."
+sudo -v
+( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done ) &
+SUDO_KEEPALIVE_PID=$!
+
+# ============================================================
+# 2. GIT PULL — bail out early if nothing changed
+# ============================================================
+cd "$APP_DIR"
+log "Fetching latest changes in $APP_DIR ..."
+BEFORE_HASH=$(git rev-parse HEAD)
+git pull
+AFTER_HASH=$(git rev-parse HEAD)
+
+if [ "$BEFORE_HASH" == "$AFTER_HASH" ]; then
+  log "No new changes pulled. Nothing to deploy. Exiting."
+  exit 0
+fi
+log "New changes detected ($BEFORE_HASH -> $AFTER_HASH). Proceeding with deploy."
+
+# ============================================================
+# 3. DETERMINE CURRENT ACTIVE COLOR FROM NGINX CONFIG
+# ============================================================
+CURRENT_PORT=$(grep -oP 'proxy_pass\s+http://127\.0\.0\.1:\K[0-9]+' "$NGINX_CONF" | head -1)
+
+if [ -z "$CURRENT_PORT" ]; then
+  err "Could not detect current active port from $NGINX_CONF."
+  err "Expected a line like: proxy_pass http://127.0.0.1:3001;"
+  exit 1
+fi
+
+if [ "$CURRENT_PORT" == "$BLUE_PORT" ]; then
+  CURRENT_COLOR="blue"
+  TARGET_COLOR="green"
+  TARGET_PORT=$GREEN_PORT
+elif [ "$CURRENT_PORT" == "$GREEN_PORT" ]; then
+  CURRENT_COLOR="green"
+  TARGET_COLOR="blue"
+  TARGET_PORT=$BLUE_PORT
+else
+  err "Current nginx port ($CURRENT_PORT) doesn't match known blue ($BLUE_PORT) or green ($GREEN_PORT) ports."
+  exit 1
+fi
+
+log "Currently active: $CURRENT_COLOR (port $CURRENT_PORT)"
+log "Deploying to:      $TARGET_COLOR (port $TARGET_PORT)"
+
+# ============================================================
+# 4. BUILD AND START THE TARGET (INACTIVE) COLOR
+# ============================================================
+COMPOSE_FILE="docker-compose.${TARGET_COLOR}.yml"
+if [ ! -f "$COMPOSE_FILE" ]; then
+  err "Compose file not found: $COMPOSE_FILE"
+  exit 1
+fi
+
+log "Building and starting $TARGET_COLOR container..."
+docker compose -f "$COMPOSE_FILE" up -d --build
+
+# ============================================================
+# 5. HEALTH CHECK THE NEW CONTAINER BEFORE SWITCHING TRAFFIC
+# ============================================================
+log "Health-checking $TARGET_COLOR on 127.0.0.1:$TARGET_PORT ..."
+HEALTHY=false
+for i in $(seq 1 "$HEALTHCHECK_RETRIES"); do
+  if curl -sf -o /dev/null "http://127.0.0.1:${TARGET_PORT}${HEALTHCHECK_PATH}"; then
+    HEALTHY=true
+    break
+  fi
+  warn "  attempt $i/$HEALTHCHECK_RETRIES not ready yet, retrying in ${HEALTHCHECK_DELAY}s..."
+  sleep "$HEALTHCHECK_DELAY"
+done
+
+if [ "$HEALTHY" != true ]; then
+  err "$TARGET_COLOR container did not become healthy after $HEALTHCHECK_RETRIES attempts."
+  err "Leaving nginx pointed at $CURRENT_COLOR (old container untouched). Aborting."
+  err "Check logs with: docker logs next-${TARGET_COLOR}"
+  exit 1
+fi
+log "$TARGET_COLOR is healthy."
+
+# ============================================================
+# 6. SWITCH NGINX TO THE NEW COLOR'S PORT
+# ============================================================
+log "Updating nginx config: $CURRENT_PORT -> $TARGET_PORT ..."
+sudo sed -i "s/proxy_pass http:\/\/127\.0\.0\.1:${CURRENT_PORT};/proxy_pass http:\/\/127.0.0.1:${TARGET_PORT};/" "$NGINX_CONF"
+
+log "Testing nginx config..."
+if ! sudo nginx -t; then
+  err "nginx config test failed! Reverting port change."
+  sudo sed -i "s/proxy_pass http:\/\/127\.0\.0\.1:${TARGET_PORT};/proxy_pass http:\/\/127.0.0.1:${CURRENT_PORT};/" "$NGINX_CONF"
+  err "Reverted. $TARGET_COLOR container is still running but not receiving traffic."
+  exit 1
+fi
+
+log "Reloading nginx..."
+sudo systemctl reload nginx
+log "Traffic now routed to $TARGET_COLOR (port $TARGET_PORT)."
+
+# ============================================================
+# 7. STOP AND REMOVE THE OLD (NOW-INACTIVE) COLOR CONTAINER
+# ============================================================
+log "Stopping and removing old $CURRENT_COLOR container..."
+docker stop "next-${CURRENT_COLOR}" 2>/dev/null || warn "next-${CURRENT_COLOR} was not running."
+docker rm "next-${CURRENT_COLOR}" 2>/dev/null || warn "next-${CURRENT_COLOR} was not present."
+
+log "Deploy complete. Active color is now: $TARGET_COLOR (port $TARGET_PORT)"
