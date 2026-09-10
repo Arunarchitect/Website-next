@@ -1,3 +1,4 @@
+// NotificationBell.tsx
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -13,6 +14,7 @@ import {
 import "./notificationBell.css";
 
 const POLL_INTERVAL_MS = 30000;
+const PAGE_SIZE = 20;
 
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -69,6 +71,10 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const refreshUnreadCount = useCallback(async () => {
@@ -79,12 +85,28 @@ export function NotificationBell() {
   const loadNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getNotifications({ page_size: 20 });
+      const data = await getNotifications({ page_size: PAGE_SIZE, page: 1 });
       setNotifications(data.results);
+      setPage(1);
+      setHasMore(data.results.length === PAGE_SIZE);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const data = await getNotifications({ page_size: PAGE_SIZE, page: nextPage });
+      setNotifications((prev) => [...prev, ...data.results]);
+      setPage(nextPage);
+      setHasMore(data.results.length === PAGE_SIZE);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     refreshUnreadCount();
@@ -144,6 +166,28 @@ export function NotificationBell() {
     }
   };
 
+  /** Deletes every notification currently loaded in the panel (not the user's full history). */
+  const handleClearAllInView = async () => {
+    if (notifications.length === 0 || clearingAll) return;
+    setClearingAll(true);
+    const idsToDelete = notifications.map((n) => n.id);
+    const unreadRemoved = notifications.filter((n) => !n.is_read).length;
+
+    setNotifications([]);
+    setUnreadCount((c) => Math.max(0, c - unreadRemoved));
+
+    try {
+      await Promise.all(idsToDelete.map((id) => deleteNotification(id)));
+    } catch {
+      loadNotifications();
+      refreshUnreadCount();
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
+  const hasUnread = notifications.some((n) => !n.is_read);
+
   return (
     <div className="notif-bell-wrapper" ref={panelRef}>
       <button
@@ -160,11 +204,23 @@ export function NotificationBell() {
         <div className="notif-panel">
           <div className="notif-panel-header">
             <span>Notifications</span>
-            {notifications.some((n) => !n.is_read) && (
-              <button type="button" className="notif-mark-all" onClick={handleMarkAllRead}>
-                Mark all read
-              </button>
-            )}
+            <div className="notif-header-actions">
+              {hasUnread && (
+                <button type="button" className="notif-mark-all" onClick={handleMarkAllRead}>
+                  Mark all read
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button
+                  type="button"
+                  className="notif-clear-all"
+                  onClick={handleClearAllInView}
+                  disabled={clearingAll}
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="notif-panel-list">
@@ -173,30 +229,43 @@ export function NotificationBell() {
             ) : notifications.length === 0 ? (
               <div className="notif-empty">No notifications yet.</div>
             ) : (
-              notifications.map((n) => (
-                <div
-                  key={n.id}
-                  className={[
-                    "notif-item",
-                    n.is_read ? "" : "notif-item-unread",
-                    n.is_priority ? "notif-item-priority" : "",
-                  ].filter(Boolean).join(" ")}
-                  onClick={() => handleNotificationClick(n)}
-                >
-                  <div className="notif-item-body">
-                    <p className="notif-item-message">{n.message}</p>
-                    <span className="notif-item-time">{timeAgo(n.created)}</span>
+              <>
+                {notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className={[
+                      "notif-item",
+                      n.is_read ? "notif-item-read" : "notif-item-unread",
+                      n.is_priority ? "notif-item-priority" : "",
+                    ].filter(Boolean).join(" ")}
+                    onClick={() => handleNotificationClick(n)}
+                  >
+                    {!n.is_read && <span className="notif-unread-dot" aria-hidden="true" />}
+                    <div className="notif-item-body">
+                      <p className="notif-item-message">{n.message}</p>
+                      <span className="notif-item-time">{timeAgo(n.created)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="notif-item-delete"
+                      onClick={(e) => handleDelete(e, n.id)}
+                      aria-label="Delete notification"
+                    >
+                      <XMarkIcon />
+                    </button>
                   </div>
+                ))}
+                {hasMore && (
                   <button
                     type="button"
-                    className="notif-item-delete"
-                    onClick={(e) => handleDelete(e, n.id)}
-                    aria-label="Delete notification"
+                    className="notif-load-more"
+                    onClick={loadMore}
+                    disabled={loadingMore}
                   >
-                    <XMarkIcon />
+                    {loadingMore ? "Loading…" : "Load more"}
                   </button>
-                </div>
-              ))
+                )}
+              </>
             )}
           </div>
         </div>
