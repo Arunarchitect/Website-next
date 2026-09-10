@@ -5,11 +5,19 @@
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 20px;
   padding: 6px;
   color: inherit;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.notif-bell-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .notif-badge {
@@ -91,9 +99,16 @@
   border: none;
   cursor: pointer;
   color: var(--slate, #6B7280);
-  font-size: 13px;
   padding: 2px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notif-item-delete-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .notif-item-delete:hover { color: #D43E3E; }

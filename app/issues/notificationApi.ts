@@ -12,7 +12,11 @@ export interface NotificationActor {
   username: string;
 }
 
-export type NotificationType = 'issue_created' | 'mentioned' | 'issue_resolved';
+export type NotificationType =
+  | 'issue_created'
+  | 'mentioned'
+  | 'issue_resolved'
+  | 'issue_commented';
 
 export interface AppNotification {
   id: number;

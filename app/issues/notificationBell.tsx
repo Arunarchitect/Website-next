@@ -25,6 +25,44 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+/** Inline SVG — no icon-library dependency, always renders. */
+function BellIcon() {
+  return (
+    <svg
+      className="notif-bell-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
+/** Inline SVG — no icon-library dependency, always renders. */
+function XMarkIcon() {
+  return (
+    <svg
+      className="notif-item-delete-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M18 6 6 18" />
+      <path d="M6 6l12 12" />
+    </svg>
+  );
+}
+
 export function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -114,7 +152,7 @@ export function NotificationBell() {
         onClick={() => setOpen((v) => !v)}
         aria-label="Notifications"
       >
-        <i className="ti ti-bell" />
+        <BellIcon />
         {unreadCount > 0 && <span className="notif-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>}
       </button>
 
@@ -155,7 +193,7 @@ export function NotificationBell() {
                     onClick={(e) => handleDelete(e, n.id)}
                     aria-label="Delete notification"
                   >
-                    <i className="ti ti-x" />
+                    <XMarkIcon />
                   </button>
                 </div>
               ))
