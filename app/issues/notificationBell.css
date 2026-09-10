@@ -6,7 +6,7 @@
   border: none;
   cursor: pointer;
   padding: 6px;
-  color: inherit;
+  color: #ffffff;   /* was: inherit */
   display: inline-flex;
   align-items: center;
   justify-content: center;

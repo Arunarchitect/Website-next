@@ -204,6 +204,17 @@ export default function Navbar() {
                   )}
                 </DisclosureButton>
               </div>
+
+              {/* NEW: mobile-only bell, right side of the top bar.
+                sm:hidden mirrors the hamburger's breakpoint exactly, so
+                there's no gap or overlap at the sm cutoff — one flips
+                off exactly as the other (desktop nav's copy) flips on. */}
+              {isAuthenticated && (
+                <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:hidden">
+                  <NotificationBell />
+                </div>
+              )}
+
               <div className="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
                 <div className="flex flex-shrink-0 items-center">
                   <NavLink href="/" isBanner>
