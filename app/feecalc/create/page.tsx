@@ -9,6 +9,13 @@
 // Two modes, same page:
 //   /feecalc/create              → blank form, creates a new QuoteOption
 //   /feecalc/create?edit=<id>    → loads an existing QuoteOption and PATCHes it
+//
+// FIX (id/name on form fields): every TextInput/TextArea/<select> below now
+// carries a unique id + name (and autoComplete="off" where free text could
+// otherwise trigger browser autofill guesses). This clears the "A form field
+// element has neither an id nor a name attribute" DevTools warning and
+// removes Chrome's incentive to treat these inputs as part of an implicit
+// autofill form. No behavioural/logic changes vs. the previous version.
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -85,9 +92,9 @@ function Toggle({ checked, onChange, color }: { checked: boolean; onChange: (v: 
   );
 }
 
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+function Label({ children, required, htmlFor }: { children: React.ReactNode; required?: boolean; htmlFor?: string }) {
   return (
-    <label style={{
+    <label htmlFor={htmlFor} style={{
       fontSize: 10, fontWeight: 700, color: C.t4, letterSpacing: "0.09em",
       textTransform: "uppercase" as const, display: "block", marginBottom: 5,
     }}>
@@ -549,8 +556,10 @@ export default function CreateQuotePage() {
               </Card>
             ) : !isEdit && orgs.length > 1 ? (
               <Card>
-                <Label required>Organisation</Label>
+                <Label required htmlFor="organisation-select">Organisation</Label>
                 <select
+                  id="organisation-select"
+                  name="organisation"
                   value={orgId ?? ""}
                   onChange={(e) => setOrgId(e.target.value ? Number(e.target.value) : null)}
                   style={inputStyle}
@@ -583,8 +592,11 @@ export default function CreateQuotePage() {
                       <SectionTitle>Basic info</SectionTitle>
                       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                         <div>
-                          <Label required>Quote name</Label>
+                          <Label required htmlFor="quote-name">Quote name</Label>
                           <TextInput
+                            id="quote-name"
+                            name="name"
+                            autoComplete="off"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             placeholder="e.g. Residence at Kowdiar — Design Fee"
@@ -592,10 +604,13 @@ export default function CreateQuotePage() {
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                           <div>
-                            <Label>Project</Label>
+                            <Label htmlFor={projectsUnavailable ? "manual-project-id" : "project-select"}>Project</Label>
                             {projectsUnavailable ? (
                               <>
                                 <TextInput
+                                  id="manual-project-id"
+                                  name="manualProjectId"
+                                  autoComplete="off"
                                   type="number"
                                   value={manualProjectId}
                                   onChange={(e) => setManualProjectId(e.target.value)}
@@ -607,6 +622,8 @@ export default function CreateQuotePage() {
                               </>
                             ) : (
                               <select
+                                id="project-select"
+                                name="project"
                                 value={projectId}
                                 onChange={(e) => setProjectId(e.target.value)}
                                 style={inputStyle}
@@ -619,8 +636,10 @@ export default function CreateQuotePage() {
                             )}
                           </div>
                           <div>
-                            <Label>Discount package</Label>
+                            <Label htmlFor="discount-package-select">Discount package</Label>
                             <select
+                              id="discount-package-select"
+                              name="discountPackage"
                               value={discountPackageId}
                               onChange={(e) => setDiscountPackageId(e.target.value)}
                               style={inputStyle}
@@ -635,8 +654,11 @@ export default function CreateQuotePage() {
                           </div>
                         </div>
                         <div>
-                          <Label>Terms &amp; Conditions (shown to client)</Label>
+                          <Label htmlFor="quote-description">Terms &amp; Conditions (shown to client)</Label>
                           <TextArea
+                            id="quote-description"
+                            name="description"
+                            autoComplete="off"
                             rows={3}
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
@@ -662,7 +684,13 @@ export default function CreateQuotePage() {
                               No active Quantity × Rate fee templates found for this organisation.
                             </div>
                           ) : (
-                            <select value={quantityTemplateId} onChange={(e) => setQuantityTemplateId(e.target.value)} style={inputStyle}>
+                            <select
+                              id="quantity-template-select"
+                              name="quantityTemplate"
+                              value={quantityTemplateId}
+                              onChange={(e) => setQuantityTemplateId(e.target.value)}
+                              style={inputStyle}
+                            >
                               <option value="">Select fee template…</option>
                               {qtyTemplates.map((t) => (
                                 <option key={t.id} value={t.id}>
@@ -679,7 +707,13 @@ export default function CreateQuotePage() {
                               No active Hourly fee templates found for this organisation.
                             </div>
                           ) : (
-                            <select value={hourlyTemplateId} onChange={(e) => setHourlyTemplateId(e.target.value)} style={inputStyle}>
+                            <select
+                              id="hourly-template-select"
+                              name="hourlyTemplate"
+                              value={hourlyTemplateId}
+                              onChange={(e) => setHourlyTemplateId(e.target.value)}
+                              style={inputStyle}
+                            >
                               <option value="">Select fee template…</option>
                               {hourlyTemplates.map((t) => (
                                 <option key={t.id} value={t.id}>
@@ -694,8 +728,11 @@ export default function CreateQuotePage() {
                           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                               <div>
-                                <Label required>Amount</Label>
+                                <Label required htmlFor="lumpsum-amount">Amount</Label>
                                 <TextInput
+                                  id="lumpsum-amount"
+                                  name="lumpsumAmount"
+                                  autoComplete="off"
                                   type="number" min="0" step="any"
                                   value={lumpsumAmount}
                                   onChange={(e) => setLumpsumAmount(e.target.value)}
@@ -703,8 +740,11 @@ export default function CreateQuotePage() {
                                 />
                               </div>
                               <div>
-                                <Label>Label</Label>
+                                <Label htmlFor="lumpsum-label">Label</Label>
                                 <TextInput
+                                  id="lumpsum-label"
+                                  name="lumpsumLabel"
+                                  autoComplete="off"
                                   value={lumpsumLabel}
                                   onChange={(e) => setLumpsumLabel(e.target.value)}
                                   placeholder="Fixed Professional Fee"
@@ -712,8 +752,11 @@ export default function CreateQuotePage() {
                               </div>
                             </div>
                             <div>
-                              <Label>Note (optional)</Label>
+                              <Label htmlFor="lumpsum-note">Note (optional)</Label>
                               <TextArea
+                                id="lumpsum-note"
+                                name="lumpsumNote"
+                                autoComplete="off"
                                 rows={2}
                                 value={lumpsumNote}
                                 onChange={(e) => setLumpsumNote(e.target.value)}
@@ -732,6 +775,7 @@ export default function CreateQuotePage() {
                     )}
 
                     <button
+                      type="button"
                       onClick={handleSubmit}
                       disabled={submitting}
                       style={{

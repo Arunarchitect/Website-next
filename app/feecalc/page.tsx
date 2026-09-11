@@ -2,6 +2,17 @@
 
 "use client";
 // app/feecalc/page.tsx
+//
+// FIX applied in this pass: the three raw <input> elements on this page
+// (quote-code entry, discount-unlock code, quantity) had neither an `id`
+// nor a `name` attribute. That's exactly what the DevTools "form field
+// element has neither an id nor a name" warning was flagging, and it's
+// also what let the browser treat Enter-key presses as an implicit form
+// submission (→ full page reload) instead of just running the onKeyDown
+// handler. Fixed by: (1) giving each input a unique id/name + autoComplete
+// off, and (2) calling e.preventDefault() before the handler on Enter, so
+// there is no ambiguity left for the browser to act on. No other logic in
+// this file was touched.
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -349,11 +360,19 @@ function CodeEntryPanel({
         <div style={{ display: "flex", gap: 9 }}>
           <input
             type="text"
+            id="quote-access-code"
+            name="quoteAccessCode"
+            autoComplete="off"
             value={codeInput}
             onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
             onFocus={() => setFocus(true)}
             onBlur={() => setFocus(false)}
-            onKeyDown={(e) => e.key === "Enter" && onLoad()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onLoad();
+              }
+            }}
             placeholder="QO-A3K9F2"
             maxLength={20}
             autoFocus
@@ -374,6 +393,7 @@ function CodeEntryPanel({
             }}
           />
           <button
+            type="button"
             onClick={onLoad}
             disabled={loading || !codeInput.trim()}
             style={{
@@ -1777,11 +1797,19 @@ function DiscountUnlockPanel({
       <div style={{ display: "flex", gap: 8 }}>
         <input
           type="text"
+          id="discount-activation-code"
+          name="discountActivationCode"
+          autoComplete="off"
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
-          onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleUnlock();
+            }
+          }}
           placeholder="DP-X7M2P1"
           maxLength={20}
           style={{
@@ -1801,6 +1829,7 @@ function DiscountUnlockPanel({
           }}
         />
         <button
+          type="button"
           onClick={() => handleUnlock()}
           disabled={loading || !code.trim()}
           style={{
@@ -1907,6 +1936,7 @@ function QuantityInputPanel({
       <div style={{ padding: "15px 16px", display: "flex", flexDirection: "column", gap: 13 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <label
+            htmlFor="fee-quantity-input"
             style={{
               fontSize: 10,
               fontWeight: 700,
@@ -1919,6 +1949,9 @@ function QuantityInputPanel({
           </label>
           <input
             type="number"
+            id="fee-quantity-input"
+            name="quantity"
+            autoComplete="off"
             value={quantity}
             min="0"
             step="any"
@@ -2335,6 +2368,7 @@ export default function FeeCalculatorPage() {
           {quote && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
+                type="button"
                 onClick={handleDownloadPDF}
                 style={{
                   background: C.amber,
@@ -2374,6 +2408,7 @@ export default function FeeCalculatorPage() {
                 {isMobile ? "PDF" : "Download PDF"}
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setQuote(null);
                   setUnlockedPkg(null);
