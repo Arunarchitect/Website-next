@@ -7,6 +7,8 @@
   --pm-bg: #F5F6F3;
   --pm-ink: #1C2521;
   --pm-muted: #6B7570;
+  --pm-accent: #2F6E62;
+  --pm-accent-hover: #275B51;
 }
 
 /* ─── Status badges ─────────────────────────────────────────────── */
@@ -166,13 +168,26 @@
   padding: 0.5rem 0.75rem;
 }
 
-/* ─── Styled file choosers (product image / IFC upload) ─────────── */
-/* Custom wrapper around a hidden native <input type="file">. Focusable
-   (tabIndex) so it can catch a Ctrl+V paste of a copied file/image
-   without needing the browse dialog open. */
+/* ─────────────────────────────────────────────────────────────────
+   Styled file choosers (product image / IFC upload)
+
+   Custom wrapper around a hidden native <input type="file">.
+
+   Supports four independent paste paths, so at least one works on
+   any browser/device:
+     1. Ctrl+V / Cmd+V          — keyboard paste into the dotted box
+     2. Right-click → Paste     — browser's native menu on the box
+     3. Mobile long-press       — iOS/Android native menu on the box
+     4. Explicit "Paste" button — navigator.clipboard.read() (HTTPS)
+
+   The dotted box is a real contentEditable element. That's what
+   makes browsers actually offer "Paste" on right-click and
+   long-press; a plain <div> would leave the menu item greyed out.
+   ───────────────────────────────────────────────────────────────── */
+
 .pm-file-chooser {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
   border: 1px dashed var(--pm-border);
   border-radius: 0.75rem;
@@ -186,7 +201,7 @@
   border-color: #B7C2BC;
 }
 .pm-file-chooser-focused {
-  border-color: #2F6E62;
+  border-color: var(--pm-accent);
   background: #F1F7F5;
   box-shadow: 0 0 0 3px rgba(47, 110, 98, 0.12);
 }
@@ -195,6 +210,7 @@
   cursor: not-allowed;
 }
 
+/* Thumbnail / preview column */
 .pm-file-thumb-wrap {
   width: 2.75rem;
   height: 2.75rem;
@@ -205,6 +221,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-top: 0.125rem;
 }
 .pm-file-thumb {
   width: 100%;
@@ -218,31 +235,49 @@
   padding: 0 0.25rem;
 }
 
+/* Main column: actions row, file name, paste surface, hint, notice */
 .pm-file-chooser-main {
   display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.5rem;
   min-width: 0;
   flex: 1;
+}
+
+/* Row of buttons (Choose file / Paste). Wraps on narrow screens so
+   both stay tappable on phones. */
+.pm-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .pm-file-button {
   font-size: 0.75rem;
   font-weight: 500;
   color: #fff;
-  background: #2F6E62;
+  background: var(--pm-accent);
   border-radius: 9999px;
   padding: 0.4rem 0.875rem;
   flex-shrink: 0;
+  min-height: 2rem; /* generous tap target for mobile */
   transition: background-color 120ms ease;
 }
 .pm-file-button:hover:not(:disabled) {
-  background: #275B51;
+  background: var(--pm-accent-hover);
 }
 .pm-file-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.pm-file-button-secondary {
+  color: var(--pm-ink);
+  background: #fff;
+  border: 1px solid var(--pm-border);
+}
+.pm-file-button-secondary:hover:not(:disabled) {
+  background: #F1F7F5;
+  border-color: var(--pm-accent);
 }
 
 .pm-file-name {
@@ -251,15 +286,77 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 12rem;
+}
+
+/* ── Paste surface ──────────────────────────────────────────────────
+   A real, focusable, editable element. This is what makes
+   right-click → Paste and mobile long-press → Paste actually show up
+   in the browser's context menu, because those menus only offer
+   Paste on editable / form targets. */
+.pm-paste-surface {
+  min-height: 2.75rem;              /* ~44px — Apple's recommended tap target */
+  border: 1px dashed #CFD6D0;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.6875rem;
+  color: #8A938E;
+  background: #fff;
+  outline: none;
+  caret-color: transparent;         /* we never accept typed input */
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: border-color 120ms ease, background-color 120ms ease;
+  -webkit-user-select: text;        /* allow iOS long-press selection UI */
+  user-select: text;
+  touch-action: manipulation;       /* remove 300ms tap delay on mobile */
+}
+.pm-paste-surface:hover {
+  border-color: #B7C2BC;
+}
+.pm-paste-surface:focus {
+  border-color: var(--pm-accent);
+  background: #F7FBF9;
+}
+
+/* Placeholder text shown only when the surface is empty, via ::before.
+   Living in CSS (rather than the DOM) means we can clear the surface
+   after each paste without wiping the hint. */
+.pm-paste-surface:empty::before {
+  content: "Paste here — Ctrl+V, right-click → Paste, or long-press → Paste";
+  color: #A4ACA6;
+  pointer-events: none;
+}
+@media (min-width: 768px) {
+  .pm-paste-surface:empty::before {
+    content: "Click here and press Ctrl+V — or right-click → Paste";
+  }
+}
+
+/* Fallback for browsers that don't support :empty reliably on
+   contentEditable (older Android WebView). Keeps the surface usable. */
+.pm-paste-surface:not(:focus):not(:empty)::before {
+  content: none;
 }
 
 .pm-file-hint {
   font-size: 0.6875rem;
   color: var(--pm-muted);
-  white-space: nowrap;
 }
 
+/* Non-fatal messages from the paste button (no image on clipboard,
+   browser blocked access, etc.). Amber to distinguish from errors. */
+.pm-file-notice {
+  font-size: 0.6875rem;
+  color: #8A5E20;
+  background: #FBF3E4;
+  border: 1px solid #F0DDB4;
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.5rem;
+}
+
+/* Hidden native file input — visually removed but still focusable and
+   programmatically clickable from the "Choose file" button. */
 .pm-file-input-hidden {
   position: absolute;
   width: 1px;
@@ -270,4 +367,28 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ─── Narrow-screen tweaks for the chooser ──────────────────────── */
+@media (max-width: 480px) {
+  .pm-file-chooser {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pm-file-thumb-wrap {
+    /* Bigger preview when the chooser stacks vertically */
+    width: 4rem;
+    height: 4rem;
+    align-self: flex-start;
+  }
+  .pm-file-actions {
+    gap: 0.375rem;
+  }
+  .pm-file-button {
+    flex: 1;
+    text-align: center;
+  }
+  .pm-file-name {
+    max-width: 100%;
+  }
 }

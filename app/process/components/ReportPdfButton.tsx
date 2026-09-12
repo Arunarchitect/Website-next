@@ -90,11 +90,18 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
   const [indexDepth, setIndexDepth] = useState(2);
   const [includeDescriptions, setIncludeDescriptions] = useState(true);
   const [includeCompletion, setIncludeCompletion] = useState(true);
+  const [includeAssigned, setIncludeAssigned] = useState(true);
   const [filterPersonIds, setFilterPersonIds] = useState<Set<string>>(new Set());
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [excludeSearch, setExcludeSearch] = useState("");
   const [showExcludePanel, setShowExcludePanel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  // ─── Header override (custom title / description) ───
+  const [useOriginalHeader, setUseOriginalHeader] = useState(true);
+  const [customTitle, setCustomTitle] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
 
   const maxLevel = rootNode
     ? Math.max(1, ...flattenTree(rootNode).map((e) => e.level))
@@ -122,6 +129,19 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
     () => (rootNode ? flattenForSelection(rootNode, excludedIds) : []),
     [rootNode, excludedIds]
   );
+
+  // Filtered view of the selection list based on the exclude-panel search box.
+  // This only changes what is DISPLAYED — it never touches excludedIds, so
+  // hand-checked nodes keep their state after the search is cleared.
+  const visibleSelectionEntries = useMemo(() => {
+    const term = excludeSearch.trim().toLowerCase();
+    if (!term) return selectionEntries;
+    return selectionEntries.filter(
+      (e) =>
+        e.node.label.toLowerCase().includes(term) ||
+        (e.node.description ?? "").toLowerCase().includes(term)
+    );
+  }, [selectionEntries, excludeSearch]);
 
   // "Select all" = nothing excluded (empty set). "Unselect all" = every
   // selectable node excluded, so the user can hand-pick just a few
@@ -191,6 +211,14 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
       const filterNames = persons.filter((p) => filterPersonIds.has(p.id)).map((p) => p.name);
       const noMatches = isFiltering && entries.length === 0;
 
+      // Resolve the header title/description according to the override toggle.
+      const headerTitle = useOriginalHeader
+        ? rootNode.label || "Process Report"
+        : customTitle.trim() || rootNode.label || "Process Report";
+      const headerDescription = useOriginalHeader
+        ? rootNode.description
+        : customDescription.trim();
+
       const lineHeightFor = (fontSize: number) => fontSize * MM_PER_PT * LINE_MULT;
 
       const wrap = (text: string, fontSize: number, weight: "normal" | "bold" | "italic", width: number) => {
@@ -257,7 +285,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
         };
 
         // ---------- header ----------
-        const titleLines = wrap(rootNode.label || "Process Report", 17, "bold", contentWidth);
+        const titleLines = wrap(headerTitle, 17, "bold", contentWidth);
         const titleHeight = titleLines.length * lineHeightFor(17);
         ensureSpace(titleHeight);
         if (draw) y = drawLines(titleLines, marginX, y, 17, "bold");
@@ -273,8 +301,8 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
           else y += filterHeight;
         }
 
-        if (rootNode.description) {
-          const descLines = wrap(rootNode.description, 9.5, "normal", contentWidth);
+        if (headerDescription) {
+          const descLines = wrap(headerDescription, 9.5, "normal", contentWidth);
           const descHeight = descLines.length * lineHeightFor(9.5);
           ensureSpace(descHeight + 1);
           y += 1;
@@ -475,19 +503,22 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
             y += 1;
           }
 
-          const assignedNames = (node.assignedPersonIds ?? [])
-            .map((pid) => persons.find((p) => p.id === pid)?.name)
-            .filter((n): n is string => Boolean(n));
-          const hasAssignees = assignedNames.length > 0;
-          const assignedText = hasAssignees ? `Assigned: ${assignedNames.join(", ")}` : "Assigned: None";
-          const assignedWeight: "normal" | "italic" = hasAssignees ? "normal" : "italic";
-          const assignedColor: [number, number, number] = hasAssignees ? TEAL : LIGHT_GRAY;
-          const aLines = wrap(assignedText, 8.5, assignedWeight, contentWidth);
-          const aHeight = aLines.length * lineHeightFor(8.5);
-          ensureSpace(aHeight + 0.4);
-          if (draw) y = drawLines(aLines, marginX, y, 8.5, assignedWeight, { color: assignedColor });
-          else y += aHeight;
-          y += 0.4;
+          // ---------- assigned people (gated by includeAssigned) ----------
+          if (includeAssigned) {
+            const assignedNames = (node.assignedPersonIds ?? [])
+              .map((pid) => persons.find((p) => p.id === pid)?.name)
+              .filter((n): n is string => Boolean(n));
+            const hasAssignees = assignedNames.length > 0;
+            const assignedText = hasAssignees ? `Assigned: ${assignedNames.join(", ")}` : "Assigned: None";
+            const assignedWeight: "normal" | "italic" = hasAssignees ? "normal" : "italic";
+            const assignedColor: [number, number, number] = hasAssignees ? TEAL : LIGHT_GRAY;
+            const aLines = wrap(assignedText, 8.5, assignedWeight, contentWidth);
+            const aHeight = aLines.length * lineHeightFor(8.5);
+            ensureSpace(aHeight + 0.4);
+            if (draw) y = drawLines(aLines, marginX, y, 8.5, assignedWeight, { color: assignedColor });
+            else y += aHeight;
+            y += 0.4;
+          }
 
           if (node.predecessors && node.predecessors.length > 0) {
             const refs = node.predecessors.map((pid) => idToPath.get(pid)).filter((v): v is string => Boolean(v));
@@ -526,7 +557,17 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setError("");
+          setExcludeSearch("");
+          // Pre-fill the custom header fields with the current node's values
+          // so the user sees them as a starting point when they turn the
+          // override on. This is only a UI convenience — the original values
+          // are still used when the override toggle is on.
+          setCustomTitle(rootNode?.label ?? "");
+          setCustomDescription(rootNode?.description ?? "");
+          setOpen(true);
+        }}
         title="Export a formatted PDF report"
         className="inline-flex items-center justify-center gap-1.5 h-8 px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm rounded-lg font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 shrink-0"
       >
@@ -543,6 +584,51 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">Export PDF Report</h3>
+
+            {/* ─── Report header (custom title / description) ─── */}
+            <div className="mb-4 pt-1">
+              <label className="flex items-center gap-2 mb-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={useOriginalHeader}
+                  onChange={(e) => setUseOriginalHeader(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                Use original title &amp; description
+              </label>
+
+              {!useOriginalHeader && (
+                <div className="ml-6 flex flex-col gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Custom report title
+                    </label>
+                    <input
+                      type="text"
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      placeholder="e.g. Q3 Review — Design Challenge"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Custom report description
+                    </label>
+                    <textarea
+                      value={customDescription}
+                      onChange={(e) => setCustomDescription(e.target.value)}
+                      rows={2}
+                      placeholder="Optional subtitle or note shown under the title"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Leave either field blank to fall back to the original value for that field only.
+                  </p>
+                </div>
+              )}
+            </div>
 
             <label className="flex items-center gap-2 mb-3 text-sm text-gray-700">
               <input
@@ -581,7 +667,7 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
               Include descriptions
             </label>
 
-            <label className="flex items-center gap-2 mb-4 text-sm text-gray-700">
+            <label className="flex items-center gap-2 mb-3 text-sm text-gray-700">
               <input
                 type="checkbox"
                 checked={includeCompletion}
@@ -589,6 +675,16 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
                 className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
               />
               Show completion status checkbox
+            </label>
+
+            <label className="flex items-center gap-2 mb-4 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={includeAssigned}
+                onChange={(e) => setIncludeAssigned(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              Include &quot;Assigned: …&quot; labels
             </label>
 
             {/* ─── Include / Exclude processes ─── */}
@@ -622,6 +718,41 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
                     handy right after Unselect all. This combines with the person filter below.
                   </p>
 
+                  {/* Search box filters only the visible list; it does not change checked state. */}
+                  <div className="relative mb-2">
+                    <input
+                      type="text"
+                      value={excludeSearch}
+                      onChange={(e) => setExcludeSearch(e.target.value)}
+                      placeholder="Search processes to include/exclude…"
+                      className="w-full border border-gray-200 rounded-lg pl-8 pr-8 py-1.5 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400"
+                    />
+                    <svg
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="m21 21-4.3-4.3" />
+                    </svg>
+                    {excludeSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setExcludeSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs font-bold"
+                        title="Clear search"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
                   <div className="flex items-center gap-2 mb-2">
                     <button
                       type="button"
@@ -641,7 +772,13 @@ export function ReportPdfButton({ rootNode, completed, persons }: ReportPdfButto
                   </div>
 
                   <div className="max-h-56 overflow-y-auto flex flex-col gap-0.5 border border-gray-100 rounded-lg p-2">
-                    {selectionEntries.map(({ node, level, ancestorExcluded }) => {
+                    {visibleSelectionEntries.length === 0 && (
+                      <div className="text-xs text-gray-400 italic px-2 py-3">
+                        No processes match &ldquo;{excludeSearch}&rdquo;.
+                      </div>
+                    )}
+
+                    {visibleSelectionEntries.map(({ node, level, ancestorExcluded }) => {
                       const selfExcluded = excludedIds.has(node.id);
                       const keptDespiteParent = ancestorExcluded && !selfExcluded;
                       const hasChildren = (node.children?.length ?? 0) > 0;

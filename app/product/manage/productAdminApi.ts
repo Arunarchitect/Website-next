@@ -46,6 +46,15 @@ export interface OrganisationPricing {
   is_active: boolean;
 }
 
+export interface OrganisationProductNote {
+  id: number;
+  organisation: number;
+  organisation_name: string;
+  note: string;
+  updated_by_name: string | null;
+  updated_at: string;
+}
+
 export interface AdminProduct {
   id: string;
   space: string;
@@ -62,6 +71,9 @@ export interface AdminProduct {
   ifc_model: IFCModel | null;
   project_pricing_rules: ProjectPricing[];
   organisation_pricing_rules: OrganisationPricing[];
+  // Org-wide catalog notes on this product, only populated for the
+  // manage/admin endpoint and scoped to orgs the caller administers.
+  organisation_notes?: OrganisationProductNote[];
   // Review workflow
   status: ProductStatus;
   organisation: number | null;
@@ -87,12 +99,6 @@ export interface ProductFormValues {
   product_image?: File | null;
 }
 
-// ─── Admin scope: orgs/projects THIS user administers ──────────────────
-// Used to populate dropdowns for project/org pricing instead of free-text
-// IDs, so a user can only ever attach pricing to something they actually
-// administer. The manage page also uses this to HIDE pricing rows that
-// belong to organisations/projects the current user does not administer —
-// they should not be visible, let alone editable, to anyone else.
 export interface AdminOrganisation {
   id: number;
   name: string;
@@ -195,7 +201,10 @@ export async function deleteProduct(id: string): Promise<void> {
 }
 
 // Discount tiers
-export async function addDiscountTier(productId: string, tier: Omit<DiscountTier, 'id' | 'product'>): Promise<DiscountTier> {
+export async function addDiscountTier(
+  productId: string,
+  tier: Omit<DiscountTier, 'id' | 'product'>
+): Promise<DiscountTier> {
   const res = await apiClient.post('/product/discount-tiers/', { ...tier, product: productId });
   return res.data;
 }
@@ -224,7 +233,11 @@ export async function addProjectPricing(
   projectId: number,
   data: Partial<Pick<ProjectPricing, 'discounted_price' | 'discount_percentage' | 'notes'>>
 ): Promise<ProjectPricing> {
-  const res = await apiClient.post('/product/project-pricing/', { ...data, product: productId, project: projectId });
+  const res = await apiClient.post('/product/project-pricing/', {
+    ...data,
+    product: productId,
+    project: projectId,
+  });
   return res.data;
 }
 
@@ -246,7 +259,11 @@ export async function addOrganisationPricing(
   organisationId: number,
   data: Partial<Pick<OrganisationPricing, 'discounted_price' | 'discount_percentage'>>
 ): Promise<OrganisationPricing> {
-  const res = await apiClient.post('/product/organisation-pricing/', { ...data, product: productId, organisation: organisationId });
+  const res = await apiClient.post('/product/organisation-pricing/', {
+    ...data,
+    product: productId,
+    organisation: organisationId,
+  });
   return res.data;
 }
 
@@ -255,7 +272,10 @@ export async function updateOrganisationPricing(
   organisationId: number,
   data: Partial<Pick<OrganisationPricing, 'discounted_price' | 'discount_percentage'>>
 ): Promise<OrganisationPricing> {
-  const res = await apiClient.patch(`/product/organisation-pricing/${id}/`, { ...data, organisation: organisationId });
+  const res = await apiClient.patch(`/product/organisation-pricing/${id}/`, {
+    ...data,
+    organisation: organisationId,
+  });
   return res.data;
 }
 
@@ -263,7 +283,7 @@ export async function deleteOrganisationPricing(id: number): Promise<void> {
   await apiClient.delete(`/product/organisation-pricing/${id}/`);
 }
 
-// ── Review workflow (org admin) ──────────────────────────────────────────
+// Review workflow
 export async function getPendingProducts(): Promise<AdminProduct[]> {
   const res = await apiClient.get('/product/products/pending/');
   return unwrapList<AdminProduct>(res.data);
@@ -279,8 +299,39 @@ export async function rejectProduct(id: string, rejection_reason: string): Promi
   return res.data;
 }
 
-// ── Admin scope (orgs/projects this user administers) ───────────────────
+// Admin scope
 export async function getAdminScope(): Promise<AdminScope> {
   const res = await apiClient.get('/product/admin-scope/');
   return res.data;
+}
+
+// ── Organisation catalog notes ────────────────────────────────────────────
+export interface SetOrganisationNoteResponse {
+  organisation_note: OrganisationProductNote | null;
+}
+
+export function getApiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { detail?: string } | undefined;
+    if (data && typeof data.detail === 'string') return data.detail;
+    if (typeof err.message === 'string' && err.message) return err.message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+export async function setOrganisationNote(
+  productId: string,
+  organisationId: number,
+  note: string
+): Promise<OrganisationProductNote | null> {
+  try {
+    const res = await apiClient.post<SetOrganisationNoteResponse>(
+      `/product/products/${productId}/organisation_note/`,
+      { organisation: organisationId, note }
+    );
+    return res.data?.organisation_note ?? null;
+  } catch (err: unknown) {
+    throw new Error(getApiErrorMessage(err, "Couldn't save the organisation note."));
+  }
 }

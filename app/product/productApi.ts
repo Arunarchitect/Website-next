@@ -36,6 +36,15 @@ export interface Space {
   required_categories: string[];
 }
 
+export interface OrganisationProductNote {
+  id: number;
+  organisation: number;
+  organisation_name: string;
+  note: string;
+  updated_by_name: string | null;
+  updated_at: string;
+}
+
 export interface ProductItem {
   id: string;
   category: string;
@@ -44,15 +53,18 @@ export interface ProductItem {
   model_label: string;
   product_link?: string;
   product_image?: string | null;
-  // Small, pre-resized (server-generated) copy of product_image. Used for
-  // the PDF export where download speed on mobile matters far more than
-  // pixel-perfect resolution. The full-size product_image remains what the
-  // catalog/assigned list UI displays, so on-screen clarity is unaffected.
   thumbnail_url?: string | null;
   base_price?: string | null;
   currency?: string | null;
   effective_price?: string | null;
   status?: "pending" | "approved" | "rejected";
+  // The viewing organisation's own catalog note on this product (from the
+  // catalog/assignment endpoints, scoped to one org). Null if none set, or
+  // if the response wasn't scoped to a single organisation.
+  organisation_note?: OrganisationProductNote | null;
+  // Every org note on this product, only populated by the admin/manage
+  // catalog endpoint (an admin may administer more than one org).
+  organisation_notes?: OrganisationProductNote[];
 }
 
 export interface Assignment {
@@ -83,6 +95,15 @@ export interface ProductSuggestionInput {
   product_link?: string;
   product_image?: File | null;
   organisation: number;
+}
+
+export const CATALOG_PAGE_SIZE = 12;
+
+export interface PaginatedResult<T> {
+  items: T[];
+  count: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
 }
 
 export function roleToUiRole(role: MembershipRole): Role {
@@ -116,22 +137,6 @@ const getAuthToken = (): string | null => {
   );
 };
 
-/**
- * Resolves a usable image URL for a product.
- *
- * By default (preferThumbnail=false) this favours the full-resolution
- * product_image — used everywhere the person is actually looking at the
- * picture (catalog cards, assigned-list thumbnails), so on-screen clarity
- * is never reduced.
- *
- * Pass { preferThumbnail: true } for contexts where download size matters
- * more than resolution — currently just the PDF export, where a small
- * server-generated thumbnail is plenty legible on paper/screen and loads
- * far faster on mobile networks than the original upload.
- *
- * Either way, falls back to whichever of the two is actually present, so
- * nothing breaks for older rows that don't have a thumbnail yet.
- */
 export const getImageSource = (
   item?: { product_image?: string | null; thumbnail_url?: string | null } | null,
   opts?: { preferThumbnail?: boolean }
@@ -155,19 +160,6 @@ export const formatPrice = (item: ProductItem): string | null => {
   return `${item.currency || 'INR'} ${num.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 };
 
-/**
- * Structured price comparison for a product: the "final" price the person
- * actually pays (effective_price, falling back to base_price when there's
- * no override) versus the catalog/MRP price (base_price).
- *
- * - `differs` is true only when both values are present and numerically
- *   different — this is what should gate showing the struck-through MRP
- *   and the +/- badge at all.
- * - `diffPct` is signed: positive means the effective price is HIGHER than
- *   MRP (mark it up, "+X%"), negative means it's LOWER ("-X%", a discount).
- *   It's null whenever there's nothing meaningful to compare against
- *   (missing base price, or base price of 0).
- */
 export interface PriceInfo {
   currency: string;
   effective: number | null;
@@ -261,13 +253,26 @@ export async function getSpaces(projectId: number): Promise<Space[]> {
 export async function getProductsByCategory(
   category: string,
   projectId: number,
-  search?: string
-): Promise<ProductItem[]> {
-  const params: any = { project: projectId };
+  opts?: { search?: string; page?: number }
+): Promise<PaginatedResult<ProductItem>> {
+  const params: any = { project: projectId, page_size: CATALOG_PAGE_SIZE };
   if (category) params.category = category;
-  if (search) params.search = search;
+  if (opts?.search) params.search = opts.search;
+  if (opts?.page) params.page = opts.page;
+
   const res = await apiClient.get('/product/products/catalog/', { params });
-  return unwrapList<ProductItem>(res.data);
+  const data = res.data;
+
+  if (Array.isArray(data)) {
+    return { items: data, count: data.length, hasNext: false, hasPrevious: false };
+  }
+
+  return {
+    items: unwrapList<ProductItem>(data),
+    count: data.count ?? 0,
+    hasNext: !!data.next,
+    hasPrevious: !!data.previous,
+  };
 }
 
 export async function getAssignments(projectId: number, spaceId?: number): Promise<Assignment[]> {
@@ -390,4 +395,40 @@ export async function updateSpace(
 
 export async function deleteSpace(id: number): Promise<void> {
   await apiClient.delete(`/product/spaces/${id}/`);
+}
+
+// ── Organisation catalog notes (per-org, admin-only) ─────────────────────
+export interface SetOrganisationNoteResponse {
+  organisation_note: OrganisationProductNote | null;
+}
+
+export function getApiErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { detail?: string } | undefined;
+    if (data && typeof data.detail === 'string') return data.detail;
+    if (typeof err.message === 'string' && err.message) return err.message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+/**
+ * Set (or clear, by passing an empty string) the calling organisation's own
+ * catalog note on a product. Backend enforces that the caller is an admin
+ * of `organisationId` — passing an org you don't admin gets a 403.
+ */
+export async function setOrganisationNote(
+  productId: string,
+  organisationId: number,
+  note: string
+): Promise<OrganisationProductNote | null> {
+  try {
+    const res = await apiClient.post<SetOrganisationNoteResponse>(
+      `/product/products/${productId}/organisation_note/`,
+      { organisation: organisationId, note }
+    );
+    return res.data?.organisation_note ?? null;
+  } catch (err: unknown) {
+    throw new Error(getApiErrorMessage(err, "Couldn't save the organisation note."));
+  }
 }
