@@ -12,8 +12,10 @@ import {
   Space,
   ProductItem,
   Assignment,
+  PricedFields,
   CATEGORIES,
   getImageSource,
+  getVariantImageSource,
   formatPrice,
   roleToUiRole,
   groupByOrganisation,
@@ -72,7 +74,7 @@ function statusLabel(a: Assignment): string {
   return `Awaiting ${waitingOn} confirmation`;
 }
 
-function sumByCurrency(products: ProductItem[]): { currency: string; total: number }[] {
+function sumByCurrency(products: PricedFields[]): { currency: string; total: number }[] {
   const totals = new Map<string, number>();
   products.forEach((item) => {
     const value = item.effective_price ?? item.base_price;
@@ -87,6 +89,18 @@ function sumByCurrency(products: ProductItem[]): { currency: string; total: numb
 
 function formatTotal(t: { currency: string; total: number }): string {
   return `${t.currency} ${t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+/** The price/image source for an assignment row — the picked variant's own
+ * numbers when one was chosen, else the product's. Both shapes already
+ * carry resolved (server-side) price/image fields, so no extra fallback
+ * logic is needed here. */
+function assignmentPriceSource(a: Assignment, product: ProductItem): PricedFields {
+  return a.variant_detail ?? product;
+}
+
+function assignmentImageSource(a: Assignment, product: ProductItem): string {
+  return a.variant_detail ? getVariantImageSource(a.variant_detail) : getImageSource(product);
 }
 
 interface ScrollableSectionProps {
@@ -320,7 +334,10 @@ export default function ProductPage() {
   }, [assignments, projectId, filterSpaceIds, filterCategory, debouncedFilterSearch, pricedProduct]);
 
   const filteredTotals = useMemo(
-    () => sumByCurrency(filteredAssignments.map((a) => pricedProduct(a.product_detail))),
+    () =>
+      sumByCurrency(
+        filteredAssignments.map((a) => assignmentPriceSource(a, pricedProduct(a.product_detail)))
+      ),
     [filteredAssignments, pricedProduct]
   );
 
@@ -328,15 +345,17 @@ export default function ProductPage() {
     () =>
       filteredAssignments.map((a) => {
         const item = pricedProduct(a.product_detail);
+        const priceSource = assignmentPriceSource(a, item);
         return {
           space: spaceNameById.get(a.space) ?? "—",
           item: item.item,
           manufacturer: item.manufacturer,
           model_label: item.model_label,
-          priceLabel: formatPrice(item),
+          variantLabel: a.variant_detail?.label || null,
+          priceLabel: formatPrice(priceSource),
           status: statusLabel(a),
           proposed_by: a.proposed_by,
-          imageSrc: getImageSource(item, { preferThumbnail: true }),
+          imageSrc: assignmentImageSource(a, item),
           product_link: item.product_link || null,
           proposerNote: a.proposer_note || null,
           declinedNote: a.declined ? a.declined_note || null : null,
@@ -823,6 +842,8 @@ export default function ProductPage() {
               <div className="space-y-3">
                 {filteredAssignments.map((a) => {
                   const item = pricedProduct(a.product_detail);
+                  const priceSource = assignmentPriceSource(a, item);
+                  const imageSrc = assignmentImageSource(a, item);
                   const bothConfirmed = a.client_confirmed && a.architect_confirmed;
                   const canConfirm = !isViewOnly && !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
 
@@ -849,7 +870,7 @@ export default function ProductPage() {
                         <div className="flex items-center gap-4 min-w-0">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={getImageSource(item)}
+                            src={imageSrc}
                             alt={item.item}
                             className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-contain bg-white flex-shrink-0"
                           />
@@ -859,8 +880,11 @@ export default function ProductPage() {
                             </span>
                             <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight truncate">{item.item}</div>
                             <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
+                            {a.variant_detail?.label && (
+                              <div className="pf-faint text-xs mt-0.5">Size: {a.variant_detail.label}</div>
+                            )}
                             <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
-                            <PriceBlock item={item} />
+                            <PriceBlock item={priceSource} />
                             {item.product_link && (
                               <ProductLink
                                 href={item.product_link}

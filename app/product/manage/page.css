@@ -392,3 +392,72 @@
     max-width: 100%;
   }
 }
+
+
+/* ─── Variants tab (ProductEditPanel) ───────────────────────────── */
+.pm-variant-card {
+  border: 1px solid var(--pm-border);
+  border-radius: 0.75rem;
+  background: #FAFBF9;
+  overflow: hidden;
+}
+
+.pm-variant-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.pm-variant-thumb {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #EDEFEA;
+}
+
+.pm-variant-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pm-variant-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pm-variant-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.pm-variant-ifc {
+  border-top: 1px dashed var(--pm-border);
+  padding: 0.625rem 0.75rem;
+  background: #fff;
+}
+
+.pm-variant-form {
+  border: 1px dashed var(--pm-border);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: #FAFBF9;
+}
+
+@media (max-width: 480px) {
+  .pm-variant-row {
+    flex-wrap: wrap;
+  }
+  .pm-variant-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 0.375rem;
+  }
+}

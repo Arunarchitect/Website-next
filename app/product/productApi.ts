@@ -45,6 +45,38 @@ export interface OrganisationProductNote {
   updated_at: string;
 }
 
+// A size/option of a Product (e.g. a water tank's "1000L"). Every priced/
+// imaged field here is already resolved server-side (falls back to the
+// parent Product when the variant doesn't set its own) — never fall back
+// again on the frontend, just use these values directly.
+export interface ProductVariant {
+  id: number;
+  product: string;
+  label: string;
+  sort_value?: string | null;
+  sku?: string;
+  base_price?: string | null;
+  currency?: string | null;
+  cost_price?: string | null;
+  variant_image?: string | null;
+  variant_thumbnail?: string | null;
+  thumbnail_url?: string | null;
+  effective_price?: string | null;
+  effective_currency?: string | null;
+  has_distinct_geometry?: boolean;
+  is_default: boolean;
+}
+
+// Shared shape for anything the price helpers can price — a ProductItem
+// and a ProductVariant both satisfy this structurally, so getPriceInfo/
+// formatPrice work on either without needing separate variant-flavoured
+// copies of the same logic.
+export interface PricedFields {
+  base_price?: string | null;
+  currency?: string | null;
+  effective_price?: string | null;
+}
+
 export interface ProductItem {
   id: string;
   category: string;
@@ -58,6 +90,10 @@ export interface ProductItem {
   currency?: string | null;
   effective_price?: string | null;
   status?: "pending" | "approved" | "rejected";
+  // Whether this product has size/option variants — if true, the frontend
+  // should have the proposer pick one (from `variants`) before proposing.
+  has_variants?: boolean;
+  variants?: ProductVariant[];
   // The viewing organisation's own catalog note on this product (from the
   // catalog/assignment endpoints, scoped to one org). Null if none set, or
   // if the response wasn't scoped to a single organisation.
@@ -73,6 +109,11 @@ export interface Assignment {
   space: number;
   product: string;
   product_detail: ProductItem;
+  // Which size/option was picked, if the product has variants. Null for a
+  // product with no variants, or an older assignment made before variants
+  // existed.
+  variant: number | null;
+  variant_detail?: ProductVariant | null;
   proposed_by: Role;
   proposer_note: string | null;
   client_confirmed: boolean;
@@ -152,7 +193,19 @@ export const getImageSource = (
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 };
 
-export const formatPrice = (item: ProductItem): string | null => {
+/** Image source for a variant, falling back to the product's own image if
+ * the variant doesn't have a distinct one (thumbnail_url already resolves
+ * that server-side, this just gets it into getImageSource's expected shape). */
+export const getVariantImageSource = (
+  variant: ProductVariant,
+  opts?: { preferThumbnail?: boolean }
+): string =>
+  getImageSource(
+    { product_image: variant.variant_image ?? null, thumbnail_url: variant.thumbnail_url ?? null },
+    opts
+  );
+
+export const formatPrice = (item: PricedFields): string | null => {
   const value = item.effective_price ?? item.base_price;
   if (value === null || value === undefined) return null;
   const num = Number(value);
@@ -168,7 +221,7 @@ export interface PriceInfo {
   diffPct: number | null;
 }
 
-export const getPriceInfo = (item: ProductItem): PriceInfo => {
+export const getPriceInfo = (item: PricedFields): PriceInfo => {
   const currency = item.currency || 'INR';
 
   const baseRaw = item.base_price;
@@ -287,12 +340,14 @@ export async function proposeAssignment(
   spaceId: number,
   productId: string,
   role: Role,
-  note?: string
+  note?: string,
+  variantId?: number | null
 ): Promise<Assignment> {
   const res = await apiClient.post('/product/assignments/', {
     project: projectId,
     space: spaceId,
     product: productId,
+    variant: variantId ?? undefined,
     proposed_by: role,
     proposer_note: note?.trim() || undefined,
     client_confirmed: role === 'client',

@@ -6,7 +6,9 @@ import {
   AdminScope,
   OrganisationPricing,
   ProductFormValues,
+  ProductVariant,
   ProjectPricing,
+  VariantFormValues,
   getImageSource,
 } from "./productAdminApi";
 import { CATEGORIES } from "../productApi";
@@ -26,6 +28,17 @@ export const EMPTY_FORM: ProductFormValues = {
   cost_price: "",
   product_link: "",
   product_image: null,
+};
+
+export const EMPTY_VARIANT_FORM: VariantFormValues = {
+  label: "",
+  sort_value: "",
+  sku: "",
+  base_price: "",
+  currency: "",
+  cost_price: "",
+  variant_image: null,
+  is_default: false,
 };
 
 // ───────────────────────────────────────────────────────────────────────
@@ -67,12 +80,10 @@ function extractFileFromDataTransfer(
 ): File | null {
   if (!dt) return null;
 
-  // files list — most desktop browsers for image pastes
   if (dt.files && dt.files.length > 0) {
     return dt.files[0];
   }
 
-  // items list — Safari/Firefox sometimes only populate this
   if (dt.items && dt.items.length > 0) {
     for (let i = 0; i < dt.items.length; i++) {
       const item = dt.items[i];
@@ -147,8 +158,6 @@ export function FileChooser({
     if (el) el.innerHTML = "";
   }
 
-  // Paths (1), (2), (3): synchronous paste event, triggered by Ctrl+V
-  // or the browser's own right-click / long-press Paste menu item.
   function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
     if (disabled) return;
     const picked = extractFileFromDataTransfer(e.clipboardData);
@@ -159,13 +168,9 @@ export function FileChooser({
       onFileSelected(picked);
       return;
     }
-    // Some browsers send clipboard items asynchronously (Safari HEIC).
-    // Fall back to the async API — still inside the user gesture.
     void tryAsyncClipboardRead();
   }
 
-  // Path (4): explicit Paste button. Also the fallback for anything the
-  // synchronous path couldn't handle.
   async function tryAsyncClipboardRead() {
     if (disabled || pasteBusy) return;
     setPasteBusy(true);
@@ -212,8 +217,6 @@ export function FileChooser({
       )}
 
       <div className="pm-file-chooser-main">
-        {/* Actions row — always tappable, so both desktop and mobile
-            have a guaranteed entry point even if the OS menu is quirky. */}
         <div className="pm-file-actions">
           <button
             type="button"
@@ -239,9 +242,6 @@ export function FileChooser({
           {file ? file.name : "No file chosen"}
         </span>
 
-        {/* Real, focusable, editable paste target. This is the piece
-            that enables right-click → Paste and mobile long-press →
-            Paste in the browser's own menu. */}
         <div
           ref={pasteSurfaceRef}
           contentEditable={!disabled}
@@ -253,17 +253,12 @@ export function FileChooser({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onInput={() => {
-            // Android keyboards sometimes insert text into a
-            // contentEditable instead of firing a paste event.
-            // Wipe anything that isn't whitespace — we only care about
-            // pasted files.
             const el = pasteSurfaceRef.current;
             if (el && el.textContent && el.textContent.trim().length > 0) {
               el.innerHTML = "";
             }
           }}
           onKeyDown={(e) => {
-            // Enter would otherwise insert a newline.
             if (e.key === "Enter") e.preventDefault();
           }}
           className="pm-paste-surface"
@@ -299,7 +294,7 @@ export function FileChooser({
 //  ProductEditPanel
 // ───────────────────────────────────────────────────────────────────────
 
-export type EditTab = "details" | "pricing" | "org_note";
+export type EditTab = "details" | "variants" | "pricing" | "org_note";
 
 interface ProductEditPanelProps {
   editingId: string;
@@ -313,15 +308,20 @@ interface ProductEditPanelProps {
   onCancel: () => void;
   onSave: () => void;
 
-  // Pricing modal openers — state lives in the parent so refresh() stays
-  // centralized in one place.
+  // Variants tab
+  onAddVariant: (values: VariantFormValues) => void;
+  onUpdateVariant: (id: number, values: Partial<VariantFormValues>) => void;
+  onDeleteVariant: (id: number) => void;
+  onUploadVariantIfc: (variantId: number, file: File) => void;
+  onDeleteVariantIfc: (ifcId: number) => void;
+
+  // Pricing modal openers
   onOpenProjectPricing: (productId: string, existing?: ProjectPricing) => void;
   onOpenOrgPricing: (productId: string, existing?: OrganisationPricing) => void;
   onDeleteProjectPricing: (id: number) => void;
   onDeleteOrgPricing: (id: number) => void;
 
-  // Org-note tab state — parent owns the form values so it can submit and
-  // refresh in one place.
+  // Org-note tab state
   orgNoteOrgId: string;
   setOrgNoteOrgId: (id: string) => void;
   orgNoteText: string;
@@ -341,6 +341,11 @@ export default function ProductEditPanel({
   isBusy,
   onCancel,
   onSave,
+  onAddVariant,
+  onUpdateVariant,
+  onDeleteVariant,
+  onUploadVariantIfc,
+  onDeleteVariantIfc,
   onOpenProjectPricing,
   onOpenOrgPricing,
   onDeleteProjectPricing,
@@ -388,6 +393,23 @@ export default function ProductEditPanel({
           }`}
         >
           Details
+        </button>
+        <button
+          onClick={() => setActiveTab("variants")}
+          disabled={isNew}
+          title={isNew ? "Save the product first" : undefined}
+          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
+            activeTab === "variants"
+              ? "border-[#2F6E62] text-[#2F6E62] font-medium"
+              : "border-transparent text-[#6B7570]"
+          }`}
+        >
+          Variants
+          {editingProduct && editingProduct.variants.length > 0 && (
+            <span className="ml-1.5 text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+              {editingProduct.variants.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setActiveTab("pricing")}
@@ -478,6 +500,12 @@ export default function ProductEditPanel({
                 }
                 className="border border-[#DCE0D8] rounded-lg px-3 py-2"
               />
+              {editingProduct && editingProduct.variants.length > 0 && (
+                <span className="text-[11px] text-[#8A938E]">
+                  Only used as a fallback — this product has variants with
+                  their own prices under the Variants tab.
+                </span>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               Currency
@@ -531,6 +559,11 @@ export default function ProductEditPanel({
                   setForm({ ...form, product_image: file })
                 }
               />
+              {editingProduct && editingProduct.variants.length > 0 && (
+                <span className="text-[11px] text-[#8A938E]">
+                  Every variant without its own image inherits this one.
+                </span>
+              )}
             </div>
           </div>
           <div className="flex gap-3">
@@ -550,6 +583,19 @@ export default function ProductEditPanel({
             </button>
           </div>
         </>
+      )}
+
+      {activeTab === "variants" && editingProduct && (
+        <VariantsTab
+          product={editingProduct}
+          isBusy={isBusy}
+          onAddVariant={onAddVariant}
+          onUpdateVariant={onUpdateVariant}
+          onDeleteVariant={onDeleteVariant}
+          onUploadVariantIfc={onUploadVariantIfc}
+          onDeleteVariantIfc={onDeleteVariantIfc}
+          onClose={onCancel}
+        />
       )}
 
       {activeTab === "pricing" && editingProduct && (
@@ -586,6 +632,330 @@ export default function ProductEditPanel({
   );
 }
 
+// ─── Variants tab ────────────────────────────────────────────────────
+
+interface VariantsTabProps {
+  product: AdminProduct;
+  isBusy: (key: string) => boolean;
+  onAddVariant: (values: VariantFormValues) => void;
+  onUpdateVariant: (id: number, values: Partial<VariantFormValues>) => void;
+  onDeleteVariant: (id: number) => void;
+  onUploadVariantIfc: (variantId: number, file: File) => void;
+  onDeleteVariantIfc: (ifcId: number) => void;
+  onClose: () => void;
+}
+
+function VariantsTab({
+  product,
+  isBusy,
+  onAddVariant,
+  onUpdateVariant,
+  onDeleteVariant,
+  onUploadVariantIfc,
+  onDeleteVariantIfc,
+  onClose,
+}: VariantsTabProps) {
+  const [formOpenFor, setFormOpenFor] = useState<number | "new" | null>(null);
+  const [variantForm, setVariantForm] = useState<VariantFormValues>(EMPTY_VARIANT_FORM);
+  const [expandedVariantId, setExpandedVariantId] = useState<number | null>(null);
+
+  function startNewVariant() {
+    setVariantForm(EMPTY_VARIANT_FORM);
+    setFormOpenFor("new");
+  }
+
+  function startEditVariant(v: ProductVariant) {
+    setVariantForm({
+      label: v.label,
+      sort_value: v.sort_value ?? "",
+      sku: v.sku ?? "",
+      base_price: v.base_price ?? "",
+      currency: v.currency ?? "",
+      cost_price: v.cost_price ?? "",
+      variant_image: null,
+      is_default: v.is_default,
+    });
+    setFormOpenFor(v.id);
+  }
+
+  function closeForm() {
+    setFormOpenFor(null);
+    setVariantForm(EMPTY_VARIANT_FORM);
+  }
+
+  function submitVariantForm() {
+    if (!variantForm.label.trim()) return;
+    if (formOpenFor === "new") {
+      onAddVariant(variantForm);
+    } else if (typeof formOpenFor === "number") {
+      onUpdateVariant(formOpenFor, variantForm);
+    }
+    closeForm();
+  }
+
+  const saveKey =
+    formOpenFor === "new" ? "save-variant-new" : `save-variant-${formOpenFor}`;
+  const saving = isBusy(saveKey);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-[#8A938E]">
+        Add a variant for each size/option this product comes in (e.g. a
+        tank`&apos;`s 1000L / 2000L / 3000L). Leave price/image/currency blank on a
+        variant to inherit the product`&apos;`s own — only set them where they
+        actually differ.
+      </p>
+
+      {product.variants.length === 0 ? (
+        <p className="text-xs text-[#8A938E]">
+          No variants — this product is sold as a single option.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {product.variants.map((v) => {
+            const deleteKey = `delete-variant-${v.id}`;
+            const uploadIfcKey = `upload-variant-ifc-${v.id}`;
+            const expanded = expandedVariantId === v.id;
+            const needsOwnIfc = v.has_distinct_geometry && !v.ifc_model;
+            return (
+              <div key={v.id} className="pm-variant-card">
+                <div className="pm-variant-row">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getImageSource(v.thumbnail_url || v.variant_image)}
+                    alt={v.label}
+                    className="pm-variant-thumb"
+                  />
+                  <div className="pm-variant-info">
+                    <div className="pm-variant-title-row">
+                      <span className="font-medium text-sm">{v.label}</span>
+                      {v.is_default && (
+                        <span className="pm-badge pm-badge-approved">default</span>
+                      )}
+                      {needsOwnIfc && (
+                        <span className="pm-badge pm-badge-pending" title="This variant has its own image, so it needs its own IFC model too">
+                          needs IFC model
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[#6B7570]">
+                      {v.effective_currency || product.currency || "INR"}{" "}
+                      {v.effective_price ?? v.base_price ?? product.base_price ?? "—"}
+                      {v.sku ? ` · SKU ${v.sku}` : ""}
+                    </p>
+                  </div>
+                  <div className="pm-variant-actions">
+                    <button
+                      onClick={() =>
+                        setExpandedVariantId(expanded ? null : v.id)
+                      }
+                      className="text-xs text-[#2F6E62] underline"
+                    >
+                      {expanded ? "Hide" : "IFC model"}
+                    </button>
+                    <button
+                      onClick={() => startEditVariant(v)}
+                      className="text-xs text-[#2F6E62] underline"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => onDeleteVariant(v.id)}
+                      disabled={isBusy(deleteKey)}
+                      className="text-xs text-red-600 underline disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {isBusy(deleteKey) ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+
+                {expanded && (
+                  <div className="pm-variant-ifc">
+                    {v.ifc_model ? (
+                      <div className="text-xs flex items-center gap-3 flex-wrap">
+                        <a
+                        
+                          href={getImageSource(v.ifc_model.file)}
+                          target="_blank"
+                          className="text-[#2F6E62] underline"
+                        >
+                          {v.ifc_model.file_name}
+                        </a>
+                        <span className="text-[#8A938E]">
+                          {v.ifc_model.file_size_mb} MB
+                        </span>
+                        <button
+                          onClick={() => onDeleteIfcAndCollapse(v.ifc_model!.id)}
+                          disabled={isBusy(`delete-variant-ifc-${v.ifc_model!.id}`)}
+                          className="text-red-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isBusy(`delete-variant-ifc-${v.ifc_model!.id}`)
+                            ? "Removing…"
+                            : "Remove"}
+                        </button>
+                      </div>
+                    ) : (
+                      <FileChooser
+                        id={`variant-ifc-input-${v.id}`}
+                        accept=".ifc,.ifczip,.ifcxml"
+                        disabled={isBusy(uploadIfcKey)}
+                        placeholder={
+                          isBusy(uploadIfcKey) ? "Uploading…" : "Choose IFC file"
+                        }
+                        hint="or paste with Ctrl+V"
+                        variant="file"
+                        onFileSelected={(file) => onUploadVariantIfc(v.id, file)}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+
+            function onDeleteIfcAndCollapse(ifcId: number) {
+              onDeleteVariantIfc(ifcId);
+            }
+          })}
+        </div>
+      )}
+
+      {formOpenFor === null ? (
+        <button
+          onClick={startNewVariant}
+          className="text-xs text-[#2F6E62] underline"
+        >
+          + Add variant
+        </button>
+      ) : (
+        <div className="pm-variant-form">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              Label
+              <input
+                value={variantForm.label}
+                onChange={(e) =>
+                  setVariantForm({ ...variantForm, label: e.target.value })
+                }
+                placeholder="e.g. 1000L"
+                className={inputBase}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Sort value (numeric size, for ordering)
+              <input
+                type="number"
+                value={variantForm.sort_value}
+                onChange={(e) =>
+                  setVariantForm({ ...variantForm, sort_value: e.target.value })
+                }
+                placeholder="e.g. 1000"
+                className={inputBase}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              SKU
+              <input
+                value={variantForm.sku}
+                onChange={(e) =>
+                  setVariantForm({ ...variantForm, sku: e.target.value })
+                }
+                className={inputBase}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Price (blank = inherit product price)
+              <input
+                type="number"
+                value={variantForm.base_price}
+                onChange={(e) =>
+                  setVariantForm({ ...variantForm, base_price: e.target.value })
+                }
+                className={inputBase}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Currency (blank = inherit)
+              <select
+                value={variantForm.currency}
+                onChange={(e) =>
+                  setVariantForm({ ...variantForm, currency: e.target.value })
+                }
+                className={inputBase}
+              >
+                <option value="">Inherit from product</option>
+                <option value="INR">INR</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={!!variantForm.is_default}
+                onChange={(e) =>
+                  setVariantForm({ ...variantForm, is_default: e.target.checked })
+                }
+              />
+              Default variant
+            </label>
+            <div className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span>Image (blank = inherit product image)</span>
+              <FileChooser
+                id="variant-image-input"
+                accept="image/*"
+                variant="image"
+                placeholder="Choose image"
+                hint="only set this if the variant genuinely looks different"
+                file={variantForm.variant_image}
+                existingPreviewUrl={
+                  typeof formOpenFor === "number"
+                    ? getImageSource(
+                        product.variants.find((v) => v.id === formOpenFor)
+                          ?.thumbnail_url ?? null
+                      )
+                    : null
+                }
+                onFileSelected={(file) =>
+                  setVariantForm({ ...variantForm, variant_image: file })
+                }
+              />
+              <span className="text-[11px] text-[#8A938E]">
+                If it looks different, it needs its own IFC model too — a
+                different shape can&apos;t reuse the parent&apos;s parametric
+                geometry.
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-3 mt-3">
+            <button
+              onClick={submitVariantForm}
+              disabled={saving || !variantForm.label.trim()}
+              className="bg-[#2F6E62] text-white text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : formOpenFor === "new" ? "Add variant" : "Save variant"}
+            </button>
+            <button
+              onClick={closeForm}
+              disabled={saving}
+              className="border border-[#DCE0D8] text-sm rounded-full px-5 py-2.5 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={onClose}
+        className="border border-[#DCE0D8] text-sm rounded-full px-5 py-2.5"
+      >
+        Close
+      </button>
+    </div>
+  );
+}
+
 // ─── Pricing tab ────────────────────────────────────────────────────────
 
 interface PricingTabProps {
@@ -598,6 +968,12 @@ interface PricingTabProps {
   onDeleteProjectPricing: (id: number) => void;
   onDeleteOrgPricing: (id: number) => void;
   onClose: () => void;
+}
+
+function variantScopeLabel(variantId: number | null, product: AdminProduct): string {
+  if (!variantId) return "Whole product";
+  const v = product.variants.find((v) => v.id === variantId);
+  return v ? v.label : `Variant #${variantId}`;
 }
 
 function PricingTab({
@@ -659,7 +1035,7 @@ function PricingTab({
                 <div key={pp.id} className="pm-rule-chip">
                   <span>
                     {projectMeta ? projectMeta.name : `Project #${pp.project}`}{" "}
-                    —{" "}
+                    · {variantScopeLabel(pp.variant, editingProduct)} —{" "}
                     {pp.discounted_price
                       ? `fixed ${pp.discounted_price}`
                       : `${pp.discount_percentage}% off`}
@@ -722,7 +1098,8 @@ function PricingTab({
               return (
                 <div key={op.id} className="pm-rule-chip">
                   <span>
-                    {orgMeta ? orgMeta.name : `Org #${op.organisation}`} —{" "}
+                    {orgMeta ? orgMeta.name : `Org #${op.organisation}`} ·{" "}
+                    {variantScopeLabel(op.variant, editingProduct)} —{" "}
                     {op.discounted_price
                       ? `fixed ${op.discounted_price}`
                       : `${op.discount_percentage}% off`}

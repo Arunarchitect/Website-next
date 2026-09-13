@@ -56,10 +56,6 @@ const IconSearch = () => (
 );
 
 // ─── Search matching helpers ───
-// Operate on the raw children array (not the synthetic "root" wrapper)
-// so effects can depend on editor.data — a stable reference — instead
-// of the freshly-built rootNode object, which changes identity every
-// render and would otherwise cause a re-search loop.
 function nodeMatchesSearch(node: ProcessNode, lowerTerm: string): boolean {
   return (
     node.label.toLowerCase().includes(lowerTerm) ||
@@ -79,8 +75,6 @@ function findMatchingNodeIds(children: ProcessNode[] | undefined, rawTerm: strin
   return matches;
 }
 
-// Extra breathing room (in canvas-local px) around a fitted search box
-// so a single small node doesn't get zoomed in to fill the screen.
 const MATCH_BOX_PADDING = 140;
 
 export default function ProcessWorkflowEditor({ masterword }: { masterword?: string }) {
@@ -379,10 +373,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     setPan({ x: 0, y: 0 });
   };
 
-  // Generic "fit this canvas-local box into the viewport" helper, used
-  // both for search results and (potentially) other future targeting.
-  // Unlike fitAllView, the resulting box isn't necessarily centered on
-  // the canvas's own center, so pan is computed explicitly.
   const fitToBox = (left: number, top: number, width: number, height: number) => {
     const canvas = canvasRef.current;
     const viewport = viewportRef.current;
@@ -432,7 +422,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   useEffect(() => {
     if (!editor.data) return;
     const frame = requestAnimationFrame(() => fitAllView());
-    // A newly loaded doc invalidates any in-progress search.
     setSearchOpen(false);
     setSearchTerm("");
     setSearchMatches([]);
@@ -442,8 +431,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   }, [editor.loadVersion]);
 
   // ─── Search ───
-  // Search only zooms/highlights — it never selects a node, so the
-  // Edit Title / Assign / Delete popup never pops up while searching.
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchMatches, setSearchMatches] = useState<string[]>([]);
@@ -452,17 +439,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const matchedNodeIds = useMemo(() => new Set(searchMatches), [searchMatches]);
   const activeMatchId = activeMatchIndex !== null ? searchMatches[activeMatchIndex] ?? null : null;
 
-  // Recompute matches whenever the term or the underlying data changes.
-  // Depending on editor.data (stable unless actually edited) rather than
-  // the freshly-built rootNode avoids a re-render loop.
   useEffect(() => {
     const matches = findMatchingNodeIds(editor.data?.children, searchTerm);
     setSearchMatches(matches);
     setActiveMatchIndex(null);
   }, [searchTerm, editor.data]);
 
-  // Whenever the match set changes, fit ALL matches into view together
-  // and dismiss any stale node/edge selection popup that might be open.
   useEffect(() => {
     if (searchMatches.length === 0) return;
     editor.clearSelection();
@@ -470,7 +452,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchMatches]);
 
-  // Step to one match at a time — zoom only, never selects the node.
   const goToMatch = (index: number) => {
     if (searchMatches.length === 0) return;
     const wrapped = ((index % searchMatches.length) + searchMatches.length) % searchMatches.length;
@@ -619,7 +600,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       return;
     }
 
-    // If move-to-parent mode is active, use this click as target
     if (moveParentMode) {
       if (id !== moveParentMode) {
         editor.moveNodeToParent(moveParentMode, id);
@@ -653,6 +633,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
   const rootNode = editor.rootNode;
   const displayGroup = masterword?.trim() || "Ungrouped";
+  // True when the page was opened scoped to a real group (e.g. /process/<masterword>).
+  // False when opened as plain /process — in that case we never list other workflows.
+  const displayGroupIsReal = Boolean(masterword && masterword.trim());
 
   // Helper: collect tasks assigned to a person, in depth-first tree order
   const getPersonTasks = (personId: string): ProcessNode[] => {
@@ -661,7 +644,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     const tasks: ProcessNode[] = [];
 
     const traverse = (node: ProcessNode) => {
-      // Exclude the root container itself from “tasks”
       if (node.id !== "root" && node.assignedPersonIds?.includes(personId)) {
         tasks.push(node);
       }
@@ -681,7 +663,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     return children.every(isNodeFullyComplete);
   };
 
-  // Compute the label for the node being moved (safe even if rootNode is null)
   const moveParentLabel = moveParentMode && rootNode ? findNodeById(rootNode, moveParentMode)?.label : null;
 
   // ─── Render ───
@@ -829,52 +810,80 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                         </div>
                       )}
 
-                      {cloud.cloudLoading && (
-                        <div className="text-xs text-gray-400 text-center py-3">Loading…</div>
+                      {/* ── Group mode: list this group's workflows ── */}
+                      {displayGroupIsReal && (
+                        <>
+                          {cloud.cloudLoading && (
+                            <div className="text-xs text-gray-400 text-center py-3">Loading…</div>
+                          )}
+
+                          {!cloud.cloudLoading && cloud.cloudList.length === 0 && (
+                            <div className="text-xs text-gray-400 text-center py-4">
+                              No saved workflows yet in this group.
+                            </div>
+                          )}
+
+                          {!cloud.cloudLoading &&
+                            cloud.cloudList.map((doc) => {
+                              const isCurrent = loadedDocId
+                                ? String(doc.id) === loadedDocId
+                                : doc.is_master;
+                              return (
+                                <button
+                                  key={doc.id}
+                                  onClick={async () => {
+                                    try {
+                                      await cloud.loadCloudDoc(doc.id);
+                                      setLoadedDocId(String(doc.id));
+                                      setLoadMenuOpen(false);
+                                    } catch {
+                                      // cloudError is already set by the hook; keep menu open so it's visible
+                                    }
+                                  }}
+                                  className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${
+                                    isCurrent
+                                      ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200"
+                                      : "hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <span className="text-sm text-gray-800 flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate">{doc.title || "Untitled Workflow"}</span>
+                                    {doc.is_master && (
+                                      <span className="shrink-0 text-[10px] font-medium text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-full">
+                                        master
+                                      </span>
+                                    )}
+                                    {isCurrent && (
+                                      <span className="shrink-0 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                                        current
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-[11px] text-gray-400">
+                                    {doc.person_name ? `${doc.person_name} · ` : ""}
+                                    {new Date(doc.updated_at).toLocaleString()}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                        </>
                       )}
 
-                      {!cloud.cloudLoading && cloud.cloudList.length === 0 && (
-                        <div className="text-xs text-gray-400 text-center py-4">No saved workflows yet.</div>
+                      {/* ── Plain /process mode: only offer the sample template ── */}
+                      {!displayGroupIsReal && (
+                        <button
+                          onClick={() => {
+                            editor.downloadInvalidUpload();
+                            setLoadMenuOpen(false);
+                          }}
+                          className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-gray-50 flex flex-col gap-0.5"
+                        >
+                          <span className="text-sm text-gray-800">Sample process JSON</span>
+                          <span className="text-[11px] text-gray-400">
+                            Download a template file to fill in and upload
+                          </span>
+                        </button>
                       )}
-
-                      {!cloud.cloudLoading &&
-                        cloud.cloudList.map((doc) => {
-                          const isCurrent = loadedDocId ? String(doc.id) === loadedDocId : doc.is_master;
-                          return (
-                            <button
-                              key={doc.id}
-                              onClick={async () => {
-                                try {
-                                  await cloud.loadCloudDoc(doc.id);
-                                  setLoadedDocId(String(doc.id));
-                                  setLoadMenuOpen(false);
-                                } catch {
-                                  // cloudError is already set by the hook; keep menu open so it's visible
-                                }
-                              }}
-                              className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${isCurrent ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "hover:bg-gray-50"
-                                }`}
-                            >
-                              <span className="text-sm text-gray-800 flex items-center gap-1.5 min-w-0">
-                                <span className="truncate">{doc.title || "Untitled Workflow"}</span>
-                                {doc.is_master && (
-                                  <span className="shrink-0 text-[10px] font-medium text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-full">
-                                    master
-                                  </span>
-                                )}
-                                {isCurrent && (
-                                  <span className="shrink-0 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
-                                    current
-                                  </span>
-                                )}
-                              </span>
-                              <span className="text-[11px] text-gray-400">
-                                {doc.person_name ? `${doc.person_name} · ` : ""}
-                                {new Date(doc.updated_at).toLocaleString()}
-                              </span>
-                            </button>
-                          );
-                        })}
                     </div>,
                     document.body
                   )}
@@ -895,10 +904,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       : "Autosave on — waiting for first save"
                     : "Autosave every 5 minutes to the server"
                 }
-                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${autosave.enabled
-                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                  : "text-gray-600 hover:bg-gray-100"
-                  }`}
+                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${
+                  autosave.enabled
+                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "text-gray-600 hover:bg-gray-100"
+                }`}
               >
                 {autosave.enabled ? "Auto: On" : "Autosave"}
               </button>
@@ -1046,7 +1056,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   Edit Description
                 </button>
 
-                {/* ─── COPY / PASTE (buttons since mobile / no-keyboard users can't use Ctrl+C/V) ─── */}
                 {editor.selectedNodeId !== "root" && (
                   <button
                     onClick={() => editor.copyNode(editor.selectedNodeId!)}
@@ -1079,7 +1088,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
                 {editor.selectedNodeId !== "root" && (
                   <>
-                    {/* ─── ORDER CHANGE TOOLS ─── */}
                     <div className="flex items-center gap-0.5 border border-gray-200 rounded-lg px-1 py-0.5">
                       <button
                         onClick={() => editor.moveNodeUp(editor.selectedNodeId!)}
@@ -1103,7 +1111,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       </button>
                     </div>
 
-                    {/* ─── MOVE TO PARENT TOOL ─── */}
                     <button
                       onClick={() => setMoveParentMode(editor.selectedNodeId!)}
                       className="px-2 py-1 rounded-lg bg-violet-50 text-violet-700 text-xs hover:bg-violet-100 transition-colors"
@@ -1528,13 +1535,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     </button>
                   )}
 
-                  {/* ─── NEW: Filter tasks button ─── */}
                   <button
                     type="button"
                     onClick={() => {
                       const next = filterPersonId === person.id ? null : person.id;
                       setFilterPersonId(next);
-                      setExpandedTaskIds(new Set()); // reset expanded rows when switching filter
+                      setExpandedTaskIds(new Set());
                     }}
                     className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${filterPersonId === person.id
                       ? "bg-indigo-100 text-indigo-700"
@@ -1568,7 +1574,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               ))}
             </div>
 
-            {/* ─── NEW: Filtered task list for selected person ─── */}
             {filterPersonId && (
               <div className="mt-4 border-t border-gray-200 pt-3">
                 <div className="flex items-center justify-between mb-2">
@@ -1590,7 +1595,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
                   return (
                     <>
-                      {/* Summary line */}
                       <div className="mb-3 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg px-3 py-1.5">
                         {completedCount} / {totalCount} task{totalCount === 1 ? "" : "s"} completed
                       </div>
@@ -1622,7 +1626,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                     }}
                                     className="flex-1 min-w-0 text-left text-sm text-gray-700 hover:text-indigo-700 flex items-center gap-1.5"
                                   >
-                                    {/* Completion indicator */}
                                     <span
                                       className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isComplete
                                         ? "bg-emerald-500 text-white"
@@ -1633,7 +1636,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                       {isComplete ? "✓" : "○"}
                                     </span>
 
-                                    {/* Expand arrow */}
                                     <span className="text-xs text-gray-400">
                                       {isExpanded ? "▾" : "▸"}
                                     </span>

@@ -5,10 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Role,
   ProductItem,
+  ProductVariant,
+  PricedFields,
   Assignment,
   CATEGORIES,
   CATALOG_PAGE_SIZE,
   getImageSource,
+  getVariantImageSource,
   getPriceInfo,
   getProductsByCategory,
   proposeAssignment,
@@ -81,7 +84,10 @@ export function ProductLink({ href, className }: { href?: string | null; classNa
   );
 }
 
-export function PriceBlock({ item, className }: { item: ProductItem; className?: string }) {
+// Accepts either a ProductItem or a ProductVariant — both carry the same
+// base_price/currency/effective_price shape, so one component renders the
+// right numbers whichever level (product or the chosen size) is active.
+export function PriceBlock({ item, className }: { item: PricedFields; className?: string }) {
   const info = getPriceInfo(item);
   if (info.effective === null) return null;
 
@@ -103,6 +109,48 @@ export function PriceBlock({ item, className }: { item: ProductItem; className?:
           {info.differs ? <span className="line-through">{baseLabel}</span> : <span>{baseLabel}</span>} MRP
         </div>
       )}
+    </div>
+  );
+}
+
+// Small chip row for picking a size/option on a product that has variants.
+function VariantPicker({
+  variants,
+  selectedId,
+  onSelect,
+  currencyFallback,
+}: {
+  variants: ProductVariant[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  currencyFallback?: string | null;
+}) {
+  return (
+    <div className="mt-2">
+      <span className="pf-faint text-xs block mb-1">Choose a size</span>
+      <div className="flex flex-wrap gap-1.5">
+        {variants.map((v) => {
+          const active = selectedId === v.id;
+          const priceValue = v.effective_price ?? v.base_price;
+          const priceLabel =
+            priceValue !== null && priceValue !== undefined && !Number.isNaN(Number(priceValue))
+              ? `${v.effective_currency || currencyFallback || "INR"} ${Number(priceValue).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+              : null;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => onSelect(v.id)}
+              className={`touch-manipulation text-xs px-2.5 py-1.5 rounded-full border whitespace-nowrap ${
+                active ? "pf-checkbox-label-active" : "pf-checkbox-label"
+              }`}
+            >
+              {v.label}
+              {priceLabel && <span className="pf-faint ml-1.5">{priceLabel}</span>}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -178,6 +226,11 @@ export default function ProductCatalog({
   const [proposingNoteId, setProposingNoteId] = useState<string | null>(null);
   const [proposeNoteText, setProposeNoteText] = useState("");
 
+  // Chosen size per product id — only meaningful for products where
+  // has_variants is true. Falls back to the product's is_default variant
+  // (if any) until the person picks a different one explicitly.
+  const [selectedVariantByProduct, setSelectedVariantByProduct] = useState<Record<string, number>>({});
+
   const [editingOrgNoteId, setEditingOrgNoteId] = useState<string | null>(null);
   const [orgNoteText, setOrgNoteText] = useState("");
   const [orgNoteError, setOrgNoteError] = useState<string | null>(null);
@@ -237,6 +290,22 @@ export default function ProductCatalog({
     return map;
   }, [assignmentsForSpace]);
 
+  /** The currently-active variant for a product card: whatever the person
+   * explicitly picked, else the variant marked is_default, else null (which
+   * means "pick a size" is still required before proposing). */
+  function activeVariantFor(item: ProductItem): ProductVariant | null {
+    if (!item.has_variants || !item.variants || item.variants.length === 0) return null;
+    const chosenId = selectedVariantByProduct[item.id];
+    if (chosenId !== undefined) {
+      return item.variants.find((v) => v.id === chosenId) ?? null;
+    }
+    return item.variants.find((v) => v.is_default) ?? null;
+  }
+
+  function selectVariant(itemId: string, variantId: number) {
+    setSelectedVariantByProduct((prev) => ({ ...prev, [itemId]: variantId }));
+  }
+
   function openProposeNote(itemId: string) {
     if (!spaceId) return;
     setProposingNoteId(itemId);
@@ -248,10 +317,10 @@ export default function ProductCatalog({
     setProposeNoteText("");
   }
 
-  async function handleProposeItem(itemId: string, note?: string) {
+  async function handleProposeItem(itemId: string, note?: string, variantId?: number | null) {
     if (!projectId || !spaceId) return;
     await runExclusive(`propose-${itemId}`, async () => {
-      const created = await proposeAssignment(projectId, spaceId, itemId, role, note);
+      const created = await proposeAssignment(projectId, spaceId, itemId, role, note, variantId ?? undefined);
       onAssignmentCreated(created);
       setProposingNoteId(null);
       setProposeNoteText("");
@@ -490,12 +559,21 @@ export default function ProductCatalog({
               const isSavingOrgNote = isBusy(orgNoteKey);
               const noteBoxOpen = proposingNoteId === item.id;
               const orgNoteEditorOpen = editingOrgNoteId === item.id;
+
+              const hasVariants = !!item.has_variants && !!item.variants && item.variants.length > 0;
+              const activeVariant = activeVariantFor(item);
+              // A variant product can't be proposed until a size is chosen
+              // (either explicitly or via an is_default variant).
+              const sizeRequired = hasVariants && !activeVariant;
+              const priceSource: PricedFields = activeVariant ?? item;
+              const imageSrc = activeVariant ? getVariantImageSource(activeVariant) : getImageSource(item);
+
               return (
                 <div key={item.id} className="pf-card rounded-2xl overflow-hidden">
                   <div className="w-full h-36 sm:h-40 bg-white flex items-center justify-center p-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={getImageSource(item)}
+                      src={imageSrc}
                       alt={item.item}
                       className="max-w-full max-h-full object-contain"
                     />
@@ -508,13 +586,23 @@ export default function ProductCatalog({
                       </div>
                     )}
                     <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
-                    <PriceBlock item={item} />
+                    <PriceBlock item={priceSource} />
                     {item.product_link && (
                       <ProductLink
                         href={item.product_link}
                         className="pf-link text-xs underline underline-offset-2 inline-block mt-0.5"
                       />
                     )}
+
+                    {hasVariants && item.variants && (
+                      <VariantPicker
+                        variants={item.variants}
+                        selectedId={activeVariant?.id ?? null}
+                        onSelect={(id) => selectVariant(item.id, id)}
+                        currencyFallback={item.currency}
+                      />
+                    )}
+
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {stats ? (
                         <>
@@ -607,10 +695,13 @@ export default function ProductCatalog({
                             }
                             className="pf-input rounded-lg px-3 py-2 text-sm w-full disabled:opacity-60"
                           />
+                          {sizeRequired && (
+                            <p className="text-xs text-[#B8802F]">Pick a size above first.</p>
+                          )}
                           <div className="flex gap-2">
                             <button
-                              onClick={() => handleProposeItem(item.id, proposeNoteText)}
-                              disabled={isProposing}
+                              onClick={() => handleProposeItem(item.id, proposeNoteText, activeVariant?.id ?? null)}
+                              disabled={isProposing || sizeRequired}
                               className="touch-manipulation pf-btn-primary flex-1 text-xs rounded-full py-2 disabled:opacity-50"
                             >
                               {isProposing ? "Adding…" : "Add"}
@@ -627,11 +718,14 @@ export default function ProductCatalog({
                       ) : (
                         <button
                           onClick={() => openProposeNote(item.id)}
-                          disabled={!spaceId}
+                          disabled={!spaceId || sizeRequired}
+                          title={sizeRequired ? "Pick a size first" : undefined}
                           className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
                         >
                           {!spaceId
                             ? "Add a space first"
+                            : sizeRequired
+                            ? "Pick a size first"
                             : count > 0
                             ? role === "client"
                               ? "Add another"

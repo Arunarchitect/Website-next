@@ -5,7 +5,6 @@ import {
   CloudDocSummary,
   changeCloudPassphrase,
   fetchCloudDoc,
-  fetchCloudDocList,
   fetchGroupBootstrap,
   fetchGroupDocList,
   saveCloudDoc,
@@ -17,14 +16,17 @@ function getErrorMessage(err: unknown, fallback: string): string {
 }
 
 /**
- * `masterword`, when given, scopes this hook to one named group.
- * Now uses the new bootstrap endpoint to fetch the group's list and
- * master doc in one request, and exposes an `initialLoading` flag.
+ * `masterword`, when given, scopes this hook to one named group and enables
+ * listing/loading that group's workflows.
+ *
+ * When `masterword` is NOT provided (e.g. plain `/process`), the hook does
+ * NOT fetch any document list — the Load menu should only offer the sample
+ * JSON template so other users' workflows are never exposed.
  */
 export function useCloudSync(loadData: (data: ProcessData) => void, masterword?: string) {
   const [cloudList, setCloudList] = useState<CloudDocSummary[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);  // ← NEW
+  const [initialLoading, setInitialLoading] = useState(true);
   const [cloudError, setCloudError] = useState("");
   const [triedMaster, setTriedMaster] = useState(false);
 
@@ -32,8 +34,13 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
   const [passphraseChangeError, setPassphraseChangeError] = useState("");
 
   const refreshList = async () => {
+    // Only groups may list workflows. Plain /process never lists anything.
+    if (!masterword) {
+      setCloudList([]);
+      return;
+    }
     try {
-      const list = masterword ? await fetchGroupDocList(masterword) : await fetchCloudDocList();
+      const list = await fetchGroupDocList(masterword);
       setCloudList(list);
     } catch (err) {
       console.error(err);
@@ -48,7 +55,7 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
       setCloudError("");
       try {
         if (masterword) {
-          // Use bootstrap to get list + master in one request
+          // Group mode: bootstrap gives us both the doc list and the master doc.
           const { documents, master } = await fetchGroupBootstrap(masterword);
           if (!cancelled) {
             setCloudList(documents);
@@ -57,13 +64,14 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
             }
           }
         } else {
-          // No masterword – still list all documents, but do not auto‑load a master
-          const list = await fetchCloudDocList();
-          if (!cancelled) setCloudList(list);
+          // Plain /process: never fetch the global list.
+          if (!cancelled) setCloudList([]);
         }
       } catch (err) {
         console.error("Could not load initial data:", err);
-        if (!cancelled) setCloudError(getErrorMessage(err, "Failed to load group data."));
+        if (!cancelled) {
+          setCloudError(getErrorMessage(err, "Failed to load group data."));
+        }
       } finally {
         if (!cancelled) {
           setInitialLoading(false);
@@ -109,10 +117,12 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
     try {
       const doc = await saveCloudDoc({
         ...params,
-        // Ensure masterword is always a string (use outer scope, fallback to params, then empty string)
         masterword: masterword ?? params.masterword ?? "",
       });
-      await refreshList();
+      // Only refresh the list when we're in group mode.
+      if (masterword) {
+        await refreshList();
+      }
       return doc;
     } catch (err: unknown) {
       setCloudError(getErrorMessage(err, "Failed to save document."));
@@ -127,7 +137,9 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
     setPassphraseChangeError("");
     try {
       const doc = await changeCloudPassphrase(oldPassphrase.trim(), newPassphrase.trim());
-      await refreshList();
+      if (masterword) {
+        await refreshList();
+      }
       return doc;
     } catch (err: unknown) {
       setPassphraseChangeError(getErrorMessage(err, "Failed to change passphrase."));
@@ -141,7 +153,7 @@ export function useCloudSync(loadData: (data: ProcessData) => void, masterword?:
     masterword,
     cloudList,
     cloudLoading,
-    initialLoading,       // ← NEW
+    initialLoading,
     cloudError,
     setCloudError,
     triedMaster,

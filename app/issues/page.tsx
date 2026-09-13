@@ -284,6 +284,12 @@ export default function IssuesPage() {
 
   const isUserCreator = (reportedBy: string, user: typeof currentUser): boolean => isUserMatch(reportedBy, user);
 
+  // --- Open a linked drawing in a new tab (same behaviour as the issue
+  // detail page's handleOpenDrawing) ---------------------------------------
+  const handleOpenDrawing = (documentId: number) => {
+    window.open(`/drawing?openDoc=${documentId}`, '_blank', 'noopener,noreferrer');
+  };
+
   // --- Scope params shared by the list request and the stats request -------
   const scopeParams = {
     organisation: filterOrgId || undefined,
@@ -648,6 +654,7 @@ export default function IssuesPage() {
                   issue={issue}
                   currentUser={currentUser}
                   isUserCreator={isUserCreator}
+                  onOpenDrawing={handleOpenDrawing}
                 />
               ))}
             </div>

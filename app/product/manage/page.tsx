@@ -5,6 +5,7 @@ import { Fragment, useEffect, useState } from "react";
 import {
   AdminProduct,
   ProductFormValues,
+  VariantFormValues,
   DiscountTier,
   ProjectPricing,
   OrganisationPricing,
@@ -14,6 +15,9 @@ import {
   createProduct,
   updateProduct,
   deleteProduct,
+  createVariant,
+  updateVariant,
+  deleteVariant,
   addDiscountTier,
   deleteDiscountTier,
   uploadIfcModel,
@@ -43,6 +47,7 @@ type PricingMode = "percentage" | "fixed";
 
 type ProjectPricingFormState = {
   project: string;
+  variant: string; // "" = whole product
   mode: PricingMode;
   discount_percentage: string;
   discounted_price: string;
@@ -51,6 +56,7 @@ type ProjectPricingFormState = {
 
 const EMPTY_PROJECT_PRICING_FORM: ProjectPricingFormState = {
   project: "",
+  variant: "",
   mode: "percentage",
   discount_percentage: "",
   discounted_price: "",
@@ -59,6 +65,7 @@ const EMPTY_PROJECT_PRICING_FORM: ProjectPricingFormState = {
 
 type OrgPricingFormState = {
   organisation: string;
+  variant: string; // "" = whole product
   mode: PricingMode;
   discount_percentage: string;
   discounted_price: string;
@@ -66,6 +73,7 @@ type OrgPricingFormState = {
 
 const EMPTY_ORG_PRICING_FORM: OrgPricingFormState = {
   organisation: "",
+  variant: "",
   mode: "percentage",
   discount_percentage: "",
   discounted_price: "",
@@ -262,7 +270,46 @@ export default function ProductManagePage() {
     });
   }
 
-  // ─── Discount tiers / IFC ────────────────────────────────────────────
+  // ─── Variants ────────────────────────────────────────────────────────
+
+  async function handleAddVariant(values: VariantFormValues) {
+    if (!editingProduct) return;
+    await runExclusive("save-variant-new", async () => {
+      await createVariant(editingProduct.id, values);
+      await refresh();
+    });
+  }
+
+  async function handleUpdateVariant(id: number, values: Partial<VariantFormValues>) {
+    await runExclusive(`save-variant-${id}`, async () => {
+      await updateVariant(id, values);
+      await refresh();
+    });
+  }
+
+  async function handleDeleteVariant(id: number) {
+    if (!confirm("Delete this variant permanently?")) return;
+    await runExclusive(`delete-variant-${id}`, async () => {
+      await deleteVariant(id);
+      await refresh();
+    });
+  }
+
+  async function handleUploadVariantIfc(variantId: number, file: File) {
+    await runExclusive(`upload-variant-ifc-${variantId}`, async () => {
+      await uploadIfcModel({ variantId }, file);
+      await refresh();
+    });
+  }
+
+  async function handleDeleteVariantIfc(ifcId: number) {
+    await runExclusive(`delete-variant-ifc-${ifcId}`, async () => {
+      await deleteIfcModel(ifcId);
+      await refresh();
+    });
+  }
+
+  // ─── Discount tiers / IFC (product-level) ───────────────────────────
 
   async function handleAddTier(productId: string) {
     const tier_name = prompt("Tier name (e.g. Bulk 10+)");
@@ -271,7 +318,7 @@ export default function ProductManagePage() {
     const max_quantity = Number(prompt("Max quantity") || "0");
     const discount_percentage = prompt("Discount %") || "0";
     await runExclusive(`add-tier-${productId}`, async () => {
-      await addDiscountTier(productId, { tier_name, min_quantity, max_quantity, discount_percentage });
+      await addDiscountTier({ productId }, { tier_name, min_quantity, max_quantity, discount_percentage });
       await refresh();
     });
   }
@@ -285,7 +332,7 @@ export default function ProductManagePage() {
 
   async function handleUploadIfc(productId: string, file: File) {
     await runExclusive(`upload-ifc-${productId}`, async () => {
-      await uploadIfcModel(productId, file);
+      await uploadIfcModel({ productId }, file);
       await refresh();
     });
   }
@@ -303,6 +350,7 @@ export default function ProductManagePage() {
     if (existing) {
       setProjectPricingForm({
         project: String(existing.project),
+        variant: existing.variant ? String(existing.variant) : "",
         mode: existing.discounted_price ? "fixed" : "percentage",
         discount_percentage: existing.discount_percentage ?? "",
         discounted_price: existing.discounted_price ?? "",
@@ -345,15 +393,16 @@ export default function ProductManagePage() {
       setProjectPricingError("");
       try {
         const projectId = Number(projectPricingForm.project);
+        const variantId = projectPricingForm.variant ? Number(projectPricingForm.variant) : undefined;
         const payload = {
           discount_percentage: projectPricingForm.mode === "percentage" ? projectPricingForm.discount_percentage : null,
           discounted_price: projectPricingForm.mode === "fixed" ? projectPricingForm.discounted_price : null,
           notes: projectPricingForm.notes || null,
         };
         if (editingPricingId) {
-          await updateProjectPricing(editingPricingId, projectId, payload);
+          await updateProjectPricing(editingPricingId, projectId, payload, variantId);
         } else {
-          await addProjectPricing(productId, projectId, payload);
+          await addProjectPricing(productId, projectId, payload, variantId);
         }
         closeProjectPricingModal();
         await refresh();
@@ -378,6 +427,7 @@ export default function ProductManagePage() {
     if (existing) {
       setOrgPricingForm({
         organisation: String(existing.organisation),
+        variant: existing.variant ? String(existing.variant) : "",
         mode: existing.discounted_price ? "fixed" : "percentage",
         discount_percentage: existing.discount_percentage ?? "",
         discounted_price: existing.discounted_price ?? "",
@@ -415,14 +465,15 @@ export default function ProductManagePage() {
       setOrgPricingError("");
       try {
         const organisationId = Number(orgPricingForm.organisation);
+        const variantId = orgPricingForm.variant ? Number(orgPricingForm.variant) : undefined;
         const payload = {
           discount_percentage: orgPricingForm.mode === "percentage" ? orgPricingForm.discount_percentage : null,
           discounted_price: orgPricingForm.mode === "fixed" ? orgPricingForm.discounted_price : null,
         };
         if (editingPricingId) {
-          await updateOrganisationPricing(editingPricingId, organisationId, payload);
+          await updateOrganisationPricing(editingPricingId, organisationId, payload, variantId);
         } else {
-          await addOrganisationPricing(productId, organisationId, payload);
+          await addOrganisationPricing(productId, organisationId, payload, variantId);
         }
         closeOrgPricingModal();
         await refresh();
@@ -541,6 +592,30 @@ export default function ProductManagePage() {
         {p.status === "rejected" && p.rejection_reason && (
           <p className="text-xs text-red-600">Rejected: {p.rejection_reason}</p>
         )}
+
+        {p.variants.length > 0 && (
+          <div>
+            <span className="text-xs font-medium text-[#4B5650]">
+              Variants ({p.variants.length})
+            </span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {p.variants.map((v) => (
+                <span
+                  key={v.id}
+                  className="text-xs bg-white border border-[#DCE0D8] rounded-full px-3 py-1"
+                >
+                  {v.label} — {v.effective_currency || p.currency || "INR"}{" "}
+                  {v.effective_price ?? v.base_price ?? p.base_price ?? "—"}
+                </span>
+              ))}
+            </div>
+            <p className="text-[11px] text-[#8A938E] mt-1">
+              Manage variants, per-variant images and IFC files under Edit →
+              Variants.
+            </p>
+          </div>
+        )}
+
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-[#4B5650]">Discount tiers</span>
@@ -583,6 +658,7 @@ export default function ProductManagePage() {
           {p.ifc_model ? (
             <div className="text-xs mt-1 flex items-center gap-3 flex-wrap">
               <a
+              
                 href={getImageSource(p.ifc_model.file)}
                 target="_blank"
                 className="text-[#2F6E62] underline"
@@ -746,6 +822,11 @@ export default function ProductManagePage() {
                 isBusy={isBusy}
                 onCancel={cancelEdit}
                 onSave={handleSave}
+                onAddVariant={handleAddVariant}
+                onUpdateVariant={handleUpdateVariant}
+                onDeleteVariant={handleDeleteVariant}
+                onUploadVariantIfc={handleUploadVariantIfc}
+                onDeleteVariantIfc={handleDeleteVariantIfc}
                 onOpenProjectPricing={openProjectPricingModal}
                 onOpenOrgPricing={openOrgPricingModal}
                 onDeleteProjectPricing={handleDeleteProjectPricing}
@@ -792,7 +873,14 @@ export default function ProductManagePage() {
                                   className="w-10 h-10 rounded-lg object-cover"
                                 />
                               </td>
-                              <td className="px-4 py-3">{p.item}</td>
+                              <td className="px-4 py-3">
+                                {p.item}
+                                {p.variants.length > 0 && (
+                                  <span className="ml-2 text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                                    {p.variants.length} variants
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-4 py-3">
                                 {p.manufacturer} — {p.model_label}
                               </td>
@@ -833,6 +921,11 @@ export default function ProductManagePage() {
                           <div className="pm-card-title-row">
                             <span className="font-medium">{p.item}</span>
                             <span className={statusBadgeClass(p.status)}>{p.status}</span>
+                            {p.variants.length > 0 && (
+                              <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                                {p.variants.length} variants
+                              </span>
+                            )}
                           </div>
                           <p className="pm-card-meta">
                             {p.manufacturer} — {p.model_label} · {p.category}
@@ -866,6 +959,7 @@ export default function ProductManagePage() {
             ? `edit-pp-${projectPricingModal.editingId}`
             : `add-pp-${projectPricingModal.productId}`;
           const submitting = isBusy(submitKey);
+          const variants = editingProduct?.variants ?? [];
           return (
             <div
               className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
@@ -906,6 +1000,27 @@ export default function ProductManagePage() {
                 <p className="text-xs text-gray-400 -mt-2 mb-3">
                   Only projects under organisations you administer are listed.
                 </p>
+
+                {variants.length > 0 && (
+                  <label className="flex flex-col gap-1 text-sm mb-3">
+                    Applies to
+                    <select
+                      value={projectPricingForm.variant}
+                      onChange={(e) =>
+                        setProjectPricingForm({ ...projectPricingForm, variant: e.target.value })
+                      }
+                      disabled={submitting}
+                      className={inputBase}
+                    >
+                      <option value="">Whole product (every variant)</option>
+                      {variants.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 <div className="pm-segmented mb-3">
                   <button
@@ -994,6 +1109,7 @@ export default function ProductManagePage() {
           const isEdit = !!orgPricingModal.editingId;
           const submitKey = isEdit ? `edit-op-${orgPricingModal.editingId}` : `add-op-${orgPricingModal.productId}`;
           const submitting = isBusy(submitKey);
+          const variants = editingProduct?.variants ?? [];
           return (
             <div
               className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
@@ -1034,6 +1150,27 @@ export default function ProductManagePage() {
                 <p className="text-xs text-gray-400 -mt-2 mb-3">
                   Only organisations you administer are listed.
                 </p>
+
+                {variants.length > 0 && (
+                  <label className="flex flex-col gap-1 text-sm mb-3">
+                    Applies to
+                    <select
+                      value={orgPricingForm.variant}
+                      onChange={(e) =>
+                        setOrgPricingForm({ ...orgPricingForm, variant: e.target.value })
+                      }
+                      disabled={submitting}
+                      className={inputBase}
+                    >
+                      <option value="">Whole product (every variant)</option>
+                      {variants.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 <div className="pm-segmented mb-3">
                   <button

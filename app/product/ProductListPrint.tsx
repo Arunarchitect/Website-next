@@ -9,6 +9,8 @@ export interface PrintableRow {
   item: string;
   manufacturer: string;
   model_label: string;
+  /** Picked size/option label, if the product has variants. */
+  variantLabel?: string | null;
   priceLabel: string | null;
   status: string;
   proposed_by: string;
@@ -202,12 +204,15 @@ export async function generateProductListPdf(
   drawHeader();
 
   const showSpaceColumn = rows.some((row) => Boolean(row.space));
+  const showVariantColumn = rows.some((row) => Boolean(row.variantLabel));
   const showLinkColumn = rows.some((row) => Boolean(row.product_link));
   const showNotesColumn = rows.some((row) => Boolean(row.proposerNote) || Boolean(row.declinedNote));
 
   const headers: string[] = ["#"];
   if (showSpaceColumn) headers.push("Space");
-  headers.push("Image", "Item", "Manufacturer / Model", "Price", "Status", "Proposed By");
+  headers.push("Image", "Item", "Manufacturer / Model");
+  if (showVariantColumn) headers.push("Variant");
+  headers.push("Price", "Status", "Proposed By");
   if (showNotesColumn) headers.push("Notes");
   if (showLinkColumn) headers.push("Product Link");
 
@@ -221,6 +226,7 @@ export async function generateProductListPdf(
     values.push(""); // Image placeholder
     values.push(row.item);
     values.push(`${row.manufacturer} - ${row.model_label}`);
+    if (showVariantColumn) values.push(row.variantLabel || "—");
     values.push(row.priceLabel || "-");
     values.push(row.status);
     values.push(row.proposed_by);
@@ -264,6 +270,13 @@ export async function generateProductListPdf(
         halign: "center",
         valign: "middle",
       },
+      ...(showVariantColumn
+        ? {
+            [headers.indexOf("Variant")]: {
+              cellWidth: 28,
+            },
+          }
+        : {}),
       ...(showNotesColumn
         ? {
             [headers.indexOf("Notes")]: {
