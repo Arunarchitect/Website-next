@@ -37,12 +37,52 @@ import { renderCommentContent } from "./commentTextRenderer";
 type LinkedDocumentRef = NonNullable<Issue['linkedDocuments']>[number];
 
 // ---------------------------------------------------------------------------
+// formatCommentTime — human-friendly relative/absolute timestamp for
+// comments.
+//   < 1 min           -> "just now"
+//   < 1 hr             -> "Xmin ago"
+//   same calendar day  -> "Xh ago"
+//   yesterday           -> "Yesterday, HH:MMhrs"
+//   older                -> "12Jan2026,13:00hrs"
+// ---------------------------------------------------------------------------
+
+function formatCommentTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMin / 60);
+
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const hoursMinsStr = () => `${pad(date.getHours())}:${pad(date.getMinutes())}hrs`;
+
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}min ago`;
+  if (diffHr < 24 && date >= startOfToday) return `${diffHr}h ago`;
+  if (date >= startOfYesterday && date < startOfToday) return `Yesterday, ${hoursMinsStr()}`;
+
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  return `${pad(date.getDate())}${months[date.getMonth()]}${date.getFullYear()},${hoursMinsStr()}`;
+}
+
+// ---------------------------------------------------------------------------
 // ScreenshotDropzone — shared click-to-upload / drag-and-drop / paste
 // control. Every screenshot upload site in the Issues feature (main issue
 // screenshot, comment images, resolution proof, edit-comment images, and
 // the new-issue form) renders this instead of a plain button, so people get
 // the same three ways in everywhere: click, drag a file onto it, or paste
 // straight from the clipboard.
+//
+// `error`, when set, renders as a small alert line directly under the
+// control — right where the person is already looking — instead of relying
+// on a single shared banner elsewhere on the page.
 // ---------------------------------------------------------------------------
 
 export interface ScreenshotDropzoneProps {
@@ -54,6 +94,8 @@ export interface ScreenshotDropzoneProps {
   onDragLeave: (e: React.DragEvent) => void;
   isDragging: boolean;
   processing: boolean;
+  /** Validation/error message for this upload site (e.g. "Image is too large (max 2MB)"). Rendered right under the dropzone. */
+  error?: string | null;
   /** Overrides the default idle label, e.g. "Replace image". */
   label?: string;
   /** Compact renders a shorter single-line control instead of the full box — used inline in tighter panels. */
@@ -69,6 +111,7 @@ export function ScreenshotDropzone({
   onDragLeave,
   isDragging,
   processing,
+  error,
   label,
   compact = false,
 }: ScreenshotDropzoneProps) {
@@ -78,60 +121,82 @@ export function ScreenshotDropzone({
       : 'Click to upload, drag a file here, or paste (Ctrl/Cmd+V)');
 
   return (
-    <div
-      className={`screenshot-dropzone${isDragging ? ' screenshot-dropzone-active' : ''}${compact ? ' screenshot-dropzone-compact' : ''}`}
-      tabIndex={0}
-      role="button"
-      aria-label="Upload screenshot: click, drag and drop, or paste"
-      onClick={() => !processing && fileInputRef.current?.click()}
-      onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && !processing) {
-          e.preventDefault();
-          fileInputRef.current?.click();
-        }
-      }}
-      onPaste={onPaste}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      style={{
-        border: `2px dashed ${isDragging ? '#4A8B6B' : 'var(--line, #D0D5DD)'}`,
-        borderRadius: 8,
-        padding: compact ? '10px 12px' : '18px 12px',
-        textAlign: 'center',
-        cursor: processing ? 'default' : 'pointer',
-        background: isDragging ? 'rgba(74, 139, 107, 0.08)' : 'transparent',
-        transition: 'background 0.15s ease, border-color 0.15s ease',
-        outline: 'none',
-        display: 'flex',
-        flexDirection: compact ? 'row' : 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: compact ? 8 : 4,
-      }}
-    >
-      <i
-        className={`ti ${processing ? 'ti-loader' : 'ti-cloud-upload'}`}
-        style={{ fontSize: compact ? 16 : 22 }}
-      />
-      <div style={{ fontSize: 13, fontWeight: 500 }}>
-        {processing ? 'Processing…' : idleLabel}
+    <div className="screenshot-dropzone-wrapper">
+      <div
+        className={`screenshot-dropzone${isDragging ? ' screenshot-dropzone-active' : ''}${compact ? ' screenshot-dropzone-compact' : ''}${error ? ' screenshot-dropzone-error' : ''}`}
+        tabIndex={0}
+        role="button"
+        aria-label="Upload screenshot: click, drag and drop, or paste"
+        aria-invalid={!!error}
+        onClick={() => !processing && fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !processing) {
+            e.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
+        onPaste={onPaste}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        style={{
+          border: `2px dashed ${error ? '#C0392B' : isDragging ? '#4A8B6B' : 'var(--line, #D0D5DD)'}`,
+          borderRadius: 8,
+          padding: compact ? '10px 12px' : '18px 12px',
+          textAlign: 'center',
+          cursor: processing ? 'default' : 'pointer',
+          background: error ? 'rgba(192, 57, 43, 0.06)' : isDragging ? 'rgba(74, 139, 107, 0.08)' : 'transparent',
+          transition: 'background 0.15s ease, border-color 0.15s ease',
+          outline: 'none',
+          display: 'flex',
+          flexDirection: compact ? 'row' : 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: compact ? 8 : 4,
+        }}
+      >
+        <i
+          className={`ti ${processing ? 'ti-loader' : error ? 'ti-alert-triangle' : 'ti-cloud-upload'}`}
+          style={{ fontSize: compact ? 16 : 22 }}
+        />
+        <div style={{ fontSize: 13, fontWeight: 500 }}>
+          {processing ? 'Processing…' : idleLabel}
+        </div>
+        {!compact && (
+          <div className="file-hint" style={{ marginTop: 2 }}>
+            PNG/JPG, max {MAX_IMAGE_SIZE_LABEL}. {SCREENSHOT_SIZE_TIP}
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg"
+          onChange={onFileUpload}
+          style={{ display: 'none' }}
+          // Stop a click on the (hidden) input from re-triggering the parent's
+          // onClick and double-opening the file dialog.
+          onClick={(e) => e.stopPropagation()}
+        />
       </div>
-      {!compact && (
-        <div className="file-hint" style={{ marginTop: 2 }}>
-          PNG/JPG, max {MAX_IMAGE_SIZE_LABEL}. {SCREENSHOT_SIZE_TIP}
+
+      {error && (
+        <div
+          className="screenshot-dropzone-error-message"
+          role="alert"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 6,
+            marginTop: 6,
+            fontSize: 12.5,
+            lineHeight: 1.4,
+            color: '#C0392B',
+          }}
+        >
+          <i className="ti ti-alert-circle" style={{ fontSize: 14, marginTop: 1, flexShrink: 0 }} />
+          <span>{error}</span>
         </div>
       )}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg"
-        onChange={onFileUpload}
-        style={{ display: 'none' }}
-        // Stop a click on the (hidden) input from re-triggering the parent's
-        // onClick and double-opening the file dialog.
-        onClick={(e) => e.stopPropagation()}
-      />
     </div>
   );
 }
@@ -481,6 +546,8 @@ interface ScreenshotSectionProps {
   newScreenshotFormat: "png" | "jpg";
   processingScreenshot: boolean;
   isDragging: boolean;
+  /** Validation error for the main issue screenshot upload site. */
+  screenshotError?: string | null;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onPaste: (e: React.ClipboardEvent) => void;
@@ -503,6 +570,7 @@ export function ScreenshotSection({
   newScreenshotFormat,
   processingScreenshot,
   isDragging,
+  screenshotError,
   fileInputRef,
   onFileUpload,
   onPaste,
@@ -575,6 +643,7 @@ export function ScreenshotSection({
             onDragLeave={onDragLeave}
             isDragging={isDragging}
             processing={processingScreenshot}
+            error={screenshotError}
             label={
               newScreenshot
                 ? 'Click, drag, or paste to change again'
@@ -680,7 +749,7 @@ export function ScreenshotHistory({
                 />
               </div>
               <span className="history-thumbnail-caption">
-                {c.author} · {c.timestamp}
+                {c.author} · {formatCommentTime(c.timestamp)}
               </span>
             </div>
           ))}
@@ -867,6 +936,8 @@ interface CommentEditState {
   editingCommentPreview: string | null;
   processingEditCommentScreenshot: boolean;
   editingCommentIsDragging: boolean;
+  /** Validation error for the edit-comment upload site (own instance per comment being edited). */
+  editingCommentError?: string | null;
   editCommentFileInputRef: React.RefObject<HTMLInputElement | null>;
   onEditCommentFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onEditCommentPaste: (e: React.ClipboardEvent) => void;
@@ -903,6 +974,7 @@ function CommentItem({
   editingCommentPreview,
   processingEditCommentScreenshot,
   editingCommentIsDragging,
+  editingCommentError,
   editCommentFileInputRef,
   onEditCommentFileUpload,
   onEditCommentPaste,
@@ -930,6 +1002,7 @@ function CommentItem({
             onChange={setEditingCommentText}
             onPaste={onEditCommentPaste}
             rows={2}
+            disabled={savingCommentEdit}
           />
 
           <div className="comment-image-edit-section">
@@ -1000,6 +1073,7 @@ function CommentItem({
                 onDragLeave={onEditCommentDragLeave}
                 isDragging={editingCommentIsDragging}
                 processing={processingEditCommentScreenshot || savingCommentEdit}
+                error={editingCommentError}
                 compact
                 label={editingCommentHasExistingImage ? 'Click, drag, or paste to replace' : undefined}
               />
@@ -1033,7 +1107,9 @@ function CommentItem({
     <div className="comment-item">
       <div className="comment-header">
         <span className="comment-author">{comment.author}</span>
-        <span className="comment-time">{comment.timestamp}</span>
+        <span className="comment-time" title={new Date(comment.timestamp).toLocaleString()}>
+          {formatCommentTime(comment.timestamp)}
+        </span>
         {isAuthor && (
           <span className="comment-owner-badge">(You)</span>
         )}
@@ -1162,10 +1238,12 @@ export function CommentsList({
 }
 
 // ---------------------------------------------------------------------------
-// ResolvePanel
+// ResolvePanel — now uses MentionTextarea so @mentioning a teammate in the
+// resolution text works the same way it does in Add Comment.
 // ---------------------------------------------------------------------------
 
 interface ResolvePanelProps {
+  organisationId: number | string;
   resolutionText: string;
   setResolutionText: (v: string) => void;
   resolutionPreview: string | null;
@@ -1178,6 +1256,8 @@ interface ResolvePanelProps {
   onResolutionDragLeave: (e: React.DragEvent) => void;
   resolutionIsDragging: boolean;
   processingResolutionScreenshot: boolean;
+  /** Validation error for the resolve-panel upload site. */
+  resolutionError?: string | null;
   onCancelResolve: () => void;
   onConfirmResolve: () => void;
   /** True while the resolve request is in flight — disables Cancel/Confirm so a slow request or a double-click can't resolve twice. */
@@ -1185,6 +1265,7 @@ interface ResolvePanelProps {
 }
 
 export function ResolvePanel({
+  organisationId,
   resolutionText,
   setResolutionText,
   resolutionPreview,
@@ -1197,18 +1278,19 @@ export function ResolvePanel({
   onResolutionDragLeave,
   resolutionIsDragging,
   processingResolutionScreenshot,
+  resolutionError,
   onCancelResolve,
   onConfirmResolve,
   isSaving = false,
 }: ResolvePanelProps) {
   return (
     <div className="resolve-panel">
-      <textarea
-        className="field-input"
-        placeholder="Describe how this was resolved…"
+      <MentionTextarea
+        organisationId={organisationId}
         value={resolutionText}
-        onChange={(e) => setResolutionText(e.target.value)}
+        onChange={setResolutionText}
         onPaste={onResolutionPaste}
+        placeholder="Describe how this was resolved… (type @ to mention someone)"
         rows={2}
         disabled={isSaving}
       />
@@ -1243,6 +1325,7 @@ export function ResolvePanel({
             onDragLeave={onResolutionDragLeave}
             isDragging={resolutionIsDragging}
             processing={processingResolutionScreenshot || isSaving}
+            error={resolutionError}
             compact
             label="Attach proof-of-fix screenshot (optional)"
           />
@@ -1272,13 +1355,20 @@ export function ResolvePanel({
 }
 
 // ---------------------------------------------------------------------------
-// ActionsBar — edit/save/cancel/delete/resolve/add-comment/share
+// ActionsBar — edit/save/cancel/delete/resolve/reopen/add-comment/share
+//
+// Reopen is intentionally NOT gated by isCreator — it's visible to anybody
+// who can see the issue, matching the requirement that any viewer should
+// be able to reopen a resolved/closed issue. (Whether the BACKEND also
+// allows a non-creator, non-admin PATCH of `status` is a separate check —
+// this only controls what the UI offers.)
 // ---------------------------------------------------------------------------
 
 interface ActionsBarProps {
   isEditing: boolean;
   isCreator: boolean;
   canResolve: boolean;
+  canReopen: boolean;
   canManageAccess: boolean;
   shareUrl?: string;
   onCancelEdit: () => void;
@@ -1286,10 +1376,13 @@ interface ActionsBarProps {
   onEdit: () => void;
   onDeleteIssue: () => void;
   onToggleResolve: () => void;
+  onReopen: () => void;
   onToggleCommentInput: () => void;
   onToggleManageAccess: () => void;
   /** True while the issue-edit save request is in flight — disables Cancel/Save so a slow request or a double-click can't save twice. */
   isSavingEdit?: boolean;
+  /** True while the reopen request is in flight — disables the Reopen button so a slow request or a double-click can't fire twice. */
+  isReopening?: boolean;
 }
 
 export function ActionsBar({
@@ -1297,15 +1390,18 @@ export function ActionsBar({
   isCreator,
   canManageAccess,
   canResolve,
+  canReopen,
   shareUrl,
   onCancelEdit,
   onSave,
   onEdit,
   onDeleteIssue,
   onToggleResolve,
+  onReopen,
   onToggleCommentInput,
   onToggleManageAccess,
   isSavingEdit = false,
+  isReopening = false,
 }: ActionsBarProps) {
   const [copied, setCopied] = useState(false);
 
@@ -1370,6 +1466,19 @@ export function ActionsBar({
               <i className="ti ti-check" /> Resolve
             </button>
           )}
+
+          {canReopen && (
+            <button
+              className="btn-outline"
+              onClick={onReopen}
+              disabled={isReopening}
+              type="button"
+              title="Reopen this issue"
+            >
+              <i className={`ti ${isReopening ? 'ti-loader' : 'ti-refresh'}`} /> {isReopening ? 'Reopening…' : 'Reopen'}
+            </button>
+          )}
+
           <button className="btn-outline" onClick={onToggleCommentInput}>
             <i className="ti ti-message-plus" /> Add Comment
           </button>
@@ -1412,6 +1521,8 @@ interface AddCommentPanelProps {
   onCommentDragLeave: (e: React.DragEvent) => void;
   commentIsDragging: boolean;
   processingCommentScreenshot: boolean;
+  /** Validation error for the add-comment upload site. */
+  commentError?: string | null;
   onCancelComment: () => void;
   onAddComment: () => void;
   /** True while the add-comment request is in flight — disables Cancel/Post so a slow request or a double-click can't post twice. */
@@ -1432,6 +1543,7 @@ export function AddCommentPanel({
   onCommentDragLeave,
   commentIsDragging,
   processingCommentScreenshot,
+  commentError,
   onCancelComment,
   onAddComment,
   isSaving = false,
@@ -1445,6 +1557,7 @@ export function AddCommentPanel({
         onPaste={onCommentPaste}
         placeholder="Add a comment… (paste an image, or type @ to mention someone)"
         rows={2}
+        disabled={isSaving}
       />
 
       <div className="comment-image-upload" style={{ marginTop: 8 }}>
@@ -1477,6 +1590,7 @@ export function AddCommentPanel({
             onDragLeave={onCommentDragLeave}
             isDragging={commentIsDragging}
             processing={processingCommentScreenshot || isSaving}
+            error={commentError}
             compact
             label="Add image (optional) — click, drag, or paste"
           />
@@ -1518,14 +1632,14 @@ export function IssueSidebar({ created, updated }: IssueSidebarProps) {
   return (
     <div className="issue-right">
       <div className="issue-timestamps">
-        <span className="issue-time">
+        <span className="issue-time" title={new Date(created).toLocaleString()}>
           <i className="ti ti-clock" />
-          {created}
+          {formatCommentTime(created)}
         </span>
         {updated && (
-          <span className="issue-time updated">
+          <span className="issue-time updated" title={new Date(updated).toLocaleString()}>
             <i className="ti ti-refresh" />
-            {updated}
+            {formatCommentTime(updated)}
           </span>
         )}
       </div>

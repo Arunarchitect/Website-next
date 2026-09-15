@@ -200,6 +200,14 @@ export interface UseScreenshotUploadResult {
   preview: string | null;
   processing: boolean;
   isDragging: boolean;
+  /**
+   * Validation error for THIS upload site only (e.g. "Image is too large").
+   * Scoped to a single useScreenshotUpload instance so a size error in the
+   * comment box never bleeds into the main screenshot dropzone or vice
+   * versa. Cleared automatically the next time a file is attempted, or
+   * manually via clearError()/reset().
+   */
+  error: string | null;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   /** Wire onto a textarea or the dropzone itself. No-ops on non-image paste. */
@@ -210,6 +218,7 @@ export interface UseScreenshotUploadResult {
   handleDragLeave: (e: React.DragEvent) => void;
   setScreenshot: (v: string | null) => void;
   setPreview: (v: string | null) => void;
+  clearError: () => void;
   reset: () => void;
 }
 
@@ -221,9 +230,16 @@ export interface UseScreenshotUploadResult {
  * All three entry points — file picker, drag-and-drop, clipboard paste —
  * funnel through the same processImageFile() call, so size/type validation
  * and error copy are identical no matter how the image arrived.
+ *
+ * `onError` is optional and, if provided, is called *in addition to* the
+ * local `error` state below — useful if a caller also wants validation
+ * failures echoed into some other shared surface (e.g. an analytics log).
+ * It is NOT required to display the error to the user: the hook's own
+ * `error` field is the source of truth for that, and ScreenshotDropzone
+ * renders it directly under the control that caused it.
  */
 export function useScreenshotUpload(
-  onError: (msg: string) => void,
+  onError?: (msg: string) => void,
   withPreview: boolean = false
 ): UseScreenshotUploadResult {
   const [screenshot, setScreenshot] = useState<string | null>(null);
@@ -231,12 +247,22 @@ export function useScreenshotUpload(
   const [preview, setPreview] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Every place inside this hook that wants to surface a validation
+  // problem goes through here, so the local `error` state and any optional
+  // external onError stay in sync.
+  const raiseError = (msg: string) => {
+    setError(msg);
+    onError?.(msg);
+  };
+
   const applyFile = async (file: File) => {
+    setError(null);
     setProcessing(true);
     try {
-      const result = await processImageFile(file, { onError });
+      const result = await processImageFile(file, { onError: raiseError });
       if (!result) return;
       setScreenshot(result.base64);
       setFormat(result.format);
@@ -272,7 +298,7 @@ export function useScreenshotUpload(
     setIsDragging(false);
     const file = extractImageFromDrop(e);
     if (!file) {
-      onError('Please drop a PNG or JPEG image.');
+      raiseError('Please drop a PNG or JPEG image.');
       return;
     }
     await applyFile(file);
@@ -290,9 +316,12 @@ export function useScreenshotUpload(
     setIsDragging(false);
   };
 
+  const clearError = () => setError(null);
+
   const reset = () => {
     setScreenshot(null);
     setPreview(null);
+    setError(null);
   };
 
   return {
@@ -301,6 +330,7 @@ export function useScreenshotUpload(
     preview,
     processing,
     isDragging,
+    error,
     fileInputRef,
     handleFileUpload,
     handlePaste,
@@ -309,6 +339,7 @@ export function useScreenshotUpload(
     handleDragLeave,
     setScreenshot,
     setPreview,
+    clearError,
     reset,
   };
 }

@@ -105,6 +105,10 @@ export function IssueDetail({
   const [isResolving, setIsResolving] = useState(false);
   const [resolutionText, setResolutionText] = useState("");
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
+  // Reserved for genuine save/network failures now (create/update/delete
+  // requests to the backend) — image-too-large and similar upload
+  // validation errors are shown locally by each ScreenshotDropzone instead,
+  // via the .error field each useScreenshotUpload() instance returns below.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showManageAccess, setShowManageAccess] = useState(false);
   const [accessOrgMembers, setAccessOrgMembers] = useState<AssigneeOption[]>([]);
@@ -117,9 +121,9 @@ export function IssueDetail({
   // ---------------------------------------------------------------------
   // In-flight submission guards.
   //
-  // Each of the four mutating actions below (save issue edit, resolve,
-  // add comment, edit comment) can be triggered by a button click. On a
-  // slow connection, or from an impatient double-click, the handler could
+  // Each mutating action below (save issue edit, resolve, reopen, add
+  // comment, edit comment) can be triggered by a button click. On a slow
+  // connection, or from an impatient double-click, the handler could
   // previously be invoked a second time before the first request settled,
   // firing the mutation twice.
   //
@@ -136,17 +140,24 @@ export function IssueDetail({
   const isSavingResolveRef = useRef(false);
   const [isSavingResolve, setIsSavingResolve] = useState(false);
 
+  const isReopeningRef = useRef(false);
+  const [isReopening, setIsReopening] = useState(false);
+
   const isSavingCommentRef = useRef(false);
   const [isSavingComment, setIsSavingComment] = useState(false);
 
   const isSavingCommentEditRef = useRef(false);
   const [isSavingCommentEdit, setIsSavingCommentEdit] = useState(false);
 
-  // Screenshot upload flows — one hook instance per independent upload site.
-  const mainScreenshot = useScreenshotUpload(setSaveError, false);
-  const resolutionScreenshot = useScreenshotUpload(setSaveError, true);
-  const commentScreenshot = useScreenshotUpload(setSaveError, true);
-  const editingCommentScreenshotUpload = useScreenshotUpload(setSaveError, true);
+  // Screenshot upload flows — one hook instance per independent upload
+  // site, each with its OWN error state (see useScreenshotUpload). No
+  // onError callback is passed here anymore: validation errors ("image too
+  // large", "please drop a PNG or JPEG") now render locally, right under
+  // the dropzone that produced them, via each instance's `.error` field.
+  const mainScreenshot = useScreenshotUpload(undefined, false);
+  const resolutionScreenshot = useScreenshotUpload(undefined, true);
+  const commentScreenshot = useScreenshotUpload(undefined, true);
+  const editingCommentScreenshotUpload = useScreenshotUpload(undefined, true);
 
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -346,6 +357,7 @@ export function IssueDetail({
   };
 
   const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
+  const canReopen = issue.status === "Resolved" || issue.status === "Closed";
   const isBim = isBimIssue(issue);
 
   const ifcElementCount = isBimIssue(issue) ? (issue.ifcElements?.length ?? 0) : 0;
@@ -557,6 +569,33 @@ export function IssueDetail({
     }
   };
 
+  // --- Reopen issue: anybody who can see the issue can do this. Guarded
+  // against double-submit like every other mutating action here. Routes
+  // through the same onSave prop the rest of the edit form uses — a plain
+  // status PATCH, no resolution/access fields touched. Resolution text is
+  // deliberately left in place as history rather than cleared, since
+  // there's currently nowhere in the UI that shows it anyway (see note
+  // above) — reconsider this if that changes. -------------------------------
+  const handleReopen = async () => {
+    if (isReopeningRef.current) return;
+    isReopeningRef.current = true;
+    setIsReopening(true);
+    try {
+      setSaveError(null);
+      await onSave({ status: "Open" } as Partial<Issue>);
+    } catch (err: unknown) {
+      console.error('Reopen error:', err);
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setSaveError("You don't have permission to reopen this issue.");
+      } else {
+        setSaveError('Failed to reopen issue. Please try again.');
+      }
+    } finally {
+      isReopeningRef.current = false;
+      setIsReopening(false);
+    }
+  };
+
   const handleImageClick = (src: string) => {
     setSelectedScreenshot(src);
   };
@@ -672,6 +711,7 @@ export function IssueDetail({
             newScreenshotFormat={mainScreenshot.format}
             processingScreenshot={mainScreenshot.processing}
             isDragging={mainScreenshot.isDragging}
+            screenshotError={mainScreenshot.error}
             fileInputRef={mainScreenshot.fileInputRef}
             onFileUpload={mainScreenshot.handleFileUpload}
             onPaste={mainScreenshot.handlePaste}
@@ -774,6 +814,7 @@ export function IssueDetail({
               editingCommentPreview={editingCommentScreenshotUpload.preview}
               processingEditCommentScreenshot={editingCommentScreenshotUpload.processing}
               editingCommentIsDragging={editingCommentScreenshotUpload.isDragging}
+              editingCommentError={editingCommentScreenshotUpload.error}
               editCommentFileInputRef={editingCommentScreenshotUpload.fileInputRef}
               onEditCommentFileUpload={editingCommentScreenshotUpload.handleFileUpload}
               onEditCommentPaste={editingCommentScreenshotUpload.handlePaste}
@@ -795,6 +836,7 @@ export function IssueDetail({
 
           {isResolving && (
             <ResolvePanel
+              organisationId={issueOrganisationId ?? ''}
               resolutionText={resolutionText}
               setResolutionText={setResolutionText}
               resolutionPreview={resolutionScreenshot.preview}
@@ -807,6 +849,7 @@ export function IssueDetail({
               onResolutionDragLeave={resolutionScreenshot.handleDragLeave}
               resolutionIsDragging={resolutionScreenshot.isDragging}
               processingResolutionScreenshot={resolutionScreenshot.processing}
+              resolutionError={resolutionScreenshot.error}
               onCancelResolve={() => {
                 setIsResolving(false);
                 resolutionScreenshot.reset();
@@ -821,6 +864,7 @@ export function IssueDetail({
             isCreator={isCreator}
             canManageAccess={issue.canManageAccess}
             canResolve={canResolve}
+            canReopen={canReopen}
             shareUrl={shareUrl}  
             onCancelEdit={() => {
               setIsEditing(false);
@@ -830,9 +874,11 @@ export function IssueDetail({
             onEdit={() => setIsEditing(true)}
             onDeleteIssue={handleDeleteIssueClick}
             onToggleResolve={() => setIsResolving((v) => !v)}
+            onReopen={handleReopen}
             onToggleCommentInput={() => setShowCommentInput((v) => !v)}
             onToggleManageAccess={() => setShowManageAccess((v) => !v)}
             isSavingEdit={isSavingEdit}
+            isReopening={isReopening}
           />
 
           {showManageAccess && (
@@ -863,6 +909,7 @@ export function IssueDetail({
               onCommentDragLeave={commentScreenshot.handleDragLeave}
               commentIsDragging={commentScreenshot.isDragging}
               processingCommentScreenshot={commentScreenshot.processing}
+              commentError={commentScreenshot.error}
               onCancelComment={() => {
                 setShowCommentInput(false);
                 setCommentText('');

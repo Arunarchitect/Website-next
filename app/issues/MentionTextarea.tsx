@@ -11,6 +11,8 @@ interface MentionTextareaProps {
   onPaste?: (e: React.ClipboardEvent) => void;
   placeholder?: string;
   rows?: number;
+  /** Disables the textarea and suppresses the suggestion list — used while a save/resolve/post request is in flight. */
+  disabled?: boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ export function MentionTextarea({
   onPaste,
   placeholder,
   rows = 3,
+  disabled = false,
 }: MentionTextareaProps) {
   const [members, setMembers] = useState<AssigneeOption[]>([]);
   const [showList, setShowList] = useState(false);
@@ -91,8 +94,9 @@ export function MentionTextarea({
         value={value}
         onChange={handleChange}
         onPaste={onPaste}
+        disabled={disabled}
       />
-      {showList && filteredMembers.length > 0 && (
+      {showList && !disabled && filteredMembers.length > 0 && (
         <ul className="mention-suggestions">
           {filteredMembers.slice(0, 20).map((m) => (
             <li key={m.id} onMouseDown={(e) => { e.preventDefault(); insertMention(m); }}>
