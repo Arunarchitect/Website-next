@@ -179,6 +179,7 @@ function validateNodeShape(node: unknown, path: string): string | null {
   if (n.successors !== undefined && !isStringArray(n.successors)) return `${path}.successors must be an array of strings.`;
   if (n.predecessors !== undefined && !isStringArray(n.predecessors)) return `${path}.predecessors must be an array of strings.`;
   if (n.assignedPersonIds !== undefined && !isStringArray(n.assignedPersonIds)) return `${path}.assignedPersonIds must be an array of strings.`;
+  if (n.area !== undefined && (typeof n.area !== "number" || n.area < 0)) return `${path}.area must be a non-negative number.`;
 
   if (n.children !== undefined) {
     if (!Array.isArray(n.children)) return `${path}.children must be an array.`;
@@ -266,7 +267,7 @@ export function useProcessEditor(initialData: ProcessData) {
   } | null>(null);
 
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<"label" | "description">("label");
+  const [editingField, setEditingField] = useState<"label" | "description" | "area">("label");
   const [editingValue, setEditingValue] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -411,8 +412,8 @@ export function useProcessEditor(initialData: ProcessData) {
   const totalLeaves = rootNode ? getLeafIds(rootNode).length : 0;
   const completedLeaves = completed.size;
 
-  // ─── Inline editor (title / description) ──────────────────────
-  const openEditor = (id: string, field: "label" | "description", currentValue: string) => {
+  // ─── Inline editor (title / description / area) ──────────────────────
+  const openEditor = (id: string, field: "label" | "description" | "area", currentValue: string) => {
     setEditingNodeId(id);
     setEditingField(field);
     setEditingValue(currentValue);
@@ -420,17 +421,30 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const closeEditor = () => setEditingNodeId(null);
 
-  const updateNode = (id: string, field: "label" | "description", value: string) => {
+  const updateNode = (id: string, field: "label" | "description" | "area", value: string) => {
     if (!data) return;
     pushHistory();
 
     if (id === "root") {
+      if (field === "area") return; // the canvas/root has no area of its own — always derived
       setData({ ...data, [field === "label" ? "title" : "description"]: value });
       return;
     }
 
     const updateTree = (node: ProcessNode): ProcessNode => {
-      if (node.id === id) return { ...node, [field]: value };
+      if (node.id === id) {
+        if (field === "area") {
+          const trimmed = value.trim();
+          if (trimmed === "") {
+            const { area: _area, ...rest } = node;
+            return rest;
+          }
+          const parsed = Number(trimmed);
+          if (Number.isNaN(parsed) || parsed < 0) return node; // ignore bad input, keep prior value
+          return { ...node, area: parsed };
+        }
+        return { ...node, [field]: value };
+      }
       if (node.children) return { ...node, children: node.children.map(updateTree) };
       return node;
     };

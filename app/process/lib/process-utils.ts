@@ -19,6 +19,14 @@ export type ProcessNode = {
   assignedPersonIds?: string[]; // ids into ProcessData.persons — NOT inherited by children
   children?: ProcessNode[];
   important?: boolean;
+  /**
+   * Leaf-only explicit area (sqm). Only meaningful on a node with no
+   * children — a node WITH children never stores its own `area`; its
+   * area is always the derived sum of its descendants (see
+   * getNodeArea). Undefined means "this node doesn't use the area
+   * feature" and it renders exactly as it always has.
+   */
+  area?: number;
 };
 
 export type ProcessData = {
@@ -69,6 +77,48 @@ export function isNodePartial(node: ProcessNode, completed: Set<string>): boolea
   );
   const allComplete = children.every((child) => isNodeComplete(child, completed));
   return anyProgress && !allComplete;
+}
+
+/* =========================================================
+   AREA (ZONE / SPACE) ROLLUP
+   ---------------------------------------------------------
+   A leaf node can carry an explicit `area`. A parent never stores its
+   own area — it's always the sum of whichever of its children resolve
+   to a number. Children that don't (nested further, or simply have no
+   area set) are skipped in the sum rather than treated as zero, so a
+   partially-filled-in zone still shows a meaningful subtotal instead
+   of an artificially low one. `partial` flags exactly that case, so
+   the UI can mark the number as incomplete instead of presenting it
+   as final.
+========================================================= */
+
+export type AreaResult = {
+  value: number | null;
+  partial: boolean;
+};
+
+export function getNodeArea(node: ProcessNode): AreaResult {
+  const children = node.children ?? [];
+
+  if (children.length === 0) {
+    return { value: typeof node.area === "number" ? node.area : null, partial: false };
+  }
+
+  const childResults = children.map(getNodeArea);
+  const withArea = childResults.filter((r) => r.value !== null);
+
+  if (withArea.length === 0) {
+    return { value: null, partial: false };
+  }
+
+  const sum = withArea.reduce((total, r) => total + (r.value as number), 0);
+  return { value: sum, partial: withArea.length < children.length };
+}
+
+export function formatArea(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  const text = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2);
+  return `${text} m²`;
 }
 
 /* =========================================================

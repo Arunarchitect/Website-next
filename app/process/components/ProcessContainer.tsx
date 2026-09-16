@@ -4,8 +4,10 @@ import { useEffect, useRef } from "react";
 import {
   Person,
   ProcessNode,
+  formatArea,
   getColorTheme,
   getLayout,
+  getNodeArea,
   isNodeComplete,
   isNodePartial,
 } from "@/app/process/lib/process-utils";
@@ -99,7 +101,7 @@ type ProcessContainerProps = {
   onToggleComplete: (node: ProcessNode) => void;
   onEditNode: (
     id: string,
-    field: "label" | "description",
+    field: "label" | "description" | "area",
     currentValue: string
   ) => void;
   registerNodeRef: (id: string, el: HTMLDivElement | null) => void;
@@ -115,6 +117,8 @@ type ProcessContainerProps = {
   matchedNodeIds?: Set<string>;
   /** The single match currently focused via next/prev navigation. */
   activeMatchId?: string | null;
+  /** True when this node has no area set but a sibling under the same parent does. */
+  showAreaWarning?: boolean;
 };
 
 export function ProcessContainer({
@@ -132,6 +136,7 @@ export function ProcessContainer({
   onOpenAssignPopup,
   matchedNodeIds,
   activeMatchId,
+  showAreaWarning = false,
 }: ProcessContainerProps) {
   const children = node.children ?? [];
   const layout = getLayout(level);
@@ -142,6 +147,10 @@ export function ProcessContainer({
   const isParent = children.length > 0;
   const isSearchMatch = matchedNodeIds?.has(node.id) ?? false;
   const isActiveSearchMatch = activeMatchId === node.id;
+
+  const areaResult = getNodeArea(node);
+  const childAreaResults = children.map(getNodeArea);
+  const anyChildHasArea = childAreaResults.some((r) => r.value !== null);
 
   // Root (level 0) is the canvas container, not a numbered process itself.
   const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
@@ -154,7 +163,7 @@ export function ProcessContainer({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
 
-  const startLongPress = (field: "label" | "description", value: string) => {
+  const startLongPress = (field: "label" | "description" | "area", value: string) => {
     longPressTriggered.current = false;
     longPressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
@@ -173,18 +182,20 @@ export function ProcessContainer({
 
   const handleTextPointerDown = (
     e: React.PointerEvent,
-    field: "label" | "description"
+    field: "label" | "description" | "area"
   ) => {
     // IMPORTANT: Do NOT stop propagation here.
     // The viewport needs to receive the pointer event for pan/pinch to work.
     if (e.pointerType === "touch" || e.pointerType === "pen") {
-      startLongPress(field, field === "label" ? node.label : node.description ?? "");
+      const value =
+        field === "label" ? node.label : field === "description" ? node.description ?? "" : String(node.area ?? "");
+      startLongPress(field, value);
     }
   };
 
   const handleTextPointerUp = () => cancelLongPress();
 
-  const handleDoubleClick = (field: "label" | "description", value: string) => {
+  const handleDoubleClick = (field: "label" | "description" | "area", value: string) => {
     if (longPressTriggered.current) {
       longPressTriggered.current = false;
       return;
@@ -318,6 +329,79 @@ export function ProcessContainer({
         </div>
       )}
 
+      {/* AREA — not shown on root. Leaf: own value (editable) or a warning
+          if siblings have area and this one doesn't. Parent: derived sum
+          (read-only, click does nothing — edit a leaf instead). */}
+      {level > 0 && !isParent && node.area !== undefined && (
+        <div
+          onPointerDown={(e) => handleTextPointerDown(e, "area")}
+          onPointerUp={handleTextPointerUp}
+          onPointerCancel={handleTextPointerUp}
+          onPointerLeave={handleTextPointerUp}
+          onDoubleClick={() => handleDoubleClick("area", String(node.area))}
+          style={{
+            marginTop: "5px",
+            marginLeft: "30px",
+            fontSize: "10px",
+            lineHeight: 1.3,
+            fontWeight: 600,
+            color: "#2F6FBF",
+            cursor: "text",
+            userSelect: "none",
+            WebkitTouchCallout: "none",
+            WebkitUserSelect: "none",
+          }}
+          title="Double-click to edit area"
+        >
+          {formatArea(node.area)}
+        </div>
+      )}
+
+      {level > 0 && !isParent && node.area === undefined && showAreaWarning && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onEditNode(node.id, "area", "");
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            marginTop: "5px",
+            marginLeft: "30px",
+            fontSize: "10px",
+            lineHeight: 1.3,
+            color: "#B45309",
+            fontStyle: "italic",
+            cursor: "pointer",
+            userSelect: "none",
+          }}
+          title="Other processes at this level have an area set — click to add one here"
+        >
+          ⚠ no area set
+        </div>
+      )}
+
+      {level > 0 && isParent && areaResult.value !== null && (
+        <div
+          style={{
+            marginTop: "5px",
+            marginLeft: "30px",
+            fontSize: "10px",
+            lineHeight: 1.3,
+            fontStyle: "italic",
+            color: areaResult.partial ? "#B45309" : "#8B96A5",
+            userSelect: "none",
+          }}
+          title={
+            areaResult.partial
+              ? "Sum of subprocesses that have an area set — some subprocesses here have none"
+              : "Sum of subprocesses' areas"
+          }
+        >
+          Σ {formatArea(areaResult.value)}
+          {areaResult.partial ? " · partial" : ""}
+        </div>
+      )}
+
       {/* ASSIGNED PEOPLE (own row, click opens assign popup) — not shown on root */}
       {level > 0 && (
         <div
@@ -378,6 +462,7 @@ export function ProcessContainer({
               onOpenAssignPopup={onOpenAssignPopup}
               matchedNodeIds={matchedNodeIds}
               activeMatchId={activeMatchId}
+              showAreaWarning={anyChildHasArea && childAreaResults[index].value === null}
             />
           ))}
         </div>

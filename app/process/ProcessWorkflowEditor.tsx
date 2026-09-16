@@ -9,7 +9,7 @@ import { UploadButton, ExportButtons } from "@/app/process/components/transfer";
 import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
 import { useCloudSync } from "@/app/process/hooks/useCloudSync";
 import { useAutosave } from "@/app/process/hooks/useAutoSave";
-import type { ProcessNode } from "@/app/process/lib/process-utils";
+import { getNodeArea, formatArea, type ProcessNode } from "@/app/process/lib/process-utils";
 import { ReportPdfButton } from "@/app/process/components/ReportPdfButton";
 
 const DRAG_THRESHOLD = 6;
@@ -632,6 +632,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const [moveParentMode, setMoveParentMode] = useState<string | null>(null);
 
   const rootNode = editor.rootNode;
+  const rootAreaResult = rootNode ? getNodeArea(rootNode) : null;
   const displayGroup = masterword?.trim() || "Ungrouped";
   // True when the page was opened scoped to a real group (e.g. /process/<masterword>).
   // False when opened as plain /process — in that case we never list other workflows.
@@ -706,6 +707,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               ? `${editor.completedLeaves} / ${editor.totalLeaves} steps done`
               : "Upload a process JSON file"}
           </div>
+          {editor.data && rootAreaResult && rootAreaResult.value !== null && (
+            <div className="text-xs text-gray-500">
+              {formatArea(rootAreaResult.value)} total{rootAreaResult.partial ? " (partial)" : ""}
+            </div>
+          )}
         </div>
 
         {/* Action bar */}
@@ -1056,6 +1062,22 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   Edit Description
                 </button>
 
+                {editor.selectedNodeId !== "root" &&
+                  (findNodeById(rootNode, editor.selectedNodeId)?.children?.length ?? 0) === 0 && (
+                    <button
+                      onClick={() =>
+                        editor.openEditor(
+                          editor.selectedNodeId!,
+                          "area",
+                          String(findNodeById(rootNode, editor.selectedNodeId!)?.area ?? "")
+                        )
+                      }
+                      className={`${btnGhost} h-7 px-2 text-xs`}
+                    >
+                      Edit Area
+                    </button>
+                  )}
+
                 {editor.selectedNodeId !== "root" && (
                   <button
                     onClick={() => editor.copyNode(editor.selectedNodeId!)}
@@ -1342,7 +1364,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">
-              Edit {editor.editingField === "label" ? "Title" : "Description"}
+              Edit {editor.editingField === "label" ? "Title" : editor.editingField === "area" ? "Area" : "Description"}
             </h3>
             {editor.editingField === "label" ? (
               <input
@@ -1356,6 +1378,25 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 className={`${inputBase} mb-4`}
                 placeholder="Enter title"
               />
+            ) : editor.editingField === "area" ? (
+              <>
+                <input
+                  autoFocus
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={editor.editingValue}
+                  onChange={(e) => editor.setEditingValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") editor.submitEditor();
+                  }}
+                  className={inputBase}
+                  placeholder="e.g. 24.5"
+                />
+                <p className="text-xs text-gray-400 mt-1 mb-4">
+                  Square meters. Leave empty to remove the area from this process.
+                </p>
+              </>
             ) : (
               <textarea
                 autoFocus
