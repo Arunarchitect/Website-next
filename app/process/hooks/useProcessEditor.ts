@@ -5,6 +5,12 @@ import {
   Person,
   ProcessData,
   ProcessNode,
+  ValueDef,
+  getNodeValue,
+  hasAnyValue,
+  resolveUnit,
+  resolveValueDef,
+  migrateProcessData,
   reverseEdgeExists,
 } from "@/app/process/lib/process-utils";
 import sampleProcess from "@/app/process/json/process.json";
@@ -95,7 +101,6 @@ function cloneSubtreeWithNewIds(node: ProcessNode): ProcessNode {
     id: newId,
     successors: undefined,
     predecessors: undefined,
-    // assignedPersonIds intentionally NOT copied — see README note on duplicate
     assignedPersonIds: undefined,
     children: (node.children ?? []).map(cloneSubtreeWithNewIds),
   };
@@ -137,9 +142,6 @@ function getLeafIds(node: ProcessNode): string[] {
 export type Edge = { from: string; to: string };
 
 // ─── Clipboard payload shape/validation ───────────────────────────
-// We wrap the copied node in a small envelope so paste can tell "this
-// is one of our process nodes" apart from someone's random clipboard
-// text (URLs, other JSON, etc.) before trying to insert it into the tree.
 const CLIPBOARD_MARKER = "modelflick-process-node-v1";
 const CLIPBOARD_STORAGE_KEY = "modelflick:process-clipboard";
 
@@ -168,6 +170,9 @@ function parseClipboardEnvelope(text: string): ProcessNode | null {
   return null;
 }
 
+// ─── Editing field addressing ─────────────────────────────────────
+export type EditingField = "label" | "description" | "value";
+
 // ─── Schema validation ────────────────────────────────────────────
 function validateNodeShape(node: unknown, path: string): string | null {
   if (!node || typeof node !== "object") return `${path} is not an object.`;
@@ -179,7 +184,12 @@ function validateNodeShape(node: unknown, path: string): string | null {
   if (n.successors !== undefined && !isStringArray(n.successors)) return `${path}.successors must be an array of strings.`;
   if (n.predecessors !== undefined && !isStringArray(n.predecessors)) return `${path}.predecessors must be an array of strings.`;
   if (n.assignedPersonIds !== undefined && !isStringArray(n.assignedPersonIds)) return `${path}.assignedPersonIds must be an array of strings.`;
-  if (n.area !== undefined && (typeof n.area !== "number" || n.area < 0)) return `${path}.area must be a non-negative number.`;
+  if (n.area !== undefined && (typeof n.area !== "number" || !Number.isFinite(n.area) || n.area < 0)) {
+    return `${path}.area must be a non-negative number.`;
+  }
+  if (n.value !== undefined && (typeof n.value !== "number" || !Number.isFinite(n.value) || n.value < 0)) {
+    return `${path}.value must be a non-negative number.`;
+  }
 
   if (n.children !== undefined) {
     if (!Array.isArray(n.children)) return `${path}.children must be an array.`;
@@ -233,6 +243,39 @@ export function validateProcessData(json: unknown): { valid: boolean; error: str
     return { valid: false, error: "edgeStyles must be an object keyed by 'fromId->toId'." };
   }
 
+  if (j.valueDef !== undefined) {
+    const d = j.valueDef as Record<string, unknown> | null;
+    if (!d || typeof d !== "object") {
+      return { valid: false, error: "valueDef must be an object." };
+    }
+    if (typeof d.label !== "string" || d.label.trim() === "") {
+      return { valid: false, error: "valueDef.label must be a non-empty string." };
+    }
+    if (typeof d.unit !== "string") {
+      return { valid: false, error: "valueDef.unit must be a string." };
+    }
+    if (d.units !== undefined) {
+      if (!Array.isArray(d.units)) {
+        return { valid: false, error: "valueDef.units must be an array." };
+      }
+      for (const u of d.units as unknown[]) {
+        const uo = u as Record<string, unknown>;
+        if (
+          !uo ||
+          typeof uo !== "object" ||
+          typeof uo.symbol !== "string" ||
+          typeof uo.fromBase !== "number" ||
+          typeof uo.toBase !== "number"
+        ) {
+          return { valid: false, error: "Each valueDef.units entry needs string symbol, number fromBase, number toBase." };
+        }
+      }
+    }
+  }
+  if (j.displayUnit !== undefined && typeof j.displayUnit !== "string") {
+    return { valid: false, error: "displayUnit must be a string." };
+  }
+
   return { valid: true, error: null };
 }
 
@@ -267,7 +310,7 @@ export function useProcessEditor(initialData: ProcessData) {
   } | null>(null);
 
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<"label" | "description" | "area">("label");
+  const [editingField, setEditingField] = useState<EditingField>("label");
   const [editingValue, setEditingValue] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -278,6 +321,9 @@ export function useProcessEditor(initialData: ProcessData) {
   const [showPersonManager, setShowPersonManager] = useState(false);
   const [newPersonName, setNewPersonName] = useState("");
   const [assignPopupNodeId, setAssignPopupNodeId] = useState<string | null>(null);
+
+  // ─── Value panel ───────────────────────────────────────────
+  const [showMetricManager, setShowMetricManager] = useState(false);
 
   // ─── Invalid-upload fallback ─────────────────────────────────
   const [invalidUpload, setInvalidUpload] = useState<{ filename: string } | null>(null);
@@ -412,8 +458,31 @@ export function useProcessEditor(initialData: ProcessData) {
   const totalLeaves = rootNode ? getLeafIds(rootNode).length : 0;
   const completedLeaves = completed.size;
 
-  // ─── Inline editor (title / description / area) ──────────────────────
-  const openEditor = (id: string, field: "label" | "description" | "area", currentValue: string) => {
+  // ─── Value type + display unit (document-level) ─────────────────────
+  const valueDef: ValueDef = resolveValueDef(data?.valueDef);
+  const displayUnit: string = data?.displayUnit ?? valueDef.unit;
+  const documentHasValue: boolean = rootNode ? hasAnyValue(rootNode) : false;
+
+  const setValueDef = (def: ValueDef) => {
+    if (!data) return;
+    pushHistory();
+    setData({
+      ...data,
+      valueDef: def,
+      // Reset the display unit to the new base so we never show a stale
+      // symbol that doesn't exist in the new def's unit list.
+      displayUnit: def.unit,
+    });
+  };
+
+  const setDisplayUnit = (symbol: string) => {
+    if (!data) return;
+    pushHistory();
+    setData({ ...data, displayUnit: symbol });
+  };
+
+  // ─── Inline editor (title / description / value) ────────────────────
+  const openEditor = (id: string, field: EditingField, currentValue: string) => {
     setEditingNodeId(id);
     setEditingField(field);
     setEditingValue(currentValue);
@@ -421,34 +490,52 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const closeEditor = () => setEditingNodeId(null);
 
-  const updateNode = (id: string, field: "label" | "description" | "area", value: string) => {
+  const updateNode = (id: string, field: EditingField, rawValue: string) => {
     if (!data) return;
-    pushHistory();
+
+    // The canvas/root never owns a value — it's always derived.
+    if (id === "root" && field === "value") return;
 
     if (id === "root") {
-      if (field === "area") return; // the canvas/root has no area of its own — always derived
-      setData({ ...data, [field === "label" ? "title" : "description"]: value });
+      pushHistory();
+      setData({ ...data, [field === "label" ? "title" : "description"]: rawValue });
       return;
     }
 
     const updateTree = (node: ProcessNode): ProcessNode => {
-      if (node.id === id) {
-        if (field === "area") {
-          const trimmed = value.trim();
-          if (trimmed === "") {
-            const { area: _area, ...rest } = node;
-            return rest;
-          }
-          const parsed = Number(trimmed);
-          if (Number.isNaN(parsed) || parsed < 0) return node; // ignore bad input, keep prior value
-          return { ...node, area: parsed };
-        }
-        return { ...node, [field]: value };
+      if (node.id !== id) {
+        if (node.children) return { ...node, children: node.children.map(updateTree) };
+        return node;
       }
-      if (node.children) return { ...node, children: node.children.map(updateTree) };
-      return node;
+
+      if (field === "value") {
+        // Values are leaf-only; a parent's number is always derived.
+        if ((node.children ?? []).length > 0) return node;
+
+        const trimmed = rawValue.trim();
+        const next = { ...node };
+
+        if (trimmed === "") {
+          delete next.value;
+          delete next.area;
+          return next;
+        }
+
+        const parsed = Number(trimmed);
+        if (!Number.isFinite(parsed) || parsed < 0) return node; // ignore bad input
+
+        // Convert from the current display unit back to base.
+        const def = resolveValueDef(data.valueDef);
+        const chosen = data.displayUnit;
+        next.value = parsed * resolveUnit(def, chosen).toBase;
+        delete next.area; // legacy superseded
+        return next;
+      }
+
+      return { ...node, [field]: rawValue };
     };
 
+    pushHistory();
     setData({ ...data, children: data.children ? data.children.map(updateTree) : undefined });
   };
 
@@ -627,19 +714,12 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedNodeId(clone.id);
   };
 
-  // ─── Copy / Paste (system clipboard, with localStorage fallback) ─
-  // Works across tabs AND across different browsers on the same
-  // machine, because navigator.clipboard reads/writes the OS-level
-  // clipboard rather than any per-browser storage. If clipboard
-  // permission is denied or unavailable (e.g. non-HTTPS during local
-  // dev), we transparently fall back to localStorage, which still
-  // covers same-browser-different-tab.
+  // ─── Copy / Paste ────────────────────────────────────────────
   const writeClipboardFallback = (envelope: ClipboardEnvelope) => {
     try {
       window.localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(envelope));
     } catch {
-      // localStorage unavailable (private mode, quota, etc.) — nothing
-      // more we can do; system clipboard write may still have worked.
+      // localStorage unavailable — nothing more we can do.
     }
   };
 
@@ -673,8 +753,6 @@ export function useProcessEditor(initialData: ProcessData) {
     const envelope: ClipboardEnvelope = { marker: CLIPBOARD_MARKER, node: snapshot };
     const payload = JSON.stringify(envelope);
 
-    // Always keep the fallback in sync, regardless of whether the
-    // system clipboard write succeeds.
     writeClipboardFallback(envelope);
 
     try {
@@ -682,15 +760,12 @@ export function useProcessEditor(initialData: ProcessData) {
         await navigator.clipboard.writeText(payload);
       }
     } catch {
-      // Permission denied or unsupported — the localStorage fallback
-      // above still lets paste work within this browser.
+      // Permission denied or unsupported.
     }
 
     showWarning(`"${target.label}" copied.`);
   };
 
-  // Paste: inserts a fresh-id clone of the clipboard as the LAST child
-  // of parentId. parentId === null pastes into the main process.
   const pasteNode = async (parentId: string | null) => {
     if (!data) return;
 
@@ -702,8 +777,7 @@ export function useProcessEditor(initialData: ProcessData) {
         clipboardNode = parseClipboardEnvelope(text);
       }
     } catch {
-      // Permission denied, no read access, or nothing text-like on the
-      // clipboard — fall through to the localStorage fallback below.
+      // fall through
     }
 
     if (!clipboardNode) {
@@ -783,7 +857,6 @@ export function useProcessEditor(initialData: ProcessData) {
   }, []);
 
   // ─── Move node up/down among siblings ──────────────────────────
-  // Helper: recursively swap a node with its previous/next sibling.
   const moveNodeInTree = (
     root: ProcessNode,
     targetId: string,
@@ -795,12 +868,11 @@ export function useProcessEditor(initialData: ProcessData) {
     if (idx !== -1) {
       const siblings = [...root.children];
       const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= siblings.length) return null; // already at boundary
+      if (targetIdx < 0 || targetIdx >= siblings.length) return null;
       [siblings[idx], siblings[targetIdx]] = [siblings[targetIdx], siblings[idx]];
       return { ...root, children: siblings };
     }
 
-    // not found directly, search deeper
     for (let i = 0; i < root.children.length; i++) {
       const child = root.children[i];
       const newChild = moveNodeInTree(child, targetId, direction);
@@ -825,7 +897,7 @@ export function useProcessEditor(initialData: ProcessData) {
       children: data.children ?? [],
     };
     const newRoot = moveNodeInTree(rootRef, nodeId, "up");
-    if (!newRoot) return; // already at top
+    if (!newRoot) return;
 
     pushHistory();
     setData({
@@ -851,7 +923,7 @@ export function useProcessEditor(initialData: ProcessData) {
       children: data.children ?? [],
     };
     const newRoot = moveNodeInTree(rootRef, nodeId, "down");
-    if (!newRoot) return; // already at bottom
+    if (!newRoot) return;
 
     pushHistory();
     setData({
@@ -879,7 +951,6 @@ export function useProcessEditor(initialData: ProcessData) {
       children: data.children ?? [],
     };
 
-    // Prevent moving a node into its own descendant
     const nodeToMove = findNodeById(rootRef, nodeId);
     if (!nodeToMove) return;
     const descendantIds = new Set(collectIds(nodeToMove));
@@ -888,10 +959,8 @@ export function useProcessEditor(initialData: ProcessData) {
       return;
     }
 
-    // Find current parent and remove node
     let newRoot = removeNodeFromTree(rootRef, nodeId);
 
-    // Add node to new parent (append to end)
     const newParent = findNodeById(newRoot, newParentId);
     if (!newParent) {
       showWarning("New parent not found.");
@@ -1210,10 +1279,11 @@ export function useProcessEditor(initialData: ProcessData) {
 
   // ─── Load / Upload / Save ───────────────────────────────────
   const loadData = (json: ProcessData) => {
+    const migrated = migrateProcessData(json);
     setInvalidUpload(null);
-    setData(json);
-    setCompleted(new Set(json.completed ?? []));
-    setPersons(json.persons ?? []);
+    setData(migrated);
+    setCompleted(new Set(migrated.completed ?? []));
+    setPersons(migrated.persons ?? []);
     setSelectedNodeId(null);
     setHoveredNodeId(null);
     setSelectedEdge(null);
@@ -1221,7 +1291,7 @@ export function useProcessEditor(initialData: ProcessData) {
     setAssignPopupNodeId(null);
     setEdgeStyles(
       new Map(
-        Object.entries(json.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
+        Object.entries(migrated.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
       )
     );
     setLoadVersion((v) => v + 1);
@@ -1373,6 +1443,10 @@ export function useProcessEditor(initialData: ProcessData) {
     persons, showPersonManager, setShowPersonManager,
     newPersonName, setNewPersonName, addPerson, deletePerson, renamePerson,
     assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment, toggleImportant,
+    // value system (one number per document)
+    valueDef, displayUnit, documentHasValue,
+    setValueDef, setDisplayUnit,
+    showMetricManager, setShowMetricManager,
     // schema validation fallback
     invalidUpload, downloadInvalidUpload,
     // undo / redo

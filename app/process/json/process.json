@@ -1,35 +1,45 @@
 {
-  "title": "Sample — Al Safa Café Pavilion (Area Demo)",
+  "title": "Sample — Al Safa Café Pavilion",
   "type": "process",
-  "description": "Small zone/space breakdown showing the area rollup. Delete this file's content and build your own — nothing here is required by the schema.",
+  "description": "One number per leaf. The document calls it Area (m²). Open the Value button to switch to ft² or to change what the number means entirely (Volume, Cost, Length, ...). Values on leaves are stored in the base unit (m²) — switching the display unit converts on screen without rewriting anything.",
   "width": 2200,
   "height": 480,
   "edgeStyles": {},
   "persons": [],
+  "valueDef": {
+    "label": "Area",
+    "unit": "m²",
+    "precision": 2,
+    "units": [
+      { "symbol": "m²",  "fromBase": 1,           "toBase": 1 },
+      { "symbol": "ft²", "fromBase": 10.7639104,  "toBase": 0.09290304 },
+      { "symbol": "yd²", "fromBase": 1.19599005,  "toBase": 0.83612736 }
+    ]
+  },
+  "displayUnit": "ft²",
   "children": [
     {
       "id": "zone-cafe-pavilion",
       "label": "Café Pavilion",
-      "description": "Top-level zone. Its area line will show the auto-summed total of every space below it that has an area set.",
+      "description": "Top-level zone. Its value line shows the auto-summed total of every space below it that has a number set.",
       "children": [
         {
           "id": "space-indoor-seating",
           "label": "Indoor Seating",
-          "description": "Leaf space with an explicit area.",
-          "area": 42.5,
+          "description": "Leaf with 42.5 m² stored — renders as ~457.47 ft² while ft² is the display unit.",
+          "value": 42.5,
           "children": []
         },
         {
           "id": "space-kitchen",
           "label": "Kitchen",
-          "description": "Leaf space with an explicit area.",
-          "area": 18,
+          "value": 18,
           "children": []
         },
         {
           "id": "space-storage",
           "label": "Storage",
-          "description": "No area set on purpose — since its siblings (Indoor Seating, Kitchen) have area, this one will render a small 'no area set' warning you can click to fill in.",
+          "description": "No value set on purpose — its siblings have one, so this one renders a small 'no area set' warning you can click to fill in.",
           "children": []
         }
       ]
@@ -42,18 +52,18 @@
         {
           "id": "subzone-dining-terrace",
           "label": "Dining Terrace",
-          "description": "This node has children, so it never stores its own area — it derives it from its two leaves below.",
+          "description": "This node has children, so it never stores its own value — it derives it from its two leaves below.",
           "children": [
             {
               "id": "space-shaded-dining",
               "label": "Shaded Dining",
-              "area": 30,
+              "value": 30,
               "children": []
             },
             {
               "id": "space-open-dining",
               "label": "Open-Air Dining",
-              "area": 22.75,
+              "value": 22.75,
               "children": []
             }
           ]
@@ -61,7 +71,7 @@
         {
           "id": "space-planter-strip",
           "label": "Planter Strip",
-          "description": "Leaf, no area — kept empty deliberately since its sibling (Dining Terrace) does end up with a derived area, so this one gets the warning too.",
+          "description": "Leaf, no value — kept empty deliberately since its sibling (Dining Terrace) does end up with a derived value, so this one gets the warning too.",
           "children": []
         }
       ]
@@ -69,7 +79,7 @@
     {
       "id": "zone-back-of-house",
       "label": "Back of House",
-      "description": "No area anywhere in this branch — behaves exactly like a process with no area feature in use at all. No warnings, no Σ line.",
+      "description": "No values anywhere in this branch — behaves exactly like a process with the value feature unused. No warnings, no Σ line.",
       "children": [
         {
           "id": "task-deliveries",

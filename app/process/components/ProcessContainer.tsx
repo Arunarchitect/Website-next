@@ -4,13 +4,16 @@ import { useEffect, useRef } from "react";
 import {
   Person,
   ProcessNode,
-  formatArea,
+  ValueDef,
+  formatValue,
   getColorTheme,
   getLayout,
-  getNodeArea,
+  getNodeValue,
   isNodeComplete,
   isNodePartial,
+  resolveUnit,
 } from "@/app/process/lib/process-utils";
+import type { EditingField } from "@/app/process/hooks/useProcessEditor";
 
 /* =========================================================
    COMPLETION CHECKBOX
@@ -99,11 +102,17 @@ type ProcessContainerProps = {
   colorIndex: number;
   completed: Set<string>;
   onToggleComplete: (node: ProcessNode) => void;
-  onEditNode: (
-    id: string,
-    field: "label" | "description" | "area",
-    currentValue: string
-  ) => void;
+  onEditNode: (id: string, field: EditingField, currentValue: string) => void;
+
+  /** What the leaf numbers mean + their conversion table. */
+  valueDef: ValueDef;
+  /** Currently-chosen display unit symbol. */
+  displayUnit: string;
+  /** Whether the value feature is in use anywhere in the doc. */
+  valueInUse: boolean;
+  /** Whether the sibling set this node belongs to has any value at all. */
+  warnIfMissingValue: boolean;
+
   registerNodeRef: (id: string, el: HTMLDivElement | null) => void;
   activeNodeId: string | null;
   onSelectNode: (id: string) => void;
@@ -117,8 +126,6 @@ type ProcessContainerProps = {
   matchedNodeIds?: Set<string>;
   /** The single match currently focused via next/prev navigation. */
   activeMatchId?: string | null;
-  /** True when this node has no area set but a sibling under the same parent does. */
-  showAreaWarning?: boolean;
 };
 
 export function ProcessContainer({
@@ -128,6 +135,10 @@ export function ProcessContainer({
   completed,
   onToggleComplete,
   onEditNode,
+  valueDef,
+  displayUnit,
+  valueInUse,
+  warnIfMissingValue,
   registerNodeRef,
   activeNodeId,
   onSelectNode,
@@ -136,7 +147,6 @@ export function ProcessContainer({
   onOpenAssignPopup,
   matchedNodeIds,
   activeMatchId,
-  showAreaWarning = false,
 }: ProcessContainerProps) {
   const children = node.children ?? [];
   const layout = getLayout(level);
@@ -148,9 +158,21 @@ export function ProcessContainer({
   const isSearchMatch = matchedNodeIds?.has(node.id) ?? false;
   const isActiveSearchMatch = activeMatchId === node.id;
 
-  const areaResult = getNodeArea(node);
-  const childAreaResults = children.map(getNodeArea);
-  const anyChildHasArea = childAreaResults.some((r) => r.value !== null);
+  const valueResult = getNodeValue(node);
+
+  const ownValue: number | undefined = (() => {
+    if (typeof node.value === "number") return node.value;
+    if (typeof node.area === "number") return node.area;
+    return undefined;
+  })();
+
+  // Per child, does it resolve to a number? Used to decide which
+  // children get the "no value set" nudge.
+  const childResults = children.map((c) => getNodeValue(c));
+  const anyChildHasValue = childResults.some((r) => r.value !== null);
+
+  const warnIdsForChild = (index: number): boolean =>
+    anyChildHasValue && childResults[index].value === null;
 
   // Root (level 0) is the canvas container, not a numbered process itself.
   const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
@@ -163,7 +185,7 @@ export function ProcessContainer({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
 
-  const startLongPress = (field: "label" | "description" | "area", value: string) => {
+  const startLongPress = (field: EditingField, value: string) => {
     longPressTriggered.current = false;
     longPressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
@@ -180,22 +202,27 @@ export function ProcessContainer({
 
   useEffect(() => cancelLongPress, []);
 
-  const handleTextPointerDown = (
-    e: React.PointerEvent,
-    field: "label" | "description" | "area"
-  ) => {
+  const handleTextPointerDown = (e: React.PointerEvent, field: EditingField) => {
     // IMPORTANT: Do NOT stop propagation here.
     // The viewport needs to receive the pointer event for pan/pinch to work.
     if (e.pointerType === "touch" || e.pointerType === "pen") {
       const value =
-        field === "label" ? node.label : field === "description" ? node.description ?? "" : String(node.area ?? "");
+        field === "label"
+          ? node.label
+          : field === "description"
+            ? node.description ?? ""
+            : (() => {
+                if (ownValue === undefined) return "";
+                const disp = ownValue * resolveUnit(valueDef, displayUnit).fromBase;
+                return String(Math.round(disp * 1e6) / 1e6);
+              })();
       startLongPress(field, value);
     }
   };
 
   const handleTextPointerUp = () => cancelLongPress();
 
-  const handleDoubleClick = (field: "label" | "description" | "area", value: string) => {
+  const handleDoubleClick = (field: EditingField, value: string) => {
     if (longPressTriggered.current) {
       longPressTriggered.current = false;
       return;
@@ -217,12 +244,13 @@ export function ProcessContainer({
         position: level === 0 ? undefined : "relative",
         zIndex: level === 0 ? undefined : 10,
         background: color.background,
-        border: `1.5px solid ${activeNodeId === node.id
+        border: `1.5px solid ${
+          activeNodeId === node.id
             ? "#3b82f6"
             : isSearchMatch
               ? "#EAB308"
               : color.border
-          }`,
+        }`,
         outline: isCompleted ? "2px solid #2F9E58" : "none",
         outlineOffset: "2px",
         borderRadius: level === 0 ? "18px" : "14px",
@@ -308,7 +336,7 @@ export function ProcessContainer({
             fontSize: layout.descriptionSize,
             lineHeight: 1.4,
             textAlign: "left",
-            whiteSpace: "pre-wrap",   // ← changed from "normal"
+            whiteSpace: "pre-wrap",
             overflowWrap: "break-word",
             wordBreak: "normal",
             hyphens: "auto",
@@ -329,77 +357,83 @@ export function ProcessContainer({
         </div>
       )}
 
-      {/* AREA — not shown on root. Leaf: own value (editable) or a warning
-          if siblings have area and this one doesn't. Parent: derived sum
-          (read-only, click does nothing — edit a leaf instead). */}
-      {level > 0 && !isParent && node.area !== undefined && (
-        <div
-          onPointerDown={(e) => handleTextPointerDown(e, "area")}
-          onPointerUp={handleTextPointerUp}
-          onPointerCancel={handleTextPointerUp}
-          onPointerLeave={handleTextPointerUp}
-          onDoubleClick={() => handleDoubleClick("area", String(node.area))}
-          style={{
-            marginTop: "5px",
-            marginLeft: "30px",
-            fontSize: "10px",
-            lineHeight: 1.3,
-            fontWeight: 600,
-            color: "#2F6FBF",
-            cursor: "text",
-            userSelect: "none",
-            WebkitTouchCallout: "none",
-            WebkitUserSelect: "none",
-          }}
-          title="Double-click to edit area"
-        >
-          {formatArea(node.area)}
-        </div>
-      )}
+      {/* VALUE — one number per document. Leaf: own value (editable) or a
+          nudge if siblings have one. Parent: derived sum (read-only). */}
+      {level > 0 && valueInUse && (
+        <>
+          {!isParent && ownValue !== undefined && (
+            <div
+              onPointerDown={(e) => handleTextPointerDown(e, "value")}
+              onPointerUp={handleTextPointerUp}
+              onPointerCancel={handleTextPointerUp}
+              onPointerLeave={handleTextPointerUp}
+              onDoubleClick={() => {
+                const disp = ownValue * resolveUnit(valueDef, displayUnit).fromBase;
+                handleDoubleClick("value", String(Math.round(disp * 1e6) / 1e6));
+              }}
+              style={{
+                marginTop: "5px",
+                marginLeft: "30px",
+                fontSize: "10px",
+                lineHeight: 1.3,
+                fontWeight: 600,
+                color: "#2F6FBF",
+                cursor: "text",
+                userSelect: "none",
+                WebkitTouchCallout: "none",
+                WebkitUserSelect: "none",
+              }}
+              title={`Double-click to edit ${valueDef.label.toLowerCase()}`}
+            >
+              {formatValue(ownValue, valueDef, displayUnit)}
+            </div>
+          )}
 
-      {level > 0 && !isParent && node.area === undefined && showAreaWarning && (
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            onEditNode(node.id, "area", "");
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          style={{
-            marginTop: "5px",
-            marginLeft: "30px",
-            fontSize: "10px",
-            lineHeight: 1.3,
-            color: "#B45309",
-            fontStyle: "italic",
-            cursor: "pointer",
-            userSelect: "none",
-          }}
-          title="Other processes at this level have an area set — click to add one here"
-        >
-          ⚠ no area set
-        </div>
-      )}
+          {!isParent && ownValue === undefined && warnIfMissingValue && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditNode(node.id, "value", "");
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              style={{
+                marginTop: "5px",
+                marginLeft: "30px",
+                fontSize: "10px",
+                lineHeight: 1.3,
+                color: "#B45309",
+                fontStyle: "italic",
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+              title={`Other processes at this level have a ${valueDef.label.toLowerCase()} — click to add one here`}
+            >
+              ⚠ no {valueDef.label.toLowerCase()} set
+            </div>
+          )}
 
-      {level > 0 && isParent && areaResult.value !== null && (
-        <div
-          style={{
-            marginTop: "5px",
-            marginLeft: "30px",
-            fontSize: "10px",
-            lineHeight: 1.3,
-            fontStyle: "italic",
-            color: areaResult.partial ? "#B45309" : "#8B96A5",
-            userSelect: "none",
-          }}
-          title={
-            areaResult.partial
-              ? "Sum of subprocesses that have an area set — some subprocesses here have none"
-              : "Sum of subprocesses' areas"
-          }
-        >
-          Σ {formatArea(areaResult.value)}
-          {areaResult.partial ? " · partial" : ""}
-        </div>
+          {isParent && valueResult.value !== null && (
+            <div
+              style={{
+                marginTop: "5px",
+                marginLeft: "30px",
+                fontSize: "10px",
+                lineHeight: 1.3,
+                fontStyle: "italic",
+                color: valueResult.partial ? "#B45309" : "#8B96A5",
+                userSelect: "none",
+              }}
+              title={
+                valueResult.partial
+                  ? `Sum of subprocesses that have a ${valueDef.label.toLowerCase()} — some here have none`
+                  : `Sum of subprocesses' ${valueDef.label.toLowerCase()}`
+              }
+            >
+              Σ {formatValue(valueResult.value, valueDef, displayUnit)}
+              {valueResult.partial ? " · partial" : ""}
+            </div>
+          )}
+        </>
       )}
 
       {/* ASSIGNED PEOPLE (own row, click opens assign popup) — not shown on root */}
@@ -454,6 +488,10 @@ export function ProcessContainer({
               completed={completed}
               onToggleComplete={onToggleComplete}
               onEditNode={onEditNode}
+              valueDef={valueDef}
+              displayUnit={displayUnit}
+              valueInUse={valueInUse}
+              warnIfMissingValue={warnIdsForChild(index)}
               registerNodeRef={registerNodeRef}
               activeNodeId={activeNodeId}
               onSelectNode={onSelectNode}
@@ -462,7 +500,6 @@ export function ProcessContainer({
               onOpenAssignPopup={onOpenAssignPopup}
               matchedNodeIds={matchedNodeIds}
               activeMatchId={activeMatchId}
-              showAreaWarning={anyChildHasArea && childAreaResults[index].value === null}
             />
           ))}
         </div>

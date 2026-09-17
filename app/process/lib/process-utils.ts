@@ -14,18 +14,20 @@ export type ProcessNode = {
   type?: string;
   width?: number;
   height?: number;
-  predecessors?: string[];  // ids of predecessor nodes (same level)
-  successors?: string[];    // ids of successor nodes (same level)
-  assignedPersonIds?: string[]; // ids into ProcessData.persons — NOT inherited by children
+  predecessors?: string[];
+  successors?: string[];
+  assignedPersonIds?: string[];
   children?: ProcessNode[];
   important?: boolean;
+
   /**
-   * Leaf-only explicit area (sqm). Only meaningful on a node with no
-   * children — a node WITH children never stores its own `area`; its
-   * area is always the derived sum of its descendants (see
-   * getNodeArea). Undefined means "this node doesn't use the area
-   * feature" and it renders exactly as it always has.
+   * LEAF-ONLY. One number, in the document's BASE unit (see ProcessData.valueDef).
+   * A node WITH children never stores its own value; its number is derived
+   * from whichever children resolve to a number (see getNodeValue).
    */
+  value?: number;
+
+  /** @deprecated legacy alias for `value`. Migrated on load. */
   area?: number;
 };
 
@@ -37,7 +39,14 @@ export type ProcessData = {
   height?: number;
   completed?: string[];
   edgeStyles?: Record<string, { dashed?: boolean }>;
-  persons?: Person[]; // global roster, referenced by ProcessNode.assignedPersonIds
+  persons?: Person[];
+
+  /** What the leaf numbers mean, and their conversion table. */
+  valueDef?: ValueDef;
+
+  /** Which display unit is currently selected. Purely cosmetic. */
+  displayUnit?: string;
+
   children?: ProcessNode[];
 };
 
@@ -80,55 +89,230 @@ export function isNodePartial(node: ProcessNode, completed: Set<string>): boolea
 }
 
 /* =========================================================
-   AREA (ZONE / SPACE) ROLLUP
+   SINGLE DOCUMENT-LEVEL VALUE
    ---------------------------------------------------------
-   A leaf node can carry an explicit `area`. A parent never stores its
-   own area — it's always the sum of whichever of its children resolve
-   to a number. Children that don't (nested further, or simply have no
-   area set) are skipped in the sum rather than treated as zero, so a
-   partially-filled-in zone still shows a meaningful subtotal instead
-   of an artificially low one. `partial` flags exactly that case, so
-   the UI can mark the number as incomplete instead of presenting it
-   as final.
+   Each leaf node carries ONE number: `value`. The document decides
+   what that number *means* — its label ("Area"), its base unit ("m²"),
+   and which display units the user can switch between. Parents never
+   store their own value; theirs is always the sum of their children.
+
+   Values are ALWAYS stored in the document's base unit. Switching
+   display units converts on the fly; nothing on disk is rewritten.
 ========================================================= */
 
-export type AreaResult = {
+export type UnitOption = {
+  /** Short symbol shown in the UI, e.g. "m²", "ft²". */
+  symbol: string;
+  /** Multiply a base-unit value by this to get the display value. */
+  fromBase: number;
+  /** Multiply a display value by this to get back to base. */
+  toBase: number;
+};
+
+/** The document's chosen value type — one per ProcessData. */
+export type ValueDef = {
+  /** What this number is, e.g. "Area", "Cost", "Length". */
+  label: string;
+  /** Base unit symbol — what stored values are assumed to be in. */
+  unit: string;
+  unitPosition?: "prefix" | "suffix"; // default suffix ("12 m²"); prefix for "₹12"
+  precision?: number;                 // decimals, default 2
+  /** Alternative display units, including the base one. */
+  units: UnitOption[];
+};
+
+export type ValueResult = {
   value: number | null;
   partial: boolean;
 };
 
-export function getNodeArea(node: ProcessNode): AreaResult {
+const unit = (symbol: string, fromBase: number, toBase: number): UnitOption => ({
+  symbol,
+  fromBase,
+  toBase,
+});
+
+const base = (symbol: string): UnitOption => unit(symbol, 1, 1);
+
+/* ── Preset value types the user can pick from ──────────────────── */
+
+export const VALUE_PRESETS: Record<string, ValueDef> = {
+  area: {
+  label: "Area",
+  unit: "ft²",          // ← was "m²"
+  precision: 2,
+  units: [
+    base("ft²"),
+    unit("m²", 0.09290304, 10.7639104),
+    unit("yd²", 0.111111, 9),
+  ],
+},
+  volume: {
+    label: "Volume",
+    unit: "m³",
+    precision: 2,
+    units: [
+      base("m³"),
+      unit("ft³", 35.3146667, 0.0283168466),
+      unit("L", 1000, 0.001),
+    ],
+  },
+  length: {
+    label: "Length",
+    unit: "m",
+    precision: 2,
+    units: [
+      base("m"),
+      unit("ft", 3.2808399, 0.3048),
+      unit("cm", 100, 0.01),
+      unit("mm", 1000, 0.001),
+    ],
+  },
+  cost: {
+    label: "Cost",
+    unit: "₹",
+    unitPosition: "prefix",
+    precision: 2,
+    units: [
+      base("₹"),
+      unit("$", 0.012, 83.3333),
+      unit("€", 0.011, 90.9091),
+      unit("AED", 0.044, 22.7273),
+    ],
+  },
+  weight: {
+    label: "Weight",
+    unit: "kg",
+    precision: 2,
+    units: [
+      base("kg"),
+      unit("lb", 2.20462262, 0.45359237),
+      unit("t", 0.001, 1000),
+    ],
+  },
+  count: {
+    label: "Count",
+    unit: "",
+    precision: 0,
+    units: [base("")],
+  },
+};
+
+/** The default value type — used when a document doesn't declare one. */
+export const DEFAULT_VALUE_DEF: ValueDef = VALUE_PRESETS.area;
+
+/** Safe resolution: document's def wins, otherwise the default. */
+export function resolveValueDef(def: ValueDef | undefined): ValueDef {
+  return def ?? DEFAULT_VALUE_DEF;
+}
+
+/* ── Unit selection + conversion ─────────────────────────────────── */
+
+export function resolveUnit(def: ValueDef, chosenSymbol?: string): UnitOption {
+  if (def.units.length === 0) return base(def.unit);
+  if (chosenSymbol) {
+    const match = def.units.find((u) => u.symbol === chosenSymbol);
+    if (match) return match;
+  }
+  const baseOpt = def.units.find((u) => u.symbol === def.unit);
+  return baseOpt ?? def.units[0];
+}
+
+export function toDisplay(baseValue: number, def: ValueDef, chosenSymbol?: string): number {
+  return baseValue * resolveUnit(def, chosenSymbol).fromBase;
+}
+
+export function toBase(displayValue: number, def: ValueDef, chosenSymbol?: string): number {
+  return displayValue * resolveUnit(def, chosenSymbol).toBase;
+}
+
+/* ── Reading values off the tree ─────────────────────────────────── */
+
+function readLeafValue(node: ProcessNode): number | null {
+  if (typeof node.value === "number" && Number.isFinite(node.value)) return node.value;
+  // Legacy: files that stored the number under `area` still work.
+  if (typeof node.area === "number" && Number.isFinite(node.area)) return node.area;
+  return null;
+}
+
+export function getNodeValue(node: ProcessNode): ValueResult {
   const children = node.children ?? [];
 
   if (children.length === 0) {
-    return { value: typeof node.area === "number" ? node.area : null, partial: false };
+    return { value: readLeafValue(node), partial: false };
   }
 
-  const childResults = children.map(getNodeArea);
-  const withArea = childResults.filter((r) => r.value !== null);
+  const childResults = children.map(getNodeValue);
+  const withValue = childResults.filter((r) => r.value !== null);
 
-  if (withArea.length === 0) {
-    return { value: null, partial: false };
-  }
+  if (withValue.length === 0) return { value: null, partial: false };
 
-  const sum = withArea.reduce((total, r) => total + (r.value as number), 0);
-  return { value: sum, partial: withArea.length < children.length };
+  const sum = withValue.reduce((total, r) => total + (r.value as number), 0);
+  return { value: sum, partial: withValue.length < children.length };
 }
 
-export function formatArea(value: number): string {
-  const rounded = Math.round(value * 100) / 100;
-  const text = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2);
-  return `${text} m²`;
+/**
+ * Format a BASE-unit value for display in the currently-chosen unit.
+ */
+export function formatValue(
+  baseValue: number,
+  def: ValueDef,
+  chosenSymbol?: string,
+): string {
+  const opt = resolveUnit(def, chosenSymbol);
+  const display = baseValue * opt.fromBase;
+  const p = def.precision ?? 2;
+  const factor = 10 ** p;
+  const rounded = Math.round(display * factor) / factor;
+  const text = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(p);
+  const u = opt.symbol;
+  if (!u) return text;
+  return def.unitPosition === "prefix" ? `${u}${text}` : `${text} ${u}`;
 }
+
+/**
+ * Does this document use the value feature at all? True if any node
+ * carries a `value` (or a legacy `area`). A document with none renders
+ * exactly as a pre-value document did.
+ */
+export function hasAnyValue(root: ProcessNode): boolean {
+  let found = false;
+  const walk = (n: ProcessNode) => {
+    if (found) return;
+    if (typeof n.value === "number" || typeof n.area === "number") {
+      found = true;
+      return;
+    }
+    (n.children ?? []).forEach(walk);
+  };
+  walk(root);
+  return found;
+}
+
+/** One-way migration: legacy `area` field → `value`. Run on load. */
+export function migrateNodeValue(node: ProcessNode): ProcessNode {
+  const { area, ...rest } = node;
+  return {
+    ...rest,
+    ...(typeof area === "number" && typeof node.value !== "number"
+      ? { value: area }
+      : {}),
+    children: node.children?.map(migrateNodeValue),
+  };
+}
+
+export function migrateProcessData(data: ProcessData): ProcessData {
+  return { ...data, children: data.children?.map(migrateNodeValue) };
+}
+
+/* ── Back-compat aliases (existing imports keep working) ───────────── */
+export type AreaResult = ValueResult;
+export const getNodeArea = (node: ProcessNode): ValueResult => getNodeValue(node);
+export const formatArea = (value: number): string =>
+  formatValue(value, DEFAULT_VALUE_DEF);
 
 /* =========================================================
    RELATION SANITIZATION
-   ---------------------------------------------------------
-   The ProcessNode/ProcessData types above only guarantee *shape*
-   (id/label are strings, successors/predecessors are string arrays,
-   etc). They can't express graph-level rules like "a node can't be its
-   own successor" or "two nodes pointing at each other should read as a
-   loop, not a rendering glitch." That's handled here instead.
 ========================================================= */
 
 export type SanitizeResult = {
@@ -141,31 +325,10 @@ function collectAllNodes(node: ProcessNode, acc: ProcessNode[]) {
   (node.children ?? []).forEach((c) => collectAllNodes(c, acc));
 }
 
-/**
- * Cleans up two specific relation problems that the TypeScript shape
- * can't catch on its own:
- *
- * 1. SELF-LOOPS — a node listing its own id in its own `successors` or
- *    `predecessors`. This is always a data bug (a node can't be its own
- *    predecessor/successor) and the offending id is stripped out.
- *
- * 2. MUTUAL PAIRS — two *different* nodes that reference each other in
- *    both directions (A is a successor of B *and* B is a successor of
- *    A). This is a legitimate pattern — e.g. an iterative feedback loop
- *    between two stages — but rendered as two overlapping solid arrows
- *    it just looks like a bug. Both directions get
- *    `edgeStyles[...].dashed = true` so the loop reads as intentional.
- *
- * Pure function — returns a new ProcessData (the input is never
- * mutated) plus a list of human-readable notes describing what changed,
- * so the caller can surface them instead of silently rewriting the
- * user's file.
- */
 export function sanitizeProcessRelations(data: ProcessData): SanitizeResult {
   const notes: string[] = [];
   const rootChildren = data.children ?? [];
 
-  // ── Pass 1: strip self-loops ──────────────────────────────────────
   const stripSelfLoops = (node: ProcessNode): ProcessNode => {
     const successors = (node.successors ?? []).filter((id) => id !== node.id);
     const predecessors = (node.predecessors ?? []).filter((id) => id !== node.id);
@@ -187,12 +350,11 @@ export function sanitizeProcessRelations(data: ProcessData): SanitizeResult {
 
   const cleanedChildren = rootChildren.map(stripSelfLoops);
 
-  // ── Pass 2: find mutual pairs across the *cleaned* tree ─────────────
   const allNodes: ProcessNode[] = [];
   cleanedChildren.forEach((c) => collectAllNodes(c, allNodes));
   const nodesById = new Map(allNodes.map((n) => [n.id, n]));
 
-  const edgeSet = new Set<string>(); // "from->to"
+  const edgeSet = new Set<string>();
   allNodes.forEach((n) => {
     (n.successors ?? []).forEach((to) => edgeSet.add(`${n.id}->${to}`));
   });
@@ -203,7 +365,7 @@ export function sanitizeProcessRelations(data: ProcessData): SanitizeResult {
   edgeSet.forEach((key) => {
     const [from, to] = key.split("->");
     const reverseKey = `${to}->${from}`;
-    if (!edgeSet.has(reverseKey)) return; // one-directional, nothing to do
+    if (!edgeSet.has(reverseKey)) return;
 
     const pairKey = [from, to].sort().join("|");
     if (seenPairs.has(pairKey)) return;
@@ -225,13 +387,6 @@ export function sanitizeProcessRelations(data: ProcessData): SanitizeResult {
   };
 }
 
-/**
- * Given a single from/to pair, tells you whether the *reverse* edge
- * (to -> from) already exists somewhere in the tree. Used by the editor
- * to decide, at the moment a relation is drawn interactively, whether it
- * just completed a mutual pair and should be dashed immediately rather
- * than waiting for the next sanitize pass.
- */
 export function reverseEdgeExists(root: ProcessNode, fromId: string, toId: string): boolean {
   const findNode = (node: ProcessNode, id: string): ProcessNode | null => {
     if (node.id === id) return node;

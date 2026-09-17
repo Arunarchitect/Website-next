@@ -9,7 +9,13 @@ import { UploadButton, ExportButtons } from "@/app/process/components/transfer";
 import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
 import { useCloudSync } from "@/app/process/hooks/useCloudSync";
 import { useAutosave } from "@/app/process/hooks/useAutoSave";
-import { getNodeArea, formatArea, type ProcessNode } from "@/app/process/lib/process-utils";
+import {
+  getNodeValue,
+  formatValue,
+  resolveUnit,
+  VALUE_PRESETS,
+  type ProcessNode,
+} from "@/app/process/lib/process-utils";
 import { ReportPdfButton } from "@/app/process/components/ReportPdfButton";
 
 const DRAG_THRESHOLD = 6;
@@ -632,7 +638,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const [moveParentMode, setMoveParentMode] = useState<string | null>(null);
 
   const rootNode = editor.rootNode;
-  const rootAreaResult = rootNode ? getNodeArea(rootNode) : null;
+  const rootValueResult = rootNode ? getNodeValue(rootNode) : null;
   const displayGroup = masterword?.trim() || "Ungrouped";
   // True when the page was opened scoped to a real group (e.g. /process/<masterword>).
   // False when opened as plain /process — in that case we never list other workflows.
@@ -707,9 +713,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               ? `${editor.completedLeaves} / ${editor.totalLeaves} steps done`
               : "Upload a process JSON file"}
           </div>
-          {editor.data && rootAreaResult && rootAreaResult.value !== null && (
+          {editor.data && editor.documentHasValue && rootValueResult && rootValueResult.value !== null && (
             <div className="text-xs text-gray-500">
-              {formatArea(rootAreaResult.value)} total{rootAreaResult.partial ? " (partial)" : ""}
+              {editor.valueDef.label}: {formatValue(rootValueResult.value, editor.valueDef, editor.displayUnit)}
+              {rootValueResult.partial ? " (partial)" : ""}
             </div>
           )}
         </div>
@@ -816,7 +823,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                         </div>
                       )}
 
-                      {/* ── Group mode: list this group's workflows ── */}
                       {displayGroupIsReal && (
                         <>
                           {cloud.cloudLoading && (
@@ -875,7 +881,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                         </>
                       )}
 
-                      {/* ── Plain /process mode: only offer the sample template ── */}
                       {!displayGroupIsReal && (
                         <button
                           onClick={() => {
@@ -925,6 +930,14 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 className={`${btnBase} h-8 px-2.5 text-xs shrink-0 sm:h-9 sm:px-3 sm:text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
               >
                 + Add
+              </button>
+
+              <button
+                onClick={() => editor.setShowMetricManager(true)}
+                title="Pick what the number means and which unit to show it in"
+                className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}
+              >
+                Value
               </button>
 
               <button
@@ -1063,18 +1076,25 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 </button>
 
                 {editor.selectedNodeId !== "root" &&
+                  editor.documentHasValue &&
                   (findNodeById(rootNode, editor.selectedNodeId)?.children?.length ?? 0) === 0 && (
                     <button
-                      onClick={() =>
-                        editor.openEditor(
-                          editor.selectedNodeId!,
-                          "area",
-                          String(findNodeById(rootNode, editor.selectedNodeId!)?.area ?? "")
-                        )
-                      }
+                      onClick={() => {
+                        const n = findNodeById(rootNode, editor.selectedNodeId!);
+                        const base = n?.value ?? n?.area;
+                        const shown =
+                          base === undefined
+                            ? ""
+                            : String(
+                                Math.round(
+                                  base * resolveUnit(editor.valueDef, editor.displayUnit).fromBase * 1e6
+                                ) / 1e6
+                              );
+                        editor.openEditor(editor.selectedNodeId!, "value", shown);
+                      }}
                       className={`${btnGhost} h-7 px-2 text-xs`}
                     >
-                      Edit Area
+                      Edit {editor.valueDef.label}
                     </button>
                   )}
 
@@ -1150,10 +1170,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     </button>
                     <button
                       onClick={() => editor.toggleImportant(editor.selectedNodeId!)}
-                      className={`px-2 py-1 rounded-lg text-xs transition-colors ${findNodeById(rootNode, editor.selectedNodeId!)?.important
-                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                        : "bg-amber-50 text-amber-600 hover:bg-amber-100"
-                        }`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-colors ${
+                        findNodeById(rootNode, editor.selectedNodeId!)?.important
+                          ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                          : "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                      }`}
                       title="Mark this process as important"
                     >
                       {findNodeById(rootNode, editor.selectedNodeId!)?.important ? "★ Important" : "☆ Mark Important"}
@@ -1338,6 +1359,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 completed={editor.completed}
                 onToggleComplete={editor.toggleComplete}
                 onEditNode={editor.openEditor}
+                valueDef={editor.valueDef}
+                displayUnit={editor.displayUnit}
+                valueInUse={editor.documentHasValue}
+                warnIfMissingValue={false}
                 registerNodeRef={registerNodeRef}
                 activeNodeId={activeNodeId}
                 onSelectNode={handleNodeClick}
@@ -1364,7 +1389,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">
-              Edit {editor.editingField === "label" ? "Title" : editor.editingField === "area" ? "Area" : "Description"}
+              Edit{" "}
+              {editor.editingField === "label"
+                ? "Title"
+                : editor.editingField === "description"
+                  ? "Description"
+                  : editor.valueDef.label}
             </h3>
             {editor.editingField === "label" ? (
               <input
@@ -1378,25 +1408,35 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 className={`${inputBase} mb-4`}
                 placeholder="Enter title"
               />
-            ) : editor.editingField === "area" ? (
-              <>
-                <input
-                  autoFocus
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={editor.editingValue}
-                  onChange={(e) => editor.setEditingValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") editor.submitEditor();
-                  }}
-                  className={inputBase}
-                  placeholder="e.g. 24.5"
-                />
-                <p className="text-xs text-gray-400 mt-1 mb-4">
-                  Square meters. Leave empty to remove the area from this process.
-                </p>
-              </>
+            ) : editor.editingField === "value" ? (
+              (() => {
+                const u = resolveUnit(editor.valueDef, editor.displayUnit);
+                return (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={editor.editingValue}
+                        onChange={(e) => editor.setEditingValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") editor.submitEditor();
+                        }}
+                        className={inputBase}
+                        placeholder="e.g. 24.5"
+                      />
+                      <span className="shrink-0 text-sm text-gray-500 font-medium min-w-[32px]">
+                        {u.symbol || "—"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1 mb-4">
+                      Value in {u.symbol || "no unit"}. Leave empty to remove {editor.valueDef.label.toLowerCase()} from this process.
+                    </p>
+                  </>
+                );
+              })()
             ) : (
               <textarea
                 autoFocus
@@ -1583,10 +1623,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       setFilterPersonId(next);
                       setExpandedTaskIds(new Set());
                     }}
-                    className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${filterPersonId === person.id
-                      ? "bg-indigo-100 text-indigo-700"
-                      : "text-gray-500 hover:bg-gray-100"
-                      }`}
+                    className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
+                      filterPersonId === person.id
+                        ? "bg-indigo-100 text-indigo-700"
+                        : "text-gray-500 hover:bg-gray-100"
+                    }`}
                     title="Filter tasks assigned to this person"
                   >
                     Tasks
@@ -1651,8 +1692,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                             return (
                               <div
                                 key={task.id}
-                                className={`rounded-lg bg-gray-50 border ${isComplete ? "border-emerald-200" : "border-gray-100"
-                                  }`}
+                                className={`rounded-lg bg-gray-50 border ${
+                                  isComplete ? "border-emerald-200" : "border-gray-100"
+                                }`}
                               >
                                 <div className="flex items-center justify-between px-2.5 py-1.5">
                                   <button
@@ -1668,10 +1710,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                     className="flex-1 min-w-0 text-left text-sm text-gray-700 hover:text-indigo-700 flex items-center gap-1.5"
                                   >
                                     <span
-                                      className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isComplete
-                                        ? "bg-emerald-500 text-white"
-                                        : "bg-gray-200 text-gray-400"
-                                        }`}
+                                      className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
+                                        isComplete
+                                          ? "bg-emerald-500 text-white"
+                                          : "bg-gray-200 text-gray-400"
+                                      }`}
                                       title={isComplete ? "Completed" : "Not completed"}
                                     >
                                       {isComplete ? "✓" : "○"}
@@ -1746,8 +1789,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     <button
                       key={person.id}
                       onClick={() => editor.toggleNodeAssignment(editor.assignPopupNodeId!, person.id)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left transition-colors ${isAssigned ? "bg-indigo-50 text-indigo-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
-                        }`}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left transition-colors ${
+                        isAssigned ? "bg-indigo-50 text-indigo-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
+                      }`}
                     >
                       <span>{person.name}</span>
                       {isAssigned && <span className="text-xs">✓ assigned</span>}
@@ -1759,6 +1803,66 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
             <div className="flex justify-end mt-4">
               <button onClick={editor.closeAssignPopup} className={`${btnOutline} h-10 px-4 text-sm`}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VALUE PANEL */}
+      {editor.showMetricManager && (
+        <div
+          className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          onClick={() => editor.setShowMetricManager(false)}
+        >
+          <div
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base sm:text-lg font-semibold mb-1 text-gray-900">Value</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              This document tracks one number per leaf. Pick what that number is and which unit to show it in — the sum on each parent updates automatically. Stored values never change when you switch units.
+            </p>
+
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">What it is</label>
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {Object.entries(VALUE_PRESETS).map(([key, preset]) => {
+                const isCurrent = editor.valueDef.label === preset.label;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => editor.setValueDef(preset)}
+                    className={`px-2.5 py-1 rounded-lg text-xs transition-colors ${
+                      isCurrent
+                        ? "bg-indigo-600 text-white"
+                        : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    }`}
+                  >
+                    {preset.label} ({preset.unit || "—"})
+                  </button>
+                );
+              })}
+            </div>
+
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Show it in</label>
+            <select
+              value={editor.displayUnit}
+              onChange={(e) => editor.setDisplayUnit(e.target.value)}
+              className={`${inputBase} mb-2`}
+            >
+              {editor.valueDef.units.map((u) => (
+                <option key={u.symbol} value={u.symbol}>
+                  {u.symbol || "no unit"}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mb-4">
+              Stored values are in {editor.valueDef.unit}. Switching only changes what you see — nothing on disk is rewritten.
+            </p>
+
+            <div className="flex justify-end">
+              <button onClick={() => editor.setShowMetricManager(false)} className={`${btnOutline} h-10 px-4 text-sm`}>
                 Done
               </button>
             </div>
@@ -1782,15 +1886,17 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
             <div className="flex gap-2 mb-4 bg-gray-100 rounded-xl p-1">
               <button
                 onClick={() => setSaveMode("local")}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${saveMode === "local" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
-                  }`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  saveMode === "local" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                }`}
               >
                 My device
               </button>
               <button
                 onClick={() => setSaveMode("server")}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${saveMode === "server" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
-                  }`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  saveMode === "server" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                }`}
               >
                 Server
               </button>
