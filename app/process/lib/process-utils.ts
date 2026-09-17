@@ -632,3 +632,114 @@ export function getLayout(level: number) {
   ];
   return layouts[Math.min(level, layouts.length - 1)];
 }
+
+/* ── Report helpers ──────────────────────────────────────────── */
+
+const SQFT_PER_SQM = 10.7639104;
+
+function roundTo(n: number, p: number): number {
+  const f = 10 ** p;
+  return Math.round(n * f) / f;
+}
+
+function fmtNumber(n: number, p: number): string {
+  const r = roundTo(n, p);
+  return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(p);
+}
+
+/**
+ * Format an area (stored in m²) for printing. Returns both the primary
+ * value in the chosen unit and the secondary value in the other unit,
+ * so a report can render "120 sqft (11.1 m²)".
+ */
+export function formatAreaPair(
+  sqm: number,
+  unit: "sqft" | "sqm",
+  precision = 1,
+): { primary: string; secondary: string } {
+  if (unit === "sqft") {
+    return {
+      primary: `${fmtNumber(sqm * SQFT_PER_SQM, precision)} sqft`,
+      secondary: `${fmtNumber(sqm, precision)} m²`,
+    };
+  }
+  return {
+    primary: `${fmtNumber(sqm, precision)} m²`,
+    secondary: `${fmtNumber(sqm * SQFT_PER_SQM, precision)} sqft`,
+  };
+}
+
+/**
+ * Flatten the tree to leaves, in depth-first order, with each leaf's
+ * number path (its position in the tree). Used to render the detailed
+ * space table.
+ */
+export function leafRows(
+  root: ProcessNode,
+): { node: ProcessNode; path: number[]; depth: number }[] {
+  const out: { node: ProcessNode; path: number[]; depth: number }[] = [];
+  const walk = (node: ProcessNode, path: number[], depth: number) => {
+    const children = node.children ?? [];
+    if (children.length === 0) {
+      out.push({ node, path, depth });
+      return;
+    }
+    children.forEach((c, i) => walk(c, [...path, i + 1], depth + 1));
+  };
+  (root.children ?? []).forEach((c, i) => walk(c, [i + 1], 1));
+  return out;
+}
+
+/**
+ * Flatten the tree to one row per node — parents AND leaves — in
+ * depth-first order, with each node's number path and depth.
+ *
+ * Used by the Space report so parents like "Utility" appear above
+ * their children. A parent's value is its derived sum (Σ of children),
+ * which the caller renders just like a leaf value.
+ */
+export function allRows(
+  root: ProcessNode,
+): { node: ProcessNode; path: number[]; depth: number; isLeaf: boolean }[] {
+  const out: { node: ProcessNode; path: number[]; depth: number; isLeaf: boolean }[] = [];
+  const walk = (node: ProcessNode, path: number[], depth: number) => {
+    const children = node.children ?? [];
+    out.push({ node, path, depth, isLeaf: children.length === 0 });
+    children.forEach((c, i) => walk(c, [...path, i + 1], depth + 1));
+  };
+  (root.children ?? []).forEach((c, i) => walk(c, [i + 1], 1));
+  return out;
+}
+
+/**
+ * Group leaves by their `valueType` (falling back to a default when a
+ * leaf hasn't picked one). Returns an ordered map.
+ */
+export function groupLeavesByType(
+  root: ProcessNode,
+  defaultType: string,
+): Map<string, { total: number; leaves: { node: ProcessNode; value: number }[] }> {
+  const out = new Map<
+    string,
+    { total: number; leaves: { node: ProcessNode; value: number }[] }
+  >();
+
+  const walk = (node: ProcessNode) => {
+    const children = node.children ?? [];
+    if (children.length === 0) {
+      const v = getNodeValue(node).value;
+      if (v !== null) {
+        const key = node.valueType ?? defaultType;
+        const bucket = out.get(key) ?? { total: 0, leaves: [] };
+        bucket.total += v;
+        bucket.leaves.push({ node, value: v });
+        out.set(key, bucket);
+      }
+      return;
+    }
+    children.forEach(walk);
+  };
+
+  walk(root);
+  return out;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
   UNIT_SYSTEMS,
   CATEGORY_META,
@@ -16,6 +16,11 @@ import {
   type UnitKey,
   type CategoryKey,
 } from "./areadata";
+import {
+  spacesToJsonString,
+  parseProcessJson,
+  type ParsedImport,
+} from "./areadata-json";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -117,15 +122,14 @@ function isValidCategory(s: string): s is CategoryKey {
   return VALID_CATEGORIES.includes(s as CategoryKey);
 }
 
-// ── CSV SCHEMA ────────────────────────────────────────────────
+// ── CSV SCHEMA (unchanged) ────────────────────────────────────
 //
-// Machine-readable rows (prefix ##):
 //   ##META,key,value          — project settings + location IDs
 //   ##SPACE,...               — one row per space
 //   ##SUBS,...                — one row per sub-space
 //   ## END DATA ##            — everything below is human-readable only
 
-// ── EXPORT ────────────────────────────────────────────────────
+// ── EXPORT (CSV — unchanged) ──────────────────────────────────
 
 function buildCsv(
   projectName: string,
@@ -151,7 +155,6 @@ function buildCsv(
 
   const lines: string[] = [];
 
-  // ── Machine-readable header ────────────────────────────────
   lines.push(
     csvRow(
       "## SPACE REQUIREMENT CSV — modelflick.com",
@@ -166,7 +169,6 @@ function buildCsv(
   );
   lines.push("");
 
-  // META rows — project settings
   lines.push(csvRow("##META", "projectName", projectName || "Untitled Project"));
   lines.push(csvRow("##META", "clientName", clientName || ""));
   lines.push(csvRow("##META", "unit", unit));
@@ -176,14 +178,12 @@ function buildCsv(
   lines.push(csvRow("##META", "locationLabel", locationLabel || ""));
   lines.push(csvRow("##META", "exportedAt", generatedDate));
 
-  // META rows — location IDs (only written when present)
   if (countryId != null) lines.push(csvRow("##META", "countryId", String(countryId)));
   if (stateId   != null) lines.push(csvRow("##META", "stateId",   String(stateId)));
   if (placeId   != null) lines.push(csvRow("##META", "placeId",   String(placeId)));
 
   lines.push("");
 
-  // SPACE header comment
   lines.push(
     csvRow(
       "## [edit] name",
@@ -200,7 +200,6 @@ function buildCsv(
     ),
   );
 
-  // SPACE rows (dimensions stored in feet internally)
   for (const space of spaces) {
     lines.push(
       csvRow(
@@ -243,7 +242,6 @@ function buildCsv(
   );
   lines.push("");
 
-  // ── Human-readable display section ────────────────────────
   lines.push(
     csvRow(
       `PROJECT: ${projectName || "Untitled"}`,
@@ -310,7 +308,6 @@ function buildCsv(
     lines.push("");
   }
 
-  // Summary
   lines.push(csvRow("── AREA SUMMARY ──"));
   lines.push(csvRow("Net Carpet Area",       "", "", "", fmt(totals.net,   unit), aLabel));
   lines.push(csvRow(`Wall Area (${wall}%)`,  "", "", "", fmt(totals.wallA, unit), aLabel));
@@ -320,7 +317,7 @@ function buildCsv(
   return "\uFEFF" + lines.join("\r\n");
 }
 
-// ── IMPORT ────────────────────────────────────────────────────
+// ── IMPORT (CSV — unchanged) ──────────────────────────────────
 
 type ParseResult =
   | { ok: true; payload: ImportPayload }
@@ -371,20 +368,16 @@ function parseCsv(text: string): ParseResult {
   const wall = Math.max(0, parseFloat(meta.wall ?? "10") || 10);
   const circ = Math.max(0, parseFloat(meta.circ ?? "15") || 15);
 
-  // Parse customRate — if present and valid, restore as override; otherwise null
   const customRateRaw = meta.customRate?.trim();
   const customRate: number | null =
     customRateRaw ? (parseFloat(customRateRaw) || null) : null;
 
-  // Parse location IDs
   const countryId: number | null = meta.countryId ? parseInt(meta.countryId) || null : null;
   const stateId: number | null   = meta.stateId   ? parseInt(meta.stateId)   || null : null;
   const placeId: number | null   = meta.placeId   ? parseInt(meta.placeId)   || null : null;
 
-  // Build sub-space lookup by parentId
   const subsByParent = new Map<string, SubSpaceInstance[]>();
   for (const row of subRows) {
-    // ##SUBS, instanceId, parentId, templateId, name, L, B, description
     const [, instanceId, parentId, templateId, name, Lraw, Braw, description] = row;
     if (!parentId || !instanceId) continue;
     const L = Math.max(0.01, parseFloat(Lraw ?? "8") || 8);
@@ -405,7 +398,6 @@ function parseCsv(text: string): ParseResult {
   const spaces: SpaceInstance[] = [];
 
   for (const row of spaceRows) {
-    // ##SPACE, instanceId, templateId, name, category, L, B, floor, icon, isCustom, description
     const [, instanceId, templateId, name, categoryRaw, Lraw, Braw, floorRaw, icon, isCustomRaw, ...descParts] = row;
     const description = descParts.join(",").trim();
     const categoryText = (categoryRaw ?? "").trim();
@@ -456,6 +448,37 @@ function parseCsv(text: string): ParseResult {
   };
 }
 
+/* ── JSON export / import helpers (new) ─────────────────────── */
+
+function buildImportPayloadFromJson(
+  parsed: Extract<ParsedImport, { ok: true }>,
+  fallback: {
+    clientName: string;
+    unit: UnitKey;
+    wall: number;
+    circ: number;
+    countryId: number | null;
+    stateId: number | null;
+    placeId: number | null;
+    customRate: number | null;
+  },
+): ImportPayload {
+  return {
+    projectName: parsed.projectName,
+    clientName: fallback.clientName,
+    unit: fallback.unit,
+    wall: fallback.wall,
+    circ: fallback.circ,
+    spaces: parsed.spaces,
+    // JSON doesn't carry geography — keep whatever the caller passes in,
+    // so importing a JSON doesn't silently wipe the user's location.
+    countryId: fallback.countryId,
+    stateId: fallback.stateId,
+    placeId: fallback.placeId,
+    customRate: fallback.customRate,
+  };
+}
+
 // ── COMPONENT ─────────────────────────────────────────────────
 
 export default function SpaceRequirementCsvButton({
@@ -476,8 +499,14 @@ export default function SpaceRequirementCsvButton({
   customRate,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Export ─────────────────────────────────────────────────
+  // Paste-modal state
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteError, setPasteError] = useState("");
+
+  // ── CSV export ─────────────────────────────────────────────
   function downloadCsv() {
     if (disabled || spaces.length === 0) return;
     const csv = buildCsv(
@@ -505,7 +534,22 @@ export default function SpaceRequirementCsvButton({
     URL.revokeObjectURL(url);
   }
 
-  // ── Import ─────────────────────────────────────────────────
+  // ── JSON export ────────────────────────────────────────────
+  function downloadJson() {
+    if (disabled || spaces.length === 0) return;
+    const json = spacesToJsonString(projectName, spaces);
+    const blob = new Blob([json], { type: "application/json;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeFileName(projectName)}-process.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── CSV import ─────────────────────────────────────────────
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -524,61 +568,294 @@ export default function SpaceRequirementCsvButton({
     e.target.value = "";
   }
 
+  // ── JSON import — file or paste ────────────────────────────
+  const fallback = {
+    clientName,
+    unit,
+    wall,
+    circ,
+    countryId: countryId ?? null,
+    stateId: stateId ?? null,
+    placeId: placeId ?? null,
+    customRate: customRate ?? null,
+  };
+
+  function handleJsonFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result;
+      if (typeof text !== "string") return;
+      const parsed = parseProcessJson(text);
+      if (!parsed.ok) {
+        alert(`Import failed:\n${parsed.error}`);
+        return;
+      }
+      onImport?.(buildImportPayloadFromJson(parsed, fallback));
+    };
+    reader.readAsText(file, "utf-8");
+    e.target.value = "";
+  }
+
+  function submitPastedJson() {
+    const text = pasteText.trim();
+    if (!text) {
+      setPasteError("Paste a JSON snippet first.");
+      return;
+    }
+    const parsed = parseProcessJson(text);
+    if (!parsed.ok) {
+      setPasteError(parsed.error);
+      return;
+    }
+    onImport?.(buildImportPayloadFromJson(parsed, fallback));
+    setPasteModalOpen(false);
+    setPasteText("");
+    setPasteError("");
+  }
+
   const exportDisabled = disabled || spaces.length === 0;
 
   return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-      {!importOnly && (
-        <button
-          onClick={downloadCsv}
-          disabled={exportDisabled}
-          title={
-            exportDisabled
-              ? "Add at least one space to export CSV"
-              : "Download editable CSV (can be re-imported)"
-          }
+    <>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        {!importOnly && (
+          <>
+            <button
+              onClick={downloadCsv}
+              disabled={exportDisabled}
+              title={
+                exportDisabled
+                  ? "Add at least one space to export CSV"
+                  : "Download editable CSV (can be re-imported)"
+              }
+              style={{
+                fontSize: 13,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid #bfdbfe",
+                background: exportDisabled ? "#f3f4f6" : "#eff6ff",
+                cursor: exportDisabled ? "not-allowed" : "pointer",
+                fontWeight: 700,
+                color: exportDisabled ? "#9ca3af" : "#1d4ed8",
+              }}
+            >
+              📊 Export CSV
+            </button>
+            <button
+              onClick={downloadJson}
+              disabled={exportDisabled}
+              title={
+                exportDisabled
+                  ? "Add at least one space to export JSON"
+                  : "Download Process Editor JSON (paste it into the Process Editor)"
+              }
+              style={{
+                fontSize: 13,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid #ddd6fe",
+                background: exportDisabled ? "#f3f4f6" : "#f5f3ff",
+                cursor: exportDisabled ? "not-allowed" : "pointer",
+                fontWeight: 700,
+                color: exportDisabled ? "#9ca3af" : "#6d28d9",
+              }}
+            >
+              🧩 Export JSON
+            </button>
+          </>
+        )}
+
+        {onImport && (
+          <>
+            {/* CSV file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: "none" }}
+              onChange={handleFileChange}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Import a previously exported CSV to restore your project"
+              style={{
+                fontSize: 13,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid #ddd6fe",
+                background: "#f5f3ff",
+                cursor: "pointer",
+                fontWeight: 700,
+                color: "#6d28d9",
+              }}
+            >
+              📂 Import CSV
+            </button>
+
+            {/* JSON file input */}
+            <input
+              ref={jsonFileInputRef}
+              type="file"
+              accept=".json,application/json"
+              style={{ display: "none" }}
+              onChange={handleJsonFileChange}
+            />
+            <button
+              onClick={() => jsonFileInputRef.current?.click()}
+              title="Import a Process Editor JSON file"
+              style={{
+                fontSize: 13,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid #c7d2fe",
+                background: "#eef2ff",
+                cursor: "pointer",
+                fontWeight: 700,
+                color: "#4338ca",
+              }}
+            >
+              🧩 Import JSON
+            </button>
+
+            {/* Paste-JSON trigger */}
+            <button
+              onClick={() => {
+                setPasteError("");
+                setPasteModalOpen(true);
+              }}
+              title="Paste a JSON snippet copied from the Process Editor"
+              style={{
+                fontSize: 13,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid #c7d2fe",
+                background: "#eef2ff",
+                cursor: "pointer",
+                fontWeight: 700,
+                color: "#4338ca",
+              }}
+            >
+              📋 Paste JSON
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Paste JSON modal */}
+      {pasteModalOpen && (
+        <div
+          onClick={() => setPasteModalOpen(false)}
           style={{
-            fontSize: 13,
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: "1px solid #bfdbfe",
-            background: exportDisabled ? "#f3f4f6" : "#eff6ff",
-            cursor: exportDisabled ? "not-allowed" : "pointer",
-            fontWeight: 700,
-            color: exportDisabled ? "#9ca3af" : "#1d4ed8",
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 300,
+            padding: 16,
           }}
         >
-          📊 Export CSV
-        </button>
-      )}
-
-      {onImport && (
-        <>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            style={{ display: "none" }}
-            onChange={handleFileChange}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="Import a previously exported CSV to restore your project"
+          <div
+            onClick={(e) => e.stopPropagation()}
             style={{
-              fontSize: 13,
-              padding: "8px 14px",
-              borderRadius: 8,
-              border: "1px solid #ddd6fe",
-              background: "#f5f3ff",
-              cursor: "pointer",
-              fontWeight: 700,
-              color: "#6d28d9",
+              background: "#fff",
+              borderRadius: 14,
+              padding: 20,
+              width: "100%",
+              maxWidth: 560,
+              boxShadow: "0 20px 60px rgba(0,0,0,.2)",
             }}
           >
-            📂 Import CSV
-          </button>
-        </>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 700, color: "#111827" }}>
+              Paste Process Editor JSON
+            </h3>
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6b7280" }}>
+              Copy a node from the Process Editor (<span style={{ fontFamily: "monospace" }}>
+                modelflick-process-node-v1
+              </span>), or paste a bare node / a <span style={{ fontFamily: "monospace" }}>spaces</span> array. Everything is merged into your current project.
+            </p>
+
+            <textarea
+              value={pasteText}
+              onChange={(e) => {
+                setPasteText(e.target.value);
+                setPasteError("");
+              }}
+              rows={10}
+              spellCheck={false}
+              placeholder='{"marker":"modelflick-process-node-v1","node":{...}}'
+              style={{
+                width: "100%",
+                fontFamily: "monospace",
+                fontSize: 12,
+                color: "#111827",
+                background: "#f9fafb",
+                border: "1.5px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 10,
+                outline: "none",
+                resize: "vertical",
+              }}
+            />
+
+            {pasteError && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 12,
+                  color: "#b91c1c",
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                }}
+              >
+                {pasteError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button
+                onClick={() => {
+                  setPasteModalOpen(false);
+                  setPasteText("");
+                  setPasteError("");
+                }}
+                style={{
+                  fontSize: 13,
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #e5e7eb",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  color: "#374151",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitPastedJson}
+                style={{
+                  fontSize: 13,
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #4f46e5",
+                  background: "#4f46e5",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  color: "#fff",
+                }}
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }
