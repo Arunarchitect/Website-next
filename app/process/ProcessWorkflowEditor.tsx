@@ -345,7 +345,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     });
 
     setNodePositions(positions);
-  }, [editor.data, editor.completed]);
+  }, [editor.data, editor.completed, editor.showValues, editor.valueScope]);
 
   const activeNodeId = editor.hoveredNodeId ?? editor.selectedNodeId;
 
@@ -640,9 +640,16 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const rootNode = editor.rootNode;
   const rootValueResult = rootNode ? getNodeValue(rootNode) : null;
   const displayGroup = masterword?.trim() || "Ungrouped";
-  // True when the page was opened scoped to a real group (e.g. /process/<masterword>).
-  // False when opened as plain /process — in that case we never list other workflows.
   const displayGroupIsReal = Boolean(masterword && masterword.trim());
+
+  // The currently selected node (if any), used by popup + toolbar buttons.
+  const selectedNode =
+    editor.selectedNodeId && rootNode
+      ? findNodeById(rootNode, editor.selectedNodeId)
+      : null;
+  const selectedIsLeaf = !!selectedNode && (selectedNode.children ?? []).length === 0;
+  const selectedHasValue =
+    !!selectedNode && (selectedNode.value !== undefined || selectedNode.area !== undefined);
 
   // Helper: collect tasks assigned to a person, in depth-first tree order
   const getPersonTasks = (personId: string): ProcessNode[] => {
@@ -713,7 +720,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               ? `${editor.completedLeaves} / ${editor.totalLeaves} steps done`
               : "Upload a process JSON file"}
           </div>
-          {editor.data && editor.documentHasValue && rootValueResult && rootValueResult.value !== null && (
+          {editor.data && editor.showValues && rootValueResult && rootValueResult.value !== null && (
             <div className="text-xs text-gray-500">
               {editor.valueDef.label}: {formatValue(rootValueResult.value, editor.valueDef, editor.displayUnit)}
               {rootValueResult.partial ? " (partial)" : ""}
@@ -932,12 +939,60 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 + Add
               </button>
 
+              {/* VALUE TOGGLE — off by default; on scopes the value lines
+                  to the currently-selected node's subtree. */}
+              <button
+                onClick={editor.toggleValues}
+                title={
+                  editor.showValues
+                    ? editor.valueScope === "root"
+                      ? "Values on — showing everywhere. Click a node to focus its subtree, or click to turn off."
+                      : "Values on — showing only in the selected subtree. Click a different node to move the focus, or click to turn off."
+                    : "Show values (scoped to the selected subtree)"
+                }
+                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${
+                  editor.showValues
+                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {editor.showValues
+                  ? editor.valueScope === "root"
+                    ? "Values: All"
+                    : "Values: Scoped"
+                  : "Values"}
+              </button>
+
+              {/* QUICK "ADD VALUE" — visible when a leaf is selected.
+                  One-click path: turns the toggle on, scopes to that
+                  leaf, opens the editor. Works even on documents that
+                  have never used the value feature. */}
+              {editor.data && selectedIsLeaf && (
+                <button
+                  onClick={() => editor.addValueToNode(editor.selectedNodeId!)}
+                  title={
+                    selectedHasValue
+                      ? `Edit the ${editor.valueDef.label.toLowerCase()} on this process`
+                      : `Add a ${editor.valueDef.label.toLowerCase()} to this process`
+                  }
+                  className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
+                >
+                  {selectedHasValue ? `Edit ${editor.valueDef.label}` : `+ ${editor.valueDef.label}`}
+                </button>
+              )}
+
+              {/* VALUE PANEL — only meaningful when the toggle is on. */}
               <button
                 onClick={() => editor.setShowMetricManager(true)}
-                title="Pick what the number means and which unit to show it in"
-                className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm`}
+                disabled={!editor.showValues}
+                title={
+                  editor.showValues
+                    ? "Pick what the number means and which unit to show it in"
+                    : "Turn the Values toggle on first"
+                }
+                className={`${btnGhost} h-8 px-2 text-xs shrink-0 sm:h-9 sm:px-2.5 sm:text-sm disabled:opacity-40 disabled:cursor-not-allowed`}
               >
-                Value
+                Units
               </button>
 
               <button
@@ -1075,26 +1130,32 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   Edit Description
                 </button>
 
+                {/* Add-or-edit the value on this leaf. Works regardless
+                    of whether the toggle is currently on. */}
                 {editor.selectedNodeId !== "root" &&
-                  editor.documentHasValue &&
                   (findNodeById(rootNode, editor.selectedNodeId)?.children?.length ?? 0) === 0 && (
                     <button
                       onClick={() => {
                         const n = findNodeById(rootNode, editor.selectedNodeId!);
                         const base = n?.value ?? n?.area;
-                        const shown =
-                          base === undefined
-                            ? ""
-                            : String(
-                                Math.round(
-                                  base * resolveUnit(editor.valueDef, editor.displayUnit).fromBase * 1e6
-                                ) / 1e6
-                              );
-                        editor.openEditor(editor.selectedNodeId!, "value", shown);
+                        if (base === undefined) {
+                          editor.addValueToNode(editor.selectedNodeId!);
+                        } else {
+                          const shown = String(
+                            Math.round(
+                              base * resolveUnit(editor.valueDef, editor.displayUnit).fromBase * 1e6
+                            ) / 1e6
+                          );
+                          editor.openEditor(editor.selectedNodeId!, "value", shown);
+                        }
                       }}
                       className={`${btnGhost} h-7 px-2 text-xs`}
                     >
-                      Edit {editor.valueDef.label}
+                      {(() => {
+                        const n = findNodeById(rootNode, editor.selectedNodeId!);
+                        const has = n?.value !== undefined || n?.area !== undefined;
+                        return `${has ? "Edit" : "Add"} ${editor.valueDef.label}`;
+                      })()}
                     </button>
                   )}
 
@@ -1276,6 +1337,46 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
+        {/* VALUE SCOPE HINT — small floating chip so the user knows
+            which subtree is currently showing values. */}
+        {editor.showValues && editor.data && (
+          <div className="absolute bottom-4 left-4 z-[115] flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5 shadow-sm no-print max-w-[80vw]">
+            <span className="text-[11px] font-medium text-emerald-800 truncate">
+              {editor.valueScope === "root"
+                ? `Values visible everywhere · ${editor.valueDef.label}`
+                : `Values scoped to “${
+                    editor.valueScope && rootNode
+                      ? findNodeById(rootNode, editor.valueScope)?.label ?? editor.valueScope
+                      : "?"
+                  }” · ${editor.valueDef.label}`}
+            </span>
+            <button
+              onClick={() => editor.setValueScope(editor.valueScope === "root" ? null : "root")}
+              className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 underline"
+              title={
+                editor.valueScope === "root"
+                  ? "Turn values off"
+                  : "Show values everywhere instead of just the selection"
+              }
+            >
+              {editor.valueScope === "root" ? "hide" : "show all"}
+            </button>
+          </div>
+        )}
+
+        {/* FIRST-TIME HINT — when the feature is on but no leaf anywhere
+            has a value yet, tell the user how to start. */}
+        {editor.showValues && editor.data && !editor.documentHasValue && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[115] bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 shadow-sm no-print max-w-[90vw] text-center">
+            <div className="text-[11px] font-medium text-indigo-800">
+              Values are on. Click{" "}
+              <span className="font-semibold">“+ add {editor.valueDef.label.toLowerCase()}”</span>{" "}
+              on any leaf — or select a leaf and use{" "}
+              <span className="font-semibold">“+ {editor.valueDef.label}”</span> in the toolbar.
+            </div>
+          </div>
+        )}
+
         {/* CANVAS */}
         <div
           ref={viewportRef}
@@ -1361,7 +1462,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 onEditNode={editor.openEditor}
                 valueDef={editor.valueDef}
                 displayUnit={editor.displayUnit}
-                valueInUse={editor.documentHasValue}
+                valuesVisible={editor.showValues}
+                inValueScope={editor.showValues && editor.valueScope === "root"}
+                valueScopeRootId={editor.valueScope}
                 warnIfMissingValue={false}
                 registerNodeRef={registerNodeRef}
                 activeNodeId={activeNodeId}
@@ -1810,8 +1913,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         </div>
       )}
 
-      {/* VALUE PANEL */}
-      {editor.showMetricManager && (
+      {/* VALUE PANEL (opened by the Units button, gated on the toggle) */}
+      {editor.showMetricManager && editor.showValues && (
         <div
           className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
           onClick={() => editor.setShowMetricManager(false)}
@@ -1822,7 +1925,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           >
             <h3 className="text-base sm:text-lg font-semibold mb-1 text-gray-900">Value</h3>
             <p className="text-xs text-gray-500 mb-4">
-              This document tracks one number per leaf. Pick what that number is and which unit to show it in — the sum on each parent updates automatically. Stored values never change when you switch units.
+              Pick what the number means and which unit to show it in — the sum on each parent updates automatically. Stored values never change when you switch units.
             </p>
 
             <label className="block text-sm font-medium text-gray-700 mb-1.5">What it is</label>

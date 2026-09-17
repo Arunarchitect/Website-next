@@ -6,26 +6,22 @@ import {
   ProcessData,
   ProcessNode,
   ValueDef,
+  ValueScope,
+  findNodeById as findNodeInTree,
   getNodeValue,
   hasAnyValue,
   resolveUnit,
   resolveValueDef,
   migrateProcessData,
   reverseEdgeExists,
+  scopeHasAnyValue,
 } from "@/app/process/lib/process-utils";
 import sampleProcess from "@/app/process/json/process.json";
 
 // ─── Pure tree helpers ───────────────────────────────────────────
 
 export function findNodeById(root: ProcessNode, id: string): ProcessNode | null {
-  if (root.id === id) return root;
-  if (root.children) {
-    for (const child of root.children) {
-      const found = findNodeById(child, id);
-      if (found) return found;
-    }
-  }
-  return null;
+  return findNodeInTree(root, id);
 }
 
 export function updateNodeData(
@@ -325,6 +321,14 @@ export function useProcessEditor(initialData: ProcessData) {
   // ─── Value panel ───────────────────────────────────────────
   const [showMetricManager, setShowMetricManager] = useState(false);
 
+  // ─── Value toggle + scope ──────────────────────────────────
+  // `showValues` gates everything value-related. `valueScope` decides
+  // WHICH subtree shows values. When both are on, only the scope root
+  // and its descendants render value lines. `"root"` means the whole
+  // document.
+  const [showValues, setShowValues] = useState(false);
+  const [valueScope, setValueScopeState] = useState<ValueScope>(null);
+
   // ─── Invalid-upload fallback ─────────────────────────────────
   const [invalidUpload, setInvalidUpload] = useState<{ filename: string } | null>(null);
 
@@ -480,6 +484,76 @@ export function useProcessEditor(initialData: ProcessData) {
     pushHistory();
     setData({ ...data, displayUnit: symbol });
   };
+
+  // ─── Value toggle + scope ──────────────────────────────────────────
+  /**
+   * The node currently in scope, or null when the feature is off. The
+   * page uses this to pass `valuesVisible` / `inValueScope` down to the
+   * tree so it can gate rendering of the value lines.
+   */
+  const valueScopeRoot: ProcessNode | null = (() => {
+    if (!showValues || !valueScope || !rootNode) return null;
+    if (valueScope === "root") return rootNode;
+    return findNodeById(rootNode, valueScope);
+  })();
+
+  /**
+   * Turn the value feature on or off.
+   *
+   * - On:  if a node is currently selected, scope the values to that
+   *        node's subtree. Otherwise scope to the whole document.
+   * - Off: hide everything and drop the scope.
+   *
+   * Turning the toggle off does NOT touch stored values — it just hides
+   * them. Flip it back on and they reappear exactly as they were.
+   */
+  const toggleValues = () => {
+    if (showValues) {
+      setShowValues(false);
+      setValueScopeState(null);
+    } else {
+      setShowValues(true);
+      // selectedNodeId is "root" when the canvas itself is selected —
+      // we treat that the same as "no selection" and default to the
+      // whole document.
+      const sel = selectedNodeId;
+      setValueScopeState(sel && sel !== "root" ? sel : "root");
+    }
+  };
+
+
+  /**
+ * Turn the value feature on (scoped to the given node) AND immediately
+ * open the value editor for that node. Used by the "Add value" button
+ * on leaves whose siblings have no value — so the user doesn't have to
+ * toggle, then select, then find the button, in that order.
+ */
+  const addValueToNode = (nodeId: string) => {
+    if (!data || !rootNode) return;
+    const node = findNodeById(rootNode, nodeId);
+    if (!node) return;
+    // Parents never own a value — no-op for them.
+    if ((node.children ?? []).length > 0) return;
+
+    // Scope the feature to this node's subtree so it stays visible while
+    // the user types.
+    setShowValues(true);
+    setValueScopeState(nodeId);
+
+    // Open the editor with an empty value (the node has none yet).
+    openEditor(nodeId, "value", "");
+  };
+
+  /**
+   * Change which subtree is showing values. Passing null turns the
+   * toggle off.
+   */
+  const setValueScope = (scope: ValueScope) => {
+    setValueScopeState(scope);
+    setShowValues(scope !== null);
+  };
+
+  const scopeHasValue = rootNode ? scopeHasAnyValue(rootNode, valueScope) : false;
 
   // ─── Inline editor (title / description / value) ────────────────────
   const openEditor = (id: string, field: EditingField, currentValue: string) => {
@@ -677,6 +751,12 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedEdge(null);
     setPendingRelation(null);
     if (assignPopupNodeId && idsToRemove.has(assignPopupNodeId)) setAssignPopupNodeId(null);
+
+    // If the scope pointed at something we just removed, fall back to
+    // the whole document so values stay visible.
+    if (showValues && valueScope && valueScope !== "root" && idsToRemove.has(valueScope)) {
+      setValueScopeState("root");
+    }
   };
 
   const duplicateNode = (id: string) => {
@@ -1294,6 +1374,10 @@ export function useProcessEditor(initialData: ProcessData) {
         Object.entries(migrated.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
       )
     );
+    // Turn the value feature off on load — it's a lens the user turns on
+    // when they want to look at values, not a property of the document.
+    setShowValues(false);
+    setValueScopeState(null);
     setLoadVersion((v) => v + 1);
 
     pastRef.current = [];
@@ -1402,6 +1486,12 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedNodeId(null);
     setSelectedEdge(null);
     setPendingRelation(null);
+
+    // While values are showing, falling back to the whole document
+    // keeps them from vanishing when the user clicks empty canvas.
+    if (showValues) {
+      setValueScopeState("root");
+    }
   };
 
   const handleNodeClick = (id: string, didDrag: boolean) => {
@@ -1414,6 +1504,12 @@ export function useProcessEditor(initialData: ProcessData) {
     }
     setSelectedEdge(null);
     setSelectedNodeId(id);
+
+    // While values are showing, the scope follows the selection so the
+    // user can move the "lens" between branches by clicking them.
+    if (showValues) {
+      setValueScopeState(id === "root" ? "root" : id);
+    }
   };
 
   const handleSelectEdge = (edge: Edge | null) => {
@@ -1447,7 +1543,11 @@ export function useProcessEditor(initialData: ProcessData) {
     valueDef, displayUnit, documentHasValue,
     setValueDef, setDisplayUnit,
     showMetricManager, setShowMetricManager,
+    // value toggle + scope
+    showValues, valueScope, valueScopeRoot,
+    toggleValues, setValueScope, scopeHasValue,
     // schema validation fallback
+    addValueToNode,
     invalidUpload, downloadInvalidUpload,
     // undo / redo
     undo, redo, canUndo, canRedo,

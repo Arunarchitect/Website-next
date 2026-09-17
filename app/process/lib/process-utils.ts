@@ -88,6 +88,16 @@ export function isNodePartial(node: ProcessNode, completed: Set<string>): boolea
   return anyProgress && !allComplete;
 }
 
+/** Depth-first search for a node by id anywhere in the tree. */
+export function findNodeById(root: ProcessNode, id: string): ProcessNode | null {
+  if (root.id === id) return root;
+  for (const child of root.children ?? []) {
+    const found = findNodeById(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
 /* =========================================================
    SINGLE DOCUMENT-LEVEL VALUE
    ---------------------------------------------------------
@@ -138,15 +148,15 @@ const base = (symbol: string): UnitOption => unit(symbol, 1, 1);
 
 export const VALUE_PRESETS: Record<string, ValueDef> = {
   area: {
-  label: "Area",
-  unit: "ft²",          // ← was "m²"
-  precision: 2,
-  units: [
-    base("ft²"),
-    unit("m²", 0.09290304, 10.7639104),
-    unit("yd²", 0.111111, 9),
-  ],
-},
+    label: "Area",
+    unit: "m²",
+    precision: 2,
+    units: [
+      base("m²"),
+      unit("ft²", 10.7639104, 0.09290304),
+      unit("yd²", 1.19599005, 0.83612736),
+    ],
+  },
   volume: {
     label: "Volume",
     unit: "m³",
@@ -276,17 +286,12 @@ export function formatValue(
  * exactly as a pre-value document did.
  */
 export function hasAnyValue(root: ProcessNode): boolean {
-  let found = false;
-  const walk = (n: ProcessNode) => {
-    if (found) return;
-    if (typeof n.value === "number" || typeof n.area === "number") {
-      found = true;
-      return;
-    }
-    (n.children ?? []).forEach(walk);
-  };
-  walk(root);
-  return found;
+  if (typeof root.value === "number") return true;
+  if (typeof root.area === "number") return true;
+  for (const child of root.children ?? []) {
+    if (hasAnyValue(child)) return true;
+  }
+  return false;
 }
 
 /** One-way migration: legacy `area` field → `value`. Run on load. */
@@ -310,6 +315,64 @@ export type AreaResult = ValueResult;
 export const getNodeArea = (node: ProcessNode): ValueResult => getNodeValue(node);
 export const formatArea = (value: number): string =>
   formatValue(value, DEFAULT_VALUE_DEF);
+
+/* =========================================================
+   VALUE SCOPE
+   ---------------------------------------------------------
+   The value feature is scoped to a subtree: when the user selects
+   a node and turns the value toggle on, that node AND every one of
+   its descendants show their value lines. Everything outside the
+   scope renders as if the feature didn't exist.
+
+   A `null` scope means "feature is off" — nothing shows anywhere,
+   even if the tree is full of stored values. This is what lets an
+   existing document that already carries `value` fields stay
+   untouched while the user chooses whether to look at them.
+========================================================= */
+
+/** A node id ("root" or a real id), or null when the feature is off. */
+export type ValueScope = string | null;
+
+/** Internal: does `node` contain `id` anywhere in its subtree (inclusive)? */
+function subtreeContains(node: ProcessNode, id: string): boolean {
+  if (node.id === id) return true;
+  for (const child of node.children ?? []) {
+    if (subtreeContains(child, id)) return true;
+  }
+  return false;
+}
+
+/**
+ * Is `nodeId` inside `scope`? True when scope is "root" (the whole
+ * document), or when the node is the scope root itself, or any
+ * descendant of it.
+ */
+export function isNodeInValueScope(
+  root: ProcessNode,
+  nodeId: string,
+  scope: ValueScope,
+): boolean {
+  if (scope === null) return false;
+  if (scope === "root") return true;
+  if (nodeId === scope) return true;
+
+  const scopeRoot = findNodeById(root, scope);
+  if (!scopeRoot) return false;
+  return subtreeContains(scopeRoot, nodeId);
+}
+
+/**
+ * Does any node INSIDE the given scope have a stored value? Used to
+ * decide whether to show the "this branch has no values at all" empty
+ * state, and (indirectly) whether the value toggle has anything to do
+ * when it's on.
+ */
+export function scopeHasAnyValue(root: ProcessNode, scope: ValueScope): boolean {
+  if (scope === null) return false;
+  const scopeRoot = scope === "root" ? root : findNodeById(root, scope);
+  if (!scopeRoot) return false;
+  return hasAnyValue(scopeRoot);
+}
 
 /* =========================================================
    RELATION SANITIZATION
@@ -388,15 +451,7 @@ export function sanitizeProcessRelations(data: ProcessData): SanitizeResult {
 }
 
 export function reverseEdgeExists(root: ProcessNode, fromId: string, toId: string): boolean {
-  const findNode = (node: ProcessNode, id: string): ProcessNode | null => {
-    if (node.id === id) return node;
-    for (const child of node.children ?? []) {
-      const found = findNode(child, id);
-      if (found) return found;
-    }
-    return null;
-  };
-  const toNode = findNode(root, toId);
+  const toNode = findNodeById(root, toId);
   return !!toNode?.successors?.includes(fromId);
 }
 

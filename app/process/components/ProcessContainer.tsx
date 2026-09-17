@@ -108,23 +108,43 @@ type ProcessContainerProps = {
   valueDef: ValueDef;
   /** Currently-chosen display unit symbol. */
   displayUnit: string;
-  /** Whether the value feature is in use anywhere in the doc. */
-  valueInUse: boolean;
-  /** Whether the sibling set this node belongs to has any value at all. */
+
+  /**
+   * Is the value feature ON at all? When false, nothing value-related
+   * renders anywhere in the tree — no leaf values, no Σ totals, no
+   * "+ add area" lines.
+   */
+  valuesVisible: boolean;
+
+  /**
+   * Is THIS node inside the active value scope? When `valuesVisible` is
+   * true but `inValueScope` is false for a node, that node stays clean
+   * even though other branches nearby are showing values.
+   */
+  inValueScope: boolean;
+
+  /**
+   * The id of the node that is the root of the current value scope, or
+   * null when the feature is off. Used by the recursion to decide which
+   * children enter the scope as it descends.
+   */
+  valueScopeRootId: string | null;
+
+  /**
+   * Whether the sibling set this node belongs to has any value at all.
+   * Only affects the *wording* of the leaf's "no value" affordance — a
+   * leaf with no value always renders one, so the user can always add
+   * one through the UI.
+   */
   warnIfMissingValue: boolean;
 
   registerNodeRef: (id: string, el: HTMLDivElement | null) => void;
   activeNodeId: string | null;
   onSelectNode: (id: string) => void;
-  /** This node's position in the tree, e.g. [2, 1] for "2nd top-level process, 1st subprocess". Empty for root. */
   numberPath?: number[];
-  /** Global person roster, used to resolve assignedPersonIds -> names. */
   persons: Person[];
-  /** Opens the assign/unassign popup for this node. */
   onOpenAssignPopup: (nodeId: string) => void;
-  /** Node ids currently matching the search box, if any. */
   matchedNodeIds?: Set<string>;
-  /** The single match currently focused via next/prev navigation. */
   activeMatchId?: string | null;
 };
 
@@ -137,7 +157,9 @@ export function ProcessContainer({
   onEditNode,
   valueDef,
   displayUnit,
-  valueInUse,
+  valuesVisible,
+  inValueScope,
+  valueScopeRootId,
   warnIfMissingValue,
   registerNodeRef,
   activeNodeId,
@@ -158,6 +180,10 @@ export function ProcessContainer({
   const isSearchMatch = matchedNodeIds?.has(node.id) ?? false;
   const isActiveSearchMatch = activeMatchId === node.id;
 
+  // Value lines only render when the feature is on AND this node is
+  // inside the active scope.
+  const showValueHere = valuesVisible && inValueScope;
+
   const valueResult = getNodeValue(node);
 
   const ownValue: number | undefined = (() => {
@@ -167,12 +193,9 @@ export function ProcessContainer({
   })();
 
   // Per child, does it resolve to a number? Used to decide which
-  // children get the "no value set" nudge.
+  // children get the "no value set" nudge (only meaningful in scope).
   const childResults = children.map((c) => getNodeValue(c));
   const anyChildHasValue = childResults.some((r) => r.value !== null);
-
-  const warnIdsForChild = (index: number): boolean =>
-    anyChildHasValue && childResults[index].value === null;
 
   // Root (level 0) is the canvas container, not a numbered process itself.
   const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
@@ -357,9 +380,16 @@ export function ProcessContainer({
         </div>
       )}
 
-      {/* VALUE — one number per document. Leaf: own value (editable) or a
-          nudge if siblings have one. Parent: derived sum (read-only). */}
-      {level > 0 && valueInUse && (
+      {/* VALUE — only shown when the feature is on AND this node is
+          inside the active scope.
+            - Leaf WITH a value:      show it (double-click to edit)
+            - Leaf WITHOUT a value:   always offer a click target
+                                       "⚠ no X set"  (amber, when a sibling has one)
+                                       "+ add X"     (blue, when none does yet)
+                                       both open the same editor
+            - Parent with a derived value: read-only Σ total
+          Outside the scope, this whole block renders nothing. */}
+      {level > 0 && showValueHere && (
         <>
           {!isParent && ownValue !== undefined && (
             <div
@@ -389,7 +419,7 @@ export function ProcessContainer({
             </div>
           )}
 
-          {!isParent && ownValue === undefined && warnIfMissingValue && (
+          {!isParent && ownValue === undefined && (
             <div
               onClick={(e) => {
                 e.stopPropagation();
@@ -401,14 +431,20 @@ export function ProcessContainer({
                 marginLeft: "30px",
                 fontSize: "10px",
                 lineHeight: 1.3,
-                color: "#B45309",
                 fontStyle: "italic",
+                color: warnIfMissingValue ? "#B45309" : "#2F6FBF",
                 cursor: "pointer",
                 userSelect: "none",
               }}
-              title={`Other processes at this level have a ${valueDef.label.toLowerCase()} — click to add one here`}
+              title={
+                warnIfMissingValue
+                  ? `Other processes at this level have a ${valueDef.label.toLowerCase()} — click to add one here`
+                  : `Click to add a ${valueDef.label.toLowerCase()} to this process`
+              }
             >
-              ⚠ no {valueDef.label.toLowerCase()} set
+              {warnIfMissingValue
+                ? `⚠ no ${valueDef.label.toLowerCase()} set`
+                : `+ add ${valueDef.label.toLowerCase()}`}
             </div>
           )}
 
@@ -479,29 +515,43 @@ export function ProcessContainer({
             boxSizing: "border-box",
           }}
         >
-          {children.map((child, index) => (
-            <ProcessContainer
-              key={child.id}
-              node={child}
-              level={level + 1}
-              colorIndex={level === 0 ? index : colorIndex}
-              completed={completed}
-              onToggleComplete={onToggleComplete}
-              onEditNode={onEditNode}
-              valueDef={valueDef}
-              displayUnit={displayUnit}
-              valueInUse={valueInUse}
-              warnIfMissingValue={warnIdsForChild(index)}
-              registerNodeRef={registerNodeRef}
-              activeNodeId={activeNodeId}
-              onSelectNode={onSelectNode}
-              numberPath={[...numberPath, index + 1]}
-              persons={persons}
-              onOpenAssignPopup={onOpenAssignPopup}
-              matchedNodeIds={matchedNodeIds}
-              activeMatchId={activeMatchId}
-            />
-          ))}
+          {children.map((child, index) => {
+            // A child is in scope when EITHER:
+            //   - this node is already in scope (so every descendant is
+            //     in scope by definition), OR
+            //   - the child IS the scope root (this happens as we walk
+            //     down from an out-of-scope ancestor toward the scope).
+            const childIsScopeRoot = child.id === valueScopeRootId;
+            const childInScope = inValueScope || childIsScopeRoot;
+
+            return (
+              <ProcessContainer
+                key={child.id}
+                node={child}
+                level={level + 1}
+                colorIndex={level === 0 ? index : colorIndex}
+                completed={completed}
+                onToggleComplete={onToggleComplete}
+                onEditNode={onEditNode}
+                valueDef={valueDef}
+                displayUnit={displayUnit}
+                valuesVisible={valuesVisible}
+                inValueScope={childInScope}
+                valueScopeRootId={valueScopeRootId}
+                warnIfMissingValue={
+                  childInScope && anyChildHasValue && childResults[index].value === null
+                }
+                registerNodeRef={registerNodeRef}
+                activeNodeId={activeNodeId}
+                onSelectNode={onSelectNode}
+                numberPath={[...numberPath, index + 1]}
+                persons={persons}
+                onOpenAssignPopup={onOpenAssignPopup}
+                matchedNodeIds={matchedNodeIds}
+                activeMatchId={activeMatchId}
+              />
+            );
+          })}
         </div>
       )}
     </div>
