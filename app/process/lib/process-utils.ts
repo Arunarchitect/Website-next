@@ -21,14 +21,28 @@ export type ProcessNode = {
   important?: boolean;
 
   /**
-   * LEAF-ONLY. One number, in the document's BASE unit (see ProcessData.valueDef).
-   * A node WITH children never stores its own value; its number is derived
-   * from whichever children resolve to a number (see getNodeValue).
+   * LEAF-ONLY main value, in the leaf's value type's BASE unit.
+   * See ProcessData.valueDef / VALUE_PRESETS.
    */
   value?: number;
 
   /** @deprecated legacy alias for `value`. Migrated on load. */
   area?: number;
+
+  /**
+   * LEAF-ONLY. Which value type this leaf uses (a preset id, e.g.
+   * "area" | "cost" | "volume" | "length" | "weight" | "count").
+   * When absent, the document's `valueDef` is used. Present only on
+   * leaves that have been individually typed.
+   */
+  valueType?: string;
+
+  /**
+   * LEAF-ONLY. Two optional factors whose product yields `value`.
+   * Rendered with the factor labels/unit of the leaf's value type.
+   */
+  factor1?: number;
+  factor2?: number;
 };
 
 export type ProcessData = {
@@ -41,10 +55,16 @@ export type ProcessData = {
   edgeStyles?: Record<string, { dashed?: boolean }>;
   persons?: Person[];
 
-  /** What the leaf numbers mean, and their conversion table. */
+  /** Default value type for leaves that haven't picked one. */
   valueDef?: ValueDef;
 
-  /** Which display unit is currently selected. Purely cosmetic. */
+  /**
+   * Per-value-type display unit. E.g. { area: "ft²", cost: "$" }.
+   * Falls back to each type's base unit when an entry is missing.
+   */
+  displayUnits?: Record<string, string>;
+
+  /** @deprecated legacy single display unit. Migrated to displayUnits on load. */
   displayUnit?: string;
 
   children?: ProcessNode[];
@@ -88,7 +108,6 @@ export function isNodePartial(node: ProcessNode, completed: Set<string>): boolea
   return anyProgress && !allComplete;
 }
 
-/** Depth-first search for a node by id anywhere in the tree. */
 export function findNodeById(root: ProcessNode, id: string): ProcessNode | null {
   if (root.id === id) return root;
   for (const child of root.children ?? []) {
@@ -99,36 +118,45 @@ export function findNodeById(root: ProcessNode, id: string): ProcessNode | null 
 }
 
 /* =========================================================
-   SINGLE DOCUMENT-LEVEL VALUE
+   VALUE SYSTEM
    ---------------------------------------------------------
-   Each leaf node carries ONE number: `value`. The document decides
-   what that number *means* — its label ("Area"), its base unit ("m²"),
-   and which display units the user can switch between. Parents never
-   store their own value; theirs is always the sum of their children.
-
-   Values are ALWAYS stored in the document's base unit. Switching
-   display units converts on the fly; nothing on disk is rewritten.
+   Each leaf carries ONE main number. The document supplies a
+   default meaning ("value type") via VALUE_PRESETS, and a leaf can
+   override it with its own `valueType`. Parents never store a
+   value; theirs is the sum of their children.
 ========================================================= */
 
 export type UnitOption = {
-  /** Short symbol shown in the UI, e.g. "m²", "ft²". */
+  /** Symbol shown for the main value, e.g. "m²", "ft²". */
   symbol: string;
   /** Multiply a base-unit value by this to get the display value. */
   fromBase: number;
   /** Multiply a display value by this to get back to base. */
   toBase: number;
+
+  /** Factor symbol for this display unit, e.g. "m", "ft". */
+  factorSymbol?: string;
+  /** Display factor value = base factor value × this. */
+  factorFromBase?: number;
+  /** Base factor value = display factor value × this. */
+  factorToBase?: number;
 };
 
 /** The document's chosen value type — one per ProcessData. */
 export type ValueDef = {
+  /** Preset id, e.g. "area". Must match a key in VALUE_PRESETS. */
+  id?: string;
   /** What this number is, e.g. "Area", "Cost", "Length". */
   label: string;
   /** Base unit symbol — what stored values are assumed to be in. */
   unit: string;
-  unitPosition?: "prefix" | "suffix"; // default suffix ("12 m²"); prefix for "₹12"
-  precision?: number;                 // decimals, default 2
-  /** Alternative display units, including the base one. */
+  unitPosition?: "prefix" | "suffix";
+  precision?: number;
   units: UnitOption[];
+  /** Names for the two factor inputs. Absent = no factors for this type. */
+  factorLabels?: [string, string];
+  /** Default factor unit symbol. Overridden per display unit when set. */
+  factorUnit?: string;
 };
 
 export type ValueResult = {
@@ -136,82 +164,115 @@ export type ValueResult = {
   partial: boolean;
 };
 
-const unit = (symbol: string, fromBase: number, toBase: number): UnitOption => ({
+const unit = (
+  symbol: string,
+  fromBase: number,
+  toBase: number,
+  factorSymbol?: string,
+  factorFromBase?: number,
+  factorToBase?: number,
+): UnitOption => ({
   symbol,
   fromBase,
   toBase,
+  factorSymbol,
+  factorFromBase,
+  factorToBase,
 });
-
-const base = (symbol: string): UnitOption => unit(symbol, 1, 1);
 
 /* ── Preset value types the user can pick from ──────────────────── */
 
 export const VALUE_PRESETS: Record<string, ValueDef> = {
   area: {
+    id: "area",
     label: "Area",
     unit: "m²",
     precision: 2,
+    factorLabels: ["Length", "Breadth"],
+    factorUnit: "m",
     units: [
-      base("m²"),
-      unit("ft²", 10.7639104, 0.09290304),
-      unit("yd²", 1.19599005, 0.83612736),
+      unit("m²", 1, 1, "m", 1, 1),
+      unit("ft²", 10.7639104, 0.09290304, "ft", 3.2808399, 0.3048),
+      unit("yd²", 1.19599005, 0.83612736, "yd", 1.0936133, 0.9144),
     ],
   },
   volume: {
+    id: "volume",
     label: "Volume",
     unit: "m³",
     precision: 2,
     units: [
-      base("m³"),
-      unit("ft³", 35.3146667, 0.0283168466),
-      unit("L", 1000, 0.001),
+      unit("m³", 1, 1, "m", 1, 1),
+      unit("ft³", 35.3146667, 0.0283168466, "ft", 3.2808399, 0.3048),
+      unit("L", 1000, 0.001, "dm", 10, 0.1),
     ],
   },
   length: {
+    id: "length",
     label: "Length",
     unit: "m",
     precision: 2,
     units: [
-      base("m"),
+      unit("m", 1, 1),
       unit("ft", 3.2808399, 0.3048),
       unit("cm", 100, 0.01),
       unit("mm", 1000, 0.001),
     ],
   },
   cost: {
+    id: "cost",
     label: "Cost",
     unit: "₹",
     unitPosition: "prefix",
     precision: 2,
+    factorLabels: ["Quantity", "Rate"],
+    factorUnit: "",
     units: [
-      base("₹"),
-      unit("$", 0.012, 83.3333),
-      unit("€", 0.011, 90.9091),
-      unit("AED", 0.044, 22.7273),
+      unit("₹", 1, 1, "", 1, 1),
+      unit("$", 0.012, 83.3333, "", 1, 1),
+      unit("€", 0.011, 90.9091, "", 1, 1),
+      unit("AED", 0.044, 22.7273, "", 1, 1),
     ],
   },
   weight: {
+    id: "weight",
     label: "Weight",
     unit: "kg",
     precision: 2,
     units: [
-      base("kg"),
+      unit("kg", 1, 1),
       unit("lb", 2.20462262, 0.45359237),
       unit("t", 0.001, 1000),
     ],
   },
   count: {
+    id: "count",
     label: "Count",
     unit: "",
     precision: 0,
-    units: [base("")],
+    units: [unit("", 1, 1)],
   },
 };
 
-/** The default value type — used when a document doesn't declare one. */
 export const DEFAULT_VALUE_DEF: ValueDef = VALUE_PRESETS.area;
 
-/** Safe resolution: document's def wins, otherwise the default. */
+/**
+ * Resolve the ValueDef a node should use. Priority:
+ *   1. node.valueType (must be a known preset id)
+ *   2. document def (data.valueDef)
+ *   3. DEFAULT_VALUE_DEF
+ */
+export function resolveNodeValueDef(
+  node: ProcessNode,
+  documentDef: ValueDef | undefined,
+): ValueDef {
+  if (node.valueType && VALUE_PRESETS[node.valueType]) {
+    return VALUE_PRESETS[node.valueType];
+  }
+  return resolveValueDef(documentDef);
+}
+
+/** Safe resolution for a document-level def. */
 export function resolveValueDef(def: ValueDef | undefined): ValueDef {
   return def ?? DEFAULT_VALUE_DEF;
 }
@@ -219,13 +280,22 @@ export function resolveValueDef(def: ValueDef | undefined): ValueDef {
 /* ── Unit selection + conversion ─────────────────────────────────── */
 
 export function resolveUnit(def: ValueDef, chosenSymbol?: string): UnitOption {
-  if (def.units.length === 0) return base(def.unit);
+  if (def.units.length === 0) return unit(def.unit, 1, 1);
   if (chosenSymbol) {
     const match = def.units.find((u) => u.symbol === chosenSymbol);
     if (match) return match;
   }
   const baseOpt = def.units.find((u) => u.symbol === def.unit);
   return baseOpt ?? def.units[0];
+}
+
+/** The unit symbol chosen for a value type, given the document's prefs. */
+export function unitForType(
+  def: ValueDef,
+  displayUnits: Record<string, string> | undefined,
+): string {
+  const id = def.id ?? "area";
+  return displayUnits?.[id] ?? def.unit;
 }
 
 export function toDisplay(baseValue: number, def: ValueDef, chosenSymbol?: string): number {
@@ -236,11 +306,47 @@ export function toBase(displayValue: number, def: ValueDef, chosenSymbol?: strin
   return displayValue * resolveUnit(def, chosenSymbol).toBase;
 }
 
+/** Factor conversion: base factor value → display factor value. */
+export function factorToDisplay(
+  baseFactor: number,
+  def: ValueDef,
+  chosenSymbol?: string,
+): number {
+  const opt = resolveUnit(def, chosenSymbol);
+  const k = opt.factorFromBase ?? 1;
+  return baseFactor * k;
+}
+
+/** Factor conversion: display factor value → base factor value. */
+export function factorFromDisplay(
+  displayFactor: number,
+  def: ValueDef,
+  chosenSymbol?: string,
+): number {
+  const opt = resolveUnit(def, chosenSymbol);
+  const k = opt.factorToBase ?? 1;
+  return displayFactor * k;
+}
+
+/* ── Factors ─────────────────────────────────────────────────────── */
+
+export function hasFactors(def: ValueDef): boolean {
+  return !!(def.factorLabels && def.factorLabels.length === 2);
+}
+
+export function computeValueFromFactors(
+  node: ProcessNode,
+  def: ValueDef,
+): number | null {
+  if (!hasFactors(def)) return null;
+  if (typeof node.factor1 !== "number" || typeof node.factor2 !== "number") return null;
+  return node.factor1 * node.factor2;
+}
+
 /* ── Reading values off the tree ─────────────────────────────────── */
 
 function readLeafValue(node: ProcessNode): number | null {
   if (typeof node.value === "number" && Number.isFinite(node.value)) return node.value;
-  // Legacy: files that stored the number under `area` still work.
   if (typeof node.area === "number" && Number.isFinite(node.area)) return node.area;
   return null;
 }
@@ -280,10 +386,21 @@ export function formatValue(
   return def.unitPosition === "prefix" ? `${u}${text}` : `${text} ${u}`;
 }
 
+/** Format a factor value for display in the current factor unit. */
+export function formatFactor(
+  baseFactor: number,
+  def: ValueDef,
+  chosenSymbol?: string,
+): string {
+  const display = factorToDisplay(baseFactor, def, chosenSymbol);
+  const rounded = Math.round(display * 1e6) / 1e6;
+  const text = Number.isInteger(rounded) ? rounded.toFixed(0) : String(rounded);
+  const u = resolveUnit(def, chosenSymbol).factorSymbol ?? def.factorUnit ?? "";
+  return u ? `${text} ${u}` : text;
+}
+
 /**
- * Does this document use the value feature at all? True if any node
- * carries a `value` (or a legacy `area`). A document with none renders
- * exactly as a pre-value document did.
+ * Does this document use the value feature at all?
  */
 export function hasAnyValue(root: ProcessNode): boolean {
   if (typeof root.value === "number") return true;
@@ -294,7 +411,7 @@ export function hasAnyValue(root: ProcessNode): boolean {
   return false;
 }
 
-/** One-way migration: legacy `area` field → `value`. Run on load. */
+/** One-way migration: legacy `area` → `value`. Run on load. */
 export function migrateNodeValue(node: ProcessNode): ProcessNode {
   const { area, ...rest } = node;
   return {
@@ -306,11 +423,26 @@ export function migrateNodeValue(node: ProcessNode): ProcessNode {
   };
 }
 
-export function migrateProcessData(data: ProcessData): ProcessData {
-  return { ...data, children: data.children?.map(migrateNodeValue) };
+/** Migrate the doc-level `displayUnit` string → `displayUnits` record. */
+export function migrateDisplayUnits(data: ProcessData): ProcessData {
+  const { displayUnit, displayUnits, ...rest } = data;
+  if (displayUnits) return { ...rest, displayUnits };
+  if (displayUnit) {
+    // Pre-change, the doc was implicitly Area. Carry the old unit over.
+    return { ...rest, displayUnits: { area: displayUnit } };
+  }
+  return rest;
 }
 
-/* ── Back-compat aliases (existing imports keep working) ───────────── */
+export function migrateProcessData(data: ProcessData): ProcessData {
+  const migratedUnits = migrateDisplayUnits(data);
+  return {
+    ...migratedUnits,
+    children: migratedUnits.children?.map(migrateNodeValue),
+  };
+}
+
+/* ── Back-compat aliases ─────────────────────────────────────────── */
 export type AreaResult = ValueResult;
 export const getNodeArea = (node: ProcessNode): ValueResult => getNodeValue(node);
 export const formatArea = (value: number): string =>
@@ -318,22 +450,10 @@ export const formatArea = (value: number): string =>
 
 /* =========================================================
    VALUE SCOPE
-   ---------------------------------------------------------
-   The value feature is scoped to a subtree: when the user selects
-   a node and turns the value toggle on, that node AND every one of
-   its descendants show their value lines. Everything outside the
-   scope renders as if the feature didn't exist.
-
-   A `null` scope means "feature is off" — nothing shows anywhere,
-   even if the tree is full of stored values. This is what lets an
-   existing document that already carries `value` fields stay
-   untouched while the user chooses whether to look at them.
 ========================================================= */
 
-/** A node id ("root" or a real id), or null when the feature is off. */
 export type ValueScope = string | null;
 
-/** Internal: does `node` contain `id` anywhere in its subtree (inclusive)? */
 function subtreeContains(node: ProcessNode, id: string): boolean {
   if (node.id === id) return true;
   for (const child of node.children ?? []) {
@@ -342,11 +462,6 @@ function subtreeContains(node: ProcessNode, id: string): boolean {
   return false;
 }
 
-/**
- * Is `nodeId` inside `scope`? True when scope is "root" (the whole
- * document), or when the node is the scope root itself, or any
- * descendant of it.
- */
 export function isNodeInValueScope(
   root: ProcessNode,
   nodeId: string,
@@ -361,12 +476,6 @@ export function isNodeInValueScope(
   return subtreeContains(scopeRoot, nodeId);
 }
 
-/**
- * Does any node INSIDE the given scope have a stored value? Used to
- * decide whether to show the "this branch has no values at all" empty
- * state, and (indirectly) whether the value toggle has anything to do
- * when it's on.
- */
 export function scopeHasAnyValue(root: ProcessNode, scope: ValueScope): boolean {
   if (scope === null) return false;
   const scopeRoot = scope === "root" ? root : findNodeById(root, scope);

@@ -5,19 +5,20 @@ import {
   Person,
   ProcessNode,
   ValueDef,
+  formatFactor,
   formatValue,
   getColorTheme,
   getLayout,
   getNodeValue,
+  hasFactors,
   isNodeComplete,
   isNodePartial,
+  resolveNodeValueDef,
   resolveUnit,
+  unitForType,
+  factorToDisplay,
 } from "@/app/process/lib/process-utils";
 import type { EditingField } from "@/app/process/hooks/useProcessEditor";
-
-/* =========================================================
-   COMPLETION CHECKBOX
-========================================================= */
 
 type CompletionCheckboxProps = {
   checked: boolean;
@@ -39,11 +40,7 @@ export function CompletionCheckbox({
       type="button"
       aria-pressed={checked}
       aria-label={
-        checked
-          ? "Mark as incomplete"
-          : locked
-            ? "Complete all subprocesses first"
-            : "Mark as complete"
+        checked ? "Mark as incomplete" : locked ? "Complete all subprocesses first" : "Mark as complete"
       }
       title={locked && !checked ? "Complete all subprocesses first" : undefined}
       onPointerDown={(event) => event.stopPropagation()}
@@ -69,32 +66,15 @@ export function CompletionCheckbox({
     >
       {checked && (
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path
-            d="M3 8.5L6.5 12L13 4.5"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+          <path d="M3 8.5L6.5 12L13 4.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
       {!checked && indeterminate && (
-        <div
-          style={{
-            width: "10px",
-            height: "2.5px",
-            borderRadius: "2px",
-            background: "#2F9E58",
-          }}
-        />
+        <div style={{ width: "10px", height: "2.5px", borderRadius: "2px", background: "#2F9E58" }} />
       )}
     </button>
   );
 }
-
-/* =========================================================
-   PROCESS CONTAINER
-========================================================= */
 
 type ProcessContainerProps = {
   node: ProcessNode;
@@ -104,38 +84,14 @@ type ProcessContainerProps = {
   onToggleComplete: (node: ProcessNode) => void;
   onEditNode: (id: string, field: EditingField, currentValue: string) => void;
 
-  /** What the leaf numbers mean + their conversion table. */
-  valueDef: ValueDef;
-  /** Currently-chosen display unit symbol. */
-  displayUnit: string;
+  /** Document default value type, used for leaves without their own. */
+  defaultValueDef: ValueDef;
+  /** Per-value-type display units, from the document. */
+  displayUnits: Record<string, string>;
 
-  /**
-   * Is the value feature ON at all? When false, nothing value-related
-   * renders anywhere in the tree — no leaf values, no Σ totals, no
-   * "+ add area" lines.
-   */
   valuesVisible: boolean;
-
-  /**
-   * Is THIS node inside the active value scope? When `valuesVisible` is
-   * true but `inValueScope` is false for a node, that node stays clean
-   * even though other branches nearby are showing values.
-   */
   inValueScope: boolean;
-
-  /**
-   * The id of the node that is the root of the current value scope, or
-   * null when the feature is off. Used by the recursion to decide which
-   * children enter the scope as it descends.
-   */
   valueScopeRootId: string | null;
-
-  /**
-   * Whether the sibling set this node belongs to has any value at all.
-   * Only affects the *wording* of the leaf's "no value" affordance — a
-   * leaf with no value always renders one, so the user can always add
-   * one through the UI.
-   */
   warnIfMissingValue: boolean;
 
   registerNodeRef: (id: string, el: HTMLDivElement | null) => void;
@@ -155,8 +111,8 @@ export function ProcessContainer({
   completed,
   onToggleComplete,
   onEditNode,
-  valueDef,
-  displayUnit,
+  defaultValueDef,
+  displayUnits,
   valuesVisible,
   inValueScope,
   valueScopeRootId,
@@ -180,9 +136,12 @@ export function ProcessContainer({
   const isSearchMatch = matchedNodeIds?.has(node.id) ?? false;
   const isActiveSearchMatch = activeMatchId === node.id;
 
-  // Value lines only render when the feature is on AND this node is
-  // inside the active scope.
   const showValueHere = valuesVisible && inValueScope;
+
+  // Resolve the value def for THIS node. A leaf can override the doc
+  // default via node.valueType.
+  const valueDef = resolveNodeValueDef(node, defaultValueDef);
+  const displayUnit = unitForType(valueDef, displayUnits);
 
   const valueResult = getNodeValue(node);
 
@@ -192,19 +151,17 @@ export function ProcessContainer({
     return undefined;
   })();
 
-  // Per child, does it resolve to a number? Used to decide which
-  // children get the "no value set" nudge (only meaningful in scope).
   const childResults = children.map((c) => getNodeValue(c));
   const anyChildHasValue = childResults.some((r) => r.value !== null);
 
-  // Root (level 0) is the canvas container, not a numbered process itself.
   const numberLabel = level > 0 && numberPath.length > 0 ? numberPath.join(".") : null;
 
   const assignedNames = (node.assignedPersonIds ?? [])
     .map((pid) => persons.find((p) => p.id === pid)?.name)
     .filter((name): name is string => Boolean(name));
 
-  // Long‑press handling for mobile
+  const defHasFactors = hasFactors(valueDef);
+
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
 
@@ -226,19 +183,22 @@ export function ProcessContainer({
   useEffect(() => cancelLongPress, []);
 
   const handleTextPointerDown = (e: React.PointerEvent, field: EditingField) => {
-    // IMPORTANT: Do NOT stop propagation here.
-    // The viewport needs to receive the pointer event for pan/pinch to work.
     if (e.pointerType === "touch" || e.pointerType === "pen") {
-      const value =
-        field === "label"
-          ? node.label
-          : field === "description"
-            ? node.description ?? ""
-            : (() => {
-                if (ownValue === undefined) return "";
-                const disp = ownValue * resolveUnit(valueDef, displayUnit).fromBase;
-                return String(Math.round(disp * 1e6) / 1e6);
-              })();
+      let value = "";
+      if (field === "label") {
+        value = node.label;
+      } else if (field === "description") {
+        value = node.description ?? "";
+      } else if (field === "value") {
+        if (ownValue !== undefined) {
+          const disp = ownValue * resolveUnit(valueDef, displayUnit).fromBase;
+          value = String(Math.round(disp * 1e6) / 1e6);
+        }
+      } else if (field === "factor1") {
+        value = node.factor1 === undefined ? "" : String(Math.round(factorToDisplay(node.factor1, valueDef, displayUnit) * 1e6) / 1e6);
+      } else if (field === "factor2") {
+        value = node.factor2 === undefined ? "" : String(Math.round(factorToDisplay(node.factor2, valueDef, displayUnit) * 1e6) / 1e6);
+      }
       startLongPress(field, value);
     }
   };
@@ -262,17 +222,12 @@ export function ProcessContainer({
         e.stopPropagation();
         onSelectNode(node.id);
       }}
-
       style={{
         position: level === 0 ? undefined : "relative",
         zIndex: level === 0 ? undefined : 10,
         background: color.background,
         border: `1.5px solid ${
-          activeNodeId === node.id
-            ? "#3b82f6"
-            : isSearchMatch
-              ? "#EAB308"
-              : color.border
+          activeNodeId === node.id ? "#3b82f6" : isSearchMatch ? "#EAB308" : color.border
         }`,
         outline: isCompleted ? "2px solid #2F9E58" : "none",
         outlineOffset: "2px",
@@ -290,15 +245,10 @@ export function ProcessContainer({
         boxShadow: [
           activeNodeId === node.id ? "0 0 0 2px rgba(59,130,246,0.5)" : null,
           node.important ? "0 0 0 2px rgba(217,119,6,0.45)" : null,
-          isActiveSearchMatch
-            ? "0 0 0 3px rgba(234,88,12,0.9)"
-            : isSearchMatch
-              ? "0 0 0 2px rgba(234,179,8,0.7)"
-              : null,
+          isActiveSearchMatch ? "0 0 0 3px rgba(234,88,12,0.9)" : isSearchMatch ? "0 0 0 2px rgba(234,179,8,0.7)" : null,
         ].filter(Boolean).join(", ") || "none",
       }}
     >
-      {/* TITLE ROW */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
         <CompletionCheckbox
           checked={isCompleted}
@@ -333,23 +283,15 @@ export function ProcessContainer({
           onDoubleClick={() => handleDoubleClick("label", node.label)}
         >
           {numberLabel && (
-            <span style={{ opacity: 0.55, fontWeight: 700, marginRight: "6px" }}>
-              {numberLabel}.
-            </span>
+            <span style={{ opacity: 0.55, fontWeight: 700, marginRight: "6px" }}>{numberLabel}.</span>
           )}
           {node.important && (
-            <span
-              title="Important"
-              style={{ color: "#D97706", marginRight: "5px" }}
-            >
-              ★
-            </span>
+            <span title="Important" style={{ color: "#D97706", marginRight: "5px" }}>★</span>
           )}
           {node.label}
         </div>
       </div>
 
-      {/* DESCRIPTION */}
       {node.description && (
         <div
           style={{
@@ -380,43 +322,84 @@ export function ProcessContainer({
         </div>
       )}
 
-      {/* VALUE — only shown when the feature is on AND this node is
-          inside the active scope.
-            - Leaf WITH a value:      show it (double-click to edit)
-            - Leaf WITHOUT a value:   always offer a click target
-                                       "⚠ no X set"  (amber, when a sibling has one)
-                                       "+ add X"     (blue, when none does yet)
-                                       both open the same editor
-            - Parent with a derived value: read-only Σ total
-          Outside the scope, this whole block renders nothing. */}
+      {/* VALUE — uses the node's own value type. */}
       {level > 0 && showValueHere && (
         <>
           {!isParent && ownValue !== undefined && (
-            <div
-              onPointerDown={(e) => handleTextPointerDown(e, "value")}
-              onPointerUp={handleTextPointerUp}
-              onPointerCancel={handleTextPointerUp}
-              onPointerLeave={handleTextPointerUp}
-              onDoubleClick={() => {
-                const disp = ownValue * resolveUnit(valueDef, displayUnit).fromBase;
-                handleDoubleClick("value", String(Math.round(disp * 1e6) / 1e6));
-              }}
-              style={{
-                marginTop: "5px",
-                marginLeft: "30px",
-                fontSize: "10px",
-                lineHeight: 1.3,
-                fontWeight: 600,
-                color: "#2F6FBF",
-                cursor: "text",
-                userSelect: "none",
-                WebkitTouchCallout: "none",
-                WebkitUserSelect: "none",
-              }}
-              title={`Double-click to edit ${valueDef.label.toLowerCase()}`}
-            >
-              {formatValue(ownValue, valueDef, displayUnit)}
-            </div>
+            <>
+              <div
+                onPointerDown={(e) => handleTextPointerDown(e, "value")}
+                onPointerUp={handleTextPointerUp}
+                onPointerCancel={handleTextPointerUp}
+                onPointerLeave={handleTextPointerUp}
+                onDoubleClick={() => {
+                  const disp = ownValue * resolveUnit(valueDef, displayUnit).fromBase;
+                  handleDoubleClick("value", String(Math.round(disp * 1e6) / 1e6));
+                }}
+                style={{
+                  marginTop: "5px",
+                  marginLeft: "30px",
+                  fontSize: "10px",
+                  lineHeight: 1.3,
+                  fontWeight: 600,
+                  color: "#2F6FBF",
+                  cursor: "text",
+                  userSelect: "none",
+                  WebkitTouchCallout: "none",
+                  WebkitUserSelect: "none",
+                }}
+                title={`Double-click to edit ${valueDef.label.toLowerCase()}`}
+              >
+                {formatValue(ownValue, valueDef, displayUnit)}
+                <span style={{ color: "#9CA3AF", fontWeight: 400, marginLeft: "6px" }}>
+                  ({valueDef.label})
+                </span>
+              </div>
+
+              {defHasFactors && (
+                <div
+                  style={{
+                    marginTop: "3px",
+                    marginLeft: "30px",
+                    fontSize: "10px",
+                    lineHeight: 1.35,
+                    color: "#6B7280",
+                    userSelect: "none",
+                    WebkitUserSelect: "none",
+                  }}
+                >
+                  {[
+                    { key: "factor1" as const, label: valueDef.factorLabels![0], value: node.factor1 },
+                    { key: "factor2" as const, label: valueDef.factorLabels![1], value: node.factor2 },
+                  ].map(({ key, label, value }) => (
+                    <div
+                      key={key}
+                      onPointerDown={(e) => handleTextPointerDown(e, key)}
+                      onPointerUp={handleTextPointerUp}
+                      onPointerCancel={handleTextPointerUp}
+                      onPointerLeave={handleTextPointerUp}
+                      onDoubleClick={() =>
+                        handleDoubleClick(
+                          key,
+                          value === undefined ? "" : String(Math.round(factorToDisplay(value, valueDef, displayUnit) * 1e6) / 1e6),
+                        )
+                      }
+                      style={{ cursor: "text" }}
+                      title={`Double-click to edit ${label.toLowerCase()}`}
+                    >
+                      {label}:{" "}
+                      {value === undefined ? (
+                        <span style={{ color: "#B8C5D6", fontStyle: "italic" }}>—</span>
+                      ) : (
+                        <span style={{ color: "#4B5563", fontWeight: 600 }}>
+                          {formatFactor(value, valueDef, displayUnit)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
           {!isParent && ownValue === undefined && (
@@ -472,7 +455,6 @@ export function ProcessContainer({
         </>
       )}
 
-      {/* ASSIGNED PEOPLE (own row, click opens assign popup) — not shown on root */}
       {level > 0 && (
         <div
           onClick={(e) => {
@@ -496,16 +478,12 @@ export function ProcessContainer({
         </div>
       )}
 
-      {/* CHILDREN */}
       {children.length > 0 && (
         <div
           style={{
             marginTop: "16px",
             display: level === 0 ? "grid" : "flex",
-            gridTemplateColumns:
-              level === 0
-                ? `repeat(${children.length}, minmax(0, 1fr))`
-                : undefined,
+            gridTemplateColumns: level === 0 ? `repeat(${children.length}, minmax(0, 1fr))` : undefined,
             flexDirection: level === 0 ? undefined : "column",
             gap: level === 0 ? "40px" : "24px",
             width: "100%",
@@ -516,11 +494,6 @@ export function ProcessContainer({
           }}
         >
           {children.map((child, index) => {
-            // A child is in scope when EITHER:
-            //   - this node is already in scope (so every descendant is
-            //     in scope by definition), OR
-            //   - the child IS the scope root (this happens as we walk
-            //     down from an out-of-scope ancestor toward the scope).
             const childIsScopeRoot = child.id === valueScopeRootId;
             const childInScope = inValueScope || childIsScopeRoot;
 
@@ -533,14 +506,12 @@ export function ProcessContainer({
                 completed={completed}
                 onToggleComplete={onToggleComplete}
                 onEditNode={onEditNode}
-                valueDef={valueDef}
-                displayUnit={displayUnit}
+                defaultValueDef={defaultValueDef}
+                displayUnits={displayUnits}
                 valuesVisible={valuesVisible}
                 inValueScope={childInScope}
                 valueScopeRootId={valueScopeRootId}
-                warnIfMissingValue={
-                  childInScope && anyChildHasValue && childResults[index].value === null
-                }
+                warnIfMissingValue={childInScope && anyChildHasValue && childResults[index].value === null}
                 registerNodeRef={registerNodeRef}
                 activeNodeId={activeNodeId}
                 onSelectNode={onSelectNode}

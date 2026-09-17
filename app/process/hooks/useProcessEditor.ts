@@ -7,18 +7,24 @@ import {
   ProcessNode,
   ValueDef,
   ValueScope,
+  VALUE_PRESETS,
   findNodeById as findNodeInTree,
   getNodeValue,
   hasAnyValue,
+  hasFactors,
+  resolveNodeValueDef,
   resolveUnit,
   resolveValueDef,
+  unitForType,
+  factorFromDisplay,
+  factorToDisplay,
   migrateProcessData,
   reverseEdgeExists,
   scopeHasAnyValue,
 } from "@/app/process/lib/process-utils";
 import sampleProcess from "@/app/process/json/process.json";
 
-// ─── Pure tree helpers ───────────────────────────────────────────
+// ─── Pure tree helpers ───────────────────────────────────────────git 
 
 export function findNodeById(root: ProcessNode, id: string): ProcessNode | null {
   return findNodeInTree(root, id);
@@ -161,13 +167,18 @@ function parseClipboardEnvelope(text: string): ProcessNode | null {
       return (parsed as ClipboardEnvelope).node;
     }
   } catch {
-    // not JSON, or not ours — treat as no usable clipboard content
+    // not JSON, or not ours
   }
   return null;
 }
 
 // ─── Editing field addressing ─────────────────────────────────────
-export type EditingField = "label" | "description" | "value";
+export type EditingField =
+  | "label"
+  | "description"
+  | "value"
+  | "factor1"
+  | "factor2";
 
 // ─── Schema validation ────────────────────────────────────────────
 function validateNodeShape(node: unknown, path: string): string | null {
@@ -185,6 +196,16 @@ function validateNodeShape(node: unknown, path: string): string | null {
   }
   if (n.value !== undefined && (typeof n.value !== "number" || !Number.isFinite(n.value) || n.value < 0)) {
     return `${path}.value must be a non-negative number.`;
+  }
+  if (n.valueType !== undefined) {
+    if (typeof n.valueType !== "string") return `${path}.valueType must be a string.`;
+    if (!VALUE_PRESETS[n.valueType]) return `${path}.valueType must be a known preset id.`;
+  }
+  if (n.factor1 !== undefined && (typeof n.factor1 !== "number" || !Number.isFinite(n.factor1) || n.factor1 < 0)) {
+    return `${path}.factor1 must be a non-negative number.`;
+  }
+  if (n.factor2 !== undefined && (typeof n.factor2 !== "number" || !Number.isFinite(n.factor2) || n.factor2 < 0)) {
+    return `${path}.factor2 must be a non-negative number.`;
   }
 
   if (n.children !== undefined) {
@@ -250,26 +271,17 @@ export function validateProcessData(json: unknown): { valid: boolean; error: str
     if (typeof d.unit !== "string") {
       return { valid: false, error: "valueDef.unit must be a string." };
     }
-    if (d.units !== undefined) {
-      if (!Array.isArray(d.units)) {
-        return { valid: false, error: "valueDef.units must be an array." };
-      }
-      for (const u of d.units as unknown[]) {
-        const uo = u as Record<string, unknown>;
-        if (
-          !uo ||
-          typeof uo !== "object" ||
-          typeof uo.symbol !== "string" ||
-          typeof uo.fromBase !== "number" ||
-          typeof uo.toBase !== "number"
-        ) {
-          return { valid: false, error: "Each valueDef.units entry needs string symbol, number fromBase, number toBase." };
-        }
-      }
-    }
   }
   if (j.displayUnit !== undefined && typeof j.displayUnit !== "string") {
     return { valid: false, error: "displayUnit must be a string." };
+  }
+  if (j.displayUnits !== undefined) {
+    if (typeof j.displayUnits !== "object" || j.displayUnits === null || Array.isArray(j.displayUnits)) {
+      return { valid: false, error: "displayUnits must be an object keyed by value type id." };
+    }
+    for (const [k, v] of Object.entries(j.displayUnits as Record<string, unknown>)) {
+      if (typeof v !== "string") return { valid: false, error: `displayUnits.${k} must be a string.` };
+    }
   }
 
   return { valid: true, error: null };
@@ -322,10 +334,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const [showMetricManager, setShowMetricManager] = useState(false);
 
   // ─── Value toggle + scope ──────────────────────────────────
-  // `showValues` gates everything value-related. `valueScope` decides
-  // WHICH subtree shows values. When both are on, only the scope root
-  // and its descendants render value lines. `"root"` means the whole
-  // document.
   const [showValues, setShowValues] = useState(false);
   const [valueScope, setValueScopeState] = useState<ValueScope>(null);
 
@@ -462,92 +470,95 @@ export function useProcessEditor(initialData: ProcessData) {
   const totalLeaves = rootNode ? getLeafIds(rootNode).length : 0;
   const completedLeaves = completed.size;
 
-  // ─── Value type + display unit (document-level) ─────────────────────
-  const valueDef: ValueDef = resolveValueDef(data?.valueDef);
-  const displayUnit: string = data?.displayUnit ?? valueDef.unit;
+  // ─── Document-level default def (used by panel, "apply all") ─────
+  const defaultValueDef: ValueDef = resolveValueDef(data?.valueDef);
+  const displayUnits: Record<string, string> = data?.displayUnits ?? {};
   const documentHasValue: boolean = rootNode ? hasAnyValue(rootNode) : false;
 
-  const setValueDef = (def: ValueDef) => {
+  const setDefaultValueType = (presetId: string) => {
+    if (!data) return;
+    const preset = VALUE_PRESETS[presetId];
+    if (!preset) return;
+    pushHistory();
+    setData({ ...data, valueDef: preset });
+  };
+
+  const setDisplayUnitForType = (presetId: string, symbol: string) => {
     if (!data) return;
     pushHistory();
     setData({
       ...data,
-      valueDef: def,
-      // Reset the display unit to the new base so we never show a stale
-      // symbol that doesn't exist in the new def's unit list.
-      displayUnit: def.unit,
+      displayUnits: { ...(data.displayUnits ?? {}), [presetId]: symbol },
     });
   };
 
-  const setDisplayUnit = (symbol: string) => {
+  // ─── Apply value type to all leaves ───────────────────────────────
+  /**
+   * Set the value type on EVERY leaf in the document. Also updates the
+   * document's default value type so future leaves inherit it.
+   */
+  const applyValueTypeToAll = (presetId: string) => {
     if (!data) return;
+    const preset = VALUE_PRESETS[presetId];
+    if (!preset) return;
+
     pushHistory();
-    setData({ ...data, displayUnit: symbol });
+
+    const rewrite = (node: ProcessNode): ProcessNode => {
+      const children = node.children ?? [];
+      if (children.length === 0) {
+        // Leaf: set its value type
+        return { ...node, valueType: presetId };
+      }
+      return { ...node, children: children.map(rewrite) };
+    };
+
+    setData({
+      ...data,
+      valueDef: preset,
+      children: data.children?.map(rewrite),
+    });
+  };
+
+  /** Set the value type on a single leaf. */
+  const setNodeValueType = (nodeId: string, presetId: string) => {
+    if (!data || !rootNode) return;
+    if (!VALUE_PRESETS[presetId]) return;
+
+    const node = findNodeById(rootNode, nodeId);
+    if (!node) return;
+    if ((node.children ?? []).length > 0) return;
+
+    const updated: ProcessNode = { ...node, valueType: presetId };
+
+    const replace = (root: ProcessNode): ProcessNode => {
+      if (root.id === nodeId) return updated;
+      if (root.children) return { ...root, children: root.children.map(replace) };
+      return root;
+    };
+
+    pushHistory();
+    setData({ ...data, children: data.children ? data.children.map(replace) : undefined });
   };
 
   // ─── Value toggle + scope ──────────────────────────────────────────
-  /**
-   * The node currently in scope, or null when the feature is off. The
-   * page uses this to pass `valuesVisible` / `inValueScope` down to the
-   * tree so it can gate rendering of the value lines.
-   */
   const valueScopeRoot: ProcessNode | null = (() => {
     if (!showValues || !valueScope || !rootNode) return null;
     if (valueScope === "root") return rootNode;
     return findNodeById(rootNode, valueScope);
   })();
 
-  /**
-   * Turn the value feature on or off.
-   *
-   * - On:  if a node is currently selected, scope the values to that
-   *        node's subtree. Otherwise scope to the whole document.
-   * - Off: hide everything and drop the scope.
-   *
-   * Turning the toggle off does NOT touch stored values — it just hides
-   * them. Flip it back on and they reappear exactly as they were.
-   */
   const toggleValues = () => {
     if (showValues) {
       setShowValues(false);
       setValueScopeState(null);
     } else {
       setShowValues(true);
-      // selectedNodeId is "root" when the canvas itself is selected —
-      // we treat that the same as "no selection" and default to the
-      // whole document.
       const sel = selectedNodeId;
       setValueScopeState(sel && sel !== "root" ? sel : "root");
     }
   };
 
-
-  /**
- * Turn the value feature on (scoped to the given node) AND immediately
- * open the value editor for that node. Used by the "Add value" button
- * on leaves whose siblings have no value — so the user doesn't have to
- * toggle, then select, then find the button, in that order.
- */
-  const addValueToNode = (nodeId: string) => {
-    if (!data || !rootNode) return;
-    const node = findNodeById(rootNode, nodeId);
-    if (!node) return;
-    // Parents never own a value — no-op for them.
-    if ((node.children ?? []).length > 0) return;
-
-    // Scope the feature to this node's subtree so it stays visible while
-    // the user types.
-    setShowValues(true);
-    setValueScopeState(nodeId);
-
-    // Open the editor with an empty value (the node has none yet).
-    openEditor(nodeId, "value", "");
-  };
-
-  /**
-   * Change which subtree is showing values. Passing null turns the
-   * toggle off.
-   */
   const setValueScope = (scope: ValueScope) => {
     setValueScopeState(scope);
     setShowValues(scope !== null);
@@ -555,7 +566,103 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const scopeHasValue = rootNode ? scopeHasAnyValue(rootNode, valueScope) : false;
 
-  // ─── Inline editor (title / description / value) ────────────────────
+  // ─── Node replacement helper ───────────────────────────────────────
+  const replaceNodeInTree = (nodeId: string, updated: ProcessNode) => {
+    if (!data) return;
+    const replace = (root: ProcessNode): ProcessNode => {
+      if (root.id === nodeId) return updated;
+      if (root.children) return { ...root, children: root.children.map(replace) };
+      return root;
+    };
+    pushHistory();
+    setData({ ...data, children: data.children ? data.children.map(replace) : undefined });
+  };
+
+  // ─── Factor setters ───────────────────────────────────────────────
+  const setNodeFactor = (
+    nodeId: string,
+    which: 1 | 2,
+    rawValue: string,
+  ) => {
+    if (!data || !rootNode) return;
+
+    const node = findNodeById(rootNode, nodeId);
+    if (!node) return;
+    if ((node.children ?? []).length > 0) return;
+
+    const def = resolveNodeValueDef(node, data.valueDef);
+    if (!hasFactors(def)) return;
+
+    const chosen = unitForType(def, data.displayUnits);
+
+    const trimmed = rawValue.trim();
+    const parsed = trimmed === "" ? undefined : Number(trimmed);
+    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed < 0)) return;
+
+    // Convert from display factor value → base factor value.
+    const baseVal = parsed === undefined ? undefined : factorFromDisplay(parsed, def, chosen);
+
+    const nextF1 = which === 1 ? baseVal : node.factor1;
+    const nextF2 = which === 2 ? baseVal : node.factor2;
+
+    const updated: ProcessNode = { ...node };
+    if (nextF1 === undefined) delete updated.factor1;
+    else updated.factor1 = nextF1;
+    if (nextF2 === undefined) delete updated.factor2;
+    else updated.factor2 = nextF2;
+
+    if (typeof nextF1 === "number" && typeof nextF2 === "number") {
+      updated.value = nextF1 * nextF2;
+      delete updated.area;
+    }
+
+    replaceNodeInTree(nodeId, updated);
+  };
+
+  const setNodeValue = (nodeId: string, rawValue: string) => {
+    if (!data || !rootNode) return;
+
+    const node = findNodeById(rootNode, nodeId);
+    if (!node) return;
+    if ((node.children ?? []).length > 0) return;
+
+    const def = resolveNodeValueDef(node, data.valueDef);
+    const chosen = unitForType(def, data.displayUnits);
+
+    const trimmed = rawValue.trim();
+
+    if (trimmed === "") {
+      const cleared: ProcessNode = { ...node };
+      delete cleared.value;
+      delete cleared.area;
+      delete cleared.factor1;
+      delete cleared.factor2;
+      replaceNodeInTree(nodeId, cleared);
+      return;
+    }
+
+    const parsedDisplay = Number(trimmed);
+    if (!Number.isFinite(parsedDisplay) || parsedDisplay < 0) return;
+
+    const baseValue = parsedDisplay * resolveUnit(def, chosen).toBase;
+    const oldValue = node.value ?? node.area ?? null;
+
+    const f1 = typeof node.factor1 === "number" ? node.factor1 : undefined;
+    const f2 = typeof node.factor2 === "number" ? node.factor2 : undefined;
+
+    const updated: ProcessNode = { ...node, value: baseValue };
+    delete updated.area;
+
+    if (typeof f1 === "number" && typeof f2 === "number" && oldValue && oldValue > 0) {
+      const k = Math.sqrt(baseValue / oldValue);
+      updated.factor1 = f1 * k;
+      updated.factor2 = f2 * k;
+    }
+
+    replaceNodeInTree(nodeId, updated);
+  };
+
+  // ─── Inline editor ────────────────────────────────────────────────
   const openEditor = (id: string, field: EditingField, currentValue: string) => {
     setEditingNodeId(id);
     setEditingField(field);
@@ -567,12 +674,24 @@ export function useProcessEditor(initialData: ProcessData) {
   const updateNode = (id: string, field: EditingField, rawValue: string) => {
     if (!data) return;
 
-    // The canvas/root never owns a value — it's always derived.
-    if (id === "root" && field === "value") return;
+    if (id === "root" && (field === "value" || field === "factor1" || field === "factor2")) return;
 
     if (id === "root") {
       pushHistory();
       setData({ ...data, [field === "label" ? "title" : "description"]: rawValue });
+      return;
+    }
+
+    if (field === "value") {
+      setNodeValue(id, rawValue);
+      return;
+    }
+    if (field === "factor1") {
+      setNodeFactor(id, 1, rawValue);
+      return;
+    }
+    if (field === "factor2") {
+      setNodeFactor(id, 2, rawValue);
       return;
     }
 
@@ -581,31 +700,6 @@ export function useProcessEditor(initialData: ProcessData) {
         if (node.children) return { ...node, children: node.children.map(updateTree) };
         return node;
       }
-
-      if (field === "value") {
-        // Values are leaf-only; a parent's number is always derived.
-        if ((node.children ?? []).length > 0) return node;
-
-        const trimmed = rawValue.trim();
-        const next = { ...node };
-
-        if (trimmed === "") {
-          delete next.value;
-          delete next.area;
-          return next;
-        }
-
-        const parsed = Number(trimmed);
-        if (!Number.isFinite(parsed) || parsed < 0) return node; // ignore bad input
-
-        // Convert from the current display unit back to base.
-        const def = resolveValueDef(data.valueDef);
-        const chosen = data.displayUnit;
-        next.value = parsed * resolveUnit(def, chosen).toBase;
-        delete next.area; // legacy superseded
-        return next;
-      }
-
       return { ...node, [field]: rawValue };
     };
 
@@ -617,9 +711,27 @@ export function useProcessEditor(initialData: ProcessData) {
     if (editingNodeId) {
       const trimmed = editingValue.trim();
       if (editingField === "label" && trimmed === "") return;
-      updateNode(editingNodeId, editingField, trimmed);
+
+      if (editingField === "factor1") {
+        setNodeFactor(editingNodeId, 1, trimmed);
+      } else if (editingField === "factor2") {
+        setNodeFactor(editingNodeId, 2, trimmed);
+      } else {
+        updateNode(editingNodeId, editingField, trimmed);
+      }
     }
     closeEditor();
+  };
+
+  const addValueToNode = (nodeId: string) => {
+    if (!data || !rootNode) return;
+    const node = findNodeById(rootNode, nodeId);
+    if (!node) return;
+    if ((node.children ?? []).length > 0) return;
+
+    setShowValues(true);
+    setValueScopeState(nodeId);
+    openEditor(nodeId, "value", "");
   };
 
   // ─── Add process ────────────────────────────────────────────
@@ -752,8 +864,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setPendingRelation(null);
     if (assignPopupNodeId && idsToRemove.has(assignPopupNodeId)) setAssignPopupNodeId(null);
 
-    // If the scope pointed at something we just removed, fall back to
-    // the whole document so values stay visible.
     if (showValues && valueScope && valueScope !== "root" && idsToRemove.has(valueScope)) {
       setValueScopeState("root");
     }
@@ -799,7 +909,7 @@ export function useProcessEditor(initialData: ProcessData) {
     try {
       window.localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(envelope));
     } catch {
-      // localStorage unavailable — nothing more we can do.
+      // localStorage unavailable
     }
   };
 
@@ -1374,8 +1484,6 @@ export function useProcessEditor(initialData: ProcessData) {
         Object.entries(migrated.edgeStyles ?? {}).map(([key, value]) => [key, { dashed: value?.dashed ?? false }])
       )
     );
-    // Turn the value feature off on load — it's a lens the user turns on
-    // when they want to look at values, not a property of the document.
     setShowValues(false);
     setValueScopeState(null);
     setLoadVersion((v) => v + 1);
@@ -1487,8 +1595,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedEdge(null);
     setPendingRelation(null);
 
-    // While values are showing, falling back to the whole document
-    // keeps them from vanishing when the user clicks empty canvas.
     if (showValues) {
       setValueScopeState("root");
     }
@@ -1505,8 +1611,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedEdge(null);
     setSelectedNodeId(id);
 
-    // While values are showing, the scope follows the selection so the
-    // user can move the "lens" between branches by clicking them.
     if (showValues) {
       setValueScopeState(id === "root" ? "root" : id);
     }
@@ -1539,21 +1643,22 @@ export function useProcessEditor(initialData: ProcessData) {
     persons, showPersonManager, setShowPersonManager,
     newPersonName, setNewPersonName, addPerson, deletePerson, renamePerson,
     assignPopupNodeId, openAssignPopup, closeAssignPopup, toggleNodeAssignment, toggleImportant,
-    // value system (one number per document)
-    valueDef, displayUnit, documentHasValue,
-    setValueDef, setDisplayUnit,
+    // value system
+    defaultValueDef, displayUnits, documentHasValue,
+    setDefaultValueType, setDisplayUnitForType,
+    applyValueTypeToAll, setNodeValueType,
+    setNodeFactor, setNodeValue,
     showMetricManager, setShowMetricManager,
-    // value toggle + scope
     showValues, valueScope, valueScopeRoot,
     toggleValues, setValueScope, scopeHasValue,
-    // schema validation fallback
     addValueToNode,
+    // schema validation fallback
     invalidUpload, downloadInvalidUpload,
     // undo / redo
     undo, redo, canUndo, canRedo,
     // move operations
     moveNodeUp, moveNodeDown, moveNodeToParent,
-    // copy / paste (async now — system clipboard + localStorage fallback)
+    // copy / paste
     copyNode, pasteNode,
   };
 }

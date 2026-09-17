@@ -13,8 +13,12 @@ import {
   getNodeValue,
   formatValue,
   resolveUnit,
+  resolveNodeValueDef,
+  unitForType,
+  hasFactors,
   VALUE_PRESETS,
   type ProcessNode,
+  type ValueDef,
 } from "@/app/process/lib/process-utils";
 import { ReportPdfButton } from "@/app/process/components/ReportPdfButton";
 
@@ -82,6 +86,24 @@ function findMatchingNodeIds(children: ProcessNode[] | undefined, rawTerm: strin
 }
 
 const MATCH_BOX_PADDING = 140;
+
+type NodeBox = { x: number; y: number; width: number; height: number };
+
+/** Value-equality check for two position maps — used to avoid redundant state updates. */
+function nodeBoxesEqual(
+  a: Map<string, NodeBox>,
+  b: Map<string, NodeBox>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, av] of a) {
+    const bv = b.get(id);
+    if (!bv) return false;
+    if (av.x !== bv.x || av.y !== bv.y || av.width !== bv.width || av.height !== bv.height) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export default function ProcessWorkflowEditor({ masterword }: { masterword?: string }) {
   // ─── Editing logic ───
@@ -309,7 +331,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   }, []);
 
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number; width: number; height: number }>>(new Map());
+  const [nodePositions, setNodePositions] = useState<Map<string, NodeBox>>(new Map());
 
   const registerNodeRef = (id: string, el: HTMLDivElement | null) => {
     if (el) {
@@ -323,7 +345,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     const canvas = canvasRef.current;
     if (!canvas || !editor.data) return;
 
-    const positions = new Map<string, { x: number; y: number; width: number; height: number }>();
+    const positions = new Map<string, NodeBox>();
 
     nodeRefs.current.forEach((el, id) => {
       let left = 0;
@@ -344,8 +366,14 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       });
     });
 
-    setNodePositions(positions);
-  }, [editor.data, editor.completed, editor.showValues, editor.valueScope]);
+    // Only commit when the numbers actually moved. Without this guard,
+    // setNodePositions would produce a fresh Map reference on every
+    // render, re-trigger this effect, and spin React into a
+    // "Maximum update depth exceeded" loop.
+    setNodePositions((prev) =>
+      nodeBoxesEqual(prev, positions) ? prev : positions,
+    );
+  }, [editor.data, editor.completed, editor.showValues, editor.valueScope, editor.displayUnits]);
 
   const activeNodeId = editor.hoveredNodeId ?? editor.selectedNodeId;
 
@@ -414,7 +442,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const fitToMatches = (ids: string[]) => {
     const boxes = ids
       .map((id) => nodePositions.get(id))
-      .filter((p): p is { x: number; y: number; width: number; height: number } => Boolean(p));
+      .filter((p): p is NodeBox => Boolean(p));
     if (boxes.length === 0) return;
 
     const left = Math.min(...boxes.map((b) => b.x)) - MATCH_BOX_PADDING;
@@ -642,7 +670,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const displayGroup = masterword?.trim() || "Ungrouped";
   const displayGroupIsReal = Boolean(masterword && masterword.trim());
 
-  // The currently selected node (if any), used by popup + toolbar buttons.
+  // Currently selected node (if any), used by popup + toolbar buttons.
   const selectedNode =
     editor.selectedNodeId && rootNode
       ? findNodeById(rootNode, editor.selectedNodeId)
@@ -650,6 +678,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const selectedIsLeaf = !!selectedNode && (selectedNode.children ?? []).length === 0;
   const selectedHasValue =
     !!selectedNode && (selectedNode.value !== undefined || selectedNode.area !== undefined);
+
+  // Effective def for the selected leaf, if any.
+  const selectedDef: ValueDef | null = selectedNode && selectedIsLeaf
+    ? resolveNodeValueDef(selectedNode, editor.defaultValueDef)
+    : null;
 
   // Helper: collect tasks assigned to a person, in depth-first tree order
   const getPersonTasks = (personId: string): ProcessNode[] => {
@@ -722,7 +755,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
           {editor.data && editor.showValues && rootValueResult && rootValueResult.value !== null && (
             <div className="text-xs text-gray-500">
-              {editor.valueDef.label}: {formatValue(rootValueResult.value, editor.valueDef, editor.displayUnit)}
+              {editor.defaultValueDef.label}: {formatValue(
+                rootValueResult.value,
+                editor.defaultValueDef,
+                unitForType(editor.defaultValueDef, editor.displayUnits),
+              )}
               {rootValueResult.partial ? " (partial)" : ""}
             </div>
           )}
@@ -939,8 +976,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 + Add
               </button>
 
-              {/* VALUE TOGGLE — off by default; on scopes the value lines
-                  to the currently-selected node's subtree. */}
+              {/* VALUE TOGGLE */}
               <button
                 onClick={editor.toggleValues}
                 title={
@@ -963,25 +999,23 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   : "Values"}
               </button>
 
-              {/* QUICK "ADD VALUE" — visible when a leaf is selected.
-                  One-click path: turns the toggle on, scopes to that
-                  leaf, opens the editor. Works even on documents that
-                  have never used the value feature. */}
+              {/* QUICK "ADD VALUE" for the selected leaf */}
               {editor.data && selectedIsLeaf && (
                 <button
                   onClick={() => editor.addValueToNode(editor.selectedNodeId!)}
                   title={
                     selectedHasValue
-                      ? `Edit the ${editor.valueDef.label.toLowerCase()} on this process`
-                      : `Add a ${editor.valueDef.label.toLowerCase()} to this process`
+                      ? `Edit the ${selectedDef?.label.toLowerCase() ?? "value"} on this process`
+                      : `Add a ${selectedDef?.label.toLowerCase() ?? "value"} to this process`
                   }
                   className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
                 >
-                  {selectedHasValue ? `Edit ${editor.valueDef.label}` : `+ ${editor.valueDef.label}`}
+                  {selectedHasValue
+                    ? `Edit ${selectedDef?.label ?? "Value"}`
+                    : `+ ${selectedDef?.label ?? "Value"}`}
                 </button>
               )}
 
-              {/* VALUE PANEL — only meaningful when the toggle is on. */}
               <button
                 onClick={() => editor.setShowMetricManager(true)}
                 disabled={!editor.showValues}
@@ -1132,32 +1166,53 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
                 {/* Add-or-edit the value on this leaf. Works regardless
                     of whether the toggle is currently on. */}
-                {editor.selectedNodeId !== "root" &&
-                  (findNodeById(rootNode, editor.selectedNodeId)?.children?.length ?? 0) === 0 && (
-                    <button
-                      onClick={() => {
-                        const n = findNodeById(rootNode, editor.selectedNodeId!);
-                        const base = n?.value ?? n?.area;
-                        if (base === undefined) {
-                          editor.addValueToNode(editor.selectedNodeId!);
-                        } else {
-                          const shown = String(
-                            Math.round(
-                              base * resolveUnit(editor.valueDef, editor.displayUnit).fromBase * 1e6
-                            ) / 1e6
-                          );
-                          editor.openEditor(editor.selectedNodeId!, "value", shown);
-                        }
-                      }}
-                      className={`${btnGhost} h-7 px-2 text-xs`}
-                    >
-                      {(() => {
-                        const n = findNodeById(rootNode, editor.selectedNodeId!);
-                        const has = n?.value !== undefined || n?.area !== undefined;
-                        return `${has ? "Edit" : "Add"} ${editor.valueDef.label}`;
-                      })()}
-                    </button>
-                  )}
+                {editor.selectedNodeId !== "root" && selectedIsLeaf && (
+                  <button
+                    onClick={() => {
+                      const n = findNodeById(rootNode, editor.selectedNodeId!);
+                      const base = n?.value ?? n?.area;
+                      if (base === undefined) {
+                        editor.addValueToNode(editor.selectedNodeId!);
+                      } else {
+                        const d = resolveNodeValueDef(n!, editor.defaultValueDef);
+                        const u = unitForType(d, editor.displayUnits);
+                        const shown = String(
+                          Math.round(base * resolveUnit(d, u).fromBase * 1e6) / 1e6
+                        );
+                        editor.openEditor(editor.selectedNodeId!, "value", shown);
+                      }
+                    }}
+                    className={`${btnGhost} h-7 px-2 text-xs`}
+                  >
+                    {selectedHasValue ? `Edit ${selectedDef?.label ?? "Value"}` : `Add ${selectedDef?.label ?? "Value"}`}
+                  </button>
+                )}
+
+                {/* Value type dropdown for the selected leaf */}
+                {editor.selectedNodeId !== "root" && selectedIsLeaf && (
+                  <select
+                    value={selectedNode?.valueType ?? ""}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === "") {
+                        // Clear the per-node override → fall back to doc default
+                        if (!selectedNode) return;
+                        const updated = { ...selectedNode };
+                        delete updated.valueType;
+                        editor.setNodeValueType(editor.selectedNodeId!, "");
+                      } else {
+                        editor.setNodeValueType(editor.selectedNodeId!, next);
+                      }
+                    }}
+                    className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 h-7"
+                    title="Value type for this process"
+                  >
+                    <option value="">Default ({editor.defaultValueDef.label})</option>
+                    {Object.entries(VALUE_PRESETS).map(([id, p]) => (
+                      <option key={id} value={id}>{p.label}</option>
+                    ))}
+                  </select>
+                )}
 
                 {editor.selectedNodeId !== "root" && (
                   <button
@@ -1337,18 +1392,17 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* VALUE SCOPE HINT — small floating chip so the user knows
-            which subtree is currently showing values. */}
+        {/* VALUE SCOPE HINT */}
         {editor.showValues && editor.data && (
           <div className="absolute bottom-4 left-4 z-[115] flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5 shadow-sm no-print max-w-[80vw]">
             <span className="text-[11px] font-medium text-emerald-800 truncate">
               {editor.valueScope === "root"
-                ? `Values visible everywhere · ${editor.valueDef.label}`
+                ? `Values visible everywhere`
                 : `Values scoped to “${
                     editor.valueScope && rootNode
                       ? findNodeById(rootNode, editor.valueScope)?.label ?? editor.valueScope
                       : "?"
-                  }” · ${editor.valueDef.label}`}
+                  }”`}
             </span>
             <button
               onClick={() => editor.setValueScope(editor.valueScope === "root" ? null : "root")}
@@ -1364,15 +1418,14 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* FIRST-TIME HINT — when the feature is on but no leaf anywhere
-            has a value yet, tell the user how to start. */}
+        {/* FIRST-TIME HINT */}
         {editor.showValues && editor.data && !editor.documentHasValue && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[115] bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 shadow-sm no-print max-w-[90vw] text-center">
             <div className="text-[11px] font-medium text-indigo-800">
               Values are on. Click{" "}
-              <span className="font-semibold">“+ add {editor.valueDef.label.toLowerCase()}”</span>{" "}
+              <span className="font-semibold">“+ add {editor.defaultValueDef.label.toLowerCase()}”</span>{" "}
               on any leaf — or select a leaf and use{" "}
-              <span className="font-semibold">“+ {editor.valueDef.label}”</span> in the toolbar.
+              <span className="font-semibold">“+ {editor.defaultValueDef.label}”</span> in the toolbar.
             </div>
           </div>
         )}
@@ -1460,8 +1513,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 completed={editor.completed}
                 onToggleComplete={editor.toggleComplete}
                 onEditNode={editor.openEditor}
-                valueDef={editor.valueDef}
-                displayUnit={editor.displayUnit}
+                defaultValueDef={editor.defaultValueDef}
+                displayUnits={editor.displayUnits}
                 valuesVisible={editor.showValues}
                 inValueScope={editor.showValues && editor.valueScope === "root"}
                 valueScopeRootId={editor.valueScope}
@@ -1488,81 +1541,115 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       </main>
 
       {/* EDIT MODAL */}
-      {editor.editingNodeId && (
-        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">
-              Edit{" "}
-              {editor.editingField === "label"
-                ? "Title"
-                : editor.editingField === "description"
-                  ? "Description"
-                  : editor.valueDef.label}
-            </h3>
-            {editor.editingField === "label" ? (
-              <input
-                autoFocus
-                type="text"
-                value={editor.editingValue}
-                onChange={(e) => editor.setEditingValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") editor.submitEditor();
-                }}
-                className={`${inputBase} mb-4`}
-                placeholder="Enter title"
-              />
-            ) : editor.editingField === "value" ? (
-              (() => {
-                const u = resolveUnit(editor.valueDef, editor.displayUnit);
-                return (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <input
-                        autoFocus
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={editor.editingValue}
-                        onChange={(e) => editor.setEditingValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") editor.submitEditor();
-                        }}
-                        className={inputBase}
-                        placeholder="e.g. 24.5"
-                      />
-                      <span className="shrink-0 text-sm text-gray-500 font-medium min-w-[32px]">
-                        {u.symbol || "—"}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1 mb-4">
-                      Value in {u.symbol || "no unit"}. Leave empty to remove {editor.valueDef.label.toLowerCase()} from this process.
-                    </p>
-                  </>
-                );
-              })()
-            ) : (
-              <textarea
-                autoFocus
-                value={editor.editingValue}
-                onChange={(e) => editor.setEditingValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    editor.submitEditor();
-                  }
-                }}
-                rows={5}
-                className={`${inputBase} mb-4 resize-vertical`}
-                placeholder="Enter description"
-              />
-            )}
-            <div className="flex justify-end gap-2">
-              <button onClick={editor.closeEditor} className={`${btnOutline} h-10 px-4 text-sm`}>Cancel</button>
-              <button onClick={editor.submitEditor} className={`${btnPrimary} h-10 px-4 text-sm`}>Done</button>
+      {editor.editingNodeId && (() => {
+        const editingNode = rootNode ? findNodeById(rootNode, editor.editingNodeId) : null;
+        const editingDef = editingNode
+          ? resolveNodeValueDef(editingNode, editor.defaultValueDef)
+          : editor.defaultValueDef;
+        const editingUnit = unitForType(editingDef, editor.displayUnits);
+        return (
+          <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print" onClick={editor.closeEditor}>
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base sm:text-lg font-semibold mb-4 text-gray-900">
+                Edit{" "}
+                {editor.editingField === "label"
+                  ? "Title"
+                  : editor.editingField === "description"
+                    ? "Description"
+                    : editor.editingField === "factor1"
+                      ? (editingDef.factorLabels?.[0] ?? "Factor 1")
+                      : editor.editingField === "factor2"
+                        ? (editingDef.factorLabels?.[1] ?? "Factor 2")
+                        : editingDef.label}
+              </h3>
+              {editor.editingField === "label" ? (
+                <input
+                  autoFocus
+                  type="text"
+                  value={editor.editingValue}
+                  onChange={(e) => editor.setEditingValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") editor.submitEditor();
+                  }}
+                  className={`${inputBase} mb-4`}
+                  placeholder="Enter title"
+                />
+              ) : editor.editingField === "value" ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={editor.editingValue}
+                      onChange={(e) => editor.setEditingValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") editor.submitEditor();
+                      }}
+                      className={inputBase}
+                      placeholder="e.g. 24.5"
+                    />
+                    <span className="shrink-0 text-sm text-gray-500 font-medium min-w-[32px]">
+                      {resolveUnit(editingDef, editingUnit).symbol || "—"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1 mb-4">
+                    Value in {resolveUnit(editingDef, editingUnit).symbol || "no unit"}. Leave empty to remove {editingDef.label.toLowerCase()} from this process
+                    {hasFactors(editingDef) ? " and its factors." : "."}
+                  </p>
+                </>
+              ) : editor.editingField === "factor1" || editor.editingField === "factor2" ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={editor.editingValue}
+                      onChange={(e) => editor.setEditingValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") editor.submitEditor();
+                      }}
+                      className={inputBase}
+                      placeholder="e.g. 4"
+                    />
+                    <span className="shrink-0 text-sm text-gray-500 font-medium min-w-[32px]">
+                      {resolveUnit(editingDef, editingUnit).factorSymbol ?? editingDef.factorUnit ?? "—"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1 mb-4">
+                    {editor.editingField === "factor1"
+                      ? editingDef.factorLabels?.[0]
+                      : editingDef.factorLabels?.[1]}{" "}
+                    in {resolveUnit(editingDef, editingUnit).factorSymbol ?? editingDef.factorUnit ?? "no unit"}. When both factors are filled, the {editingDef.label.toLowerCase()} is computed automatically.
+                  </p>
+                </>
+              ) : (
+                <textarea
+                  autoFocus
+                  value={editor.editingValue}
+                  onChange={(e) => editor.setEditingValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      editor.submitEditor();
+                    }
+                  }}
+                  rows={5}
+                  className={`${inputBase} mb-4 resize-vertical`}
+                  placeholder="Enter description"
+                />
+              )}
+              <div className="flex justify-end gap-2">
+                <button onClick={editor.closeEditor} className={`${btnOutline} h-10 px-4 text-sm`}>Cancel</button>
+                <button onClick={editor.submitEditor} className={`${btnPrimary} h-10 px-4 text-sm`}>Done</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ADD PROCESS MODAL */}
       {editor.showAddModal && (
@@ -1913,7 +2000,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         </div>
       )}
 
-      {/* VALUE PANEL (opened by the Units button, gated on the toggle) */}
+      {/* VALUE PANEL */}
       {editor.showMetricManager && editor.showValues && (
         <div
           className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
@@ -1928,14 +2015,16 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               Pick what the number means and which unit to show it in — the sum on each parent updates automatically. Stored values never change when you switch units.
             </p>
 
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">What it is</label>
-            <div className="flex flex-wrap gap-1.5 mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Default type (for new leaves)
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
               {Object.entries(VALUE_PRESETS).map(([key, preset]) => {
-                const isCurrent = editor.valueDef.label === preset.label;
+                const isCurrent = editor.defaultValueDef.id === preset.id;
                 return (
                   <button
                     key={key}
-                    onClick={() => editor.setValueDef(preset)}
+                    onClick={() => editor.setDefaultValueType(key)}
                     className={`px-2.5 py-1 rounded-lg text-xs transition-colors ${
                       isCurrent
                         ? "bg-indigo-600 text-white"
@@ -1947,22 +2036,60 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 );
               })}
             </div>
-
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Show it in</label>
-            <select
-              value={editor.displayUnit}
-              onChange={(e) => editor.setDisplayUnit(e.target.value)}
-              className={`${inputBase} mb-2`}
-            >
-              {editor.valueDef.units.map((u) => (
-                <option key={u.symbol} value={u.symbol}>
-                  {u.symbol || "no unit"}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-400 mb-4">
-              Stored values are in {editor.valueDef.unit}. Switching only changes what you see — nothing on disk is rewritten.
+            <p className="text-[11px] text-gray-400 mb-4">
+              New leaves will use this type. Leaves with their own type keep theirs.
             </p>
+
+            <div className="border-t border-gray-200 pt-4 mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Display unit per type
+              </label>
+              <div className="flex flex-col gap-2">
+                {Object.entries(VALUE_PRESETS).map(([key, preset]) => {
+                  const current = editor.displayUnits[key] ?? preset.unit;
+                  return (
+                    <div key={key} className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-gray-600 truncate">{preset.label}</span>
+                      <select
+                        value={current}
+                        onChange={(e) => editor.setDisplayUnitForType(key, e.target.value)}
+                        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                      >
+                        {preset.units.map((u) => (
+                          <option key={u.symbol} value={u.symbol}>
+                            {u.symbol || "no unit"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-4 mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Apply to all processes
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(VALUE_PRESETS).map(([key, preset]) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      if (window.confirm(`Set every process in this document to "${preset.label}"?`)) {
+                        editor.applyValueTypeToAll(key);
+                      }
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-xs bg-rose-50 text-rose-700 hover:bg-rose-100"
+                  >
+                    All → {preset.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Overwrites every leaf&apos;s type. Use when the whole doc should be one thing.
+              </p>
+            </div>
 
             <div className="flex justify-end">
               <button onClick={() => editor.setShowMetricManager(false)} className={`${btnOutline} h-10 px-4 text-sm`}>
