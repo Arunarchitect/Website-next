@@ -21,6 +21,7 @@ import {
   type ValueDef,
 } from "@/app/process/lib/process-utils";
 import { ReportPdfButton } from "@/app/process/components/ReportPdfButton";
+import { generateIfc } from "@/app/process/lib/ifc-generator";
 
 const DRAG_THRESHOLD = 6;
 
@@ -636,6 +637,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
   const [moveParentMode, setMoveParentMode] = useState<string | null>(null);
 
+  // ─── IFC export options modal ───────────────────────────
+  const [ifcModalOpen, setIfcModalOpen] = useState(false);
+  const [ifcStoreyHeightInput, setIfcStoreyHeightInput] = useState("3");
+  const [ifcWallThicknessInput, setIfcWallThicknessInput] = useState("0.2");
+
   const rootNode = editor.rootNode;
   const rootValueResult = rootNode ? getNodeValue(rootNode) : null;
   const displayGroup = masterword?.trim() || "Ungrouped";
@@ -685,6 +691,67 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   };
 
   const moveParentLabel = moveParentMode && rootNode ? findNodeById(rootNode, moveParentMode)?.label : null;
+
+  // ─── IFC export ───────────────────────────────────────────
+  const runIfcExport = () => {
+    if (!editor.data || !rootNode) return;
+
+    const parsedHeight = Number(ifcStoreyHeightInput);
+    const parsedThickness = Number(ifcWallThicknessInput);
+
+    const storeyHeight =
+      ifcStoreyHeightInput.trim() === "" || !Number.isFinite(parsedHeight) || parsedHeight <= 0
+        ? undefined
+        : parsedHeight;
+
+    const wallThickness =
+      ifcWallThicknessInput.trim() === "" || !Number.isFinite(parsedThickness) || parsedThickness < 0
+        ? undefined
+        : parsedThickness;
+
+    // Scope: selected node wins; falls back to the whole document.
+    const scopeNode =
+      editor.selectedNodeId && editor.selectedNodeId !== "root"
+        ? findNodeById(rootNode, editor.selectedNodeId) ?? rootNode
+        : rootNode;
+
+    try {
+      // If the scope is a subtree, wrap it in a lightweight ProcessData
+      // so the IFC header carries a sensible title.
+      const scopedData =
+        scopeNode.id === "root"
+          ? editor.data
+          : {
+              ...editor.data,
+              title: scopeNode.label,
+              description: scopeNode.description,
+            };
+
+      const ifc = generateIfc(scopedData, scopeNode, { storeyHeight, wallThickness });
+
+      const blob = new Blob([ifc], { type: "application/x-step" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(scopeNode.label || "model")
+        .replace(/[^a-z0-9]+/gi, "-")
+        .toLowerCase()}.ifc`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+
+      setIfcModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      editor.setError(
+        err instanceof Error ? err.message : "Failed to generate IFC.",
+      );
+      setIfcModalOpen(false);
+    }
+  };
 
   return (
     <div
@@ -856,11 +923,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                       // cloudError is already set by the hook
                                     }
                                   }}
-                                  className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${
-                                    isCurrent
-                                      ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200"
-                                      : "hover:bg-gray-50"
-                                  }`}
+                                  className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${isCurrent
+                                    ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200"
+                                    : "hover:bg-gray-50"
+                                    }`}
                                 >
                                   <span className="text-sm text-gray-800 flex items-center gap-1.5 min-w-0">
                                     <span className="truncate">{doc.title || "Untitled Workflow"}</span>
@@ -919,11 +985,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       : "Autosave on — waiting for first save"
                     : "Autosave every 5 minutes to the server"
                 }
-                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${
-                  autosave.enabled
-                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    : "text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${autosave.enabled
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "text-gray-600 hover:bg-gray-100"
+                  }`}
               >
                 {autosave.enabled ? "Auto: On" : "Autosave"}
               </button>
@@ -945,11 +1010,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       : "Values on — showing only in the selected subtree. Click a different node to move the focus, or click to turn off."
                     : "Show values (scoped to the selected subtree)"
                 }
-                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${
-                  editor.showValues
-                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    : "text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`${btnBase} h-8 px-2 text-[11px] shrink-0 sm:h-9 sm:px-2.5 sm:text-xs ${editor.showValues
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "text-gray-600 hover:bg-gray-100"
+                  }`}
               >
                 {editor.showValues
                   ? editor.valueScope === "root"
@@ -1004,6 +1068,23 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 completed={editor.completed}
                 persons={editor.persons}
               />
+              <button
+                onClick={() => {
+                  if (!editor.data || !rootNode) return;
+                  setIfcStoreyHeightInput("3");
+                  setIfcWallThicknessInput("0.2");
+                  setIfcModalOpen(true);
+                }}
+                disabled={!editor.data}
+                title={
+                  editor.selectedNodeId && editor.selectedNodeId !== "root"
+                    ? `Export IFC for "${findNodeById(rootNode ?? { id: "", label: "" } as ProcessNode, editor.selectedNodeId)?.label ?? "selection"}" only`
+                    : "Export IFC for the whole document"
+                }
+                className={`${btnOutline} h-8 px-2.5 text-xs shrink-0 sm:h-9 sm:px-3 sm:text-sm disabled:opacity-40`}
+              >
+                Export IFC
+              </button>
             </div>
           </div>
 
@@ -1127,12 +1208,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                           current === null
                             ? ""
                             : String(
-                                Math.round(
-                                  current *
-                                    resolveUnit(def, unit).fromBase *
-                                    1e6,
-                                ) / 1e6,
-                              );
+                              Math.round(
+                                current *
+                                resolveUnit(def, unit).fromBase *
+                                1e6,
+                              ) / 1e6,
+                            );
                         setOverrideTarget(displayValue);
                         setOverrideError("");
                         setOverrideInfo(null);
@@ -1260,11 +1341,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     </button>
                     <button
                       onClick={() => editor.toggleImportant(editor.selectedNodeId!)}
-                      className={`px-2 py-1 rounded-lg text-xs transition-colors ${
-                        findNodeById(rootNode, editor.selectedNodeId!)?.important
-                          ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                          : "bg-amber-50 text-amber-600 hover:bg-amber-100"
-                      }`}
+                      className={`px-2 py-1 rounded-lg text-xs transition-colors ${findNodeById(rootNode, editor.selectedNodeId!)?.important
+                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                        : "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                        }`}
                       title="Mark this process as important"
                     >
                       {findNodeById(rootNode, editor.selectedNodeId!)?.important ? "★ Important" : "☆ Mark Important"}
@@ -1369,11 +1449,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
             <span className="text-[11px] font-medium text-emerald-800 truncate">
               {editor.valueScope === "root"
                 ? `Values visible everywhere`
-                : `Values scoped to “${
-                    editor.valueScope && rootNode
-                      ? findNodeById(rootNode, editor.valueScope)?.label ?? editor.valueScope
-                      : "?"
-                  }”`}
+                : `Values scoped to “${editor.valueScope && rootNode
+                  ? findNodeById(rootNode, editor.valueScope)?.label ?? editor.valueScope
+                  : "?"
+                }”`}
             </span>
             <button
               onClick={() => editor.setValueScope(editor.valueScope === "root" ? null : "root")}
@@ -1927,11 +2006,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       setFilterPersonId(next);
                       setExpandedTaskIds(new Set());
                     }}
-                    className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
-                      filterPersonId === person.id
-                        ? "bg-indigo-100 text-indigo-700"
-                        : "text-gray-500 hover:bg-gray-100"
-                    }`}
+                    className={`shrink-0 text-xs font-medium px-2 py-1 rounded-md transition-colors ${filterPersonId === person.id
+                      ? "bg-indigo-100 text-indigo-700"
+                      : "text-gray-500 hover:bg-gray-100"
+                      }`}
                     title="Filter tasks assigned to this person"
                   >
                     Tasks
@@ -1996,9 +2074,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                             return (
                               <div
                                 key={task.id}
-                                className={`rounded-lg bg-gray-50 border ${
-                                  isComplete ? "border-emerald-200" : "border-gray-100"
-                                }`}
+                                className={`rounded-lg bg-gray-50 border ${isComplete ? "border-emerald-200" : "border-gray-100"
+                                  }`}
                               >
                                 <div className="flex items-center justify-between px-2.5 py-1.5">
                                   <button
@@ -2014,11 +2091,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                     className="flex-1 min-w-0 text-left text-sm text-gray-700 hover:text-indigo-700 flex items-center gap-1.5"
                                   >
                                     <span
-                                      className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${
-                                        isComplete
-                                          ? "bg-emerald-500 text-white"
-                                          : "bg-gray-200 text-gray-400"
-                                      }`}
+                                      className={`shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isComplete
+                                        ? "bg-emerald-500 text-white"
+                                        : "bg-gray-200 text-gray-400"
+                                        }`}
                                       title={isComplete ? "Completed" : "Not completed"}
                                     >
                                       {isComplete ? "✓" : "○"}
@@ -2093,9 +2169,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     <button
                       key={person.id}
                       onClick={() => editor.toggleNodeAssignment(editor.assignPopupNodeId!, person.id)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left transition-colors ${
-                        isAssigned ? "bg-indigo-50 text-indigo-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
-                      }`}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm text-left transition-colors ${isAssigned ? "bg-indigo-50 text-indigo-700" : "bg-gray-50 text-gray-700 hover:bg-gray-100"
+                        }`}
                     >
                       <span>{person.name}</span>
                       {isAssigned && <span className="text-xs">✓ assigned</span>}
@@ -2139,11 +2214,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   <button
                     key={key}
                     onClick={() => editor.setDefaultValueType(key)}
-                    className={`px-2.5 py-1 rounded-lg text-xs transition-colors ${
-                      isCurrent
-                        ? "bg-indigo-600 text-white"
-                        : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                    }`}
+                    className={`px-2.5 py-1 rounded-lg text-xs transition-colors ${isCurrent
+                      ? "bg-indigo-600 text-white"
+                      : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                      }`}
                   >
                     {preset.label} ({preset.unit || "—"})
                   </button>
@@ -2230,17 +2304,15 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
             <div className="flex gap-2 mb-4 bg-gray-100 rounded-xl p-1">
               <button
                 onClick={() => setSaveMode("local")}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  saveMode === "local" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
-                }`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${saveMode === "local" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  }`}
               >
                 My device
               </button>
               <button
                 onClick={() => setSaveMode("server")}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  saveMode === "server" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
-                }`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${saveMode === "server" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                  }`}
               >
                 Server
               </button>
@@ -2381,6 +2453,70 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 className={`${btnPrimary} h-10 px-4 text-sm`}
               >
                 {autosave.verifying ? "Checking…" : "Enable"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IFC EXPORT OPTIONS MODAL */}
+      {ifcModalOpen && (
+        <div
+          className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+          onClick={() => setIfcModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-sm mx-0 sm:mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base sm:text-lg font-semibold mb-1 text-gray-900">Export IFC</h3>
+            <p className="text-xs text-gray-500 mb-4">Leave a field blank to use the default.</p>
+
+            <div className="mb-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Floor height (m)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.1"
+                value={ifcStoreyHeightInput}
+                onChange={(e) => setIfcStoreyHeightInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runIfcExport();
+                }}
+                className={inputBase}
+                placeholder="3"
+                autoFocus
+              />
+              <p className="text-xs text-gray-400 mt-1">Default: 3 m</p>
+            </div>
+
+            <div className="mb-5">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Wall thickness / gap (m)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={ifcWallThicknessInput}
+                onChange={(e) => setIfcWallThicknessInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runIfcExport();
+                }}
+                className={inputBase}
+                placeholder="0.2"
+              />
+              <p className="text-xs text-gray-400 mt-1">Default: 0.2 m (20 cm)</p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setIfcModalOpen(false)} className={`${btnOutline} h-10 px-4 text-sm`}>
+                Cancel
+              </button>
+              <button onClick={runIfcExport} className={`${btnPrimary} h-10 px-4 text-sm`}>
+                Export
               </button>
             </div>
           </div>
