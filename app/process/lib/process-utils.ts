@@ -256,12 +256,6 @@ export const VALUE_PRESETS: Record<string, ValueDef> = {
 
 export const DEFAULT_VALUE_DEF: ValueDef = VALUE_PRESETS.area;
 
-/**
- * Resolve the ValueDef a node should use. Priority:
- *   1. node.valueType (must be a known preset id)
- *   2. document def (data.valueDef)
- *   3. DEFAULT_VALUE_DEF
- */
 export function resolveNodeValueDef(
   node: ProcessNode,
   documentDef: ValueDef | undefined,
@@ -272,7 +266,6 @@ export function resolveNodeValueDef(
   return resolveValueDef(documentDef);
 }
 
-/** Safe resolution for a document-level def. */
 export function resolveValueDef(def: ValueDef | undefined): ValueDef {
   return def ?? DEFAULT_VALUE_DEF;
 }
@@ -289,7 +282,6 @@ export function resolveUnit(def: ValueDef, chosenSymbol?: string): UnitOption {
   return baseOpt ?? def.units[0];
 }
 
-/** The unit symbol chosen for a value type, given the document's prefs. */
 export function unitForType(
   def: ValueDef,
   displayUnits: Record<string, string> | undefined,
@@ -306,7 +298,6 @@ export function toBase(displayValue: number, def: ValueDef, chosenSymbol?: strin
   return displayValue * resolveUnit(def, chosenSymbol).toBase;
 }
 
-/** Factor conversion: base factor value → display factor value. */
 export function factorToDisplay(
   baseFactor: number,
   def: ValueDef,
@@ -317,7 +308,6 @@ export function factorToDisplay(
   return baseFactor * k;
 }
 
-/** Factor conversion: display factor value → base factor value. */
 export function factorFromDisplay(
   displayFactor: number,
   def: ValueDef,
@@ -367,9 +357,6 @@ export function getNodeValue(node: ProcessNode): ValueResult {
   return { value: sum, partial: withValue.length < children.length };
 }
 
-/**
- * Format a BASE-unit value for display in the currently-chosen unit.
- */
 export function formatValue(
   baseValue: number,
   def: ValueDef,
@@ -386,7 +373,6 @@ export function formatValue(
   return def.unitPosition === "prefix" ? `${u}${text}` : `${text} ${u}`;
 }
 
-/** Format a factor value for display in the current factor unit. */
 export function formatFactor(
   baseFactor: number,
   def: ValueDef,
@@ -399,9 +385,6 @@ export function formatFactor(
   return u ? `${text} ${u}` : text;
 }
 
-/**
- * Does this document use the value feature at all?
- */
 export function hasAnyValue(root: ProcessNode): boolean {
   if (typeof root.value === "number") return true;
   if (typeof root.area === "number") return true;
@@ -411,7 +394,6 @@ export function hasAnyValue(root: ProcessNode): boolean {
   return false;
 }
 
-/** One-way migration: legacy `area` → `value`. Run on load. */
 export function migrateNodeValue(node: ProcessNode): ProcessNode {
   const { area, ...rest } = node;
   return {
@@ -423,12 +405,10 @@ export function migrateNodeValue(node: ProcessNode): ProcessNode {
   };
 }
 
-/** Migrate the doc-level `displayUnit` string → `displayUnits` record. */
 export function migrateDisplayUnits(data: ProcessData): ProcessData {
   const { displayUnit, displayUnits, ...rest } = data;
   if (displayUnits) return { ...rest, displayUnits };
   if (displayUnit) {
-    // Pre-change, the doc was implicitly Area. Carry the old unit over.
     return { ...rest, displayUnits: { area: displayUnit } };
   }
   return rest;
@@ -481,6 +461,113 @@ export function scopeHasAnyValue(root: ProcessNode, scope: ValueScope): boolean 
   const scopeRoot = scope === "root" ? root : findNodeById(root, scope);
   if (!scopeRoot) return false;
   return hasAnyValue(scopeRoot);
+}
+
+/* =========================================================
+   RESCALE SUBTREE
+   ---------------------------------------------------------
+   Given a node and a target NET value (in the document's base
+   unit — e.g. m² for Area), return a new node where every leaf
+   underneath has been scaled so the subtree's total equals the
+   target.
+
+   Leaf scaling preserves the L:B aspect ratio by using
+     k = sqrt(target / old)
+   applied to BOTH factors, so (L × k) × (B × k) = (L × B) × k²
+   = target × (leaf share), and the ratio L:B is unchanged.
+========================================================= */
+
+export type RescaleResult = {
+  node: ProcessNode;
+  /** True when the rescale actually changed something. */
+  applied: boolean;
+  /** Human-readable reason for not applying, when applied === false. */
+  reason?: string;
+  /** The subtree's net value before rescaling (base unit). */
+  oldTotal: number | null;
+  /** The subtree's net value after rescaling (base unit). */
+  newTotal: number | null;
+  /** Number of leaves whose values were changed. */
+  leavesChanged: number;
+};
+
+export function rescaleSubtree(
+  node: ProcessNode,
+  target: number,
+): RescaleResult {
+  if (!Number.isFinite(target) || target < 0) {
+    return {
+      node,
+      applied: false,
+      reason: "Target must be a non-negative number.",
+      oldTotal: null,
+      newTotal: null,
+      leavesChanged: 0,
+    };
+  }
+
+  const oldTotal = getNodeValue(node).value;
+  if (oldTotal === null) {
+    return {
+      node,
+      applied: false,
+      reason: "This subtree has no values to scale.",
+      oldTotal,
+      newTotal: null,
+      leavesChanged: 0,
+    };
+  }
+  if (oldTotal === 0) {
+    return {
+      node,
+      applied: false,
+      reason: "Current total is zero — nothing to scale.",
+      oldTotal,
+      newTotal: null,
+      leavesChanged: 0,
+    };
+  }
+
+  const ratio = target / oldTotal;
+  const k = Math.sqrt(ratio);
+
+  let leavesChanged = 0;
+
+  const walk = (n: ProcessNode): ProcessNode => {
+    const children = n.children ?? [];
+    if (children.length > 0) {
+      return { ...n, children: children.map(walk) };
+    }
+
+    const hadValue =
+      typeof n.value === "number"
+        ? n.value
+        : typeof n.area === "number"
+          ? n.area
+          : null;
+    if (hadValue === null || hadValue === 0) return n;
+
+    const next: ProcessNode = { ...n };
+    next.value = hadValue * ratio;
+
+    if (typeof n.factor1 === "number") next.factor1 = n.factor1 * k;
+    if (typeof n.factor2 === "number") next.factor2 = n.factor2 * k;
+    delete next.area;
+
+    leavesChanged++;
+    return next;
+  };
+
+  const newNode = walk(node);
+
+  return {
+    node: newNode,
+    applied: leavesChanged > 0,
+    reason: leavesChanged === 0 ? "No leaves with values to scale." : undefined,
+    oldTotal,
+    newTotal: getNodeValue(newNode).value,
+    leavesChanged,
+  };
 }
 
 /* =========================================================
@@ -647,11 +734,6 @@ function fmtNumber(n: number, p: number): string {
   return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(p);
 }
 
-/**
- * Format an area (stored in m²) for printing. Returns both the primary
- * value in the chosen unit and the secondary value in the other unit,
- * so a report can render "120 sqft (11.1 m²)".
- */
 export function formatAreaPair(
   sqm: number,
   unit: "sqft" | "sqm",
@@ -669,11 +751,6 @@ export function formatAreaPair(
   };
 }
 
-/**
- * Flatten the tree to leaves, in depth-first order, with each leaf's
- * number path (its position in the tree). Used to render the detailed
- * space table.
- */
 export function leafRows(
   root: ProcessNode,
 ): { node: ProcessNode; path: number[]; depth: number }[] {
@@ -690,14 +767,6 @@ export function leafRows(
   return out;
 }
 
-/**
- * Flatten the tree to one row per node — parents AND leaves — in
- * depth-first order, with each node's number path and depth.
- *
- * Used by the Space report so parents like "Utility" appear above
- * their children. A parent's value is its derived sum (Σ of children),
- * which the caller renders just like a leaf value.
- */
 export function allRows(
   root: ProcessNode,
 ): { node: ProcessNode; path: number[]; depth: number; isLeaf: boolean }[] {
@@ -711,10 +780,6 @@ export function allRows(
   return out;
 }
 
-/**
- * Group leaves by their `valueType` (falling back to a default when a
- * leaf hasn't picked one). Returns an ordered map.
- */
 export function groupLeavesByType(
   root: ProcessNode,
   defaultType: string,

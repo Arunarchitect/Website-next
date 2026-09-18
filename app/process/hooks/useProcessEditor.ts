@@ -18,11 +18,13 @@ import {
   factorFromDisplay,
   migrateProcessData,
   reverseEdgeExists,
+  rescaleSubtree,
   scopeHasAnyValue,
+  type RescaleResult,
 } from "@/app/process/lib/process-utils";
 import sampleProcess from "@/app/process/json/process.json";
 
-// ─── Pure tree helpers ───────────────────────────────────────────git 
+// ─── Pure tree helpers ───────────────────────────────────────────
 
 export function findNodeById(root: ProcessNode, id: string): ProcessNode | null {
   return findNodeInTree(root, id);
@@ -323,25 +325,19 @@ export function useProcessEditor(initialData: ProcessData) {
   const [newProcess, setNewProcess] = useState({ label: "", description: "", position: 0 });
   const [addError, setAddError] = useState("");
 
-  // ─── People ────────────────────────────────────────────────
   const [showPersonManager, setShowPersonManager] = useState(false);
   const [newPersonName, setNewPersonName] = useState("");
   const [assignPopupNodeId, setAssignPopupNodeId] = useState<string | null>(null);
 
-  // ─── Value panel ───────────────────────────────────────────
   const [showMetricManager, setShowMetricManager] = useState(false);
 
-  // ─── Value toggle + scope ──────────────────────────────────
   const [showValues, setShowValues] = useState(false);
   const [valueScope, setValueScopeState] = useState<ValueScope>(null);
 
-  // ─── Invalid-upload fallback ─────────────────────────────────
   const [invalidUpload, setInvalidUpload] = useState<{ filename: string } | null>(null);
 
-  // ─── Load tracking ───────────────────────────────────────────
   const [loadVersion, setLoadVersion] = useState(0);
 
-  // ─── Undo / redo history ──────────────────────────────────────
   const [past, setPast] = useState<Snapshot[]>([]);
   const [future, setFuture] = useState<Snapshot[]>([]);
   const pastRef = useRef<Snapshot[]>([]);
@@ -468,7 +464,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const totalLeaves = rootNode ? getLeafIds(rootNode).length : 0;
   const completedLeaves = completed.size;
 
-  // ─── Document-level default def (used by panel, "apply all") ─────
   const defaultValueDef: ValueDef = resolveValueDef(data?.valueDef);
   const displayUnits: Record<string, string> = data?.displayUnits ?? {};
   const documentHasValue: boolean = rootNode ? hasAnyValue(rootNode) : false;
@@ -490,11 +485,6 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  // ─── Apply value type to all leaves ───────────────────────────────
-  /**
-   * Set the value type on EVERY leaf in the document. Also updates the
-   * document's default value type so future leaves inherit it.
-   */
   const applyValueTypeToAll = (presetId: string) => {
     if (!data) return;
     const preset = VALUE_PRESETS[presetId];
@@ -505,7 +495,6 @@ export function useProcessEditor(initialData: ProcessData) {
     const rewrite = (node: ProcessNode): ProcessNode => {
       const children = node.children ?? [];
       if (children.length === 0) {
-        // Leaf: set its value type
         return { ...node, valueType: presetId };
       }
       return { ...node, children: children.map(rewrite) };
@@ -518,7 +507,6 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  /** Set the value type on a single leaf. */
   const setNodeValueType = (nodeId: string, presetId: string) => {
     if (!data || !rootNode) return;
     if (!VALUE_PRESETS[presetId]) return;
@@ -539,7 +527,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setData({ ...data, children: data.children ? data.children.map(replace) : undefined });
   };
 
-  // ─── Value toggle + scope ──────────────────────────────────────────
   const valueScopeRoot: ProcessNode | null = (() => {
     if (!showValues || !valueScope || !rootNode) return null;
     if (valueScope === "root") return rootNode;
@@ -564,7 +551,6 @@ export function useProcessEditor(initialData: ProcessData) {
 
   const scopeHasValue = rootNode ? scopeHasAnyValue(rootNode, valueScope) : false;
 
-  // ─── Node replacement helper ───────────────────────────────────────
   const replaceNodeInTree = (nodeId: string, updated: ProcessNode) => {
     if (!data) return;
     const replace = (root: ProcessNode): ProcessNode => {
@@ -576,7 +562,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setData({ ...data, children: data.children ? data.children.map(replace) : undefined });
   };
 
-  // ─── Factor setters ───────────────────────────────────────────────
   const setNodeFactor = (
     nodeId: string,
     which: 1 | 2,
@@ -597,7 +582,6 @@ export function useProcessEditor(initialData: ProcessData) {
     const parsed = trimmed === "" ? undefined : Number(trimmed);
     if (parsed !== undefined && (!Number.isFinite(parsed) || parsed < 0)) return;
 
-    // Convert from display factor value → base factor value.
     const baseVal = parsed === undefined ? undefined : factorFromDisplay(parsed, def, chosen);
 
     const nextF1 = which === 1 ? baseVal : node.factor1;
@@ -660,7 +644,56 @@ export function useProcessEditor(initialData: ProcessData) {
     replaceNodeInTree(nodeId, updated);
   };
 
-  // ─── Inline editor ────────────────────────────────────────────────
+  /**
+   * Set a subtree's net value to `target` (in the document's base
+   * unit — m² for Area). Every leaf under `nodeId` is scaled
+   * proportionally so their L:B aspect ratios are preserved.
+   *
+   * Callers with a display value (e.g. ft²) must convert to base
+   * first via `value * resolveUnit(def, chosen).toBase`.
+   */
+  const setSubtreeValue = (nodeId: string, target: number): RescaleResult => {
+    if (!data || !rootNode) {
+      return {
+        node: {} as ProcessNode,
+        applied: false,
+        reason: "No document loaded.",
+        oldTotal: null,
+        newTotal: null,
+        leavesChanged: 0,
+      };
+    }
+
+    const node = findNodeById(rootNode, nodeId);
+    if (!node) {
+      return {
+        node: {} as ProcessNode,
+        applied: false,
+        reason: "Node not found.",
+        oldTotal: null,
+        newTotal: null,
+        leavesChanged: 0,
+      };
+    }
+
+    const result = rescaleSubtree(node, target);
+    if (!result.applied) return result;
+
+    const replace = (root: ProcessNode): ProcessNode => {
+      if (root.id === nodeId) return result.node;
+      if (root.children) return { ...root, children: root.children.map(replace) };
+      return root;
+    };
+
+    pushHistory();
+    setData({
+      ...data,
+      children: data.children ? data.children.map(replace) : undefined,
+    });
+
+    return result;
+  };
+
   const openEditor = (id: string, field: EditingField, currentValue: string) => {
     setEditingNodeId(id);
     setEditingField(field);
@@ -732,7 +765,6 @@ export function useProcessEditor(initialData: ProcessData) {
     openEditor(nodeId, "value", "");
   };
 
-  // ─── Add process ────────────────────────────────────────────
   const getParentInfo = () => {
     if (!data) return { parentLabel: "Root", childCount: 0 };
     if (selectedNodeId) {
@@ -809,7 +841,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setAddError("");
   };
 
-  // ─── Delete / duplicate ────────────────────────────────────
   const deleteNode = (id: string) => {
     if (!data || id === "root") return;
 
@@ -902,7 +933,6 @@ export function useProcessEditor(initialData: ProcessData) {
     setSelectedNodeId(clone.id);
   };
 
-  // ─── Copy / Paste ────────────────────────────────────────────
   const writeClipboardFallback = (envelope: ClipboardEnvelope) => {
     try {
       window.localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(envelope));
@@ -1044,7 +1074,6 @@ export function useProcessEditor(initialData: ProcessData) {
     return () => window.removeEventListener("keydown", handleCopyPasteKeys);
   }, []);
 
-  // ─── Move node up/down among siblings ──────────────────────────
   const moveNodeInTree = (
     root: ProcessNode,
     targetId: string,
@@ -1125,7 +1154,6 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  // ─── Move node to a different parent ───────────────────────────
   const moveNodeToParent = (nodeId: string, newParentId: string) => {
     if (!data || nodeId === "root" || newParentId === nodeId) return;
 
@@ -1169,7 +1197,6 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  // ─── People ────────────────────────────────────────────────
   const addPerson = () => {
     const trimmed = newPersonName.trim();
     if (!trimmed) return;
@@ -1289,7 +1316,6 @@ export function useProcessEditor(initialData: ProcessData) {
   const openAssignPopup = (nodeId: string) => setAssignPopupNodeId(nodeId);
   const closeAssignPopup = () => setAssignPopupNodeId(null);
 
-  // ─── Relations ─────────────────────────────────────────────
   const addRelationRaw = (fromId: string, toId: string, mode: "successor" | "predecessor") => {
     if (!data) return;
     setData((prev) => {
@@ -1438,7 +1464,6 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  // ─── Completion ────────────────────────────────────────────
   const toggleComplete = (node: ProcessNode) => {
     const children = node.children ?? [];
     const isParent = children.length > 0;
@@ -1465,7 +1490,6 @@ export function useProcessEditor(initialData: ProcessData) {
     });
   };
 
-  // ─── Load / Upload / Save ───────────────────────────────────
   const loadData = (json: ProcessData) => {
     const migrated = migrateProcessData(json);
     setInvalidUpload(null);
@@ -1645,7 +1669,7 @@ export function useProcessEditor(initialData: ProcessData) {
     defaultValueDef, displayUnits, documentHasValue,
     setDefaultValueType, setDisplayUnitForType,
     applyValueTypeToAll, setNodeValueType,
-    setNodeFactor, setNodeValue,
+    setNodeFactor, setNodeValue, setSubtreeValue,
     showMetricManager, setShowMetricManager,
     showValues, valueScope, valueScopeRoot,
     toggleValues, setValueScope, scopeHasValue,

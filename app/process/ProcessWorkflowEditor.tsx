@@ -24,7 +24,6 @@ import { ReportPdfButton } from "@/app/process/components/ReportPdfButton";
 
 const DRAG_THRESHOLD = 6;
 
-// ─── Shared button style tokens ───
 const btnBase =
   "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap";
 const btnGhost = `${btnBase} text-gray-600 hover:bg-gray-100`;
@@ -34,7 +33,6 @@ const btnDanger = `${btnBase} bg-red-50 text-red-600 hover:bg-red-100`;
 const inputBase =
   "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition";
 
-// ─── Small inline icons ───
 const IconWrap = ({ children }: { children: React.ReactNode }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     {children}
@@ -65,7 +63,6 @@ const IconSearch = () => (
   <IconWrap><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></IconWrap>
 );
 
-// ─── Search matching helpers ───
 function nodeMatchesSearch(node: ProcessNode, lowerTerm: string): boolean {
   return (
     node.label.toLowerCase().includes(lowerTerm) ||
@@ -89,11 +86,7 @@ const MATCH_BOX_PADDING = 140;
 
 type NodeBox = { x: number; y: number; width: number; height: number };
 
-/** Value-equality check for two position maps — used to avoid redundant state updates. */
-function nodeBoxesEqual(
-  a: Map<string, NodeBox>,
-  b: Map<string, NodeBox>,
-): boolean {
+function nodeBoxesEqual(a: Map<string, NodeBox>, b: Map<string, NodeBox>): boolean {
   if (a.size !== b.size) return false;
   for (const [id, av] of a) {
     const bv = b.get(id);
@@ -106,7 +99,6 @@ function nodeBoxesEqual(
 }
 
 export default function ProcessWorkflowEditor({ masterword }: { masterword?: string }) {
-  // ─── Editing logic ───
   const editor = useProcessEditor({
     title: "Untitled Workflow",
     description: "Start building your process by adding nodes.",
@@ -118,11 +110,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     edgeStyles: {},
   });
 
-  // ─── Cloud sync + autosave ───
   const cloud = useCloudSync(editor.loadData, masterword);
   const autosave = useAutosave(editor.getExportData, cloud.saveToCloud);
 
-  // Save popup state
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<"local" | "server">("server");
   const [passphrase, setPassphrase] = useState("");
@@ -130,16 +120,13 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveFormError, setSaveFormError] = useState("");
 
-  // Admin options
   const [showAdminMaster, setShowAdminMaster] = useState(false);
   const [wantMaster, setWantMaster] = useState(false);
   const [masterKeyInput, setMasterKeyInput] = useState("");
 
-  // Autosave prompt
   const [autosavePromptOpen, setAutosavePromptOpen] = useState(false);
   const [autosavePassphraseInput, setAutosavePassphraseInput] = useState("");
 
-  // People manager
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [editingPersonName, setEditingPersonName] = useState("");
 
@@ -164,10 +151,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     setEditingPersonName("");
   };
 
-  // Loaded doc id
   const [loadedDocId, setLoadedDocId] = useState<string | null>(null);
 
-  // Load dropdown
   const [loadMenuOpen, setLoadMenuOpen] = useState(false);
   const loadBtnRef = useRef<HTMLButtonElement | null>(null);
   const [loadMenuPos, setLoadMenuPos] = useState({ top: 0, left: 0, width: 288 });
@@ -207,7 +192,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [loadMenuOpen]);
 
-  // Toolbar scroll
   const toolbarScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -293,7 +277,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     }
   };
 
-  // ─── View state ───
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -366,10 +349,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       });
     });
 
-    // Only commit when the numbers actually moved. Without this guard,
-    // setNodePositions would produce a fresh Map reference on every
-    // render, re-trigger this effect, and spin React into a
-    // "Maximum update depth exceeded" loop.
     setNodePositions((prev) =>
       nodeBoxesEqual(prev, positions) ? prev : positions,
     );
@@ -377,7 +356,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
   const activeNodeId = editor.hoveredNodeId ?? editor.selectedNodeId;
 
-  // ─── Zoom / Pan ───
   const zoomIn = () => setZoom((v) => Math.min(v * 1.2, 4));
   const zoomOut = () => setZoom((v) => Math.max(v / 1.2, 0.15));
 
@@ -464,7 +442,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.loadVersion]);
 
-  // ─── Search ───
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchMatches, setSearchMatches] = useState<string[]>([]);
@@ -503,7 +480,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     setActiveMatchIndex(null);
   };
 
-  // ─── Pointer handlers ───
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -523,13 +499,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
       const ratio = newZoom / oldZoom;
       const oldPan = panRef.current;
 
-      const newPan = {
+      setZoom(newZoom);
+      setPan({
         x: (mouseX - halfW) * (1 - ratio) + oldPan.x * ratio,
         y: (mouseY - halfH) * (1 - ratio) + oldPan.y * ratio,
-      };
-
-      setZoom(newZoom);
-      setPan(newPan);
+      });
     };
 
     viewport.addEventListener("wheel", handleWheel, { passive: false });
@@ -627,7 +601,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     }
   };
 
-  // ─── Handle node click (including move mode) ───
   const handleNodeClick = (id: string) => {
     if (didDragRef.current) {
       didDragRef.current = false;
@@ -645,7 +618,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     editor.handleNodeClick(id, false);
   };
 
-  // ─── Helper: get parent and index of a node ───
   const getNodeParentAndIndex = (nodeId: string) => {
     const search = (node: ProcessNode, targetId: string): { parent: ProcessNode; index: number } | null => {
       if (!node.children) return null;
@@ -662,7 +634,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     return rootNode ? search(rootNode, nodeId) : null;
   };
 
-  // ─── State for move-to-parent mode ───
   const [moveParentMode, setMoveParentMode] = useState<string | null>(null);
 
   const rootNode = editor.rootNode;
@@ -670,7 +641,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const displayGroup = masterword?.trim() || "Ungrouped";
   const displayGroupIsReal = Boolean(masterword && masterword.trim());
 
-  // Currently selected node (if any), used by popup + toolbar buttons.
   const selectedNode =
     editor.selectedNodeId && rootNode
       ? findNodeById(rootNode, editor.selectedNodeId)
@@ -679,29 +649,33 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const selectedHasValue =
     !!selectedNode && (selectedNode.value !== undefined || selectedNode.area !== undefined);
 
-  // Effective def for the selected leaf, if any.
   const selectedDef: ValueDef | null = selectedNode && selectedIsLeaf
     ? resolveNodeValueDef(selectedNode, editor.defaultValueDef)
     : null;
 
-  // Helper: collect tasks assigned to a person, in depth-first tree order
+  // ─── Override-sum state ───
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideTarget, setOverrideTarget] = useState("");
+  const [overrideError, setOverrideError] = useState("");
+  const [overrideInfo, setOverrideInfo] = useState<{
+    oldTotal: number | null;
+    newTotal: number | null;
+    leavesChanged: number;
+  } | null>(null);
+
   const getPersonTasks = (personId: string): ProcessNode[] => {
     if (!rootNode) return [];
-
     const tasks: ProcessNode[] = [];
-
     const traverse = (node: ProcessNode) => {
       if (node.id !== "root" && node.assignedPersonIds?.includes(personId)) {
         tasks.push(node);
       }
       (node.children ?? []).forEach(traverse);
     };
-
     traverse(rootNode);
     return tasks;
   };
 
-  // Helper: whether a node (task) is fully complete
   const isNodeFullyComplete = (node: ProcessNode): boolean => {
     const children = node.children ?? [];
     if (children.length === 0) {
@@ -712,13 +686,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
   const moveParentLabel = moveParentMode && rootNode ? findNodeById(rootNode, moveParentMode)?.label : null;
 
-  // ─── Render ───
   return (
     <div
       className="flex flex-col w-full h-[calc(100vh-140px)] min-h-[400px] sm:h-[calc(100vh-220px)] sm:min-h-[600px]"
       style={{ touchAction: "pan-x pan-y" }}
     >
-      {/* INITIAL LOADING OVERLAY */}
       {cloud.initialLoading && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center bg-white/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3">
@@ -728,7 +700,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         </div>
       )}
 
-      {/* TOOLBAR */}
       <div className="flex flex-wrap items-start justify-between gap-2 px-0.5 pb-2 sm:gap-3 sm:pb-3 no-print shrink-0">
         <div className="bg-white border border-gray-200/70 rounded-2xl px-3.5 py-2.5 shadow-[0_2px_16px_rgba(15,23,42,0.06)] sm:px-4 sm:py-3">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -765,7 +736,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           )}
         </div>
 
-        {/* Action bar */}
         <div className="relative max-w-full">
           <div className="bg-white border border-gray-200/70 rounded-2xl shadow-[0_2px_16px_rgba(15,23,42,0.06)] overflow-hidden">
             <div
@@ -805,20 +775,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               <div className="w-px h-6 bg-gray-200 mx-0.5 shrink-0" />
 
               <div className="flex items-center gap-0.5 shrink-0">
-                <button
-                  onClick={editor.undo}
-                  disabled={!editor.canUndo}
-                  title="Undo (Ctrl+Z)"
-                  className={`${btnGhost} w-8 h-8 sm:w-9 sm:h-9`}
-                >
+                <button onClick={editor.undo} disabled={!editor.canUndo} title="Undo (Ctrl+Z)" className={`${btnGhost} w-8 h-8 sm:w-9 sm:h-9`}>
                   <IconUndo />
                 </button>
-                <button
-                  onClick={editor.redo}
-                  disabled={!editor.canRedo}
-                  title="Redo (Ctrl+Shift+Z)"
-                  className={`${btnGhost} w-8 h-8 sm:w-9 sm:h-9`}
-                >
+                <button onClick={editor.redo} disabled={!editor.canRedo} title="Redo (Ctrl+Shift+Z)" className={`${btnGhost} w-8 h-8 sm:w-9 sm:h-9`}>
                   <IconRedo />
                 </button>
               </div>
@@ -893,7 +853,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                                       setLoadedDocId(String(doc.id));
                                       setLoadMenuOpen(false);
                                     } catch {
-                                      // cloudError is already set by the hook; keep menu open so it's visible
+                                      // cloudError is already set by the hook
                                     }
                                   }}
                                   className={`w-full text-left px-2.5 py-2 rounded-lg flex flex-col gap-0.5 ${
@@ -976,7 +936,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 + Add
               </button>
 
-              {/* VALUE TOGGLE */}
               <button
                 onClick={editor.toggleValues}
                 title={
@@ -999,7 +958,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   : "Values"}
               </button>
 
-              {/* QUICK "ADD VALUE" for the selected leaf */}
               {editor.data && selectedIsLeaf && (
                 <button
                   onClick={() => editor.addValueToNode(editor.selectedNodeId!)}
@@ -1041,11 +999,11 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
               <ExportButtons printRef={printRef} setError={editor.setError} />
               <ReportPdfButton
-  rootNode={rootNode}
-  selectedNodeId={editor.selectedNodeId}
-  completed={editor.completed}
-  persons={editor.persons}
-/>
+                rootNode={rootNode}
+                selectedNodeId={editor.selectedNodeId}
+                completed={editor.completed}
+                persons={editor.persons}
+              />
             </div>
           </div>
 
@@ -1070,12 +1028,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         </div>
       </div>
 
-      {/* CANVAS BOX */}
       <main
         className="relative flex-1 min-h-0 w-full overflow-hidden bg-gray-50 rounded-2xl"
         style={{ userSelect: dragging ? "none" : "auto" }}
       >
-        {/* SEARCH BAR */}
         {searchOpen && (
           <div className="absolute top-4 right-4 z-[130] flex items-center gap-1.5 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print max-w-[92vw]">
             <IconSearch />
@@ -1103,20 +1059,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   ? "No matches"
                   : `${(activeMatchIndex ?? 0) + 1}/${searchMatches.length}`}
             </span>
-            <button
-              onClick={prevMatch}
-              disabled={searchMatches.length === 0}
-              title="Previous match"
-              className={`${btnGhost} w-7 h-7 shrink-0`}
-            >
+            <button onClick={prevMatch} disabled={searchMatches.length === 0} title="Previous match" className={`${btnGhost} w-7 h-7 shrink-0`}>
               <IconArrowUp />
             </button>
-            <button
-              onClick={nextMatch}
-              disabled={searchMatches.length === 0}
-              title="Next match"
-              className={`${btnGhost} w-7 h-7 shrink-0`}
-            >
+            <button onClick={nextMatch} disabled={searchMatches.length === 0} title="Next match" className={`${btnGhost} w-7 h-7 shrink-0`}>
               <IconArrowDown />
             </button>
             <button
@@ -1129,7 +1075,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* ACTION POPUP */}
         {(editor.selectedNodeId || editor.selectedEdge) && !editor.pendingRelation && !moveParentMode && (
           <div
             data-action-popup
@@ -1169,8 +1114,37 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   Edit Description
                 </button>
 
-                {/* Add-or-edit the value on this leaf. Works regardless
-                    of whether the toggle is currently on. */}
+                {/* Override sum — only for parents. */}
+                {editor.selectedNodeId !== "root" &&
+                  (findNodeById(rootNode, editor.selectedNodeId)?.children?.length ?? 0) > 0 && (
+                    <button
+                      onClick={() => {
+                        const n = findNodeById(rootNode, editor.selectedNodeId!);
+                        const current = n ? getNodeValue(n).value : null;
+                        const def = editor.defaultValueDef;
+                        const unit = unitForType(def, editor.displayUnits);
+                        const displayValue =
+                          current === null
+                            ? ""
+                            : String(
+                                Math.round(
+                                  current *
+                                    resolveUnit(def, unit).fromBase *
+                                    1e6,
+                                ) / 1e6,
+                              );
+                        setOverrideTarget(displayValue);
+                        setOverrideError("");
+                        setOverrideInfo(null);
+                        setOverrideOpen(true);
+                      }}
+                      className={`${btnGhost} h-7 px-2 text-xs`}
+                      title="Set a new total for this subtree — all sub-processes rescale proportionally"
+                    >
+                      Override sum
+                    </button>
+                  )}
+
                 {editor.selectedNodeId !== "root" && selectedIsLeaf && (
                   <button
                     onClick={() => {
@@ -1193,17 +1167,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   </button>
                 )}
 
-                {/* Value type dropdown for the selected leaf */}
                 {editor.selectedNodeId !== "root" && selectedIsLeaf && (
                   <select
                     value={selectedNode?.valueType ?? ""}
                     onChange={(e) => {
                       const next = e.target.value;
                       if (next === "") {
-                        // Clear the per-node override → fall back to doc default
-                        if (!selectedNode) return;
-                        const updated = { ...selectedNode };
-                        delete updated.valueType;
                         editor.setNodeValueType(editor.selectedNodeId!, "");
                       } else {
                         editor.setNodeValueType(editor.selectedNodeId!, next);
@@ -1373,7 +1342,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* MOVE-TO-PARENT MODE POPUP */}
         {moveParentMode && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto">
             <span className="text-sm font-medium text-violet-700 px-1">
@@ -1385,7 +1353,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* PENDING RELATION POPUP */}
         {editor.pendingRelation && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 bg-white/95 backdrop-blur border border-gray-200/70 rounded-xl p-2 shadow-[0_4px_20px_rgba(15,23,42,0.1)] pointer-events-auto no-print flex-wrap max-w-[95vw] overflow-x-auto">
             <span className="text-sm font-medium text-amber-700 px-1">
@@ -1397,7 +1364,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* VALUE SCOPE HINT */}
         {editor.showValues && editor.data && (
           <div className="absolute bottom-4 left-4 z-[115] flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5 shadow-sm no-print max-w-[80vw]">
             <span className="text-[11px] font-medium text-emerald-800 truncate">
@@ -1423,7 +1389,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* FIRST-TIME HINT */}
         {editor.showValues && editor.data && !editor.documentHasValue && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[115] bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 shadow-sm no-print max-w-[90vw] text-center">
             <div className="text-[11px] font-medium text-indigo-800">
@@ -1435,7 +1400,6 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
           </div>
         )}
 
-        {/* CANVAS */}
         <div
           ref={viewportRef}
           className={`absolute inset-0 overflow-hidden ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
@@ -1650,6 +1614,151 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               <div className="flex justify-end gap-2">
                 <button onClick={editor.closeEditor} className={`${btnOutline} h-10 px-4 text-sm`}>Cancel</button>
                 <button onClick={editor.submitEditor} className={`${btnPrimary} h-10 px-4 text-sm`}>Done</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* OVERRIDE SUM MODAL */}
+      {overrideOpen && editor.selectedNodeId && rootNode && (() => {
+        const targetNode = findNodeById(rootNode, editor.selectedNodeId);
+        const currentTotal = targetNode ? getNodeValue(targetNode).value : null;
+        const def = editor.defaultValueDef;
+        const unit = unitForType(def, editor.displayUnits);
+        const unitSymbol = resolveUnit(def, unit).symbol;
+
+        const preview = (() => {
+          if (!targetNode || currentTotal === null || currentTotal === 0) return null;
+          const parsed = Number(overrideTarget);
+          if (!Number.isFinite(parsed) || parsed < 0) return null;
+          const ratio = parsed / currentTotal;
+          if (!Number.isFinite(ratio) || ratio === 0) return null;
+          const k = Math.sqrt(ratio);
+          return { ratio, k };
+        })();
+
+        const submit = () => {
+          const parsed = Number(overrideTarget);
+          if (!Number.isFinite(parsed) || parsed < 0) {
+            setOverrideError("Enter a non-negative number.");
+            return;
+          }
+          const baseTarget = parsed * resolveUnit(def, unit).toBase;
+          const result = editor.setSubtreeValue(editor.selectedNodeId!, baseTarget);
+          if (!result.applied) {
+            setOverrideError(result.reason ?? "Could not rescale this subtree.");
+            return;
+          }
+          setOverrideInfo({
+            oldTotal: result.oldTotal,
+            newTotal: result.newTotal,
+            leavesChanged: result.leavesChanged,
+          });
+          setOverrideError("");
+        };
+
+        return (
+          <div
+            className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+            onClick={() => setOverrideOpen(false)}
+          >
+            <div
+              className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md mx-0 sm:mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-base sm:text-lg font-semibold mb-1 text-gray-900">
+                Override sum
+              </h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Set a new total for <strong>{targetNode?.label}</strong>. Every
+                sub-process underneath scales proportionally. Length × Breadth keep
+                their aspect ratio.
+              </p>
+
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Current total
+                </label>
+                <div className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  {currentTotal === null
+                    ? "— (no values yet)"
+                    : `${Math.round(currentTotal * resolveUnit(def, unit).fromBase * 1e6) / 1e6} ${unitSymbol}`}
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  New total ({unitSymbol})
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={overrideTarget}
+                  onChange={(e) => {
+                    setOverrideTarget(e.target.value);
+                    setOverrideError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submit();
+                  }}
+                  className={inputBase}
+                  placeholder="e.g. 50"
+                  autoFocus
+                />
+              </div>
+
+              {preview && (
+                <div className="mb-3 text-xs text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                  Scale factor <strong>k = √ratio = {preview.k.toFixed(4)}</strong> will
+                  be applied to every dimension. Area scales by{" "}
+                  <strong>{preview.ratio.toFixed(4)}×</strong>.
+                </div>
+              )}
+
+              {overrideError && (
+                <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg">
+                  {overrideError}
+                </div>
+              )}
+
+              {overrideInfo && (
+                <div className="mb-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
+                  ✓ Rescaled. {overrideInfo.leavesChanged} leaf
+                  {overrideInfo.leavesChanged === 1 ? "" : "s"} updated.
+                  {overrideInfo.newTotal !== null && (
+                    <>
+                      {" "}
+                      New total:{" "}
+                      <strong>
+                        {Math.round(overrideInfo.newTotal * resolveUnit(def, unit).fromBase * 1e6) / 1e6}{" "}
+                        {unitSymbol}
+                      </strong>
+                      .
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setOverrideOpen(false);
+                    setOverrideInfo(null);
+                    setOverrideError("");
+                  }}
+                  className={`${btnOutline} h-10 px-4 text-sm`}
+                >
+                  {overrideInfo ? "Done" : "Cancel"}
+                </button>
+                <button
+                  onClick={submit}
+                  disabled={!!overrideInfo}
+                  className={`${btnPrimary} h-10 px-4 text-sm disabled:opacity-50`}
+                >
+                  Rescale
+                </button>
               </div>
             </div>
           </div>
