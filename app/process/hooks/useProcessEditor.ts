@@ -694,6 +694,94 @@ export function useProcessEditor(initialData: ProcessData) {
     return result;
   };
 
+  /**
+   * Replace the subtree at `nodeId` with the object parsed from `json`.
+   *
+   * Used by the "Edit JSON" modal: the user selects a node, the modal
+   * shows its JSON, they edit it, and hit Apply. If the JSON is
+   * malformed or fails schema validation, nothing changes and an error
+   * message is returned so the modal can show it.
+   *
+   * Rules:
+   *   - The JSON must be an object (a ProcessNode).
+   *   - Its `id` must match `nodeId` unless the caller explicitly wants
+   *     to allow re-keying — we require a match here so references in
+   *     `successors`/`predecessors`/`completed` don't silently break.
+   *   - The subtree is validated by the same `validateNodeShape` used on
+   *     upload, so nothing that couldn't be uploaded can be pasted.
+   *   - On success, the tree is replaced and history is pushed so undo
+   *     works.
+   */
+  const setSubtreeFromJson = (
+    nodeId: string,
+    json: string,
+  ): { ok: true } | { ok: false; error: string } => {
+    if (!data || !rootNode) {
+      return { ok: false, error: "No document loaded." };
+    }
+
+    // The root (the synthetic canvas node) can't be replaced — only real
+    // nodes in data.children.
+    if (nodeId === "root") {
+      return { ok: false, error: "The root process can't be replaced." };
+    }
+
+    const target = findNodeById(rootNode, nodeId);
+    if (!target) {
+      return { ok: false, error: "Selected process no longer exists." };
+    }
+
+    // 1. Parse.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch (err) {
+      return {
+        ok: false,
+        error:
+          err instanceof Error ? `Invalid JSON: ${err.message}` : "Invalid JSON.",
+      };
+    }
+
+    // 2. Shape check — must be an object with the same id.
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, error: "JSON must be a single process object." };
+    }
+    const candidate = parsed as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || candidate.id.trim() === "") {
+      return { ok: false, error: "JSON must include a string `id`." };
+    }
+    if (candidate.id !== nodeId) {
+      return {
+        ok: false,
+        error: `The id in the JSON ("${candidate.id}") must match the selected process ("${nodeId}").`,
+      };
+    }
+
+    // 3. Full schema validation using the same rules as upload.
+    const err = validateNodeShape(candidate, "node");
+    if (err) {
+      return { ok: false, error: err };
+    }
+
+    const replacement = candidate as unknown as ProcessNode;
+
+    // 4. Replace in tree.
+    const replace = (root: ProcessNode): ProcessNode => {
+      if (root.id === nodeId) return replacement;
+      if (root.children) return { ...root, children: root.children.map(replace) };
+      return root;
+    };
+
+    pushHistory();
+    setData({
+      ...data,
+      children: data.children ? data.children.map(replace) : undefined,
+    });
+
+    return { ok: true };
+  };
+
   const openEditor = (id: string, field: EditingField, currentValue: string) => {
     setEditingNodeId(id);
     setEditingField(field);
@@ -1669,7 +1757,7 @@ export function useProcessEditor(initialData: ProcessData) {
     defaultValueDef, displayUnits, documentHasValue,
     setDefaultValueType, setDisplayUnitForType,
     applyValueTypeToAll, setNodeValueType,
-    setNodeFactor, setNodeValue, setSubtreeValue,
+    setNodeFactor, setNodeValue, setSubtreeValue, setSubtreeFromJson,
     showMetricManager, setShowMetricManager,
     showValues, valueScope, valueScopeRoot,
     toggleValues, setValueScope, scopeHasValue,

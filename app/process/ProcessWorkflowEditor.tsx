@@ -669,6 +669,12 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
     leavesChanged: number;
   } | null>(null);
 
+  // ─── Edit-JSON modal state ───
+  const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
+  const [jsonEditorText, setJsonEditorText] = useState("");
+  const [jsonEditorError, setJsonEditorError] = useState("");
+  const [jsonEditorInfo, setJsonEditorInfo] = useState("");
+
   const getPersonTasks = (personId: string): ProcessNode[] => {
     if (!rootNode) return [];
     const tasks: ProcessNode[] = [];
@@ -722,10 +728,10 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
         scopeNode.id === "root"
           ? editor.data
           : {
-              ...editor.data,
-              title: scopeNode.label,
-              description: scopeNode.description,
-            };
+            ...editor.data,
+            title: scopeNode.label,
+            description: scopeNode.description,
+          };
 
       const ifc = generateIfc(scopedData, scopeNode, { storeyHeight, wallThickness });
 
@@ -1194,6 +1200,25 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                 >
                   Edit Description
                 </button>
+
+                {/* Edit JSON — only for real nodes, not the synthetic root */}
+                {editor.selectedNodeId !== "root" && selectedNode && (
+                  <button
+                    onClick={() => {
+                      // Open the modal pre-filled with the node's current JSON.
+                      // We pretty-print with 2-space indent so it's readable; the user
+                      // can reformat however they like before hitting Apply.
+                      setJsonEditorText(JSON.stringify(selectedNode, null, 2));
+                      setJsonEditorError("");
+                      setJsonEditorInfo("");
+                      setJsonEditorOpen(true);
+                    }}
+                    className={`${btnGhost} h-7 px-2 text-xs`}
+                    title="Edit this process (and its sub-processes) as raw JSON"
+                  >
+                    Edit JSON
+                  </button>
+                )}
 
                 {/* Override sum — only for parents. */}
                 {editor.selectedNodeId !== "root" &&
@@ -1839,6 +1864,133 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   Rescale
                 </button>
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* EDIT JSON MODAL */}
+      {jsonEditorOpen && editor.selectedNodeId && rootNode && (() => {
+        const targetNode = findNodeById(rootNode, editor.selectedNodeId);
+        if (!targetNode) return null;
+
+        const apply = () => {
+          setJsonEditorError("");
+          setJsonEditorInfo("");
+
+          const result = editor.setSubtreeFromJson(
+            editor.selectedNodeId!,
+            jsonEditorText,
+          );
+
+          if (!result.ok) {
+            setJsonEditorError(result.error);
+            return;
+          }
+
+          // Success — close the modal. The tree has already been updated
+          // and history pushed by the hook, so nothing more to do here.
+          setJsonEditorOpen(false);
+        };
+
+        return (
+          <div
+            className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm no-print"
+            onClick={() => setJsonEditorOpen(false)}
+          >
+            <div
+              className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-2xl mx-0 sm:mx-4 max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-baseline justify-between gap-3 mb-1">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">
+                  Edit JSON
+                </h3>
+                <span className="text-[11px] font-mono text-gray-400 truncate">
+                  {targetNode.label}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Edit the raw JSON for this process and everything under it. The
+                <span className="font-mono"> id</span> must stay as
+                <span className="font-mono"> &quot;{editor.selectedNodeId}&quot;</span>.
+                Apply is rejected if the schema is invalid — nothing changes
+                until the JSON is correct.
+              </p>
+
+              <textarea
+                value={jsonEditorText}
+                onChange={(e) => {
+                  setJsonEditorText(e.target.value);
+                  setJsonEditorError("");
+                  setJsonEditorInfo("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    apply();
+                  } else if (e.key === "Escape") {
+                    setJsonEditorOpen(false);
+                  }
+                }}
+                spellCheck={false}
+                className="flex-1 min-h-[300px] w-full border border-gray-200 rounded-lg px-3 py-2 text-[12px] font-mono text-gray-800 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 resize-vertical"
+              />
+
+              {jsonEditorError && (
+                <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg whitespace-pre-wrap">
+                  {jsonEditorError}
+                </div>
+              )}
+              {jsonEditorInfo && (
+                <div className="mt-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
+                  {jsonEditorInfo}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-4">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setJsonEditorText(JSON.stringify(targetNode, null, 2));
+                      setJsonEditorError("");
+                      setJsonEditorInfo("");
+                    }}
+                    className={`${btnGhost} h-9 px-3 text-xs`}
+                    title="Reset to the current saved JSON"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(jsonEditorText);
+                    }}
+                    className={`${btnGhost} h-9 px-3 text-xs`}
+                    title="Copy this JSON to the clipboard"
+                  >
+                    Copy
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setJsonEditorOpen(false)}
+                    className={`${btnOutline} h-9 px-4 text-sm`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={apply}
+                    className={`${btnPrimary} h-9 px-4 text-sm`}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-gray-400 mt-2">
+                Ctrl/Cmd+Enter to apply · Esc to cancel · Empty label is not allowed
+              </p>
             </div>
           </div>
         );
