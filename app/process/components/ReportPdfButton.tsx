@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ProcessNode, Person } from "@/app/process/lib/process-utils";
+import type { ProcessNode, Person, ValueDef } from "@/app/process/lib/process-utils";
 import {
   getNodeValue,
   groupLeavesByType,
   allRows,
   findNodeById,
   VALUE_PRESETS,
+  resolveUnit,
 } from "@/app/process/lib/process-utils";
 
 type ReportPdfButtonProps = {
@@ -26,6 +27,10 @@ type BlockMode = "blocks" | "one-block";
 const SQFT_PER_SQM = 10.7639104;
 const MM_PER_PT = 0.3528;
 const LINE_MULT = 1.15;
+/** Tighter line spacing used inside the detailed space table, where rows
+ * often wrap onto 2-4 lines (long descriptions) and the default LINE_MULT
+ * makes the report needlessly long. */
+const TABLE_LINE_MULT = 1.05;
 
 const RED: [number, number, number] = [190, 30, 30];
 const GRAY: [number, number, number] = [110, 110, 110];
@@ -66,28 +71,60 @@ function fmtCost(amount: number, symbol: string): string {
 }
 
 /**
+ * Resolve the ValueDef a given leaf renders under, the same way the
+ * rest of the app does: the leaf's own `valueType` if it has one,
+ * otherwise fall back to the Area preset (this report is area-first).
+ */
+function resolveLeafDef(leaf: ProcessNode): ValueDef {
+  const defId = leaf.valueType;
+  return defId && VALUE_PRESETS[defId] ? VALUE_PRESETS[defId] : VALUE_PRESETS.area;
+}
+
+/**
+ * Which unit symbol a leaf's value/factors should be displayed in for
+ * this report. For Area-type leaves this follows the report-wide
+ * sqft/sqm toggle; other value types just use their own base unit
+ * (the space report doesn't offer a unit picker for those).
+ */
+function chosenSymbolForLeaf(def: ValueDef, reportUnit: ReportUnit): string {
+  return def.id === "area" ? (reportUnit === "sqft" ? "ft²" : "m²") : def.unit;
+}
+
+/**
  * Given a leaf node and the report's chosen unit ("sqft" | "sqm"),
  * return the factor symbol that applies (e.g. "ft" for sqft, "m" for
  * sqm, "" for value types without factors).
  */
-function factorSymbolForLeaf(
-  leaf: ProcessNode,
-  reportUnit: ReportUnit,
-): string {
-  const defId = leaf.valueType;
-  const def =
-    defId && VALUE_PRESETS[defId] ? VALUE_PRESETS[defId] : VALUE_PRESETS.area;
+function factorSymbolForLeaf(leaf: ProcessNode, reportUnit: ReportUnit): string {
+  const def = resolveLeafDef(leaf);
   if (!def.factorLabels) return "";
-
-  const chosen =
-    def.id === "area"
-      ? reportUnit === "sqft"
-        ? "ft²"
-        : "m²"
-      : def.unit;
-
-  const opt = def.units.find((u) => u.symbol === chosen) ?? def.units[0];
+  const chosen = chosenSymbolForLeaf(def, reportUnit);
+  const opt = resolveUnit(def, chosen);
   return opt.factorSymbol ?? def.factorUnit ?? "";
+}
+
+/**
+ * Convert a leaf's stored factor1/factor2 (always in the value type's
+ * BASE unit, e.g. metres) into the unit this report is displaying —
+ * e.g. feet when the report unit is sqft. This is what was missing
+ * before: the column header said "(ft)" but the numbers underneath
+ * were never actually converted from metres.
+ */
+function displayFactorsForLeaf(
+  leaf: ProcessNode,
+  reportUnit: ReportUnit
+): { f1: number | null; f2: number | null } {
+  if (leaf.factor1 === undefined || leaf.factor2 === undefined) {
+    return { f1: null, f2: null };
+  }
+  const def = resolveLeafDef(leaf);
+  if (!def.factorLabels) {
+    return { f1: leaf.factor1, f2: leaf.factor2 };
+  }
+  const chosen = chosenSymbolForLeaf(def, reportUnit);
+  const opt = resolveUnit(def, chosen);
+  const k = opt.factorFromBase ?? 1;
+  return { f1: leaf.factor1 * k, f2: leaf.factor2 * k };
 }
 
 /* ─── Tree helpers ───────────────────────────────────────────── */
@@ -1461,25 +1498,27 @@ function renderSpaceReport(
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const marginX = 16;
-  const marginTop = 16;
-  const marginBottom = 18;
+  // Tighter margins than before — more content per page.
+  const marginX = 14;
+  const marginTop = 14;
+  const marginBottom = 14;
   const contentWidth = pageWidth - marginX * 2;
   const contentBottom = pageHeight - marginBottom;
 
   const lineHeightFor = (fontSize: number) => fontSize * MM_PER_PT * LINE_MULT;
+  const lineHeightCompact = (fontSize: number) => fontSize * MM_PER_PT * TABLE_LINE_MULT;
 
   let page = 1;
   let y = marginTop;
 
   const drawFooter = () => {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.setTextColor(140);
+    doc.setFontSize(8);
+    doc.setTextColor(150);
     doc.text(
       `www.modelflick.com   ·   Page ${page} of ${doc.getNumberOfPages()}`,
       pageWidth / 2,
-      pageHeight - 9,
+      pageHeight - 8,
       { align: "center" }
     );
     doc.setTextColor(...INK);
@@ -1536,6 +1575,13 @@ function renderSpaceReport(
     doc.setDrawColor(0);
   };
 
+  /** Plain bold section heading — no decoration, minimal ink. */
+  const sectionHeading = (label: string) => {
+    ensureSpace(lineHeightFor(10.5) + 1);
+    text(label, marginX, y, { size: 10.5, weight: "bold", color: INK });
+    y += lineHeightFor(10.5) + 1;
+  };
+
   /* ── Compute all numbers up front ─────────────────────────── */
 
   const blocks =
@@ -1553,57 +1599,50 @@ function renderSpaceReport(
 
   /* ── Cover page ───────────────────────────────────────────── */
 
-  y += 4;
-  text("SPACE REQUIREMENT", marginX, y, { weight: "bold", size: 20, color: INK });
-  y += lineHeightFor(20) + 1;
-
-  text(rootNode.label || "Untitled", marginX, y, {
-    weight: "bold",
-    size: 15,
-    color: INK,
-  });
-  y += lineHeightFor(15) + 1;
-
-  if (rootNode.description) {
-    const descLines = doc.splitTextToSize(
-      rootNode.description,
-      contentWidth
-    ) as string[];
-    setFont("normal", 9.5);
-    doc.setTextColor(...GRAY);
-    descLines.forEach((line) => {
-      doc.text(line, marginX, y);
-      y += lineHeightFor(9.5);
-    });
-    doc.setTextColor(...INK);
-    y += 0.6;
-  }
-
+  y += 2;
+  const titleBaseline = y;
+  text("SPACE REQUIREMENT", marginX, titleBaseline, { weight: "bold", size: 18, color: INK });
   text(
     `Generated ${new Date().toLocaleDateString("en-GB", {
       day: "numeric",
       month: "short",
       year: "numeric",
     })}`,
-    marginX,
-    y,
-    { weight: "italic", size: 8.5, color: GRAY }
+    pageWidth - marginX,
+    titleBaseline,
+    { weight: "italic", size: 8, color: GRAY, align: "right" }
   );
-  y += lineHeightFor(8.5) + 3;
+  y += lineHeightFor(18);
+
+  text(rootNode.label || "Untitled", marginX, y, {
+    weight: "bold",
+    size: 13,
+    color: INK,
+  });
+  y += lineHeightFor(13) + 0.5;
+
+  if (rootNode.description) {
+    const descLines = doc.splitTextToSize(
+      rootNode.description,
+      contentWidth
+    ) as string[];
+    setFont("normal", 9);
+    doc.setTextColor(...GRAY);
+    descLines.forEach((line) => {
+      doc.text(line, marginX, y);
+      y += lineHeightCompact(9);
+    });
+    doc.setTextColor(...INK);
+    y += 0.5;
+  }
 
   rule(y);
-  y += 3;
+  y += 2.2;
 
   /* ── Cover: summary table ─────────────────────────────────── */
 
   if (includeCoverTotals) {
-    text(
-      blockMode === "one-block" ? "SUMMARY" : "SUMMARY BY BLOCK",
-      marginX,
-      y,
-      { size: 11, weight: "bold", color: INK }
-    );
-    y += lineHeightFor(11) + 1.5;
+    sectionHeading(blockMode === "one-block" ? "SUMMARY" : "SUMMARY BY BLOCK");
 
     const colBlockX = marginX;
     const colNetX = marginX + contentWidth * 0.34;
@@ -1615,113 +1654,113 @@ function renderSpaceReport(
     const showCostCol = showCost && ratePerSqft !== null;
     const showTotalRow = blocks.length > 1;
 
-    text("BLOCK", colBlockX, y, { size: 8, weight: "bold", color: GRAY });
-    text("NET", colNetX, y, { size: 8, weight: "bold", color: GRAY });
+    text("BLOCK", colBlockX, y, { size: 7.5, weight: "bold", color: GRAY });
+    text("NET", colNetX, y, { size: 7.5, weight: "bold", color: GRAY });
     if (wallPct !== null)
-      text("WALL", colWallX, y, { size: 8, weight: "bold", color: GRAY });
+      text("WALL", colWallX, y, { size: 7.5, weight: "bold", color: GRAY });
     if (circPct !== null)
-      text("CIRC", colCircX, y, { size: 8, weight: "bold", color: GRAY });
-    text("GROSS", colGrossX, y, { size: 8, weight: "bold", color: GRAY });
+      text("CIRC", colCircX, y, { size: 7.5, weight: "bold", color: GRAY });
+    text("GROSS", colGrossX, y, { size: 7.5, weight: "bold", color: GRAY });
     if (showCostCol)
       text("COST", colCostX, y, {
-        size: 8,
+        size: 7.5,
         weight: "bold",
         color: GRAY,
         align: "right",
       });
-    y += lineHeightFor(8) + 0.8;
+    y += lineHeightFor(7.5) + 0.6;
     rule(y);
-    y += 2.5;
+    y += 2;
 
     for (const b of blocks) {
-      ensureSpace(6);
+      ensureSpace(5.5);
       const rowTop = y;
 
       text(b.node.label, colBlockX, rowTop, {
-        size: 9.5,
+        size: 9,
         weight: "normal",
         color: INK,
       });
       text(fmtNum(b.netSqm * SQFT_PER_SQM, 0), colNetX, rowTop, {
-        size: 9.5,
+        size: 9,
         weight: "normal",
         color: INK,
       });
       if (wallPct !== null) {
         text(fmtNum(b.wallSqm * SQFT_PER_SQM, 0), colWallX, rowTop, {
-          size: 9.5,
+          size: 9,
           weight: "normal",
           color: GRAY,
         });
       }
       if (circPct !== null) {
         text(fmtNum(b.circSqm * SQFT_PER_SQM, 0), colCircX, rowTop, {
-          size: 9.5,
+          size: 9,
           weight: "normal",
           color: GRAY,
         });
       }
       text(fmtNum(b.grossSqm * SQFT_PER_SQM, 0), colGrossX, rowTop, {
-        size: 9.5,
+        size: 9,
         weight: "bold",
         color: INK,
       });
       if (showCostCol && b.cost !== null) {
         text(fmtCost(b.cost, currency), colCostX, rowTop, {
-          size: 9.5,
+          size: 9,
           weight: "normal",
           color: AMBER,
           align: "right",
         });
       }
-      y = rowTop + lineHeightFor(9.5) + 1;
+      y = rowTop + lineHeightFor(9) + 0.7;
     }
 
     if (showTotalRow) {
-      y += 0.5;
+      y += 0.3;
       rule(y);
-      y += 2;
-      ensureSpace(6);
+      y += 1.6;
+      ensureSpace(5.5);
       const totalTop = y;
 
       text("Total (all blocks)", colBlockX, totalTop, {
-        size: 9.5,
+        size: 9,
         weight: "bold",
         color: INK,
       });
       text(fmtNum(totalNetSqm * SQFT_PER_SQM, 0), colNetX, totalTop, {
-        size: 9.5,
+        size: 9,
         weight: "bold",
         color: INK,
       });
       if (wallPct !== null) {
         text(fmtNum(totalWallSqm * SQFT_PER_SQM, 0), colWallX, totalTop, {
-          size: 9.5,
+          size: 9,
           weight: "bold",
           color: GRAY,
         });
       }
       if (circPct !== null) {
         text(fmtNum(totalCircSqm * SQFT_PER_SQM, 0), colCircX, totalTop, {
-          size: 9.5,
+          size: 9,
           weight: "bold",
           color: GRAY,
         });
       }
       text(fmtNum(totalGrossSqm * SQFT_PER_SQM, 0), colGrossX, totalTop, {
-        size: 9.5,
+        size: 9,
         weight: "bold",
         color: GREEN,
       });
       if (showCostCol && totalCost !== null) {
         text(fmtCost(totalCost, currency), colCostX, totalTop, {
-          size: 9.5,
+          size: 9,
           weight: "bold",
           color: AMBER,
           align: "right",
         });
       }
-      y = totalTop + lineHeightFor(9.5) + 2;
+      y = totalTop + lineHeightFor(9) + 1.2;
     }
 
     const hint =
@@ -1742,14 +1781,14 @@ function renderSpaceReport(
             .join("  ·  ");
 
     if (hint) {
-      ensureSpace(4);
-      text(hint, marginX, y, { size: 7.5, weight: "italic", color: GRAY });
-      y += lineHeightFor(7.5) + 2;
+      ensureSpace(3.5);
+      text(hint, marginX, y, { size: 7, weight: "italic", color: GRAY });
+      y += lineHeightFor(7) + 1.5;
     }
 
-    y += 1;
+    y += 0.5;
     rule(y);
-    y += 4;
+    y += 3;
   }
 
   /* ── Area breakdown by type ───────────────────────────────── */
@@ -1757,25 +1796,20 @@ function renderSpaceReport(
   if (includeBreakdown) {
     const groups = groupLeavesByType(rootNode, "area");
     if (groups.size > 0) {
-      ensureSpace(12);
+      ensureSpace(10);
 
-      text("AREA BREAKDOWN BY TYPE", marginX, y, {
-        size: 11,
-        weight: "bold",
-        color: INK,
-      });
-      y += lineHeightFor(11) + 1.5;
+      sectionHeading("AREA BREAKDOWN BY TYPE");
 
       const colLabelX = marginX;
       const colAreaX = marginX + contentWidth * 0.5;
       const colPctX = marginX + contentWidth * 0.8;
 
-      text("TYPE", colLabelX, y, { size: 8, weight: "bold", color: GRAY });
-      text(`AREA (${unit})`, colAreaX, y, { size: 8, weight: "bold", color: GRAY });
-      text("% OF NET", colPctX, y, { size: 8, weight: "bold", color: GRAY });
-      y += lineHeightFor(8) + 0.8;
+      text("TYPE", colLabelX, y, { size: 7.5, weight: "bold", color: GRAY });
+      text(`AREA (${unit})`, colAreaX, y, { size: 7.5, weight: "bold", color: GRAY });
+      text("% OF NET", colPctX, y, { size: 7.5, weight: "bold", color: GRAY });
+      y += lineHeightFor(7.5) + 0.6;
       rule(y);
-      y += 2.5;
+      y += 2;
 
       const typeTotal = Array.from(groups.values()).reduce(
         (a, b) => a + b.total,
@@ -1785,37 +1819,37 @@ function renderSpaceReport(
         const preset = VALUE_PRESETS[typeId];
         const label = preset?.label ?? typeId;
 
-        ensureSpace(6);
-        text(label, colLabelX, y, { size: 10, weight: "normal", color: INK });
+        ensureSpace(5);
+        text(label, colLabelX, y, { size: 9.5, weight: "normal", color: INK });
         text(fmtAreaPair(total, unit, 1), colAreaX, y, {
-          size: 10,
+          size: 9.5,
           weight: "normal",
           color: INK,
         });
         const pct = typeTotal > 0 ? (total / typeTotal) * 100 : 0;
         text(`${pct.toFixed(1)}%`, colPctX, y, {
-          size: 10,
+          size: 9.5,
           weight: "normal",
           color: INK,
         });
-        y += lineHeightFor(10) + 1;
+        y += lineHeightFor(9.5) + 0.6;
       }
 
-      y += 0.8;
+      y += 0.5;
       rule(y);
-      y += 2.5;
+      y += 2;
 
       text("Net Carpet Total", colLabelX, y, {
-        size: 10,
+        size: 9.5,
         weight: "bold",
         color: INK,
       });
       text(fmtAreaPair(typeTotal, unit, 1), colAreaX, y, {
-        size: 10,
+        size: 9.5,
         weight: "bold",
         color: INK,
       });
-      y += lineHeightFor(10) + 3;
+      y += lineHeightFor(9.5) + 2.5;
     }
   }
 
@@ -1827,18 +1861,21 @@ function renderSpaceReport(
   });
 
   if (rows.length > 0) {
-    const showNotes = includeNotesColumn;
     const showDims = includeDimensions;
+    const showNotes = includeNotesColumn;
 
+    // Compact name/dims/area so the notes column — where long
+    // descriptions actually live — gets most of the row's width.
     const colSpaceX = marginX;
     const colSpaceW = showDims
-      ? contentWidth * (showNotes ? 0.34 : 0.42)
-      : contentWidth * (showNotes ? 0.5 : 0.6);
+      ? contentWidth * (showNotes ? 0.26 : 0.34)
+      : contentWidth * (showNotes ? 0.32 : 0.4);
     const colDimsX = colSpaceX + colSpaceW;
-    const colDimsW = showDims ? contentWidth * 0.2 : 0;
+    const colDimsW = showDims ? contentWidth * 0.13 : 0;
     const colAreaX = colDimsX + colDimsW;
-    const colAreaW = contentWidth * (showNotes ? 0.2 : 0.4);
+    const colAreaW = contentWidth * (showNotes ? 0.15 : 0.6 - (showDims ? 0.13 : 0));
     const colNotesX = colAreaX + colAreaW;
+    const colNotesW = contentWidth - (colNotesX - marginX);
 
     // DIMENSIONS heading with unit. Grab the first leaf's factor symbol
     // for the current report unit — e.g. "(ft)" when the report is in
@@ -1847,38 +1884,35 @@ function renderSpaceReport(
     const dimUnit = firstLeaf ? factorSymbolForLeaf(firstLeaf, unit) : "";
     const dimsHeader = dimUnit ? `DIMENSIONS (${dimUnit})` : "DIMENSIONS";
 
-    ensureSpace(14);
-    text("DETAILED SPACE REQUIREMENT", marginX, y, {
-      size: 11,
-      weight: "bold",
-      color: INK,
-    });
-    y += lineHeightFor(11) + 1.5;
+    ensureSpace(12);
+    sectionHeading("DETAILED SPACE REQUIREMENT");
 
-    text("SPACE / ROOM", colSpaceX, y, { size: 8, weight: "bold", color: GRAY });
+    text("SPACE / ROOM", colSpaceX, y, { size: 7, weight: "bold", color: GRAY });
     if (showDims)
-      text(dimsHeader, colDimsX, y, { size: 8, weight: "bold", color: GRAY });
-    text(`AREA (${unit})`, colAreaX, y, { size: 8, weight: "bold", color: GRAY });
+      text(dimsHeader, colDimsX, y, { size: 7, weight: "bold", color: GRAY });
+    text(`AREA (${unit})`, colAreaX, y, { size: 7, weight: "bold", color: GRAY });
     if (showNotes)
-      text("NOTES", colNotesX, y, { size: 8, weight: "bold", color: GRAY });
-    y += lineHeightFor(8) + 0.8;
+      text("NOTES", colNotesX, y, { size: 7, weight: "bold", color: GRAY });
+    y += lineHeightFor(7) + 0.6;
     rule(y);
-    y += 2.5;
+    y += 2;
+
+    const nameFontSize = 8.5;
+    const dimsFontSize = 7.5;
+    const areaFontSize = 8.5;
+    const notesFontSize = 7;
 
     for (const { node, path, depth, isLeaf } of rows) {
       const v = getNodeValue(node).value ?? 0;
-      const indent = Math.min(depth - 1, 3) * 4;
+      const indent = Math.min(depth - 1, 3) * 3;
 
       const displayName = `${path.join(".")}  ${node.label}`;
 
-      // Option A: only leaves print their L × B.
-      const dimsText =
-        showDims &&
-        isLeaf &&
-        node.factor1 !== undefined &&
-        node.factor2 !== undefined
-          ? `${fmtNum(node.factor1, 1)} × ${fmtNum(node.factor2, 1)}`
-          : "";
+      // Convert the leaf's stored (base-unit) factors into the unit
+      // this report is displaying, so "DIMENSIONS (ft)" actually
+      // shows feet rather than the raw metre values.
+      const { f1, f2 } = showDims && isLeaf ? displayFactorsForLeaf(node, unit) : { f1: null, f2: null };
+      const dimsText = f1 !== null && f2 !== null ? `${fmtNum(f1, 1)} × ${fmtNum(f2, 1)}` : "";
 
       const notesText = (node.description ?? "").trim();
 
@@ -1886,58 +1920,55 @@ function renderSpaceReport(
         displayName,
         colSpaceW - indent - 2
       ) as string[];
-      const notesLines =
-        showNotes && notesText
-          ? (doc.splitTextToSize(
-              notesText,
-              contentWidth - colNotesX - 2
-            ) as string[])
-          : [];
       const dimsLines =
         showDims && dimsText
           ? (doc.splitTextToSize(dimsText, colDimsW - 2) as string[])
           : [];
       const areaLines = doc.splitTextToSize(
         fmtAreaPair(v, unit, 1),
-        contentWidth - colAreaX - (showNotes ? colAreaW : 0) - 2
+        colAreaW - 2
       ) as string[];
+      const notesLines =
+        showNotes && notesText
+          ? (doc.splitTextToSize(notesText, colNotesW - 2) as string[])
+          : [];
 
       const rowLines = Math.max(
         nameLines.length,
-        notesLines.length || 1,
         dimsLines.length || 1,
-        areaLines.length || 1
+        areaLines.length || 1,
+        notesLines.length || 1
       );
-      const rowHeight = rowLines * lineHeightFor(9.5) + 1.5;
+      const rowHeight = rowLines * lineHeightCompact(nameFontSize) + 0.8;
 
       ensureSpace(rowHeight);
       const rowTop = y;
 
-      setFont(isLeaf ? "normal" : "bold", 9.5);
+      setFont(isLeaf ? "normal" : "bold", nameFontSize);
       doc.setTextColor(...INK);
       nameLines.forEach((line, i) => {
-        doc.text(line, colSpaceX + indent, rowTop + i * lineHeightFor(9.5));
+        doc.text(line, colSpaceX + indent, rowTop + i * lineHeightCompact(nameFontSize));
       });
 
       if (showDims) {
-        setFont("normal", 9);
+        setFont("normal", dimsFontSize);
         doc.setTextColor(...GRAY);
         dimsLines.forEach((line, i) => {
-          doc.text(line, colDimsX, rowTop + i * lineHeightFor(9.5));
+          doc.text(line, colDimsX, rowTop + i * lineHeightCompact(nameFontSize));
         });
       }
 
-      setFont(isLeaf ? "normal" : "bold", 9.5);
+      setFont(isLeaf ? "normal" : "bold", areaFontSize);
       doc.setTextColor(...INK);
       areaLines.forEach((line, i) => {
-        doc.text(line, colAreaX, rowTop + i * lineHeightFor(9.5));
+        doc.text(line, colAreaX, rowTop + i * lineHeightCompact(nameFontSize));
       });
 
       if (showNotes) {
-        setFont("normal", 8.5);
+        setFont("normal", notesFontSize);
         doc.setTextColor(...GRAY);
         notesLines.forEach((line, i) => {
-          doc.text(line, colNotesX, rowTop + i * lineHeightFor(9.5));
+          doc.text(line, colNotesX, rowTop + i * lineHeightCompact(nameFontSize));
         });
       }
 
@@ -1945,45 +1976,45 @@ function renderSpaceReport(
       y = rowTop + rowHeight;
 
       if (y < contentBottom - 3) {
-        doc.setDrawColor(240, 240, 240);
-        doc.setLineWidth(0.15);
-        doc.line(marginX, y - 0.8, pageWidth - marginX, y - 0.8);
+        doc.setDrawColor(242, 242, 242);
+        doc.setLineWidth(0.12);
+        doc.line(marginX, y - 0.5, pageWidth - marginX, y - 0.5);
         doc.setDrawColor(0);
       }
     }
 
-    y += 2;
+    y += 1.5;
     rule(y);
-    y += 2;
+    y += 1.8;
 
-    ensureSpace(6);
-    setFont("bold", 10);
+    ensureSpace(5.5);
+    setFont("bold", 9.5);
     doc.setTextColor(...INK);
     doc.text("Total Net Carpet Area", colSpaceX, y);
     doc.text(fmtAreaPair(totalNetSqm, unit, 1), colAreaX, y);
-    y += lineHeightFor(10) + 3;
+    y += lineHeightFor(9.5) + 2.5;
   }
 
   /* ── Footnote ─────────────────────────────────────────────── */
 
-  ensureSpace(18);
-  rule(y, 0.2, [220, 220, 220]);
-  y += 3;
-  text("NOTE", marginX, y, { size: 8, weight: "bold", color: GRAY });
-  y += lineHeightFor(8) + 0.5;
+  ensureSpace(16);
+  rule(y, 0.2, [225, 225, 225]);
+  y += 2.5;
+  text("NOTE", marginX, y, { size: 7.5, weight: "bold", color: GRAY });
+  y += lineHeightFor(7.5) + 0.4;
   const footnote =
     "This is a preliminary space requirement and area estimate prepared for " +
     "architectural discussion and future reference. All dimensions and areas " +
     "are indicative. Final areas may vary after design development, structural " +
     "planning, services coordination, statutory approvals, and site-specific " +
     "conditions.";
-  setFont("italic", 8);
+  setFont("italic", 7.5);
   doc.setTextColor(...GRAY);
   const fnLines = doc.splitTextToSize(footnote, contentWidth) as string[];
   fnLines.forEach((line) => {
-    ensureSpace(lineHeightFor(8));
+    ensureSpace(lineHeightCompact(7.5));
     doc.text(line, marginX, y);
-    y += lineHeightFor(8);
+    y += lineHeightCompact(7.5);
   });
   doc.setTextColor(...INK);
 
