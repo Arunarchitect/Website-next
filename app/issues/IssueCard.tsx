@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getPriorityColor, getStatusColor } from "./issueApi";
 import { Issue, isBimIssue } from "./issueTypes";
 import { ClassificationBadge } from "./IssueCardAccessParts";
+import { renderCommentContent } from "./commentTextRenderer";
 
 export interface CurrentUser {
   email: string;
@@ -66,7 +67,7 @@ export function IssueCard({
         <div className="issue-compact-body">
           <div className="issue-compact-line1">
             <span className="issue-id">#{issue.id}</span>
-            <span className="issue-compact-title">{issue.title}</span>
+            <span className="issue-compact-title">{renderCommentContent(issue.title)}</span>
           </div>
 
           <div className="issue-compact-line2">
@@ -83,6 +84,12 @@ export function IssueCard({
               <span className="meta-item">
                 <i className="ti ti-box" />
                 {issue.module}
+              </span>
+            )}
+            {issue.projectName && (
+              <span className="meta-item">
+                <i className="ti ti-folder" />
+                {issue.projectName}
               </span>
             )}
             {issue.organisation && (

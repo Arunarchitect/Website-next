@@ -33,10 +33,10 @@ import {
 import { ExpandableText } from "./ExpandableText";
 
 import { ManageAccessPanel } from "./IssueCardAccessParts";
+import { renderCommentContent } from "./commentTextRenderer";
 import {
   getImageSource,
   useScreenshotUpload,
-  linkifyText,
   DEFAULT_CAMERA_POSITION,
   DEFAULT_CAMERA_DIRECTION,
   DEFAULT_CAMERA_UP_VECTOR,
@@ -696,7 +696,7 @@ export function IssueDetail({
           ) : (
             <ExpandableText
               text={issue.description}
-              linkify={linkifyText}
+              linkify={renderCommentContent}
               className="issue-description"
               wordLimit={30}
             />

@@ -24,6 +24,7 @@ import { Issue, IssueStatus, IssuePriority, IssueDomain, BcfTopicType } from "./
 import { IssueCard } from "./IssueCard";
 import { processImageFile, extractImageFromClipboard, extractImageFromDrop } from "./imageUtils";
 import { ScreenshotDropzone } from "./IssueCardParts";
+import { MentionTextarea } from "./MentionTextarea";
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { isUserMatch } from '@/components/utils/userMatching';
 import { useAppDispatch } from '@/redux/hooks';
@@ -1003,13 +1004,25 @@ function NewIssueForm({ onCreate, onCancel }: {
 
       <div className="form-field">
         <label>Title <span style={{ color: '#D43E3E' }}>*</span></label>
-        <input className="field-input" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <MentionTextarea
+          organisationId={organisationId ?? ""}
+          value={title}
+          onChange={setTitle}
+          rows={1}
+          placeholder="Issue title"
+        />
       </div>
 
       <div className="form-field">
         <label>Description</label>
-        <textarea className="field-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} onPaste={handlePaste} />
-        <span className="file-hint">Tip: you can paste a screenshot (Ctrl/Cmd+V) directly into this box.</span>
+        <MentionTextarea
+          organisationId={organisationId ?? ""}
+          value={description}
+          onChange={setDescription}
+          onPaste={handlePaste}
+          rows={3}
+          placeholder="Describe the issue…"
+        />
       </div>
 
       <div className="form-field">

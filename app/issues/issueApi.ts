@@ -471,6 +471,10 @@ const convertDjangoIssue = (data: any): Issue => {
     assignedToId: extractIdSafe(data.assigned_to) ?? null,
     project: extractIdSafe(data.project),
     project_id: extractIdSafe(data.project),
+    // Flat project display name — comes straight from the list/detail
+    // serializers' `project_name` field (falls back to project_details.name
+    // on the detail endpoint, which nests it instead).
+    projectName: data.project_name || data.project_details?.name || null,
     deliverable: extractIdSafe(data.deliverable) ?? null,
     organisationId:
       typeof data.organisation_id === 'number'

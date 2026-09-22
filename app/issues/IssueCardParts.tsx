@@ -225,7 +225,7 @@ export function IssueHeader({ issue, isEditing, titleValue, onTitleChange, isBim
           onChange={(e) => onTitleChange(e.target.value)}
         />
       ) : (
-        <h3 className="issue-title">{issue.title}</h3>
+        <h3 className="issue-title">{renderCommentContent(issue.title)}</h3>
       )}
       <span className={`domain-badge domain-${issue.domain}`}>
         {isBim ? (

@@ -133,6 +133,9 @@ interface BaseIssue {
   linkedDocuments?: LinkedDocument[];
   project?: number;
   project_id?: number;
+  // Display name of the linked project. Optional so existing call sites
+  // (getDefaultIssue, fromBcfTopic) that don't set it still type-check.
+  projectName?: string | null;
   deliverable?: number | null;
   reported_by?: number;
   assigned_to?: number | null;
@@ -483,6 +486,9 @@ export interface DjangoIssueData {
   linked_documents_details?: LinkedDocument[];
   comments?: DjangoCommentData[];
   project?: DjangoRef;
+  // Flat project display name, as returned by IssueListSerializer /
+  // IssueSerializer's `project_name` field.
+  project_name?: string | null;
   deliverable?: DjangoRef;
   organisation?: string | null;
   organisation_id?: number;   
@@ -543,6 +549,7 @@ export function fromDjangoIssue(data: DjangoIssueData): Issue {
     })),
     project: extractId(data.project) ?? undefined,
     project_id: extractId(data.project) ?? undefined,
+    projectName: data.project_name || null,
     deliverable: extractId(data.deliverable),
     reported_by: extractId(data.reported_by) ?? undefined,
     assigned_to: extractId(data.assigned_to),
