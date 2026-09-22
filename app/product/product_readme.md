@@ -419,7 +419,7 @@ Adding a new assignment field that only one side should write (like
    *permission*, so a stale frontend never even offers an action the backend
    would reject.
 7. **Print**: if it should show up in exports, extend `PrintableRow` +
-   `filteredPrintRows`.
+   `filteredPrintRows`...
 
 Adding a brand-new mutating action in general? Put it through the same
 `view.action == '...'` pattern in `CanModifyAssignment` rather than
