@@ -73,6 +73,7 @@ export function ProductLink({ href, className }: { href?: string | null; classNa
   if (!href) return null;
   return (
     <a
+    
       href={href}
       target="_blank"
       rel="noopener noreferrer"
@@ -479,6 +480,10 @@ export default function ProductCatalog({
 
   const suggesting = isBusy("suggest-submit");
   const isOrgAdmin = !isViewOnly && rawRole === "admin";
+  // Anyone except an org admin can suggest a new catalog product for
+  // approval — client, member, and manager all get this button; admin
+  // manages the catalog directly instead (see "Manage catalog" link).
+  const canSuggestProduct = rawRole !== "admin";
 
   // Referenced so no-unused-vars doesn't complain; the paginated view
   // intentionally uses its own pageItems state.
@@ -510,7 +515,7 @@ export default function ProductCatalog({
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
-            {!isViewOnly && role === "client" && (
+            {canSuggestProduct && (
               <button
                 onClick={openSuggestModal}
                 className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-2.5 sm:py-2 text-sm whitespace-nowrap"
@@ -539,7 +544,7 @@ export default function ProductCatalog({
           ) : pageItems.length === 0 ? (
             <div className="col-span-full text-center py-10 space-y-3">
               <p className="pf-muted text-sm">No matching products.</p>
-              {!isViewOnly && role === "client" && (
+              {canSuggestProduct && (
                 <button onClick={openSuggestModal} className="touch-manipulation pf-btn-primary text-sm rounded-full px-5 py-2.5">
                   Can&apos;t find it? Suggest a product
                 </button>
@@ -550,7 +555,11 @@ export default function ProductCatalog({
               const stats = itemStats.get(item.id);
               const count = selectedCountsForSpace.get(item.id) ?? 0;
               const isPending = item.status === "pending";
-              const canWithdraw = !isViewOnly && role === "client" && isPending;
+              // The catalog/list endpoint only ever returns a pending item
+              // to the person who suggested it (see get_queryset on the
+              // backend), so "pending" here already means "mine" for
+              // whichever role is viewing — client, member, or manager.
+              const canWithdraw = isPending;
               const proposeKey = `propose-${item.id}`;
               const withdrawKey = `withdraw-${item.id}`;
               const orgNoteKey = `org-note-${item.id}`;
@@ -677,64 +686,62 @@ export default function ProductCatalog({
                       </>
                     )}
 
-                    {!isViewOnly && (
-                      noteBoxOpen ? (
-                        <div className="mt-3 space-y-2">
-                          <label className="text-xs pf-muted block">
-                            Optional note — why this pick for {currentSpaceName || "this space"}?
-                          </label>
-                          <textarea
-                            value={proposeNoteText}
-                            onChange={(e) => setProposeNoteText(e.target.value)}
-                            rows={2}
+                    {noteBoxOpen ? (
+                      <div className="mt-3 space-y-2">
+                        <label className="text-xs pf-muted block">
+                          Optional note — why this pick for {currentSpaceName || "this space"}?
+                        </label>
+                        <textarea
+                          value={proposeNoteText}
+                          onChange={(e) => setProposeNoteText(e.target.value)}
+                          rows={2}
+                          disabled={isProposing}
+                          placeholder={
+                            role === "client"
+                              ? "e.g. Matches the finish we discussed."
+                              : "e.g. Fits the budget and lead time for this space."
+                          }
+                          className="pf-input rounded-lg px-3 py-2 text-sm w-full disabled:opacity-60"
+                        />
+                        {sizeRequired && (
+                          <p className="text-xs text-[#B8802F]">Pick a size above first.</p>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleProposeItem(item.id, proposeNoteText, activeVariant?.id ?? null)}
+                            disabled={isProposing || sizeRequired}
+                            className="touch-manipulation pf-btn-primary flex-1 text-xs rounded-full py-2 disabled:opacity-50"
+                          >
+                            {isProposing ? "Adding…" : "Add"}
+                          </button>
+                          <button
+                            onClick={cancelProposeNote}
                             disabled={isProposing}
-                            placeholder={
-                              role === "client"
-                                ? "e.g. Matches the finish we discussed."
-                                : "e.g. Fits the budget and lead time for this space."
-                            }
-                            className="pf-input rounded-lg px-3 py-2 text-sm w-full disabled:opacity-60"
-                          />
-                          {sizeRequired && (
-                            <p className="text-xs text-[#B8802F]">Pick a size above first.</p>
-                          )}
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleProposeItem(item.id, proposeNoteText, activeVariant?.id ?? null)}
-                              disabled={isProposing || sizeRequired}
-                              className="touch-manipulation pf-btn-primary flex-1 text-xs rounded-full py-2 disabled:opacity-50"
-                            >
-                              {isProposing ? "Adding…" : "Add"}
-                            </button>
-                            <button
-                              onClick={cancelProposeNote}
-                              disabled={isProposing}
-                              className="touch-manipulation pf-btn-outline flex-1 text-xs rounded-full py-2 disabled:opacity-50"
-                            >
-                              Cancel
-                            </button>
-                          </div>
+                            className="touch-manipulation pf-btn-outline flex-1 text-xs rounded-full py-2 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => openProposeNote(item.id)}
-                          disabled={!spaceId || sizeRequired}
-                          title={sizeRequired ? "Pick a size first" : undefined}
-                          className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
-                        >
-                          {!spaceId
-                            ? "Add a space first"
-                            : sizeRequired
-                            ? "Pick a size first"
-                            : count > 0
-                            ? role === "client"
-                              ? "Add another"
-                              : "Suggest another"
-                            : role === "client"
-                            ? "Select for this space"
-                            : "Suggest for this space"}
-                        </button>
-                      )
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => openProposeNote(item.id)}
+                        disabled={!spaceId || sizeRequired}
+                        title={sizeRequired ? "Pick a size first" : undefined}
+                        className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
+                      >
+                        {!spaceId
+                          ? "Add a space first"
+                          : sizeRequired
+                          ? "Pick a size first"
+                          : count > 0
+                          ? role === "client"
+                            ? "Add another"
+                            : "Suggest another"
+                          : role === "client"
+                          ? "Select for this space"
+                          : "Suggest for this space"}
+                      </button>
                     )}
                     {canWithdraw && (
                       <div className="mt-2 flex gap-2">
@@ -786,7 +793,7 @@ export default function ProductCatalog({
         )}
       </section>
 
-      {showSuggestModal && !isViewOnly && (
+      {showSuggestModal && canSuggestProduct && (
         <div
           className="pf-modal-overlay fixed inset-0 flex items-end sm:items-center justify-center z-20 px-0 sm:px-4"
           onClick={closeSuggestModal}

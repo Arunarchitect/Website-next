@@ -109,12 +109,13 @@ export interface Assignment {
   space: number;
   product: string;
   product_detail: ProductItem;
-  // Which size/option was picked, if the product has variants. Null for a
-  // product with no variants, or an older assignment made before variants
-  // existed.
   variant: number | null;
   variant_detail?: ProductVariant | null;
   proposed_by: Role;
+  // The specific user who proposed this — distinct from `proposed_by`'s
+  // role bucket. Used to scope removal to "this specific person, or an
+  // admin" rather than "anyone on the architect/client side".
+  proposed_by_user?: number | null;
   proposer_note: string | null;
   client_confirmed: boolean;
   architect_confirmed: boolean;

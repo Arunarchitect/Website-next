@@ -1,4 +1,3 @@
-// page.tsx
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,6 +5,7 @@ import { Fraunces, Inter } from "next/font/google";
 import "./product.css";
 import ProductListPrintButton from "./ProductListPrint";
 import ProductCatalog, { PriceBlock, ProductLink, useDebounced } from "./ProductCatalog";
+import { getCurrentUser } from "@/app/main/user/userApi"; // ⚠️ adjust this relative path to match your tree
 import {
   Role,
   OrganisationGroup,
@@ -141,6 +141,12 @@ export default function ProductPage() {
   const [rawRole, setRawRole] = useState<string>("");
   const [projectSearch, setProjectSearch] = useState("");
 
+  // The logged-in user's own id — needed to tell "my proposal" apart from
+  // "someone else on my side's proposal" now that member/manager (not just
+  // client/architect-admin) can propose assignments. Pulled from whatever
+  // getCurrentUser() already resolves (localStorage-cached user record).
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceId, setSpaceId] = useState<number | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -192,6 +198,13 @@ export default function ProductPage() {
       });
     }
   }
+
+  useEffect(() => {
+    (async () => {
+      const user = await getCurrentUser();
+      setCurrentUserId(user?.id ?? null);
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -848,7 +861,14 @@ export default function ProductPage() {
                   const canConfirm = !isViewOnly && !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
 
                   const isProposer = a.proposed_by === role;
-                  const canHardDelete = !isViewOnly && isProposer;
+                  // Admin can remove any assignment. Otherwise it's the
+                  // specific person who proposed it — not just "anyone on
+                  // the same side" — since member/manager (isViewOnly) now
+                  // share the architect bucket with admin but shouldn't be
+                  // able to remove each other's proposals.
+                  const canHardDelete =
+                    rawRole === "admin" ||
+                    (currentUserId !== null && a.proposed_by_user === currentUserId);
                   const canDecline = !isViewOnly && !isProposer && !a.declined;
                   const canUndoDecline = !isViewOnly && a.declined && a.declined_by === role;
                   const confirmKey = `confirm-${a.id}`;
@@ -863,6 +883,12 @@ export default function ProductPage() {
                   const isSavingNote = isBusy(editNoteKey);
                   const noteBoxOpen = decliningNoteId === a.id;
                   const editNoteBoxOpen = editingNoteId === a.id;
+
+                  // Whether the action row should render at all for this
+                  // row: everyone gets it if they're not view-only; a
+                  // view-only person (member/manager) still gets it
+                  // *only* to see their own remove button.
+                  const showActionRow = !isViewOnly || canHardDelete;
 
                   return (
                     <div key={a.id} className="pf-row flex flex-col gap-3 rounded-2xl px-4 sm:px-5 py-4">
@@ -899,9 +925,9 @@ export default function ProductPage() {
                           }`}>
                             {statusLabel(a)}
                           </span>
-                          {!isViewOnly && (
+                          {showActionRow && (
                             <div className="flex gap-2 flex-wrap justify-end">
-                              {canConfirm && (
+                              {!isViewOnly && canConfirm && (
                                 <button
                                   onClick={() => handleConfirm(a.id)}
                                   disabled={isConfirming}
@@ -919,7 +945,7 @@ export default function ProductPage() {
                                   {isRemoving ? "Removing…" : "Remove"}
                                 </button>
                               )}
-                              {isProposer && !editNoteBoxOpen && (
+                              {!isViewOnly && isProposer && !editNoteBoxOpen && (
                                 <button
                                   onClick={() => openEditNote(a)}
                                   className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5"
@@ -927,7 +953,7 @@ export default function ProductPage() {
                                   {a.proposer_note ? "Edit note" : "Add note"}
                                 </button>
                               )}
-                              {canDecline && !noteBoxOpen && (
+                              {!isViewOnly && canDecline && !noteBoxOpen && (
                                 <button
                                   onClick={() => openDeclineNote(a.id)}
                                   className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5"
@@ -935,7 +961,7 @@ export default function ProductPage() {
                                   Decline
                                 </button>
                               )}
-                              {canUndoDecline && (
+                              {!isViewOnly && canUndoDecline && (
                                 <button
                                   onClick={() => handleUndoDecline(a.id)}
                                   disabled={isUndeclining}
@@ -944,7 +970,7 @@ export default function ProductPage() {
                                   {isUndeclining ? "Undoing…" : "Undo decline"}
                                 </button>
                               )}
-                              {!canHardDelete && !canDecline && !canUndoDecline && a.declined && (
+                              {!isViewOnly && !canHardDelete && !canDecline && !canUndoDecline && a.declined && (
                                 <span className="pf-faint text-xs px-3 py-1.5">Declined</span>
                               )}
                             </div>
