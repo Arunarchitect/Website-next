@@ -59,7 +59,11 @@ async function loadImageForPdf(
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const response = await fetch(url, { signal: controller.signal, mode: "cors" });
+    const response = await fetch(url, {
+      signal: controller.signal,
+      mode: "cors",
+      cache: "no-store",
+    });
     clearTimeout(timeoutId);
     if (!response.ok) return null;
 

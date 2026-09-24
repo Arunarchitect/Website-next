@@ -465,9 +465,21 @@ const convertDjangoIssue = (data: any): Issue => {
     status: mapStatusToFrontend(data.status) as IssueStatus,
     priority: mapPriorityToFrontend(data.priority) as IssuePriority,
     module: data.module || '',
-    reportedBy: data.reported_by_name || data.reported_by?.email || data.reported_by?.full_name || 'Unknown',
+    reportedBy:
+      data.reported_by_name ||
+      data.reported_by?.email ||
+      data.reported_by?.full_name ||
+      data.reported_by_details?.full_name ||
+      data.reported_by_details?.email ||
+      'Unknown',
     reportedById: extractIdSafe(data.reported_by) ?? null,
-    assignedTo: data.assigned_to_name || data.assigned_to?.email || data.assigned_to?.full_name || null,
+    assignedTo:
+      data.assigned_to_name ||
+      data.assigned_to?.email ||
+      data.assigned_to?.full_name ||
+      data.assigned_to_details?.full_name ||
+      data.assigned_to_details?.email ||
+      null,
     assignedToId: extractIdSafe(data.assigned_to) ?? null,
     project: extractIdSafe(data.project),
     project_id: extractIdSafe(data.project),

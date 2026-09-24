@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Role,
   ProductItem,
@@ -170,6 +170,187 @@ function SkeletonCard() {
   );
 }
 
+// Paste-enabled image picker. The dropzone is a contentEditable region —
+// that's what makes the browser offer "Paste" in its native right-click
+// menu, and what makes mobile long-press → Paste work, since both are the
+// same native paste path a plain <div> doesn't get. Ctrl+V while it's
+// focused fires the same onPaste handler. A "Paste from clipboard" button
+// (navigator.clipboard.read()) is the fallback for anyone whose browser
+// doesn't surface Paste on a contentEditable — plus "Choose file" and
+// drag-and-drop for anyone who hasn't copied anything.
+function ImagePasteField({
+  label,
+  value,
+  onChange,
+  existingImageUrl,
+  disabled,
+}: {
+  label: string;
+  value: File | null;
+  onChange: (file: File | null) => void;
+  existingImageUrl?: string | null;
+  disabled?: boolean;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!value) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(value);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [value]);
+
+  function acceptFile(file: File | null | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPasteError("That's not an image file.");
+      return;
+    }
+    setPasteError(null);
+    onChange(file);
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          acceptFile(item.getAsFile());
+          break;
+        }
+      }
+    }
+    // Whatever the browser inserted into the contentEditable (text, or
+    // the pasted image itself) is just a side effect we don't want kept.
+    if (dropzoneRef.current) dropzoneRef.current.textContent = "";
+  }
+
+  async function handlePasteButton() {
+    setPasteError(null);
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        setPasteError("Clipboard access isn't supported here — try Ctrl+V instead.");
+        return;
+      }
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const file = new File([blob], `pasted-image.${imageType.split("/")[1] || "png"}`, {
+            type: imageType,
+          });
+          acceptFile(file);
+          return;
+        }
+      }
+      setPasteError("No image found on the clipboard.");
+    } catch {
+      setPasteError("Couldn't read the clipboard — try Ctrl+V instead.");
+    }
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragOver(false);
+    acceptFile(e.dataTransfer.files?.[0]);
+  }
+
+  const showPreview = previewUrl || existingImageUrl;
+
+  return (
+    <div className="flex flex-col gap-1.5 text-sm sm:col-span-2">
+      <span>{label}</span>
+
+      <div
+        ref={dropzoneRef}
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        tabIndex={disabled ? -1 : 0}
+        onPaste={handlePaste}
+        onDrop={handleDrop}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragOver(true);
+        }}
+        onDragLeave={() => setIsDragOver(false)}
+        onClick={() => {
+          if (!showPreview) fileInputRef.current?.click();
+        }}
+        className={`pf-input rounded-xl px-3 py-4 text-center text-xs cursor-pointer outline-none transition-colors ${
+          isDragOver ? "pf-checkbox-label-active" : ""
+        } ${disabled ? "opacity-60 pointer-events-none" : ""}`}
+      >
+        {showPreview ? (
+          <div className="flex flex-col items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl || existingImageUrl || undefined}
+              alt="Selected"
+              className="max-h-28 max-w-full object-contain rounded-lg pointer-events-none"
+            />
+            <span className="pf-faint">{value ? value.name : "Current photo"}</span>
+          </div>
+        ) : (
+          <span className="pf-faint">
+            Click to browse, or paste an image here
+            <br />
+            (Ctrl+V, right-click → Paste, or long-press on mobile)
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled}
+          className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+        >
+          Choose file
+        </button>
+        <button
+          type="button"
+          onClick={handlePasteButton}
+          disabled={disabled}
+          className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+        >
+          Paste from clipboard
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            disabled={disabled}
+            className="touch-manipulation pf-btn-danger-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+
+      {pasteError && <p className="pf-error-box text-xs rounded-lg px-3 py-2">{pasteError}</p>}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => acceptFile(e.target.files?.[0])}
+        className="hidden"
+      />
+    </div>
+  );
+}
+
 interface ProductCatalogProps {
   catalogAll: ProductItem[];
   setCatalogAll: React.Dispatch<React.SetStateAction<ProductItem[]>>;
@@ -223,6 +404,7 @@ export default function ProductCatalog({
   const [suggestSuccess, setSuggestSuccess] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editingProductImageUrl, setEditingProductImageUrl] = useState<string | null>(null);
 
   const [proposingNoteId, setProposingNoteId] = useState<string | null>(null);
   const [proposeNoteText, setProposeNoteText] = useState("");
@@ -372,6 +554,7 @@ export default function ProductCatalog({
 
   function openSuggestModal() {
     setEditingProductId(null);
+    setEditingProductImageUrl(null);
     setSuggestForm({ ...EMPTY_SUGGESTION, category: categoryId });
     setSuggestSuccess(false);
     setSuggestError(null);
@@ -380,6 +563,7 @@ export default function ProductCatalog({
 
   function openEditSuggestion(item: ProductItem) {
     setEditingProductId(item.id);
+    setEditingProductImageUrl(item.product_image || item.thumbnail_url || null);
     setSuggestForm({
       space: "",
       category: item.category,
@@ -402,6 +586,7 @@ export default function ProductCatalog({
     setSuggestForm(EMPTY_SUGGESTION);
     setSuggestError(null);
     setEditingProductId(null);
+    setEditingProductImageUrl(null);
   }
 
   async function handleSuggestSubmit() {
@@ -925,15 +1110,14 @@ export default function ProductCatalog({
                       className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                    {editingProductId ? "Replace photo (optional)" : "Photo (optional)"}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => setSuggestForm({ ...suggestForm, product_image: e.target.files?.[0] ?? null })}
-                      className="text-sm"
-                    />
-                  </label>
+
+                  <ImagePasteField
+                    label={editingProductId ? "Replace photo (optional)" : "Photo (optional)"}
+                    value={suggestForm.product_image}
+                    onChange={(file) => setSuggestForm({ ...suggestForm, product_image: file })}
+                    existingImageUrl={editingProductId ? editingProductImageUrl : null}
+                    disabled={suggesting}
+                  />
                 </fieldset>
 
                 <div className="flex gap-3 pt-2">

@@ -202,7 +202,8 @@ export function ScreenshotDropzone({
 }
 
 // ---------------------------------------------------------------------------
-// IssueHeader — id, title (view/edit), domain badge, owner badge, org badge
+// IssueHeader — id, title (view/edit), domain badge, owner badge, project
+// badge, org badge
 // ---------------------------------------------------------------------------
 
 interface IssueHeaderProps {
@@ -241,6 +242,12 @@ export function IssueHeader({ issue, isEditing, titleValue, onTitleChange, isBim
       {!isEditing && <ClassificationBadge classification={issue.classification} />}
       {!isEditing && isCreator && (
         <span className="issue-owner-badge">(You)</span>
+      )}
+      {!isEditing && issue.projectName && (
+        <span className="issue-organisation-badge">
+          <i className="ti ti-folder" />
+          {issue.projectName}
+        </span>
       )}
       {!isEditing && issue.organisation && (
         <span className="issue-organisation-badge">
