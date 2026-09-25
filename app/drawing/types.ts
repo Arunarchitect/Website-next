@@ -42,6 +42,10 @@ export interface DrawingDocument {
   is_private: boolean;
   allowed_roles?: string[];
   is_public: boolean;
+  // Present only on the detail serializer response (DrawingDocumentSerializer),
+  // never on the list serializer — see drawings/serializers.py. null/undefined
+  // means no single-drawing guest link currently exists for this document.
+  guest_access_code?: string | null;
 }
 
 export interface DrawingDocumentResolved extends DrawingDocument {

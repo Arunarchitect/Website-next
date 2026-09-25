@@ -449,8 +449,15 @@ export function IssueDetail({
       setEditingCommentText("");
       editingCommentScreenshotUpload.reset();
       setEditingCommentHasExistingImage(false);
-    } catch {
-      setSaveError('Failed to edit comment.');
+    } catch (err: unknown) {
+      console.error('Edit comment error:', err);
+      if (axios.isAxiosError(err) && err.response?.data) {
+        const data = err.response.data as Record<string, unknown>;
+        const detail = (data.error ?? data.detail) as string | undefined;
+        setSaveError(detail || 'Failed to edit comment.');
+      } else {
+        setSaveError('Failed to edit comment.');
+      }
     } finally {
       isSavingCommentEditRef.current = false;
       setIsSavingCommentEdit(false);
@@ -462,8 +469,15 @@ export function IssueDetail({
     try {
       setSaveError(null);
       await onDeleteComment(commentId);
-    } catch {
-      setSaveError('Failed to delete comment.');
+    } catch (err: unknown) {
+      console.error('Delete comment error:', err);
+      if (axios.isAxiosError(err) && err.response?.data) {
+        const data = err.response.data as Record<string, unknown>;
+        const detail = (data.error ?? data.detail) as string | undefined;
+        setSaveError(detail || 'Failed to delete comment.');
+      } else {
+        setSaveError('Failed to delete comment.');
+      }
     }
   };
 
@@ -523,7 +537,11 @@ export function IssueDetail({
       mainScreenshot.setScreenshot(null);
     } catch (err: unknown) {
       console.error('Save error:', err);
-      if (axios.isAxiosError(err) && err.response?.data) {
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        const data = err.response?.data as Record<string, unknown> | undefined;
+        const detail = (data?.error ?? data?.detail) as string | undefined;
+        setSaveError(detail || "You don't have permission to edit this issue.");
+      } else if (axios.isAxiosError(err) && err.response?.data) {
         const errors = Object.values(err.response.data as Record<string, unknown>).flat().join('\n');
         setSaveError(`Validation Error: ${errors}`);
       } else {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, Suspense, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -20,6 +20,8 @@ import {
   createDocument,
   updateDocument,
   deleteDocument,
+  getMyMemberships,
+  RawMembership,
 } from "./drawingApi";
 import {
   Organisation,
@@ -44,6 +46,8 @@ const mono = IBM_Plex_Mono({
   weight: ["400", "500"],
   variable: "--font-mono",
 });
+
+const UPLOAD_ROLES = ["admin", "manager", "member"];
 
 type ApiError = {
   message?: string;
@@ -85,12 +89,22 @@ function DocumentsPageInner() {
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [showPrivateOnly, setShowPrivateOnly] = useState<boolean>(false);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  // Only meaningful for admin/manager/member — clients are always forced to
+  // "published" and never see this control (see canFilterByStatus below).
+  const [selectedStatus, setSelectedStatus] = useState<"draft" | "published" | "archived" | undefined>(
+    undefined
+  );
 
   const [selectedDoc, setSelectedDoc] = useState<DrawingDocumentResolved | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserContext | null>(null);
+
+  // Real org-membership rows from /my-memberships/ (OrganisationMembership),
+  // used instead of currentUser.roles — see getMyMemberships() in drawingApi.ts.
+  const [memberships, setMemberships] = useState<RawMembership[]>([]);
+  const [membershipsLoaded, setMembershipsLoaded] = useState<boolean>(false);
 
   const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
@@ -140,6 +154,49 @@ function DocumentsPageInner() {
 
   const isGuest = currentUser?.id === 0;
 
+  // Fetch real OrganisationMembership rows once we know who's logged in.
+  // currentUser.roles isn't reliable for org-role gating (see drawingApi.ts),
+  // so canUpload below is derived from this instead.
+  useEffect(() => {
+    if (!currentUser || isGuest) {
+      setMembershipsLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    const loadMemberships = async () => {
+      try {
+        const data = await getMyMemberships();
+        if (!cancelled) setMemberships(data);
+      } catch (err) {
+        console.error("Error loading memberships:", err);
+      } finally {
+        if (!cancelled) setMembershipsLoaded(true);
+      }
+    };
+    loadMemberships();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, isGuest]);
+
+  // A client-only user has no org-wide admin/manager/member membership anywhere.
+  // This only gates UI (hiding buttons that would otherwise fail or
+  // shouldn't be offered) — the real access boundary is enforced
+  // server-side regardless of what this computes to. Until memberships
+  // have loaded, default to false so the upload/edit/delete controls
+  // don't flash on before we know the user actually has a qualifying role.
+  const hasElevatedRole = useMemo(
+    () => membershipsLoaded && memberships.some((m) => UPLOAD_ROLES.includes(m.role)),
+    [membershipsLoaded, memberships]
+  );
+  const canUpload = hasElevatedRole;
+
+  // Same admin/manager/member set gates the Status filter. A client (or
+  // anyone without a qualifying membership) never sees the control and is
+  // always restricted to published documents — enforced below in
+  // loadDocuments, not just hidden in the UI.
+  const canFilterByStatus = hasElevatedRole;
+
   useEffect(() => {
     if (!currentUser || isGuest) return;
     const loadOrganisations = async () => {
@@ -188,7 +245,16 @@ function DocumentsPageInner() {
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedOrgId, selectedProjectId, selectedDeliverableId, searchTerm, showPrivateOnly, pageSize, sortOrder]);
+  }, [
+    selectedOrgId,
+    selectedProjectId,
+    selectedDeliverableId,
+    searchTerm,
+    showPrivateOnly,
+    pageSize,
+    sortOrder,
+    selectedStatus,
+  ]);
 
   const loadDocuments = useCallback(async () => {
     if (!currentUser || isGuest) return;
@@ -196,6 +262,12 @@ function DocumentsPageInner() {
     try {
       setLoading(true);
       setError(null);
+
+      // Clients (and anyone without an admin/manager/member membership) are
+      // always restricted to published documents, regardless of whatever
+      // selectedStatus happens to hold — the dropdown is hidden for them,
+      // but this is the actual enforcement point, not just the UI hiding.
+      const effectiveStatus = canFilterByStatus ? selectedStatus : "published";
 
       const data = await getDocuments({
         organisationId: selectedOrgId,
@@ -205,7 +277,8 @@ function DocumentsPageInner() {
         showPrivate: showPrivateOnly,
         page: currentPage,
         pageSize,
-        ordering: sortOrder === "newest" ? "-created_at" : "created_at", 
+        ordering: sortOrder === "newest" ? "-created_at" : "created_at",
+        status: effectiveStatus,
       });
 
       setDocuments(data.results);
@@ -219,7 +292,8 @@ function DocumentsPageInner() {
         search: searchTerm,
         page: 1,
         pageSize: 1000,
-        ordering: sortOrder === "newest" ? "-created_at" : "created_at",  
+        ordering: sortOrder === "newest" ? "-created_at" : "created_at",
+        status: effectiveStatus,
       });
       const privCount = all.results.filter((d) => d.is_private).length;
       const pubCount = all.results.filter((d) => !d.is_private).length;
@@ -242,6 +316,8 @@ function DocumentsPageInner() {
     currentUser,
     isGuest,
     sortOrder,
+    selectedStatus,
+    canFilterByStatus,
   ]);
 
   useEffect(() => {
@@ -423,14 +499,16 @@ function DocumentsPageInner() {
     setSearchTerm("");
     setShowPrivateOnly(false);
     setCurrentPage(1);
-    setSortOrder("newest"); 
+    setSortOrder("newest");
+    setSelectedStatus(undefined);
   };
 
   const hasActiveFilters =
     selectedOrgId !== undefined ||
     selectedProjectId !== undefined ||
     selectedDeliverableId !== undefined ||
-    searchTerm.trim() !== "";
+    searchTerm.trim() !== "" ||
+    (canFilterByStatus && selectedStatus !== undefined);
 
   if (!currentUser) {
     return (
@@ -474,18 +552,20 @@ function DocumentsPageInner() {
             <span>Back to Portal</span>
           </Link>
           <div className="documents-header-actions">
-            <button
-              className="btn-primary"
-              onClick={() => {
-                setFormMode("create");
-                setEditingDocument(null);
-                setIsFormOpen(true);
-              }}
-            >
-              <i className="ti ti-plus" />
-              New Document
-            </button>
-            {selectedDoc && (
+            {canUpload && (
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setFormMode("create");
+                  setEditingDocument(null);
+                  setIsFormOpen(true);
+                }}
+              >
+                <i className="ti ti-plus" />
+                New Document
+              </button>
+            )}
+            {selectedDoc && canUpload && (
               <>
                 <button className="btn-secondary" onClick={() => handleEditDocument(selectedDoc)}>
                   <i className="ti ti-edit" />
@@ -653,6 +733,28 @@ function DocumentsPageInner() {
             ))}
           </select>
         </div>
+        {canFilterByStatus && (
+          <div className="documents-filter-group">
+            <label className="documents-filter-label">
+              <i className="ti ti-flag" /> Status
+            </label>
+            <select
+              className="documents-filter-select"
+              value={selectedStatus ?? ""}
+              onChange={(e) =>
+                setSelectedStatus(
+                  e.target.value ? (e.target.value as "draft" | "published" | "archived") : undefined
+                )
+              }
+            >
+              <option value="">All Statuses</option>
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+        )}
+
         <div className="documents-filter-group" style={{ marginLeft: "auto" }}>
           <label className="documents-filter-label">
             <i className="ti ti-arrows-sort" /> Sort
@@ -666,8 +768,6 @@ function DocumentsPageInner() {
             <option value="oldest">Oldest First</option>
           </select>
         </div>
-
-
 
         {hasActiveFilters && (
           <button className="documents-filter-clear" onClick={clearFilters}>
@@ -918,18 +1018,20 @@ function DocumentsPageInner() {
                   ? "No private documents match the selected filters"
                   : "No documents match the selected filters"}
               </p>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  setFormMode("create");
-                  setEditingDocument(null);
-                  setIsFormOpen(true);
-                }}
-                style={{ marginTop: "16px" }}
-              >
-                <i className="ti ti-plus" />
-                Create your first document
-              </button>
+              {canUpload && (
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    setFormMode("create");
+                    setEditingDocument(null);
+                    setIsFormOpen(true);
+                  }}
+                  style={{ marginTop: "16px" }}
+                >
+                  <i className="ti ti-plus" />
+                  Create your first document
+                </button>
+              )}
             </div>
           )}
         </>

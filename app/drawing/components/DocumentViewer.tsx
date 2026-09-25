@@ -8,6 +8,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { DrawingDocumentResolved } from "../types";
 import { getFullFileUrl } from "../drawingApi";
+import ShareLinkModal from "./ShareLinkModal";
 
 // Point react-pdf's worker at a CDN build matching the installed version.
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -68,6 +69,15 @@ export default function DocumentViewer({
   // Editable zoom percentage input — kept as a local string buffer so
   // typing doesn't fight the displayed zoom on every keystroke.
   const [zoomInputValue, setZoomInputValue] = useState<string>('100');
+
+  // Share-link state — mirrors doc.guest_access_code locally so the modal
+  // can update it without needing the parent list/grid to re-fetch.
+  const [guestCode, setGuestCode] = useState<string | null>(doc.guest_access_code ?? null);
+  const [isShareOpen, setIsShareOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    setGuestCode(doc.guest_access_code ?? null);
+  }, [doc.id, doc.guest_access_code]);
 
   const isPDF = doc.file_type === 'pdf';
   const isImage = doc.file_type === 'image';
@@ -443,6 +453,17 @@ export default function DocumentViewer({
                 <span className="document-viewer-btn-label">Favorite</span>
               </button>
             )}
+            {!guestMode && (
+              <button
+                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-share"
+                onClick={() => setIsShareOpen(true)}
+                title="Get a shareable link for this drawing"
+                aria-label="Share"
+              >
+                <i className={`ti ${guestCode ? 'ti-link' : 'ti-share'}`} />
+                <span className="document-viewer-btn-label">Share</span>
+              </button>
+            )}
             {isPDF && !hasError && !isLoading && blobUrl && (
               <div className="document-viewer-zoom-controls">
                 <button
@@ -658,6 +679,16 @@ export default function DocumentViewer({
           </div>
         </div>
       </div>
+
+      {isShareOpen && (
+        <ShareLinkModal
+          documentId={doc.id}
+          documentTitle={doc.title}
+          initialCode={guestCode}
+          onClose={() => setIsShareOpen(false)}
+          onCodeChange={setGuestCode}
+        />
+      )}
     </div>
   );
 }

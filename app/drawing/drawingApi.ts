@@ -222,7 +222,8 @@ export interface DocumentFilters {
   showPrivate?: boolean;
   page?: number;
   pageSize?: number;
-  ordering?: string; 
+  ordering?: string;
+  status?: 'draft' | 'published' | 'archived';
 }
 
 export const getDocuments = async (
@@ -246,8 +247,11 @@ export const getDocuments = async (
     if (filters.showPrivate) {
       params.append('show_private', 'true');
     }
-    if (filters.ordering) {                         // <-- add this block
+    if (filters.ordering) {
       params.append('ordering', filters.ordering);
+    }
+    if (filters.status) {
+      params.append('status', filters.status);
     }
 
     const page = filters.page ?? 1;
@@ -290,6 +294,44 @@ export const toggleFavorite = async (id: number): Promise<boolean> => {
     console.error('Error toggling favorite:', error);
     throw new Error('Failed to toggle favorite');
   }
+};
+
+export interface GuestLinkResult {
+  guest_access_code: string | null;
+}
+
+/**
+ * Create (or fetch the existing) single-drawing guest link for this
+ * document. Idempotent — calling this on a document that already has a
+ * code just returns that same code rather than rotating it.
+ */
+export const createGuestLink = async (id: number): Promise<GuestLinkResult> => {
+  try {
+    const response = await apiClient.post(`/drawings/documents/${id}/guest-link/`);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating guest link:', error);
+    throw new Error('Failed to create guest link');
+  }
+};
+
+/**
+ * Revoke this document's single-drawing guest link. Anyone holding the
+ * old link loses access immediately.
+ */
+export const revokeGuestLink = async (id: number): Promise<void> => {
+  try {
+    await apiClient.delete(`/drawings/documents/${id}/guest-link/`);
+  } catch (error) {
+    console.error('Error revoking guest link:', error);
+    throw new Error('Failed to revoke guest link');
+  }
+};
+
+/** Builds the public share URL from a code, e.g. "/drawing/<code>". */
+export const buildGuestLinkUrl = (code: string): string => {
+  if (typeof window === 'undefined') return `/drawing/${code}`;
+  return `${window.location.origin}/drawing/${code}`;
 };
 
 export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<void> => {
@@ -422,4 +464,22 @@ export const canAccessDocument = (doc: DrawingDocumentResolved, user: UserContex
     return doc.allowed_roles.some((role) => user.roles.includes(role));
   }
   return false;
+};
+
+export interface RawMembership {
+  id: number;
+  organisation: number;
+  role: string;
+  project: number | null;
+}
+
+/** Same endpoint userApi.ts's getOrganisationMemberships() uses. */
+export const getMyMemberships = async (): Promise<RawMembership[]> => {
+  try {
+    const response = await apiClient.get('/my-memberships/');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching memberships:', error);
+    return [];
+  }
 };
