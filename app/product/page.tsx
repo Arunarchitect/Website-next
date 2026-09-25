@@ -14,6 +14,7 @@ import {
   Assignment,
   PricedFields,
   CATEGORIES,
+  IFC_PREDEFINED_TYPES,
   getImageSource,
   getVariantImageSource,
   formatPrice,
@@ -150,12 +151,20 @@ export default function ProductPage() {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceId, setSpaceId] = useState<number | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [categoryId, setCategoryId] = useState(CATEGORIES[0].id);
+  const [categoryId, setCategoryId] = useState("");
 
   const [filterSpaceIds, setFilterSpaceIds] = useState<Set<number>>(new Set());
   const [filterCategory, setFilterCategory] = useState<string>("");
+  const [filterPredefinedType, setFilterPredefinedType] = useState<string>("");
   const [filterSearch, setFilterSearch] = useState("");
   const debouncedFilterSearch = useDebounced(filterSearch, 250);
+
+  // The predefined-type option list depends on filterCategory — clear the
+  // selection whenever the category filter changes so it can't point at a
+  // type that doesn't belong to the newly-selected category.
+  useEffect(() => {
+    setFilterPredefinedType("");
+  }, [filterCategory]);
 
   const [catalogAll, setCatalogAll] = useState<ProductItem[]>([]);
 
@@ -338,13 +347,14 @@ export default function ProductPage() {
       if (!filterSpaceIds.has(a.space)) return false;
       const item = pricedProduct(a.product_detail);
       if (filterCategory && item.category !== filterCategory) return false;
+      if (filterPredefinedType && item.predefined_type !== filterPredefinedType) return false;
       if (term) {
         const hay = `${item.item} ${item.manufacturer} ${item.model_label}`.toLowerCase();
         if (!hay.includes(term)) return false;
       }
       return true;
     });
-  }, [assignments, projectId, filterSpaceIds, filterCategory, debouncedFilterSearch, pricedProduct]);
+  }, [assignments, projectId, filterSpaceIds, filterCategory, filterPredefinedType, debouncedFilterSearch, pricedProduct]);
 
   const filteredTotals = useMemo(
     () =>
@@ -385,12 +395,16 @@ export default function ProductPage() {
       return spaces.filter((s) => filterSpaceIds.has(s.id)).map((s) => s.name).join(", ");
     })();
     const catLabel = filterCategory ? CATEGORIES.find((c) => c.id === filterCategory)?.label : null;
+    const typeLabel = filterPredefinedType
+      ? IFC_PREDEFINED_TYPES[filterCategory]?.find((t) => t.code === filterPredefinedType)?.label
+      : null;
     const searchLabel = filterSearch.trim() ? `Search: "${filterSearch.trim()}"` : null;
     const parts = [spaceLabel];
     if (catLabel) parts.push(catLabel);
+    if (typeLabel) parts.push(typeLabel);
     if (searchLabel) parts.push(searchLabel);
     return parts.join(" · ");
-  }, [spaces, filterSpaceIds, filterCategory, filterSearch]);
+  }, [spaces, filterSpaceIds, filterCategory, filterPredefinedType, filterSearch]);
 
   function toggleFilterSpace(id: number) {
     setFilterSpaceIds((prev) => {
@@ -794,6 +808,18 @@ export default function ProductPage() {
                   <option key={c.id} value={c.id}>{c.label}</option>
                 ))}
               </select>
+              {filterCategory && (IFC_PREDEFINED_TYPES[filterCategory]?.length ?? 0) > 0 && (
+                <select
+                  value={filterPredefinedType}
+                  onChange={(e) => setFilterPredefinedType(e.target.value)}
+                  className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm w-full sm:w-auto"
+                >
+                  <option value="">All types</option>
+                  {IFC_PREDEFINED_TYPES[filterCategory].map((t) => (
+                    <option key={t.code} value={t.code}>{t.label}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {spaces.length > 0 && (

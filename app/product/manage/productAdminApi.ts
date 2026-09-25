@@ -95,6 +95,9 @@ export interface AdminProduct {
   id: string;
   space: string;
   category: string;
+  predefined_type: string | null;
+  predefined_type_label?: string;
+  display_name?: string;
   item: string;
   manufacturer: string;
   model_label: string;
@@ -124,6 +127,7 @@ export interface AdminProduct {
 export interface ProductFormValues {
   space: string;
   category: string;
+  predefined_type?: string;
   item: string;
   manufacturer: string;
   model_label: string;
@@ -190,6 +194,7 @@ function buildFormData(values: ProductFormValues): FormData {
   const fd = new FormData();
   fd.append('space', values.space);
   fd.append('category', values.category);
+  if (values.predefined_type) fd.append('predefined_type', values.predefined_type);
   fd.append('item', values.item);
   fd.append('manufacturer', values.manufacturer);
   fd.append('model_label', values.model_label);

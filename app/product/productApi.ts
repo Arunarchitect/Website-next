@@ -9,11 +9,96 @@ export type MembershipRole = "admin" | "manager" | "member" | "client";
 
 export const CATEGORIES: { id: string; label: string }[] = [
   { id: "IfcSanitaryTerminal", label: "Sanitary Terminal" },
-  { id: "IfcFurnishingElement", label: "Furnishing Element" },
   { id: "IfcFlowTerminal", label: "Flow Terminal" },
+  { id: "IfcElectricAppliance", label: "Electric Appliance" },
+  { id: "IfcFurnishingElement", label: "Furnishing Element" },
   { id: "IfcLightFixture", label: "Lighting Fixture" },
+  { id: "IfcDoor", label: "Door" },
+  { id: "IfcWindow", label: "Window" },
   { id: "IfcOther", label: "Other" },
 ];
+
+// Mirrors Product.IFC_PREDEFINED_TYPES on the backend — code -> label,
+// scoped per IFC category. Keep these two in sync.
+export const IFC_PREDEFINED_TYPES: Record<string, { code: string; label: string }[]> = {
+  IfcSanitaryTerminal: [
+    { code: "WASHHANDBASIN", label: "Wash Basin" },
+    { code: "SINK", label: "Sink" },
+    { code: "BATH", label: "Bathtub" },
+    { code: "SHOWER", label: "Shower" },
+    { code: "BIDET", label: "Bidet" },
+    { code: "TOILETPAN", label: "Toilet (WC Pan)" },
+    { code: "URINAL", label: "Urinal" },
+    { code: "CISTERN", label: "Cistern" },
+    { code: "WCSEAT", label: "WC Seat" },
+  ],
+  IfcFlowTerminal: [
+    { code: "TAP", label: "Tap / Faucet" },
+    { code: "SHOWERHEAD", label: "Shower Head" },
+    { code: "DIFFUSER", label: "AC Diffuser" },
+    { code: "GRILLE", label: "Grille" },
+    { code: "SPRINKLER", label: "Sprinkler" },
+    { code: "FLOORDRAIN", label: "Floor Drain" },
+    { code: "ROOFDRAIN", label: "Roof Drain" },
+  ],
+  IfcElectricAppliance: [
+    { code: "REFRIGERATOR", label: "Refrigerator" },
+    { code: "FRIDGE_FREEZER", label: "Fridge-Freezer" },
+    { code: "FREEZER", label: "Freezer" },
+    { code: "WASHINGMACHINE", label: "Washing Machine" },
+    { code: "TUMBLEDRYER", label: "Tumble Dryer" },
+    { code: "DISHWASHER", label: "Dishwasher" },
+    { code: "MICROWAVE", label: "Microwave" },
+    { code: "ELECTRICCOOKER", label: "Electric Cooker" },
+    { code: "STOVE", label: "Stove" },
+    { code: "ELECTRICHEATER", label: "Electric Heater" },
+    { code: "WATERHEATER", label: "Water Heater / Geyser" },
+    { code: "WATERCOOLER", label: "Water Cooler" },
+    { code: "TV", label: "Television" },
+    { code: "HANDDRYER", label: "Hand Dryer" },
+  ],
+  IfcFurnishingElement: [
+    { code: "BED", label: "Bed" },
+    { code: "SOFA", label: "Sofa" },
+    { code: "WARDROBE", label: "Wardrobe" },
+    { code: "KITCHENCABINET", label: "Kitchen Cabinet" },
+    { code: "VANITYUNIT", label: "Vanity Unit" },
+    { code: "DININGTABLE", label: "Dining Table" },
+    { code: "CHAIR", label: "Chair" },
+    { code: "DESK", label: "Desk" },
+  ],
+  IfcLightFixture: [
+    { code: "DOWNLIGHT", label: "Downlight" },
+    { code: "PENDANT", label: "Pendant Light" },
+    { code: "WALLLIGHT", label: "Wall Light" },
+    { code: "TRACKLIGHT", label: "Track Light" },
+    { code: "CHANDELIER", label: "Chandelier" },
+  ],
+  IfcDoor: [
+    { code: "DOOR", label: "Door" },
+    { code: "GATE", label: "Gate" },
+    { code: "TRAPDOOR", label: "Trap Door" },
+  ],
+  IfcWindow: [
+    { code: "WINDOW", label: "Window" },
+    { code: "SKYLIGHT", label: "Skylight" },
+    { code: "LIGHTDOME", label: "Light Dome" },
+  ],
+  IfcOther: [],
+};
+
+export function getPredefinedTypeLabel(category: string, code?: string | null): string {
+  if (!code) return "";
+  return IFC_PREDEFINED_TYPES[category]?.find((t) => t.code === code)?.label || code;
+}
+
+/** e.g. "Wash Basin (Sanitary Terminal)" — falls back to just the category
+ * label if no predefined type is set. */
+export function getDisplayName(category: string, predefinedType?: string | null): string {
+  const catLabel = CATEGORIES.find((c) => c.id === category)?.label || category;
+  const typeLabel = getPredefinedTypeLabel(category, predefinedType);
+  return typeLabel ? `${typeLabel} (${catLabel})` : catLabel;
+}
 
 export interface MyContextEntry {
   organisation: { id: number; name: string };
@@ -80,6 +165,11 @@ export interface PricedFields {
 export interface ProductItem {
   id: string;
   category: string;
+  // IFC PredefinedType code, scoped to `category` — e.g. WASHHANDBASIN,
+  // SINK, DISHWASHER. See IFC_PREDEFINED_TYPES above.
+  predefined_type?: string | null;
+  predefined_type_label?: string;
+  display_name?: string;
   item: string;
   manufacturer: string;
   model_label: string;
@@ -87,6 +177,7 @@ export interface ProductItem {
   product_image?: string | null;
   thumbnail_url?: string | null;
   base_price?: string | null;
+  cost_price?: string | null; 
   currency?: string | null;
   effective_price?: string | null;
   status?: "pending" | "approved" | "rejected";
@@ -129,10 +220,12 @@ export interface Assignment {
 export interface ProductSuggestionInput {
   space: string;
   category: string;
+  predefined_type?: string;
   item: string;
   manufacturer: string;
   model_label: string;
   base_price?: string;
+  cost_price?: string; 
   currency?: string;
   product_link?: string;
   product_image?: File | null;
@@ -307,10 +400,11 @@ export async function getSpaces(projectId: number): Promise<Space[]> {
 export async function getProductsByCategory(
   category: string,
   projectId: number,
-  opts?: { search?: string; page?: number }
+  opts?: { search?: string; page?: number; predefinedType?: string }
 ): Promise<PaginatedResult<ProductItem>> {
   const params: any = { project: projectId, page_size: CATALOG_PAGE_SIZE };
   if (category) params.category = category;
+  if (opts?.predefinedType) params.predefined_type = opts.predefinedType;
   if (opts?.search) params.search = opts.search;
   if (opts?.page) params.page = opts.page;
 
@@ -389,6 +483,7 @@ export async function suggestProduct(input: ProductSuggestionInput): Promise<Pro
   const fd = new FormData();
   fd.append('space', input.space);
   fd.append('category', input.category);
+  if (input.predefined_type) fd.append('predefined_type', input.predefined_type);
   fd.append('item', input.item);
   fd.append('manufacturer', input.manufacturer);
   fd.append('model_label', input.model_label);
@@ -396,6 +491,7 @@ export async function suggestProduct(input: ProductSuggestionInput): Promise<Pro
   if (input.currency) fd.append('currency', input.currency);
   if (input.product_link) fd.append('product_link', input.product_link);
   if (input.product_image) fd.append('product_image', input.product_image);
+  if (input.cost_price) fd.append('cost_price', input.cost_price);   // NEW
   fd.append('organisation', String(input.organisation));
 
   const res = await apiClient.post('/product/products/suggest/', fd, {
@@ -410,10 +506,12 @@ export async function updateProductSuggestion(
 ): Promise<ProductItem> {
   const fd = new FormData();
   if (input.category !== undefined) fd.append('category', input.category);
+  if (input.predefined_type !== undefined) fd.append('predefined_type', input.predefined_type);
   if (input.item !== undefined) fd.append('item', input.item);
   if (input.manufacturer !== undefined) fd.append('manufacturer', input.manufacturer);
   if (input.model_label !== undefined) fd.append('model_label', input.model_label);
   if (input.base_price !== undefined) fd.append('base_price', input.base_price);
+  if (input.cost_price !== undefined) fd.append('cost_price', input.cost_price); 
   if (input.currency !== undefined) fd.append('currency', input.currency);
   if (input.product_link !== undefined) fd.append('product_link', input.product_link);
   if (input.product_image) fd.append('product_image', input.product_image);

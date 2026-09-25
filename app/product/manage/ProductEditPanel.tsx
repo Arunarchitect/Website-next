@@ -11,7 +11,7 @@ import {
   VariantFormValues,
   getImageSource,
 } from "./productAdminApi";
-import { CATEGORIES } from "../productApi";
+import { CATEGORIES, IFC_PREDEFINED_TYPES } from "../productApi";
 
 // ─── Shared helpers (also used by page.tsx) ─────────────────────────────
 
@@ -20,6 +20,7 @@ export const inputBase = "w-full border border-[#DCE0D8] rounded-lg px-3 py-2 te
 export const EMPTY_FORM: ProductFormValues = {
   space: "",
   category: CATEGORIES[0].id,
+  predefined_type: "",
   item: "",
   manufacturer: "",
   model_label: "",
@@ -369,6 +370,8 @@ export default function ProductEditPanel({
   }`;
   const savingNote = isBusy(noteSaveKey);
 
+  const predefinedTypeOptions = IFC_PREDEFINED_TYPES[form.category] ?? [];
+
   function handleOrgNoteOrgChange(orgId: string) {
     setOrgNoteOrgId(orgId);
     const existing = editingProduct?.organisation_notes?.find(
@@ -452,7 +455,9 @@ export default function ProductEditPanel({
               Category
               <select
                 value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, category: e.target.value, predefined_type: "" })
+                }
                 className="border border-[#DCE0D8] rounded-lg px-3 py-2"
               >
                 {CATEGORIES.map((c) => (
@@ -462,6 +467,23 @@ export default function ProductEditPanel({
                 ))}
               </select>
             </label>
+            {predefinedTypeOptions.length > 0 && (
+              <label className="flex flex-col gap-1 text-sm">
+                Type
+                <select
+                  value={form.predefined_type ?? ""}
+                  onChange={(e) => setForm({ ...form, predefined_type: e.target.value })}
+                  className="border border-[#DCE0D8] rounded-lg px-3 py-2"
+                >
+                  <option value="">Select…</option>
+                  {predefinedTypeOptions.map((t) => (
+                    <option key={t.code} value={t.code}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="flex flex-col gap-1 text-sm">
               Item
               <input

@@ -9,6 +9,7 @@ import {
   PricedFields,
   Assignment,
   CATEGORIES,
+  IFC_PREDEFINED_TYPES,
   CATALOG_PAGE_SIZE,
   getImageSource,
   getVariantImageSource,
@@ -24,10 +25,12 @@ import {
 const EMPTY_SUGGESTION = {
   space: "",
   category: CATEGORIES[0].id,
+  predefined_type: "",
   item: "",
   manufacturer: "",
   model_label: "",
   base_price: "",
+  cost_price: "",
   currency: "INR",
   product_link: "",
   product_image: null as File | null,
@@ -73,7 +76,8 @@ export function ProductLink({ href, className }: { href?: string | null; classNa
   if (!href) return null;
   return (
     <a
-    
+
+
       href={href}
       target="_blank"
       rel="noopener noreferrer"
@@ -142,9 +146,8 @@ function VariantPicker({
               key={v.id}
               type="button"
               onClick={() => onSelect(v.id)}
-              className={`touch-manipulation text-xs px-2.5 py-1.5 rounded-full border whitespace-nowrap ${
-                active ? "pf-checkbox-label-active" : "pf-checkbox-label"
-              }`}
+              className={`touch-manipulation text-xs px-2.5 py-1.5 rounded-full border whitespace-nowrap ${active ? "pf-checkbox-label-active" : "pf-checkbox-label"
+                }`}
             >
               {v.label}
               {priceLabel && <span className="pf-faint ml-1.5">{priceLabel}</span>}
@@ -286,9 +289,8 @@ function ImagePasteField({
         onClick={() => {
           if (!showPreview) fileInputRef.current?.click();
         }}
-        className={`pf-input rounded-xl px-3 py-4 text-center text-xs cursor-pointer outline-none transition-colors ${
-          isDragOver ? "pf-checkbox-label-active" : ""
-        } ${disabled ? "opacity-60 pointer-events-none" : ""}`}
+        className={`pf-input rounded-xl px-3 py-4 text-center text-xs cursor-pointer outline-none transition-colors ${isDragOver ? "pf-checkbox-label-active" : ""
+          } ${disabled ? "opacity-60 pointer-events-none" : ""}`}
       >
         {showPreview ? (
           <div className="flex flex-col items-center gap-2">
@@ -393,6 +395,16 @@ export default function ProductCatalog({
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounced(searchTerm, 250);
 
+  // Predefined-type filter for the catalog grid — dependent on categoryId,
+  // reset whenever the category changes since the option list is scoped
+  // to whatever category is selected.
+  const [predefinedTypeId, setPredefinedTypeId] = useState("");
+  const predefinedTypeOptions = IFC_PREDEFINED_TYPES[categoryId] ?? [];
+
+  useEffect(() => {
+    setPredefinedTypeId("");
+  }, [categoryId]);
+
   const [page, setPage] = useState(1);
   const [pageItems, setPageItems] = useState<ProductItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -421,7 +433,7 @@ export default function ProductCatalog({
 
   useEffect(() => {
     setPage(1);
-  }, [projectId, categoryId, debouncedSearch]);
+  }, [projectId, categoryId, predefinedTypeId, debouncedSearch]);
 
   const fetchPage = useCallback(async () => {
     if (!projectId) {
@@ -435,6 +447,7 @@ export default function ProductCatalog({
       const result = await getProductsByCategory(categoryId, projectId, {
         search: debouncedSearch || undefined,
         page,
+        predefinedType: predefinedTypeId || undefined,
       });
       setPageItems(result.items);
       setTotalCount(result.count);
@@ -442,7 +455,7 @@ export default function ProductCatalog({
     } finally {
       setLoadingPage(false);
     }
-  }, [projectId, categoryId, debouncedSearch, page]);
+  }, [projectId, categoryId, predefinedTypeId, debouncedSearch, page]);
 
   useEffect(() => {
     fetchPage();
@@ -555,7 +568,7 @@ export default function ProductCatalog({
   function openSuggestModal() {
     setEditingProductId(null);
     setEditingProductImageUrl(null);
-    setSuggestForm({ ...EMPTY_SUGGESTION, category: categoryId });
+    setSuggestForm({ ...EMPTY_SUGGESTION, category: categoryId || CATEGORIES[0].id });
     setSuggestSuccess(false);
     setSuggestError(null);
     setShowSuggestModal(true);
@@ -567,10 +580,12 @@ export default function ProductCatalog({
     setSuggestForm({
       space: "",
       category: item.category,
+      predefined_type: item.predefined_type || "",
       item: item.item,
       manufacturer: item.manufacturer,
       model_label: item.model_label,
       base_price: item.base_price ? String(item.base_price) : "",
+      cost_price: item.cost_price ? String(item.cost_price) : "",
       currency: item.currency || "INR",
       product_link: item.product_link || "",
       product_image: null,
@@ -605,10 +620,12 @@ export default function ProductCatalog({
         if (editingProductId) {
           const updated = await updateProductSuggestion(editingProductId, {
             category: suggestForm.category,
+            predefined_type: suggestForm.predefined_type || undefined,
             item: suggestForm.item,
             manufacturer: suggestForm.manufacturer,
             model_label: suggestForm.model_label,
             base_price: suggestForm.base_price || undefined,
+            cost_price: suggestForm.cost_price || undefined,
             currency: suggestForm.currency || undefined,
             product_link: suggestForm.product_link || undefined,
             product_image: suggestForm.product_image,
@@ -619,10 +636,12 @@ export default function ProductCatalog({
           await suggestProduct({
             space: suggestForm.space,
             category: suggestForm.category,
+            predefined_type: suggestForm.predefined_type || undefined,
             item: suggestForm.item,
             manufacturer: suggestForm.manufacturer,
             model_label: suggestForm.model_label,
             base_price: suggestForm.base_price || undefined,
+            cost_price: suggestForm.cost_price || undefined,
             currency: suggestForm.currency || undefined,
             product_link: suggestForm.product_link || undefined,
             product_image: suggestForm.product_image,
@@ -670,6 +689,8 @@ export default function ProductCatalog({
   // manages the catalog directly instead (see "Manage catalog" link).
   const canSuggestProduct = rawRole !== "admin";
 
+  const suggestFormTypeOptions = IFC_PREDEFINED_TYPES[suggestForm.category] ?? [];
+
   // Referenced so no-unused-vars doesn't complain; the paginated view
   // intentionally uses its own pageItems state.
   void catalogAll;
@@ -696,10 +717,23 @@ export default function ProductCatalog({
               onChange={(e) => setCategoryId(e.target.value)}
               className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm flex-1 sm:flex-none min-w-0"
             >
+              <option value="">All categories</option>
               {CATEGORIES.map((c) => (
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
+            {predefinedTypeOptions.length > 0 && (
+              <select
+                value={predefinedTypeId}
+                onChange={(e) => setPredefinedTypeId(e.target.value)}
+                className="pf-input px-4 py-2.5 sm:py-2 rounded-full text-sm flex-1 sm:flex-none min-w-0"
+              >
+                <option value="">All types</option>
+                {predefinedTypeOptions.map((t) => (
+                  <option key={t.code} value={t.code}>{t.label}</option>
+                ))}
+              </select>
+            )}
             {canSuggestProduct && (
               <button
                 onClick={openSuggestModal}
@@ -918,14 +952,14 @@ export default function ProductCatalog({
                         {!spaceId
                           ? "Add a space first"
                           : sizeRequired
-                          ? "Pick a size first"
-                          : count > 0
-                          ? role === "client"
-                            ? "Add another"
-                            : "Suggest another"
-                          : role === "client"
-                          ? "Select for this space"
-                          : "Suggest for this space"}
+                            ? "Pick a size first"
+                            : count > 0
+                              ? role === "client"
+                                ? "Add another"
+                                : "Suggest another"
+                              : role === "client"
+                                ? "Select for this space"
+                                : "Suggest for this space"}
                       </button>
                     )}
                     {canWithdraw && (
@@ -1048,7 +1082,9 @@ export default function ProductCatalog({
                     Category
                     <select
                       value={suggestForm.category}
-                      onChange={(e) => setSuggestForm({ ...suggestForm, category: e.target.value })}
+                      onChange={(e) =>
+                        setSuggestForm({ ...suggestForm, category: e.target.value, predefined_type: "" })
+                      }
                       className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     >
                       {CATEGORIES.map((c) => (
@@ -1056,6 +1092,21 @@ export default function ProductCatalog({
                       ))}
                     </select>
                   </label>
+                  {suggestFormTypeOptions.length > 0 && (
+                    <label className="flex flex-col gap-1 text-sm">
+                      Type
+                      <select
+                        value={suggestForm.predefined_type}
+                        onChange={(e) => setSuggestForm({ ...suggestForm, predefined_type: e.target.value })}
+                        className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
+                      >
+                        <option value="">Select…</option>
+                        {suggestFormTypeOptions.map((t) => (
+                          <option key={t.code} value={t.code}>{t.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <label className="flex flex-col gap-1 text-sm sm:col-span-2">
                     Item name
                     <input
@@ -1081,11 +1132,21 @@ export default function ProductCatalog({
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
-                    Approx. price (optional)
+                    Approx. price / MRP (optional)
                     <input
                       type="number"
                       value={suggestForm.base_price}
                       onChange={(e) => setSuggestForm({ ...suggestForm, base_price: e.target.value })}
+                      className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    Final price, if discounted (optional)
+                    <input
+                      type="number"
+                      value={suggestForm.cost_price}
+                      onChange={(e) => setSuggestForm({ ...suggestForm, cost_price: e.target.value })}
+                      placeholder="Leave blank if same as MRP"
                       className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>

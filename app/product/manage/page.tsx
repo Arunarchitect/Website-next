@@ -1,7 +1,7 @@
 "use client";
 
 import "./page.css";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   AdminProduct,
   ProductFormValues,
@@ -35,6 +35,7 @@ import {
   setOrganisationNote,
   getApiErrorMessage,
 } from "./productAdminApi";
+import { CATEGORIES, IFC_PREDEFINED_TYPES, getPredefinedTypeLabel } from "../productApi";
 import ProductEditPanel, {
   FileChooser,
   EMPTY_FORM,
@@ -104,12 +105,20 @@ function statusBadgeClass(status: AdminProduct["status"]) {
   return "pm-badge pm-badge-pending";
 }
 
+// Small helper so we don't sprinkle null-checks everywhere. Falls back to
+// the raw stored value if there's no friendly label for it yet.
+function predefinedTypeLabel(category: string, predefinedType: string | null | undefined) {
+  if (!predefinedType) return null;
+  return getPredefinedTypeLabel(category, predefinedType) || predefinedType;
+}
+
 export default function ProductManagePage() {
   const [view, setView] = useState<"catalog" | "pending">("catalog");
 
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [predefinedTypeFilter, setPredefinedTypeFilter] = useState<string>("");
 
   const [pending, setPending] = useState<AdminProduct[]>([]);
   const [loadingPending, setLoadingPending] = useState(false);
@@ -198,6 +207,41 @@ export default function ProductManagePage() {
     })();
   }, []);
 
+  // ─── Category / predefined-type filters — shared by Catalog and Pending ─
+  // Built from the full IFC choice lists (CATEGORIES / IFC_PREDEFINED_TYPES),
+  // not just whatever's currently loaded, so an admin can filter down to a
+  // type even if nothing of that type exists yet.
+
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+
+  const predefinedTypeOptions = categoryFilter ? IFC_PREDEFINED_TYPES[categoryFilter] ?? [] : [];
+
+  // The type list is scoped to categoryFilter, so clear a stale selection
+  // whenever the category changes.
+  useEffect(() => {
+    setPredefinedTypeFilter("");
+  }, [categoryFilter]);
+
+  // Catalog tab: approved products only — pending ones live in their own tab.
+  const visibleProducts = useMemo(() => {
+    return products.filter((p) => {
+      if (p.status !== "approved") return false;
+      if (categoryFilter && p.category !== categoryFilter) return false;
+      if (predefinedTypeFilter && p.predefined_type !== predefinedTypeFilter) return false;
+      return true;
+    });
+  }, [products, categoryFilter, predefinedTypeFilter]);
+
+  // Pending tab: same category/type filters, no status filter (it's already
+  // scoped to pending by getPendingProducts()).
+  const filteredPending = useMemo(() => {
+    return pending.filter((p) => {
+      if (categoryFilter && p.category !== categoryFilter) return false;
+      if (predefinedTypeFilter && p.predefined_type !== predefinedTypeFilter) return false;
+      return true;
+    });
+  }, [pending, categoryFilter, predefinedTypeFilter]);
+
   // ─── Edit panel open/close ───────────────────────────────────────────
 
   function startEdit(p: AdminProduct) {
@@ -213,6 +257,7 @@ export default function ProductManagePage() {
       currency: p.currency ?? "INR",
       cost_price: p.cost_price ?? "",
       product_link: p.product_link ?? "",
+      predefined_type: p.predefined_type ?? "",
       product_image: null,
     });
   }
@@ -737,6 +782,35 @@ export default function ProductManagePage() {
           </div>
         </header>
 
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-4 py-2 rounded-full border border-[#DCE0D8] bg-white text-sm text-[#4B5650]"
+          >
+            <option value="">All categories</option>
+            {CATEGORIES.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          {predefinedTypeOptions.length > 0 && (
+            <select
+              value={predefinedTypeFilter}
+              onChange={(e) => setPredefinedTypeFilter(e.target.value)}
+              className="px-4 py-2 rounded-full border border-[#DCE0D8] bg-white text-sm text-[#4B5650]"
+            >
+              <option value="">All types</option>
+              {predefinedTypeOptions.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
         {view === "pending" ? (
           <div className="bg-white border border-[#DCE0D8] rounded-2xl overflow-hidden">
             {loadingPending ? (
@@ -745,12 +819,17 @@ export default function ProductManagePage() {
               <div className="p-10 text-center text-sm text-[#6B7570]">
                 No pending suggestions from your organisation&apos;s clients right now.
               </div>
+            ) : filteredPending.length === 0 ? (
+              <div className="p-10 text-center text-sm text-[#6B7570]">
+                No pending suggestions match the selected category/type.
+              </div>
             ) : (
               <div className="divide-y divide-[#EDEFEA]">
-                {pending.map((p) => {
+                {filteredPending.map((p) => {
                   const approveKey = `approve-${p.id}`;
                   const rejectKey = `reject-${p.id}`;
                   const anyBusy = isBusy(approveKey) || isBusy(rejectKey);
+                  const typeLabel = predefinedTypeLabel(p.category, p.predefined_type);
                   return (
                     <div
                       key={p.id}
@@ -766,6 +845,11 @@ export default function ProductManagePage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">{p.item}</span>
                           <span className={statusBadgeClass(p.status)}>{p.status}</span>
+                          {typeLabel && (
+                            <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                              {typeLabel}
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-[#6B7570]">
                           {p.manufacturer} — {p.model_label} · {p.category}
@@ -844,25 +928,32 @@ export default function ProductManagePage() {
             <div className="bg-white border border-[#DCE0D8] rounded-2xl overflow-hidden">
               {loading ? (
                 <div className="p-10 text-center text-sm text-[#6B7570]">Loading…</div>
-              ) : products.length === 0 ? (
-                <div className="p-10 text-center text-sm text-[#6B7570]">No products found.</div>
+              ) : visibleProducts.length === 0 ? (
+                <div className="p-10 text-center text-sm text-[#6B7570]">
+                  {products.length === 0
+                    ? "No products found."
+                    : "No approved products match the selected category/type."}
+                </div>
               ) : (
                 <>
                   <div className="pm-table-wrap overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-[#F5F6F3] text-left text-[#6B7570]">
                         <tr>
-                          <th className="px-4 py-3"></th>
+                          <th className="px-4 py-3">Image</th>
                           <th className="px-4 py-3">Item</th>
                           <th className="px-4 py-3">Manufacturer / Model</th>
                           <th className="px-4 py-3">Category</th>
+                          <th className="px-4 py-3">Type</th>
                           <th className="px-4 py-3">Status</th>
                           <th className="px-4 py-3">Price</th>
                           <th className="px-4 py-3"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {products.map((p) => (
+                        {visibleProducts.map((p) => {
+                          const typeLabel = predefinedTypeLabel(p.category, p.predefined_type);
+                          return (
                           <Fragment key={p.id}>
                             <tr className="border-t border-[#EDEFEA]">
                               <td className="px-4 py-3">
@@ -885,6 +976,7 @@ export default function ProductManagePage() {
                                 {p.manufacturer} — {p.model_label}
                               </td>
                               <td className="px-4 py-3 text-xs">{p.category}</td>
+                              <td className="px-4 py-3 text-xs">{typeLabel || "—"}</td>
                               <td className="px-4 py-3">
                                 <span className={statusBadgeClass(p.status)}>{p.status}</span>
                               </td>
@@ -897,19 +989,22 @@ export default function ProductManagePage() {
                             </tr>
                             {expandedId === p.id && (
                               <tr className="bg-[#F9FAF8] border-t border-[#EDEFEA]">
-                                <td colSpan={7} className="px-6 py-4 space-y-4">
+                                <td colSpan={8} className="px-6 py-4 space-y-4">
                                   <ProductDetailsPanel p={p} />
                                 </td>
                               </tr>
                             )}
                           </Fragment>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
                   <div className="pm-card-list">
-                    {products.map((p) => (
+                    {visibleProducts.map((p) => {
+                      const typeLabel = predefinedTypeLabel(p.category, p.predefined_type);
+                      return (
                       <div key={p.id} className="pm-card">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -924,6 +1019,11 @@ export default function ProductManagePage() {
                             {p.variants.length > 0 && (
                               <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
                                 {p.variants.length} variants
+                              </span>
+                            )}
+                            {typeLabel && (
+                              <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                                {typeLabel}
                               </span>
                             )}
                           </div>
@@ -943,7 +1043,8 @@ export default function ProductManagePage() {
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}
