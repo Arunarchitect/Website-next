@@ -2106,6 +2106,30 @@
   border-color: rgba(212, 62, 62, 0.35);
 }
 
+/* ============================================
+   VIEWER - MOBILE MINIMAL ACTIONS
+   Used when <DocumentViewer hideActionsOnMobile />, e.g. /drawing/<code>.
+   On phones: hide Print + Close, show one "Fast View / Download" button.
+   ============================================ */
+
+.document-viewer-label-mobile {
+  display: none;
+}
+
+@media (max-width: 780px) {
+  .document-viewer-mobile-minimal .document-viewer-hide-on-mobile {
+    display: none !important;
+  }
+
+  .document-viewer-mobile-minimal .document-viewer-label-desktop {
+    display: none !important;
+  }
+
+  .document-viewer-mobile-minimal .document-viewer-label-mobile {
+    display: inline !important;
+  }
+}
+
 @media (max-width: 780px) {
   .document-viewer-header {
     flex-wrap: wrap;
@@ -2183,6 +2207,16 @@
     line-height: 1.1;
     white-space: nowrap;
     color: inherit;
+  }
+
+  /* Keep the desktop/mobile label swap working: the rule above forces
+     display:block, so re-assert the hide for the label that shouldn't show. */
+  .document-viewer-mobile-minimal .document-viewer-btn-labeled .document-viewer-label-desktop {
+    display: none !important;
+  }
+
+  .document-viewer-mobile-minimal .document-viewer-btn-labeled .document-viewer-label-mobile {
+    display: block !important;
   }
 
   .document-viewer-btn-print {

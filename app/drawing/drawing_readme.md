@@ -1,12 +1,17 @@
-# Guest Drawing Access — How It Works
+# Drawings App: How It Works
 
-Lets people without a Modelflick login view drawings/documents via a shared
-code, at three different scopes: an entire project, a single deliverable, or
-one specific drawing.
+Drawings/documents for Modelflick. Two audiences:
+
+- **Logged-in users** browse, upload, share and manage drawings (§5).
+- **Guests** (no login) view drawings through a shared code (§1-§4).
+
+Backend: Django REST Framework, app `drawings`. Frontend: Next.js, `app/drawing/`.
+Last updated after: in-app Share button, **bulk share / revoke / print**, client
+project-scoping, status filter, **mobile-minimal viewer toolbar** (direct link).
 
 ---
 
-## 1. The three scopes
+## 1. The three guest scopes
 
 | Scope | Code lives on | Visibility rule | Bypasses private/archived? |
 |---|---|---|---|
@@ -14,31 +19,40 @@ one specific drawing.
 | **Deliverable** | `DeliverableAccessKey` (viewer app) | only `is_private=False, status='published'` drawings in that deliverable | No |
 | **Drawing** | `DrawingDocument.guest_access_code` | that one drawing, regardless of privacy/status | **Yes** |
 
-The per-drawing code is intentionally the odd one out — it's a direct share
-link for a specific file and ignores every other access rule.
+The per-drawing code is intentionally the odd one out: it's a direct share
+link for one file and ignores every other access rule. It is also the **only**
+scope a logged-in user can create from inside the app (§2.1, §2.2, §3.6, §3.8).
+Project and deliverable keys are still admin/viewer-app-managed.
 
 ---
 
 ## 2. Backend
 
-### Models — `drawings/models.py`
+### Models: `drawings/models.py`
 
 ```python
 DrawingDocument.guest_access_code   # unique, nullable CharField(32)
 DrawingDocument.generate_guest_access_code()   # mints a 12-char hex code, saves, returns it
-DrawingDocument.revoke_guest_access_code()     # clears the code
+DrawingDocument.revoke_guest_access_code()     # clears the code (sets None)
 
 DrawingDocument.guest_visible_for_project_key(access_key)      # -> queryset
 DrawingDocument.guest_visible_for_deliverable_key(access_key)  # -> queryset
 DrawingDocument.guest_visible_for_drawing_code(code)           # -> queryset
 ```
 
-`ProjectAccessKey` and `DeliverableAccessKey` live in the **viewer app**, not
-`drawings` — they're reused models, not new ones added for this feature.
+Useful `DrawingDocument` properties (used by serializers and the bulk endpoints):
+`organisation`, `project`, `deliverable_name`, `project_name`, `project_id`,
+`organisation_name`, `organisation_id`, `uploaded_by_name`, `file_size_display`.
 
-### Views — `drawings/views.py`
+`DocumentAccessLog.action` choices: `view`, `download`, `share`, `edit`, `delete`.
+`share` is written by every guest-link create/revoke, single or bulk.
 
-All three are `permission_classes = [AllowAny]`:
+`ProjectAccessKey` / `DeliverableAccessKey` live in the **viewer app**, not
+`drawings`.
+
+### Guest views: `drawings/views.py`
+
+All `permission_classes = [AllowAny]`:
 
 ```python
 GuestProjectDrawingsView       # GET /api/drawings/public/project/<access_code>/
@@ -46,74 +60,72 @@ GuestDeliverableDrawingsView   # GET /api/drawings/public/deliverable/<access_co
 GuestDrawingDetailView         # GET /api/drawings/public/drawing/<code>/
 ```
 
-⚠️ **Known inconsistency:** `GuestDeliverableDrawingsView` explicitly checks
-`DeliverableAccessKey.objects.filter(...).exists()` and returns **404** if
-not found. `GuestProjectDrawingsView` does **not** — an invalid project code
-returns **200 with an empty list**, not a 404. This matters because of how
-the frontend resolves codes (see §3.1) — it breaks the fallback chain. Still
-unfixed — see §7.1.
+Both the project and deliverable views return **404 on an unknown key**. This
+matters because the frontend resolves a typed code by trying all three
+endpoints in order (§3.1): a `200 []` from the project endpoint would stop the
+chain early. (The project view used to return `200 []`; fixed.)
 
-### URLs — `drawings/urls.py`
+### URLs: `drawings/urls.py`
 
 ```python
+router.register(r'documents', DrawingDocumentViewSet, basename='drawing-document')
+...
 path('public/project/<str:access_code>/', GuestProjectDrawingsView.as_view()),
 path('public/deliverable/<str:access_code>/', GuestDeliverableDrawingsView.as_view()),
 path('public/drawing/<str:code>/', GuestDrawingDetailView.as_view()),
 ```
 
-Note the prefix is `public/`, not `guest/` — some docstrings in `views.py`
-say `guest/`, those are stale comments, ignore them.
+The prefix is `public/`, not `guest/`. The router picks up every `@action`
+automatically, so new actions on the viewset need **no** `urls.py` change.
 
-### Admin — `drawings/admin.py`
+### Admin: `drawings/admin.py`
 
-`guest_access_code` is **not directly editable** in admin. Instead:
+`guest_access_code` is not directly editable. Instead:
 
-- Select document(s) in the list view →
-  **"Generate guest link for selected"** action → mints/regenerates the code,
-  shows the resulting `/drawing/<code>` URL(s) in the success banner.
-- **"Revoke guest link for selected"** action clears it.
-- The change form shows the current code (read-only) and a rendered
-  `/drawing/<code>` link once one exists.
-- List view has a ✓ Active / — badge column so you can see at a glance
-  which docs currently have a live guest link.
+- Select document(s) → **"Generate guest link for selected"** (mints/regenerates,
+  shows `/drawing/<code>` URLs in the banner) or **"Revoke guest link for selected"**.
+- Change form shows the current code (read-only) and a rendered link.
+- List view has a ✓ Active / — badge column.
 
-To generate one outside admin (e.g. for local testing), Django shell works
-directly:
+Admin still works as a fallback for everything the in-app tools do.
 
-```python
-doc = DrawingDocument.objects.get(pk=123)
-code = doc.generate_guest_access_code()
-```
-
-This is still the only way to mint a code *from admin*. As of §2.1 below,
-it's no longer the only way overall — a logged-in user can now mint their
-own link for a document they can access, from inside the app itself.
-
-### 2.1 In-app link creation — `guest_link` action on `DrawingDocumentViewSet`
-
-New addition: authenticated users no longer need Django admin to create or
-revoke a per-drawing guest link.
+### 2.1 Single-drawing link: `guest_link` action
 
 ```
-POST   /drawings/documents/<id>/guest-link/    — create (or return existing) code
-DELETE /drawings/documents/<id>/guest-link/    — revoke the code
+POST   /drawings/documents/<id>/guest-link/    create (or return existing) code
+DELETE /drawings/documents/<id>/guest-link/    revoke
 ```
 
-- Implemented as a `@action` on `DrawingDocumentViewSet`, so it reuses
-  `get_object()` — meaning the **existing permission chain already applies**:
-  `IsAuthenticated` + `CanAccessDocumentPermission` (see §5.2). A user who
-  can't access a document can't mint a share link for it either; no new
-  permission logic was written for this endpoint.
-- `POST` calls `generate_guest_access_code()` if no code exists yet,
-  otherwise just returns the existing one — idempotent, doesn't rotate an
-  already-active link.
-- `DELETE` calls `revoke_guest_access_code()`.
-- Both log a `DocumentAccessLog(action='share')` — `'share'` was already a
-  defined choice on that model but unused until now.
+- `@action(detail=True)`, so it reuses `get_object()` and the full permission
+  chain: `IsAuthenticated` + `get_queryset()` + `CanAccessDocumentPermission`.
+- `POST` is idempotent: returns the existing code, doesn't rotate it. To rotate,
+  Revoke then Create.
+- Both log `DocumentAccessLog(action='share')`; POST logs only when a code is
+  actually minted.
 
-This only mints/revokes the **drawing-scope** code (§1). Project- and
-deliverable-scope `AccessKey` records are unaffected and still
-admin/viewer-app-managed.
+### 2.2 Bulk actions: `DrawingDocumentViewSet` (`detail=False`)
+
+Three list-level actions back the bulk Share modal (§3.8). All use
+`permission_classes=[IsAuthenticated]` and scope every id through
+**`self.get_queryset()`**, so org boundary, client project-scoping,
+draft/published rules and privacy rules all apply. Ids the user can't access
+are silently dropped and reported in `skipped`.
+
+| Endpoint | Body / query | Does | Returns |
+|---|---|---|---|
+| `POST /drawings/documents/bulk-guest-link/` | `{"ids": [..]}` (max 300) | mints missing codes, returns existing ones; logs `share` only for newly minted | `{links: [{id,title,code,project_name,deliverable_name,is_private}], skipped}` |
+| `GET /drawings/documents/guest-links/` | same filters as list (`organisation_id`, `project_id`, `deliverable_id`, `status`, `search`, `show_private`) | every accessible drawing matching the filters that **already has** a link. Not paginated | `{links: [...]}` |
+| `POST /drawings/documents/bulk-revoke-guest-link/` | `{"ids": [..]}` (max 300) | revokes the code on each accessible drawing that has one; logs `share` per drawing | `{revoked: [ids], skipped}` |
+
+Notes:
+
+- Because these use the list-level permission (not `get_object()`), there is no
+  object-permission check; `get_queryset()` is the only gate. Keep it that way
+  or add an explicit check if `get_queryset()` ever loosens.
+- Writes run inside `transaction.atomic()`; logs are `bulk_create`d.
+- An **optional, commented-out block** in `bulk_guest_link` restricts minting to
+  org-wide admin/manager/member (`_full_access_org_ids`). Enable it to stop
+  project-scoped clients from minting links (§7.6).
 
 ---
 
@@ -123,565 +135,498 @@ admin/viewer-app-managed.
 
 ```
 app/drawing/
-├── page.tsx                          # main authenticated document browser;
-│                                      # renders <GuestAccessGate /> instead
-│                                      # if the current user is a guest.
-│                                      # canUpload is now derived from
-│                                      # getMyMemberships(), not
-│                                      # currentUser.roles — see §5.5.
-│                                      # Status (draft/published/archived)
-│                                      # filter shown only to admin/manager/
-│                                      # member; clients are hardcoded to
-│                                      # published — see §5.6.
-├── [code]/page.tsx                   # direct single-drawing link
-│                                      # (/drawing/<code>)
-├── guestApi.ts                       # unauthenticated axios client + the
-│                                      # 3 guest fetch functions + resolver
-├── drawingApi.ts                     # authenticated client, getCurrentUser,
-│                                      # createGuestLink, revokeGuestLink,
-│                                      # buildGuestLinkUrl, getMyMemberships
-│                                      # (see §5.5)
+├── page.tsx                  # authenticated document browser; renders
+│                             # <GuestAccessGate /> if the user is a guest.
+│                             # Header has a Share button (bulk, §3.8).
+│                             # canUpload / canFilterByStatus come from
+│                             # getMyMemberships() (§5.5, §5.6).
+├── [code]/page.tsx           # direct single-drawing link (/drawing/<code>);
+│                             # passes hideActionsOnMobile to the viewer (§3.5)
+├── guestApi.ts               # unauthenticated axios client + 3 guest fetches + resolver
+├── drawingApi.ts             # authenticated client + all logged-in API calls
+├── types.ts                  # shared types (its `DocumentFilters` is stale: no
+│                             # status/ordering. Use the one in drawingApi.ts, §7.14)
+├── styles.css
 └── components/
-    ├── GuestAccessGate.tsx           # the access-code entry form
-    ├── GuestDocumentGrid.tsx         # renders resolved docs, w/ filters
-    ├── DocumentViewer.tsx            # shared viewer, takes guestMode prop;
-    │                                 # now has a Share button (hidden in
-    │                                 # guestMode)
-    └── ShareLinkModal.tsx            # new — create/copy/revoke a guest link
+    ├── GuestAccessGate.tsx   # access-code entry form
+    ├── GuestDocumentGrid.tsx # renders resolved guest docs, with filters
+    ├── DocumentViewer.tsx    # shared viewer, guestMode prop; Share button
+    │                         # (hidden in guestMode) opens ShareLinkModal;
+    │                         # hideActionsOnMobile prop (§3.6b)
+    ├── ShareLinkModal.tsx    # create/copy/revoke ONE drawing's link
+    ├── BulkShareModal.tsx    # checklist + Print PDF (clickable links) + Revoke links (§3.8)
+    ├── DocumentForm.tsx      # create/edit drawing
+    └── PdfThumbnail.tsx
 ```
 
-### 3.1 How a typed code gets resolved — `guestApi.ts`
+### 3.1 How a typed code gets resolved: `guestApi.ts`
 
-There is **no backend "what type is this code" endpoint.** The frontend
-just tries all three guest endpoints in sequence and uses whichever one
-succeeds first:
+No backend "what type is this code" endpoint. The frontend tries all three in order:
 
 ```
 resolveGuestAccessCode(code)
-  1. GET /api/drawings/public/project/<code>/       — try project scope
-  2. GET /api/drawings/public/deliverable/<code>/    — try deliverable scope
-  3. GET /api/drawings/public/drawing/<code>/        — try drawing scope
-  → first 2xx wins; if all three fail, throw "doesn't match any shared drawings"
+  1. GET /api/drawings/public/project/<code>/
+  2. GET /api/drawings/public/deliverable/<code>/
+  3. GET /api/drawings/public/drawing/<code>/
+  → first 2xx wins; all fail → "doesn't match any shared drawings"
 ```
 
-This means a single-drawing code takes up to 3 round trips to resolve
-(fails project, fails deliverable, succeeds on drawing) — a latency detail,
-not a bug.
+A single-drawing code can take 3 round trips (latency, not a bug).
 
-`guestClient` is a **separate axios instance** from the authenticated
-`apiClient` in `drawingApi.ts` — no `Authorization` header, no 401-refresh
-interceptor. This is deliberate: a guest may still be carrying a stale token
-in localStorage from a previous logged-in session on the same browser, and
-that must never leak into guest requests.
+Two details of the resolver: each attempt downloads the **full document
+list/detail** (it only cares that the call succeeds), and `GuestAccessGate` then
+fetches the same data again, so a typed code costs one extra request. The
+`catch {}` blocks also swallow every error type, not just 404, so a network
+failure reads as "doesn't match any shared drawings".
 
-### 3.2 Who sees the gate — `page.tsx`
+`guestClient` is a **separate axios instance** from `apiClient`: no
+`Authorization` header, no 401-refresh interceptor. Deliberate, so a stale token
+from a previous login on the same browser never leaks into guest requests.
+
+### 3.2 Who sees the gate: `page.tsx`
 
 ```ts
 const isGuest = currentUser?.id === 0;
 ```
 
-`getCurrentUser()` (in `drawingApi.ts`) returns a synthetic
-`{ id: 0, name: 'Guest', ... }` object whenever no auth token is found in
-`localStorage`/`sessionStorage`. If `isGuest`, the whole authenticated
-browser (org/project/deliverable filters, upload form, etc.) is skipped
-entirely and only `<GuestAccessGate />` renders.
+`getCurrentUser()` returns a synthetic `{ id: 0, name: 'Guest', ... }` when no
+auth token is found. If `isGuest`, only `<GuestAccessGate />` renders; the
+document browser, Share button and `BulkShareModal` are never mounted (the
+`isGuest` branch returns before them).
 
-### 3.3 The form — `GuestAccessGate.tsx`
+### 3.3 The form: `GuestAccessGate.tsx`
 
-Plain controlled input → `handleSubmit` → `resolveGuestAccessCode(code)` →
-based on `result.type`, calls the matching fetch function
-(`getProjectGuestDocuments` / `getDeliverableGuestDocuments` /
-`getGuestDrawing`) → sets `documents` state → switches to rendering
-`<GuestDocumentGrid documents={docs} heading={...} />`.
+Controlled input → `resolveGuestAccessCode(code)` → matching fetch
+(`getProjectGuestDocuments` / `getDeliverableGuestDocuments` / `getGuestDrawing`)
+→ `<GuestDocumentGrid documents={docs} heading={...} />`.
 
-### 3.4 The grid — `GuestDocumentGrid.tsx`
+### 3.4 The grid: `GuestDocumentGrid.tsx`
 
-- Builds "filter by deliverable" / "filter by file type" dropdowns from
-  whatever documents came back (only shown if there's more than one value).
-- **DXF files are not hidden or filtered out of the grid.** A project or
-  deliverable code that resolves to a mix of PDFs, images, and DXFs shows
-  all of them as cards, side by side. The only difference is what happens
-  on interaction:
-  - `handleCardClick(doc)` — if `file_type === 'dxf'`, calls `guestDownload(doc)`
-    immediately instead of opening `DocumentViewer` (DXF has no in-browser
-    preview).
-  - The action button label swaps to `'Download'` for DXF vs `'Fast View'`
-    for everything else — same underlying `guestDownload` call either way.
-  - Thumbnail area: PDF gets `PdfThumbnail`; DXF has no thumbnail generator,
-    so it falls through to the generic file-icon placeholder like any other
-    type without a preview image.
-- Everything non-DXF opens `DocumentViewer` with `guestMode` set, which
-  hides the favorite button (guests have no account to persist favorites
-  against).
+- Deliverable / file-type filter dropdowns built from returned docs (shown only
+  if more than one value).
+- **DXF is never hidden**, only handled differently: clicking a DXF card (or its
+  button, labelled `Download`) calls `guestDownload(doc)` instead of opening
+  `DocumentViewer`. DXF has no thumbnail generator, so it shows the generic icon.
+- Everything non-DXF opens `DocumentViewer` with `guestMode` (hides Favorite and Share).
+  The grid does **not** pass `hideActionsOnMobile`, so Close stays available on
+  mobile and users can return to the list.
 
-### 3.5 Direct single-drawing link — `[code]/page.tsx`
+### 3.5 Direct single-drawing link: `[code]/page.tsx`
 
-Separate route, `/drawing/<code>`. Skips the form entirely — calls
-`getGuestDrawing(code)` on mount.
+`/drawing/<code>` skips the form and calls `getGuestDrawing(code)` on mount.
+Branches on `file_type`:
 
-**Updated behavior:** this route now branches on `file_type`, matching what
-the grid already does, instead of unconditionally handing every document to
-`DocumentViewer`:
+- **Non-DXF** (`pdf`, `image`, `document`, `ifc`): `DocumentViewer` with
+  `guestMode` and `hideActionsOnMobile`. On phones (≤780px) the toolbar shows
+  only **Fast View / Download**; desktop keeps Print, Fast View and Close. This
+  is the only page that passes `hideActionsOnMobile`, because the viewer is the
+  whole page and there is nothing to close back to. The guest grid and the
+  logged-in viewer keep Close on mobile so users aren't trapped.
+- **DXF**: skips the viewer, auto-calls `guestDownload(doc)`, and shows a
+  "can't preview" state with a manual **Download** button (auto-download can be
+  silently blocked by browsers; the button is the guaranteed path). The
+  apostrophe in that message must be `&apos;` (a previous version was garbled).
 
-- **Non-DXF** (`pdf`, `image`, `document`, `ifc`): renders straight into
-  `DocumentViewer`, `guestMode=true` — unchanged from before.
-- **DXF**: skips `DocumentViewer` entirely. Triggers `guestDownload(doc)`
-  automatically on load, and renders a dedicated state (reusing the
-  `documents-empty` / `documents-retry-btn` CSS classes from the grid)
-  explaining that DXF can't be previewed, with a manual **Download** button
-  as the reliable fallback — auto-download via a synthetic click on page
-  load can get silently blocked by some browsers, so the visible button is
-  the path that's guaranteed to work.
+Every link from admin, the single Share modal and the bulk modal points here.
 
-This is what both an admin-generated per-drawing link *and* a link minted
-through the new in-app Share button (§3.6) point to.
+### 3.6 Sharing ONE drawing: `DocumentViewer` + `ShareLinkModal`
 
-### 3.6 Sharing a drawing as a logged-in user — new
+- `DocumentViewer.tsx`: Share button next to Favorite; hidden when `guestMode`.
+- `ShareLinkModal.tsx`:
+  - No code yet → "Create shareable link" → `createGuestLink(id)`.
+  - Code exists → full URL (`buildGuestLinkUrl`), Copy, Revoke → `revokeGuestLink(id)`.
+- Detail serializer includes read-only `guest_access_code`; the **list**
+  serializer does not (which is why the bulk modal needs `GET guest-links/`, §2.2).
+- Permissions: reuses `get_object()`; same rule as viewing the document.
+- `ShareLinkModal` props: `documentId, documentTitle, initialCode, onClose,
+  onCodeChange`. It reuses form-modal CSS classes (`document-form-modal`,
+  `form-input`, `btn-*`) and renders at `zIndex: 1100`.
+- `DocumentViewer` keeps the code in local state (`guestCode`) synced from
+  `doc.guest_access_code`. `page.tsx` always opens the viewer through
+  `getDocument(id)` (detail serializer), so reopening a drawing after a bulk
+  generate/revoke picks up the new state. The Share icon switches to
+  `ti-link` when a code exists.
+- The viewer's Share button is **not** role-gated (visible to any logged-in
+  user), same as the header Share button. See §7.6 if you restrict sharing.
 
-Logged-in users can now create a per-drawing guest link from inside the
-viewer itself, without going through Django admin.
+### 3.6b `DocumentViewer.tsx` capabilities
 
-- **`DocumentViewer.tsx`** — new Share button next to Favorite. **Hidden
-  when `guestMode` is set** — a guest viewing a shared drawing can't mint
-  further share links from inside it.
-- **`ShareLinkModal.tsx`** (new) — opened by the Share button:
-  - If the document has no `guest_access_code` yet: shows "Create shareable
-    link" → calls `createGuestLink(doc.id)` → `POST
-    /drawings/documents/<id>/guest-link/`.
-  - If a code already exists: shows the full URL (via
-    `buildGuestLinkUrl(code)`), a Copy button, and a Revoke button →
-    `revokeGuestLink(doc.id)` → `DELETE
-    /drawings/documents/<id>/guest-link/`.
-- **`drawingApi.ts`** — added `createGuestLink`, `revokeGuestLink`,
-  `buildGuestLinkUrl`.
-- **Serializer** — `guest_access_code` was added to the **detail**
-  serializer only (`DrawingDocumentSerializer`), read-only, so
-  `getDocument(id)` returns the current code if one exists. It's absent
-  from the list serializer, matching the existing pattern where the list
-  serializer is a trimmed read-only view (§5.4).
-- **Permissions** — no new permission class was written. The action reuses
-  `get_object()`, so `CanAccessDocumentPermission` (§5.2) already governs
-  who's allowed to share a given document — same rule as viewing/downloading
-  it.
+- **PDF:** `react-pdf` continuous scroll, worker loaded from unpkg
+  (`pdfjs-dist@<installed version>`), zoom 50-600% (± buttons, typed %, Ctrl/Cmd+wheel,
+  `+`/`-`/`0` keys), mouse drag-pan, touch pan + pinch-zoom, and print via hidden
+  iframe (blob URL).
+- **Fast View** link (PDF **and image**) opens `file_url` in a new tab. With
+  `hideActionsOnMobile`, at ≤780px Print and Close are hidden and the label
+  becomes "Fast View / Download" (see §3.5). This only opens the file; it does
+  not force a download (§7.15).
+- **Image:** blob URL rendered with `next/image` (`unoptimized`, `fill`).
+- **DXF:** placeholder card with a "Download DXF File" button (`onDownload`).
+  Logged-in users see this inside the viewer; guest flows bypass the viewer (§6).
+- **Loading:** PDF/image are fetched via `fetch(getFullFileUrl(doc.file_url),
+  { credentials: 'include' })` into a blob, i.e. straight from the media URL,
+  **not** through the authenticated `view` action (see §7.12).
+- Props: `document, isOpen, onClose, onFavoriteToggle, onDownload, guestMode?,
+  hideActionsOnMobile?`. Locks body scroll while open; Escape closes.
+- **Mobile-minimal mode** (`hideActionsOnMobile`): the controls container gets
+  `document-viewer-mobile-minimal`; Print and Close get
+  `document-viewer-hide-on-mobile`; the Fast View anchor renders two labels
+  (`document-viewer-label-desktop` / `document-viewer-label-mobile`) and CSS
+  swaps them at ≤780px. The CSS lives in `styles.css` under "VIEWER - MOBILE
+  MINIMAL ACTIONS", with a matching override inside the ≤480px block so the
+  label swap still works there. Escape still closes the viewer regardless.
 
-Flow, end to end:
+### 3.7 Guest download: `guestDownload`
 
+Guests never hit the authenticated `/documents/<id>/download/` (needs a real
+`UserContext`). `guestDownload` opens `doc.file_url` in a new tab via a
+synthetic `<a>` click: no permission check, no access log.
+
+Whether a DXF downloads or opens inline depends on the storage backend's
+`Content-Disposition`; forcing `attachment` is a backend header fix, not a
+frontend change.
+
+### 3.8 Sharing MANY drawings: `BulkShareModal.tsx` (new)
+
+Opened by the **Share** button in the `page.tsx` header (visible to every
+logged-in user; the server scopes what they can share).
+
+**On open** it loads, in parallel with the current page filters:
+1. **All** drawings matching the filters (loops `getDocuments` at
+   `pageSize=100`, the backend max, up to 50 pages), not just the visible page.
+2. `getActiveGuestLinks(filters)` → which of them already have a link (non-fatal
+   if it fails: no "shared" badges and Revoke stays disabled).
+
+**UI**
+- Checklist grouped by project, with per-project "select all"; per-drawing
+  badges: green **shared** (has a link), amber **private**.
+- Search box; **All / None** quick-select. Footer shows `N selected`.
+
+**Two actions**
+
+| Button | Behaviour |
+|---|---|
+| **Print PDF** | `bulkCreateGuestLinks(selectedIds)` (mints any missing links, returns existing ones) → `downloadPdf(links)` → A4 portrait PDF with clickable links. Enabled when ≥1 drawing is selected. |
+| **Revoke links** | confirm → `bulkRevokeGuestLinks(selected ids that have a link)` → badges update; anyone holding those links loses access immediately. Enabled when ≥1 selected drawing has a link. |
+
+A private-drawing warning shows when any selected drawing is private (links
+bypass privacy and never expire). Max 300 drawings per call.
+
+**Print PDF** (`downloadPdf`, needs `npm i jspdf`): builds a real A4 portrait
+PDF client-side with jsPDF, grouped by project (sorted), then deliverable, then
+title. Each row: `#`, title + deliverable, and the full `/drawing/<code>` URL as
+blue underlined text with a **true link annotation** (clickable in every PDF
+viewer). Project headings stay with their first row across page breaks. The file
+downloads as `shared-drawings-YYYY-MM-DD.pdf`; the user prints it from the PDF
+viewer. jsPDF's built-in fonts are Latin-1 only, so non-Latin characters in
+titles print as `?`. (The earlier HTML/iframe print path was removed: "Save as
+PDF" from a browser print dialog doesn't reliably keep links.)
+
+**Filter contract.** The modal takes the *same* filters `loadDocuments` uses
+(`organisationId, projectId, deliverableId, search, showPrivate, ordering,
+status`). `page.tsx` computes `effectiveStatus` **once at component level** and
+passes it to both, so clients stay locked to `published` in the modal too. The
+frontend uses camelCase (`DocumentFilters`); `getDocuments` /
+`getActiveGuestLinks` translate to the snake_case query params the backend
+reads.
+
+### 3.9 `drawingApi.ts`: guest-link related exports
+
+```ts
+createGuestLink(id)           // POST   /drawings/documents/<id>/guest-link/
+revokeGuestLink(id)           // DELETE /drawings/documents/<id>/guest-link/
+buildGuestLinkUrl(code)       // `${origin}/drawing/${code}`
+bulkCreateGuestLinks(ids)     // POST   /drawings/documents/bulk-guest-link/
+getActiveGuestLinks(filters)  // GET    /drawings/documents/guest-links/?...
+bulkRevokeGuestLinks(ids)     // POST   /drawings/documents/bulk-revoke-guest-link/
+interface BulkLink { id, title, code, project_name, deliverable_name, is_private }
+getMyMemberships()            // GET    /my-memberships/  (see §5.5)
 ```
-Logged-in user → opens a drawing → DocumentViewer → Share button
-  → ShareLinkModal → "Create shareable link"
-  → POST /drawings/documents/<id>/guest-link/
-  → doc.guest_access_code set (or existing one returned)
-  → DocumentAccessLog(action='share') recorded
-  → modal shows https://modelflick.com/drawing/<code> + Copy + Revoke
-```
-
-To kill a link later: reopen the same drawing, Share button, Revoke in the
-same modal — no trip to Django admin required for either step, though admin
-still works identically as a fallback (§2 Admin section is unchanged).
-
-### 3.7 Downloading as a guest — `guestDownload`
-
-Guests never hit the authenticated `/documents/<id>/download/` action (it
-checks `canAccessDocument` against a real `UserContext`, which a guest
-doesn't have). Instead `guestDownload` just opens `doc.file_url` directly
-in a new tab (`target="_blank"`) via a synthetic `<a>` click — no permission
-check, no access log entry.
-
-⚠️ Note this opens the file rather than forcing a save dialog. Whether a
-DXF (plain text/XML-ish) opens inline in the new tab instead of downloading
-depends entirely on the `Content-Disposition` header the file storage
-backend sends for that file type — if it's not already `attachment` for
-DXF, that's a one-line backend header fix, not a frontend change.
 
 ---
 
 ## 4. End-to-end flows
 
-**Password-gated project view** (what a client with a project-wide code
-sees at `modelflick.com/drawing`):
+**Project/deliverable code (client at `/drawing`):**
 
 ```
-User visits /drawing → not logged in (isGuest) → GuestAccessGate shown
-  → types code → resolveGuestAccessCode
-  → GET /api/drawings/public/project/<code>/  → 200, list of docs
-  → GuestAccessGate stores docs + "Project Documents" heading
-  → renders GuestDocumentGrid
-  → PDFs/images open in DocumentViewer on click; DXFs download directly
-    (all types shown as cards in the same grid — see §3.4)
+/drawing → not logged in → GuestAccessGate
+  → code → resolveGuestAccessCode → GET public/project/<code>/ → 200 docs
+  → GuestDocumentGrid; PDFs/images open in DocumentViewer, DXFs download
 ```
 
-**Direct drawing share link (admin-generated or self-serve via Share button):**
+**Single drawing (admin, Share button, or bulk):**
 
 ```
-Link created either via:
-  (a) Admin selects a drawing → "Generate guest link for selected", or
-  (b) Logged-in user → DocumentViewer → Share → "Create shareable link"
-  → doc.guest_access_code set, e.g. "a1b2c3d4e5f6"
-  → share URL: https://modelflick.com/drawing/a1b2c3d4e5f6
-  → visitor opens it → [code]/page.tsx → getGuestDrawing(code)
-  → GET /api/drawings/public/drawing/a1b2c3d4e5f6/ → 200
-  → non-DXF: DocumentViewer renders directly, guestMode=true
-  → DXF: auto-download fires + dedicated "can't preview, download here"
-    state renders instead of the viewer
+Link created via admin action, ShareLinkModal, or BulkShareModal
+  → doc.guest_access_code e.g. "a1b2c3d4e5f6"
+  → https://modelflick.com/drawing/a1b2c3d4e5f6
+  → [code]/page.tsx → GET public/drawing/<code>/
+  → non-DXF: DocumentViewer (guestMode, hideActionsOnMobile)
+             desktop: Print / Fast View / Close · mobile: Fast View / Download only
+  → DXF: auto-download + fallback button
+```
+
+**Bulk share + print (logged-in):**
+
+```
+/drawing → Share → BulkShareModal loads all filtered drawings + existing links
+  → tick drawings (grouped by project)
+  → Print PDF → POST bulk-guest-link/ (mints missing) → clickable A4 PDF downloads
+  → later: reopen, tick shared drawings (green badge) → Revoke links
 ```
 
 ---
 
-## 5. Logged-in (authenticated) user access
+## 5. Logged-in user access
 
-Guests aren't the only path through this code — logged-in users browse the
-*same* `DrawingDocument` records through a parallel, fully authenticated
-stack. Worth knowing both, since bugs in one privacy rule (`is_private`,
-`allowed_roles`, org membership) can affect both paths differently.
+Logged-in users browse the *same* `DrawingDocument` records through a separate
+authenticated stack. A bug in one privacy rule (`is_private`, `allowed_roles`,
+org/project scoping) can affect the two paths differently.
 
-### 5.1 Frontend — `app/drawing/page.tsx`
+### 5.1 Frontend: `page.tsx`
 
 ```
-getCurrentUser() → not guest (id !== 0)
-  → loads organisations/projects/deliverables (cascading filters)
-  → loadDocuments() → getDocuments(filters) → GET /api/drawings/documents/?...
-  → renders documents-grid with pagination
+getCurrentUser() → not guest → load organisations/projects/deliverables (cascading)
+  → loadDocuments() → GET /api/drawings/documents/?...   (paginated)
 ```
 
-`getDocuments` (in `drawingApi.ts`) hits the DRF ViewSet's paginated `list`
-action with query params: `organisation_id`, `project_id`, `deliverable_id`,
-`search`, `show_private`, `ordering`, `page`, `page_size`.
+`getDocuments` params: `organisation_id`, `project_id`, `deliverable_id`,
+`search`, `show_private`, `ordering`, `status`, `page`, `page_size`.
 
-**Viewing a doc:** `handleViewDocument(doc)` → client-side
-`canAccessDocument(doc, currentUser)` check (see 5.3) → if it passes,
-`getDocument(doc.id)` → `GET /drawings/documents/<id>/` (detail serializer,
-now including `guest_access_code` — see §3.6) → opens
-`<DocumentViewer document={fullDoc} ... />` — **no** `guestMode` prop, so
-both the Favorite button and the new Share button are shown.
+- **View:** `handleViewDocument` → client `canAccessDocument` → `getDocument(id)`
+  (detail serializer) → `DocumentViewer` (no `guestMode`: Favorite + Share shown).
+- **Download:** `downloadDocument` → `canAccessDocument` → Bearer `fetch` of
+  `/documents/<id>/download/` → server re-checks → `FileResponse` attachment.
+- **Favorite:** `POST toggle-favorite/` → row create/delete + `edit` log.
+- **Share one:** inside `DocumentViewer` → `ShareLinkModal` (§3.6). `page.tsx`
+  does not handle it. **Share many:** header button → `BulkShareModal` (§3.8).
+- **Create / edit / delete:** `DocumentForm.tsx` → multipart `FormData`
+  (`tags`, `allowed_roles` as repeated fields, not JSON). Buttons render only
+  when `canUpload` (§5.5).
 
-**Downloading:** `downloadDocument(doc)` → same client-side
-`canAccessDocument` check → `fetch` with a Bearer token to
-`GET /drawings/documents/<id>/download/` → server re-checks access (5.2)
-→ `FileResponse` as an attachment.
+⚠️ `DocumentViewer.tsx` never calls the DRF `view` action; it fetches
+`doc.file_url` directly and builds a blob URL. The `view` action is currently
+unused by the frontend.
 
-**Favoriting:** `handleToggleFavorite(id)` → `POST
-/drawings/documents/<id>/toggle-favorite/` → creates/deletes a
-`DocumentFavorite` row, logs a `DocumentAccessLog(action='edit')`.
+⚠️ Privacy counts: `loadDocuments` requests `pageSize: 1000` for the
+Public/Private badges, but the backend caps `page_size` at 100, so those
+counts only cover the first 100 matching drawings (§7.8).
 
-**Sharing:** `handleShare(doc)` → opens `ShareLinkModal` → `createGuestLink`
-/ `revokeGuestLink` (§3.6) → logs `DocumentAccessLog(action='share')`.
+### 5.2 Backend: `DrawingDocumentViewSet` (`views.py`)
 
-**Create / edit / delete:** `DocumentForm.tsx` → `createDocument` /
-`updateDocument` / `deleteDocument` → `POST` / `PATCH` / `DELETE` on
-`/drawings/documents/...`, using multipart `FormData` (tags and
-`allowed_roles` sent as repeated fields, not JSON — see the comment in
-`DocumentForm.handleSubmit`). The org/project/deliverable dropdowns in the
-form are populated via `getOrganisations` / `getProjects` /
-`getDeliverables`, which are membership-scoped on the backend (see
-`DrawingOrganisationListView` etc. in `views.py`). These three buttons are
-only rendered at all when `canUpload` is true — see §5.5.
-
-⚠️ Note: `DocumentViewer.tsx` never actually calls the DRF `view` action
-(`GET /drawings/documents/<id>/view/`) — it fetches the file straight from
-`doc.file_url` via `fetch(..., { credentials: 'include' })` and builds a
-blob URL itself. The `view` action in `views.py` appears currently unused
-by the frontend; `download` is the one path that's actually wired up
-server-side.
-
-### 5.2 Backend — `DrawingDocumentViewSet` (`views.py`)
-
-`permission_classes = [IsAuthenticated, CanAccessDocumentPermission]`
-(`permissions.py`):
-
-- `has_permission` — just `IsAuthenticated`; every logged-in user passes
-  for `list`/`create`, filtering happens in `get_queryset` instead.
-- `has_object_permission` (retrieve/update/delete/detail actions,
-  **including the new `guest_link` action** — see §2.1) —
-  **same three-step logic as `_can_access_document` below**, duplicated
-  as its own permission class:
-  1. org membership check — not in the doc's org → denied outright, before any privacy check
-  2. `is_private=False` → allowed
-  3. else: `drawing_private_role` in the user's roles → allowed
-  4. else: allowed only if the user's roles overlap `document.allowed_roles`
-
-⚠️ There's a third, near-identical permission class in the same file —
-`IsDrawingAdminOrReadOnly` (read allowed for any authenticated user, write
-requires an `admin` org membership) — but it's **not** in
-`DrawingDocumentViewSet.permission_classes`. Either it's meant for a
-different viewset that isn't shown here, or it's dead code / a permission
-gap where admin-only write enforcement was intended but never wired up.
-Worth deciding whether `guest_link` (which effectively grants *anyone with
-the URL* read/download access, bypassing privacy entirely per §1) should
-require this stricter admin-only permission instead of the standard
-read-level check it currently inherits — right now, any user who can merely
-*view* a private document can also mint a public bypass link for it.
+`permission_classes = [IsAuthenticated, CanAccessDocumentPermission]`.
+The bulk actions override this with `[IsAuthenticated]` (§2.2).
 
 `get_queryset()` layers, in order:
-1. **Hard org boundary** — always applied: `deliverable__project__organisation_id__in=<user's org ids>`. A user can never see another org's documents, full stop, regardless of any other query param.
-2. **Privacy filter** — unless the user has role `drawing_private_role` in *any* org membership, restrict to `is_private=False` **or** `is_private=True` docs where the user's roles overlap `allowed_roles`. Done in Python (not a DB `__overlap` lookup) because `allowed_roles` is a plain `JSONField`, not `ArrayField`.
-3. Then the usual query-param narrowing (org/project/deliverable/file_type/status/search/is_favorite/show_private).
 
-`download` and `view` actions both separately call `_can_access_document(user, document)` — same four-step logic as `CanAccessDocumentPermission.has_object_permission` above, just re-implemented as a plain method instead of reused from the permission class.
+1. **Hard org boundary:** `deliverable__project__organisation_id__in=<user's orgs>`.
+2. **Client project-scoping, per organisation.** Orgs where the user has an
+   org-wide (`project=None`) admin/manager/member membership show every
+   project. Any other org the user belongs to is narrowed to projects they're
+   explicitly linked to (via `OrganisationMembership.project` **or**
+   `ProjectMembership(role='client')`) **and `status='published'`**. See
+   `_full_access_org_ids()` / `_client_project_ids()`. Evaluated per org: an
+   admin in org A who is a client in org B is still restricted in B.
+3. **Privacy filter:** unless the user has `drawing_private_role` in any
+   membership, restrict to `is_private=False` or private docs whose
+   `allowed_roles` overlap the user's roles. Done in Python (not `__overlap`)
+   because `allowed_roles` is a plain `JSONField`.
+4. **Query-param narrowing:** `organisation_id`, `project_id`,
+   `deliverable_id`, `file_type`, `status`, `is_favorite`, `show_private`, `search`.
 
-So privacy enforcement exists **three times** server-side: the queryset
-filter (what shows up in listings), the `CanAccessDocumentPermission`
-object check (retrieve/update/delete/guest-link), and `_can_access_document`
-again inside `download`/`view` (so a stale/cached doc reference can't
-bypass privacy by hitting the action directly). All three encode the same
-rule independently rather than sharing one implementation — worth
-consolidating if the rule ever changes, since right now it'd need updating
-in three places.
+`download` / `view` re-check with `_can_access_document(user, doc)`, which
+mirrors steps 1-3 (org, client project + published, privacy).
 
-### 5.3 Frontend-side access check — `canAccessDocument` (`drawingApi.ts`)
+⚠️ **Rule duplicated in three places** (queryset, `_can_access_document`,
+`CanAccessDocumentPermission.has_object_permission`). The permission class in
+`permissions.py` has only the org + privacy checks: it does **not** include the
+client project/published scoping. `get_object()` runs `get_queryset()` first, so
+retrieve/update/delete/`guest_link` are still protected by step 2, but the
+permission class alone is weaker than the other two. Consolidate into one shared
+function if the rule changes.
+
+`IsDrawingAdminOrReadOnly` exists in `permissions.py` but is **not wired to any
+view here** (dead code, or an intended admin-only write gate that was never applied).
+
+Dropdown endpoints (`DrawingOrganisationListView`, `DrawingProjectListView`,
+`DrawingDeliverableListView`) apply the same per-org full-access vs
+client-project logic, so a client only sees their own orgs/projects/deliverables.
+
+### 5.3 Frontend access check: `canAccessDocument` (`drawingApi.ts`)
 
 ```ts
-canAccessDocument(doc, user):
-  user.organisationIds.includes(doc.organisation_id)   // must be a member
-  && (!doc.is_private
-      || user.hasDrawingPrivateAccess
+user.organisationIds.includes(doc.organisation_id)
+  && (!doc.is_private || user.hasDrawingPrivateAccess
       || doc.allowed_roles.some(r => user.roles.includes(r)))
 ```
 
-This mirrors `_can_access_document` on the backend, but it's **UX only** —
-it just disables the View/Download buttons in the grid. The real
-enforcement is always the backend checks in 5.2; a user could never get a
-document they're not entitled to just by bypassing this client check.
+UX only: disables View/Download buttons. Real enforcement is §5.2.
 
-⚠️ `user.hasDrawingPrivateAccess` here is set from `roles.includes('drawing_private_role')`
-inside `getCurrentUser()`, where `roles` comes straight off `/users/me/`.
-This is the **same unreliable field** that `canUpload` used to be built on
-(see §5.5) — `/users/me/` almost certainly doesn't return real
-`OrganisationMembership` roles, so this badge/gate can silently read wrong
-for a user who does hold `drawing_private_role` via `/my-memberships/`.
-Only `canUpload` has been moved off this field so far; `hasDrawingPrivateAccess`
-has not — see §7.7.
+⚠️ `hasDrawingPrivateAccess` and `user.roles` come from `/users/me/`, which does
+not reliably reflect `OrganisationMembership` roles. Not yet migrated to
+`/my-memberships/` (§7.7).
 
-### 5.4 Serializers — `serializers.py`
-
-`get_serializer_class()` on the ViewSet picks between two:
+### 5.4 Serializers: `serializers.py`
 
 | | `DrawingDocumentSerializer` (detail/create/update) | `DrawingDocumentListSerializer` (list) |
 |---|---|---|
-| `file` field | included, write-only (upload) | absent entirely |
-| `uploaded_by` | included (read-only id) | absent — only `uploaded_by_name` |
-| `deliverable_id` | writable `PrimaryKeyRelatedField` | absent (list serializer has no write path) |
-| `guest_access_code` | included, read-only (new) | absent |
-| Everything else | same (`is_favorite`, `file_size_display`, org/project/deliverable names, tags, privacy fields, timestamps) | same |
+| `file` | included, write-only | absent |
+| `uploaded_by` | included (read-only id) | absent, only `uploaded_by_name` |
+| `deliverable_id` | writable `PrimaryKeyRelatedField` | present, **read-only** (resolved from the model's FK attribute) |
+| `guest_access_code` | included, read-only | **absent** |
+| `created_at` / `updated_at` | included | absent (only `uploaded_at`) |
+| Rest | same (`is_favorite`, `file_size_display`, org/project/deliverable names, tags, privacy fields) | same |
 
-So the list serializer is genuinely a trimmed read-only view — it can't be
-used for writes, which is why `DocumentForm.tsx` always posts to the plain
-detail endpoint regardless of create vs. edit.
+`guest_access_code` is in the detail serializer's `read_only_fields`; it can
+only change through the guest-link actions, never a create/update payload.
+Guest project/deliverable endpoints use the **list** serializer (no context, so
+`is_favorite` is always false); `GuestDrawingDetailView` uses the **detail**
+serializer, so a guest with a drawing code also receives `allowed_roles`,
+`uploaded_by` (user id) and `guest_access_code` (§7.13).
 
-**`to_internal_value` override** on `DrawingDocumentSerializer` exists
-specifically to handle `tags`/`allowed_roles` arriving as repeated
-multipart fields (matching the `form.append('tags', tag)` pattern in
-`DocumentForm.tsx` — see §5.1). It pulls them out of the incoming
-`QueryDict` by hand (`getlist`), tries `json.loads` as a fallback for a
-single JSON-encoded value, then re-validates them through the normal
-field before handing off to `super().to_internal_value()`. The comment in
-the code notes this replaced an earlier approach that tried writing a
-Python list back into the `QueryDict` directly, which didn't round-trip
-correctly and produced "Value must be valid JSON" errors — worth knowing
-if that error resurfaces, since the fix is specifically about *not*
-touching `QueryDict.__setitem__` for list values.
+`DocumentForm.tsx` always posts to the detail endpoint. The
+`to_internal_value` override pulls `tags`/`allowed_roles` out of the multipart
+`QueryDict` with `getlist` (JSON fallback for a single encoded value). Don't
+write Python lists back into `QueryDict` (`__setitem__`); that caused "Value must
+be valid JSON" errors. `validate_file` enforces `MAX_DOCUMENT_SIZE` and
+`ALLOWED_DOCUMENT_EXTENSIONS` from `settings.py`.
 
-`validate_file` enforces `MAX_DOCUMENT_SIZE` and, if set,
-`ALLOWED_DOCUMENT_EXTENSIONS` from Django settings — neither value is
-shown in what's been pasted, so check `settings.py` for the actual limits
-in effect.
+### 5.5 `canUpload`: role gating via `/my-memberships/`
 
-### 5.5 `canUpload` — role gating fixed to use `/my-memberships/`
-
-**New.** `page.tsx`'s `canUpload` flag (which gates the New Document /
-Edit / Delete buttons in the header, and the "Create your first document"
-empty-state button) used to be computed straight off `currentUser.roles`:
+`canUpload` gates New Document / Edit / Delete and the empty-state create
+button. It is derived from `getMyMemberships()` (`GET /my-memberships/`, real
+`OrganisationMembership` rows), **not** `currentUser.roles`:
 
 ```ts
-// old — unreliable
-const canUpload = currentUser.roles.some(r => ['admin','manager','member'].includes(r));
+const UPLOAD_ROLES = ["admin", "manager", "member"];
+const hasElevatedRole = useMemo(
+  () => membershipsLoaded && memberships.some((m) => UPLOAD_ROLES.includes(m.role)),
+  [membershipsLoaded, memberships]
+);
+const canUpload = hasElevatedRole;
 ```
 
-That field comes from `getCurrentUser()` → `GET /users/me/`, which does
-**not** reliably reflect real `OrganisationMembership` roles (it likely
-reflects Django auth groups or an empty/unrelated field instead) — so an
-actual org admin could see `canUpload === false`. `hasDrawingPrivateAccess`
-(§5.3) was built on the same field and has the same problem, just less
-visible since nobody noticed the badge was missing.
+Defaults to `false` until memberships load (no flash of controls). UX-only;
+the server enforces real permissions.
 
-**Fix:** `canUpload` is now derived from `/my-memberships/` — the same
-`OrganisationMembership`-backed endpoint `userApi.ts`'s
-`getOrganisationMemberships()` already calls elsewhere in the app — instead
-of `/users/me/`.
+### 5.6 Status filter (`draft` / `published` / `archived`): client-locked
 
-- **`drawingApi.ts`** — added:
-  ```ts
-  export interface RawMembership {
-    id: number;
-    organisation: number;
-    role: string;
-    project: number | null;
-  }
+Status dropdown renders only when `canFilterByStatus` (= `hasElevatedRole`).
+Clients are forced to `published`, computed once at component level:
 
-  export const getMyMemberships = async (): Promise<RawMembership[]> => {
-    try {
-      const response = await apiClient.get('/my-memberships/');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching memberships:', error);
-      return [];
-    }
-  };
-  ```
-- **`page.tsx`** — added `memberships` / `membershipsLoaded` state, fetched
-  once `currentUser` is known and isn't a guest. `canUpload` is now:
-  ```ts
-  const UPLOAD_ROLES = ["admin", "manager", "member"];
+```ts
+const effectiveStatus = canFilterByStatus ? selectedStatus : "published";
+```
 
-  const canUpload = useMemo(
-    () => membershipsLoaded && memberships.some((m) => UPLOAD_ROLES.includes(m.role)),
-    [membershipsLoaded, memberships]
-  );
-  ```
-  It defaults to `false` until memberships have actually loaded, so the
-  upload/edit/delete controls don't flash on for a user who turns out not
-  to qualify.
-- This is **UX-only**, same caveat as §5.3 — it just shows/hides buttons.
-  Server-side, `create`/`update`/`delete` on `DrawingDocumentViewSet` still
-  go through whatever permission class is actually wired up there (§5.2)
-  regardless of what the frontend computes.
-- `hasDrawingPrivateAccess` has **not** been migrated yet and still reads
-  the same unreliable `/users/me/` field — see §7.7.
+Used by `loadDocuments` **and** `BulkShareModal`. Server-side, clients are
+independently limited to published in `get_queryset()`. Until memberships load,
+`canFilterByStatus` is false, so an elevated user's first load is briefly
+`published`-only, then refetches (deliberate). `clearFilters` resets
+`selectedStatus`; `hasActiveFilters` only counts it when `canFilterByStatus`.
 
-### 5.6 Status filter (`draft` / `published` / `archived`) — client-locked
-
-**New.** The filter row in `page.tsx` (Organisation / Project / Deliverable /
-Sort) gained a **Status** dropdown — but only for roles that should be able
-to see unpublished work:
-
-- Reuses the same role check as `canUpload` (§5.5) — `hasElevatedRole`,
-  true when `/my-memberships/` contains an `admin`, `manager`, or `member`
-  row. A **client** membership (or no qualifying membership at all) means
-  `hasElevatedRole` is `false`.
-- **Admin / manager / member** — `canFilterByStatus` is `true`. The Status
-  dropdown renders (`All Statuses` / `Draft` / `Published` / `Archived`)
-  next to Sort, and `selectedStatus` is passed straight through to
-  `getDocuments({ status })` → appended as a `status` query param on
-  `GET /drawings/documents/`.
-- **Client** — `canFilterByStatus` is `false`. The dropdown isn't rendered
-  at all, and `loadDocuments` doesn't fall back to "no filter" — it
-  hardcodes `effectiveStatus = "published"` and sends that regardless of
-  whatever `selectedStatus` holds:
-
-  ```ts
-  const effectiveStatus = canFilterByStatus ? selectedStatus : "published";
-  ```
-
-  So a client is locked to published documents at the fetch call, not just
-  by hiding a control — the same "UI convenience, not the real boundary"
-  pattern as §5.3/§5.5. The actual enforcement of who can see `draft`/
-  `archived` documents at all is still whatever `get_queryset()` /
-  `status` filtering does server-side (§5.2); this just stops a client
-  from ever *asking* for a non-published status in the first place.
-- Same loaded-state caution as §5.5: until `membershipsLoaded` is `true`,
-  `hasElevatedRole` (and therefore `canFilterByStatus`) defaults to
-  `false`, so an admin/manager/member's very first document load is
-  briefly restricted to `published` too, then automatically refetches
-  once their membership role comes back — this is deliberate, not a bug.
-- `clearFilters` resets `selectedStatus` to `undefined` (`All Statuses`);
-  `hasActiveFilters` only counts it while `canFilterByStatus` is true, so a
-  client never shows a stray "clear filters" state for a filter they can't
-  see or change.
-- Assumes the backend list endpoint already accepts a `status` query param
-  (§5.2 lists `status` among the "usual query-param narrowing" applied in
-  `get_queryset()`) — no backend change was made alongside this; confirm
-  that's actually wired up if documents don't filter as expected.
-
-### 5.7 Guest vs logged-in, side by side
+### 5.7 Guest vs logged-in
 
 | | Guest | Logged-in |
 |---|---|---|
 | Auth | none (`AllowAny`, code-based) | `IsAuthenticated` + `CanAccessDocumentPermission` |
-| Listing | `guest_visible_for_*_key()` — public+published only, or single doc via `guest_access_code` | `get_queryset()` — org-scoped, privacy/role-aware, full filter/search/pagination |
-| Detail fetch | `GuestDrawingDetailView` | `DrawingDocumentViewSet.retrieve` |
-| Download | direct `<a>` to `file_url`, no check, no log | `download` action, re-checks access, logs `DocumentAccessLog` |
-| Favorites | hidden (`guestMode`) | full toggle support |
-| Share (mint/revoke guest link) | hidden — guests can't create further guest links | `guest_link` action, logs `DocumentAccessLog(action='share')` |
-| Viewer component | `DocumentViewer` with `guestMode` | `DocumentViewer` without `guestMode` |
-| DXF handling | grid & direct-link page both skip the viewer, download directly | opens normally in whatever the browser does with the downloaded file (no in-app DXF viewer for anyone) |
+| Listing | `guest_visible_for_*_key()`: public+published only, or one doc via `guest_access_code` | `get_queryset()`: org-scoped, client-scoped, privacy/role-aware, filter/search/pagination |
+| Detail | `GuestDrawingDetailView` | `DrawingDocumentViewSet.retrieve` |
+| Download | direct `<a>` to `file_url`, no check, no log | `download` action, re-checks access, logs |
+| Favorites | hidden (`guestMode`) | full |
+| Share (mint/revoke link) | hidden | single: `guest_link`; bulk: `bulk-guest-link` / `bulk-revoke-guest-link`; all log `share` |
+| Viewer | `DocumentViewer` + `guestMode` (direct link also `hideActionsOnMobile`) | `DocumentViewer` |
+| DXF | grid & direct link skip the viewer, download directly | opens `DocumentViewer`, which shows a DXF placeholder + "Download DXF File" button (no in-app DXF preview for anyone) |
 
 ---
 
 ## 6. DXF handling summary
 
-DXF gets special-cased at every guest entry point because there's no
-in-browser DXF preview anywhere in the app — not a guest-only limitation.
+No in-browser DXF preview exists anywhere, so DXF is special-cased at every
+guest entry point.
 
-| Entry point | Behavior for DXF |
+| Entry point | Behaviour |
 |---|---|
-| `GuestDocumentGrid` (project/deliverable code) | Shown as a normal card alongside PDFs/images; click or action button triggers `guestDownload` instead of opening `DocumentViewer` |
-| `[code]/page.tsx` (direct/single-drawing link) | Auto-triggers `guestDownload` on load; renders a "can't preview, here's a download button" state instead of `DocumentViewer` |
-| `DocumentViewer` | Never receives a DXF document in guest flows — both entry points route around it |
+| `GuestDocumentGrid` | normal card; click/button → `guestDownload` |
+| `[code]/page.tsx` | auto `guestDownload` + "can't preview" state with Download button |
+| `DocumentViewer` | never receives a DXF in guest flows; logged-in users get a placeholder card + download button |
 
-DXF is **not** filtered out of listings at any level (backend querysets,
-`GuestDocumentGrid`) — it's visible, just not previewable. If you want DXF
-hidden from a scope entirely rather than shown-but-download-only, that
-would need a new explicit filter (backend `guest_visible_for_*_key()` or
-frontend `filteredDocuments`) — nothing currently does this.
+DXF is not filtered out of any listing. Hiding it from a scope would need an
+explicit filter (`guest_visible_for_*_key()` or the grid's `filteredDocuments`).
 
 ---
 
 ## 7. Known issues / TODO
 
-1. **Fix `GuestProjectDrawingsView` to 404 on an invalid key**, matching
-   `GuestDeliverableDrawingsView`'s pattern:
+1. ~~`GuestProjectDrawingsView` 200-on-invalid-key~~ **Fixed:** returns 404,
+   matching the deliverable view.
 
-   ```python
-   class GuestProjectDrawingsView(APIView):
-       permission_classes = [AllowAny]
+2. **No rate limiting** on the three guest endpoints (`AllowAny`, no
+   `throttle_classes`). 12-char hex codes make brute force impractical, but
+   nothing stops scripted probing.
 
-       def get(self, request, access_code):
-           from viewer.models import ProjectAccessKey
-           if not ProjectAccessKey.objects.filter(access_key=access_code).exists():
-               return Response({'error': 'Invalid access code'}, status=404)
-           queryset = DrawingDocument.guest_visible_for_project_key(access_code)...
-   ```
+3. **No expiry** on any guest code. Valid until manually revoked (admin, single
+   Share modal, or bulk Revoke).
 
-   Without this, an invalid project-scoped code returns `200, []` instead
-   of a real failure, which stops `resolveGuestAccessCode`'s fallback chain
-   early — a code that's actually valid for the deliverable or drawing
-   scope never gets checked if it first "succeeds" (with zero results)
-   against the project endpoint. **Still open — unaffected by the Share
-   feature work.**
+4. **No access logging for guest views/downloads.** `DocumentAccessLog` is only
+   written by authenticated actions (incl. `share`). No audit trail of what a
+   guest does.
 
-2. **No rate limiting** on any of the three guest endpoints
-   (`AllowAny`, no `throttle_classes`). Codes are 12-char hex
-   (`uuid.uuid4().hex[:12]`), so brute-forcing is impractical, but there's
-   currently nothing stopping scripted probing either.
+5. **3-endpoint guessing chain** for typed codes: could collapse into one
+   endpoint returning `{ type, docs }` (up to 3 round trips → 1).
 
-3. **No expiry** on any guest code — once generated, a link is valid
-   forever until manually revoked (now from either admin or the in-app
-   Share modal — see §3.6).
+6. **Who may mint links (worse with bulk).** `guest_link`, `bulk_guest_link`
+   only require *view* access. A minted link bypasses privacy and status for
+   that file, so anyone who can view a private drawing can mint permanent public
+   links for up to 300 at once, and a project-scoped **client** can mint links
+   that keep working after the drawing is unpublished/archived. The modal only
+   warns. Fix options: enable the commented block in `bulk_guest_link`
+   (org-wide roles only); require `drawing_private_role`/`admin` for private
+   drawings; or wire `IsDrawingAdminOrReadOnly`. Also hide the Share button with
+   `hasElevatedRole` if you restrict it.
 
-4. **No access logging** for guest views/downloads — `DocumentAccessLog`
-   entries are only created on the authenticated `view`/`download`/
-   `toggle-favorite`/**`share`** actions, so there's still no audit trail
-   for what a guest actually does once they're in — only that a link was
-   created or revoked by a logged-in user.
+7. **`hasDrawingPrivateAccess` / `user.roles`** still come from `/users/me/`
+   (unreliable). A user with `drawing_private_role` via a real membership may be
+   denied client-side access to private docs they're entitled to. Server side is
+   unaffected. Migrate to `/my-memberships/`.
 
-5. Consider collapsing the 3-endpoint guessing chain into one backend
-   endpoint that takes the code and returns `{ type, docs }` directly —
-   would cut guest login latency from up to 3 round trips down to 1.
+8. **Privacy count badges undercount.** `page.tsx` asks for `pageSize: 1000`;
+   backend `max_page_size` is 100, so Public/Private counts cover only the first
+   100 results. Use a count endpoint or loop pages.
 
-6. **New:** `guest_link` creation currently only requires the same
-   permission as *viewing* a document (§5.2). Since a minted link fully
-   bypasses privacy for that one file (§1), anyone who can view a private
-   document can also generate a public, unauthenticated, non-expiring link
-   to it. Worth deciding if this should require a stricter permission (e.g.
-   `IsDrawingAdminOrReadOnly`'s admin check, currently unused elsewhere —
-   see §5.2) before it's exposed more widely than it is today.
+9. **Bulk limits:** 300 ids per generate/revoke call; the modal loads at most
+   50 pages × 100 = 5000 drawings. `GET guest-links/` is unpaginated. Fine at
+   current scale; paginate or cap if drawing counts grow.
 
-7. **New:** `hasDrawingPrivateAccess` (`drawingApi.ts` → `getCurrentUser()`,
-   used in §5.3's `canAccessDocument`) still derives from
-   `roles.includes('drawing_private_role')` on `/users/me/`'s `roles`
-   field — the same field that made `canUpload` unreliable before the
-   §5.5 fix. It hasn't been migrated to `/my-memberships/` yet. Until it
-   is, a user who actually holds `drawing_private_role` via a real
-   `OrganisationMembership` row may still be denied client-side access to
-   private documents they're entitled to see (server-side enforcement in
-   §5.2 is unaffected either way, since it reads membership roles directly
-   rather than trusting this frontend field).
+10. **Permission class gap:** `CanAccessDocumentPermission` lacks the client
+    project/published scoping present in `get_queryset()` and
+    `_can_access_document` (§5.2). Currently masked by `get_queryset()`; worth
+    consolidating.
+
+11. **Print PDF is a download, not a print dialog.** The user prints the PDF from their viewer. It needs the
+    `jspdf` npm package, and titles with non-Latin characters print as `?`
+    (embed a Unicode font in `downloadPdf` if that matters).
+
+12. **Media files are fetched by plain URL.** `DocumentViewer` and `guestDownload`
+    fetch `doc.file_url` (`/media/drawings/<org>/<project>/<deliverable>/<name>_<timestamp>_<6 hex>.<ext>`)
+    directly, not through an authenticated view. Assuming `/media/` is served
+    statically (verify in nginx/Django config), privacy is enforced on the
+    **API** (listings, detail, share links) but not on the file itself. Two
+    consequences: a private drawing's file is reachable by anyone who learns its
+    URL, and **revoking a guest link stops the `/drawing/<code>` page but not a
+    `file_url` someone already saw**. Fix by serving media through an
+    access-checked view or signed/expiring URLs.
+
+13. **Guest drawing-detail response is over-broad.** `GuestDrawingDetailView`
+    uses the full `DrawingDocumentSerializer`, so guests also get
+    `allowed_roles`, `uploaded_by` (numeric user id) and internal ids. Use a
+    guest-specific serializer with only what the viewer needs.
+
+14. **Stale duplicate types.** `types.ts` defines a `DocumentFilters` without
+    `status`/`ordering` and a `Project.location` field the API doesn't return.
+    Import `DocumentFilters` from `drawingApi.ts` (as `BulkShareModal` does) and
+    remove or sync the copy in `types.ts`.
+
+15. **"Fast View / Download" doesn't force a download.** On mobile it opens
+    `file_url` in a new tab and the user saves from the browser menu. A real
+    forced download needs a `Content-Disposition: attachment` header from the
+    backend (see §3.7).

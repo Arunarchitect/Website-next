@@ -34,6 +34,7 @@ import DocumentViewer from "./components/DocumentViewer";
 import DocumentForm from "./components/DocumentForm";
 import PdfThumbnail from "./components/PdfThumbnail";
 import GuestAccessGate from "./components/GuestAccessGate";
+import BulkShareModal from "./components/BulkShareModal";
 import "./styles.css";
 
 const display = Space_Grotesk({
@@ -109,6 +110,9 @@ function DocumentsPageInner() {
   const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingDocument, setEditingDocument] = useState<DrawingDocumentResolved | null>(null);
+
+  // Bulk share (checklist + A4 print of guest links)
+  const [showBulkShare, setShowBulkShare] = useState<boolean>(false);
 
   const [privateCount, setPrivateCount] = useState<number>(0);
   const [publicCount, setPublicCount] = useState<number>(0);
@@ -197,6 +201,14 @@ function DocumentsPageInner() {
   // loadDocuments, not just hidden in the UI.
   const canFilterByStatus = hasElevatedRole;
 
+  // Clients (and anyone without an admin/manager/member membership) are
+  // always restricted to published documents, regardless of whatever
+  // selectedStatus happens to hold. Shared by loadDocuments and the bulk
+  // share modal so both see the exact same set of drawings.
+  const effectiveStatus: "draft" | "published" | "archived" | undefined = canFilterByStatus
+    ? selectedStatus
+    : "published";
+
   useEffect(() => {
     if (!currentUser || isGuest) return;
     const loadOrganisations = async () => {
@@ -263,12 +275,6 @@ function DocumentsPageInner() {
       setLoading(true);
       setError(null);
 
-      // Clients (and anyone without an admin/manager/member membership) are
-      // always restricted to published documents, regardless of whatever
-      // selectedStatus happens to hold — the dropdown is hidden for them,
-      // but this is the actual enforcement point, not just the UI hiding.
-      const effectiveStatus = canFilterByStatus ? selectedStatus : "published";
-
       const data = await getDocuments({
         organisationId: selectedOrgId,
         projectId: selectedProjectId,
@@ -316,8 +322,7 @@ function DocumentsPageInner() {
     currentUser,
     isGuest,
     sortOrder,
-    selectedStatus,
-    canFilterByStatus,
+    effectiveStatus,
   ]);
 
   useEffect(() => {
@@ -552,6 +557,14 @@ function DocumentsPageInner() {
             <span>Back to Portal</span>
           </Link>
           <div className="documents-header-actions">
+            <button
+              className="btn-secondary"
+              onClick={() => setShowBulkShare(true)}
+              disabled={!membershipsLoaded}
+            >
+              <i className="ti ti-share" />
+              Share
+            </button>
             {canUpload && (
               <button
                 className="btn-primary"
@@ -1057,6 +1070,21 @@ function DocumentsPageInner() {
         document={editingDocument}
         title={formMode === "create" ? "Create New Document" : "Edit Document"}
         submitLabel={formMode === "create" ? "Create Document" : "Update Document"}
+      />
+
+      {/* Logged-in only: this whole return branch is unreachable for guests. */}
+      <BulkShareModal
+        open={showBulkShare}
+        onClose={() => setShowBulkShare(false)}
+        filters={{
+          organisationId: selectedOrgId,
+          projectId: selectedProjectId,
+          deliverableId: selectedDeliverableId,
+          search: searchTerm,
+          showPrivate: showPrivateOnly,
+          ordering: sortOrder === "newest" ? "-created_at" : "created_at",
+          status: effectiveStatus,
+        }}
       />
     </main>
   );

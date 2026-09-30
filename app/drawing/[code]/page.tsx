@@ -37,7 +37,7 @@ export default function GuestDrawingPage() {
         <div className="documents-empty">
           <i className="ti ti-file-type-xml" />
           <h3>{doc.title}</h3>
-          <p>DXF files can`&apos;`t be previewed in the browser. Your download should have started automatically.</p>
+          <p>DXF files can&apos;t be previewed in the browser. Your download should have started automatically.</p>
           <button
             className="documents-retry-btn"
             onClick={() => guestDownload(doc)}

@@ -20,6 +20,12 @@ interface DocumentViewerProps {
   onFavoriteToggle: (id: number) => void;
   onDownload: (doc: DrawingDocumentResolved) => void;
   guestMode?: boolean;
+  /**
+   * On small screens, hide Print and Close and show a single
+   * "Fast View / Download" button. Use only where the viewer is the whole
+   * page (e.g. /drawing/<code>), so there is nothing to close back to.
+   */
+  hideActionsOnMobile?: boolean;
 }
 
 const MIN_ZOOM = 0.5;
@@ -46,6 +52,7 @@ export default function DocumentViewer({
   onFavoriteToggle,
   onDownload,
   guestMode = false,
+  hideActionsOnMobile = false,
 }: DocumentViewerProps) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
@@ -441,7 +448,11 @@ export default function DocumentViewer({
               {doc.file_type.toUpperCase()}
             </span>
           </div>
-          <div className="document-viewer-controls">
+          <div
+            className={`document-viewer-controls${
+              hideActionsOnMobile ? ' document-viewer-mobile-minimal' : ''
+            }`}
+          >
             {!guestMode && (
               <button
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-favorite"
@@ -503,7 +514,9 @@ export default function DocumentViewer({
             )}
             {(isPDF || isImage) && !hasError && !isLoading && blobUrl && (
               <button
-                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-print"
+                className={`document-viewer-btn document-viewer-btn-labeled document-viewer-btn-print${
+                  hideActionsOnMobile ? ' document-viewer-hide-on-mobile' : ''
+                }`}
                 onClick={handlePrint}
                 title="Print document"
               >
@@ -511,19 +524,29 @@ export default function DocumentViewer({
                 <span className="document-viewer-btn-label">Print</span>
               </button>
             )}
-            {isPDF && (
+            {(isPDF || isImage) && (
               <a
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-open"
                 href={getFullFileUrl(doc.file_url)}
                 target="_blank"
                 rel="noopener noreferrer"
+                title={hideActionsOnMobile ? 'Fast View / Download' : 'Fast View'}
               >
                 <i className="ti ti-external-link" />
-                <span className="document-viewer-btn-label">Fast View</span>
+                <span className="document-viewer-btn-label document-viewer-label-desktop">
+                  Fast View
+                </span>
+                {hideActionsOnMobile && (
+                  <span className="document-viewer-btn-label document-viewer-label-mobile">
+                    Fast View / Download
+                  </span>
+                )}
               </a>
             )}
             <button
-              className="document-viewer-btn document-viewer-btn-labeled document-viewer-close"
+              className={`document-viewer-btn document-viewer-btn-labeled document-viewer-close${
+                hideActionsOnMobile ? ' document-viewer-hide-on-mobile' : ''
+              }`}
               onClick={onClose}
             >
               <i className="ti ti-x" />

@@ -334,6 +334,68 @@ export const buildGuestLinkUrl = (code: string): string => {
   return `${window.location.origin}/drawing/${code}`;
 };
 
+export interface BulkLink {
+  id: number;
+  title: string;
+  code: string;
+  project_name: string;
+  deliverable_name: string;
+  is_private: boolean;
+}
+
+/**
+ * Create (or fetch existing) single-drawing guest links for many documents
+ * at once. Ids the user can't access are dropped server-side and counted
+ * in `skipped`. Max 300 ids per call.
+ */
+export const bulkCreateGuestLinks = async (
+  ids: number[]
+): Promise<{ links: BulkLink[]; skipped: number }> => {
+  try {
+    const response = await apiClient.post('/drawings/documents/bulk-guest-link/', { ids });
+    return response.data;
+  } catch (error) {
+    console.error('Error creating bulk guest links:', error);
+    throw new Error('Failed to create guest links');
+  }
+};
+
+/**
+ * All drawings matching the filters that already have an active guest link.
+ * Same filter shape as getDocuments (page/pageSize ignored). Not paginated.
+ */
+export const getActiveGuestLinks = async (
+  filters: Omit<DocumentFilters, 'page' | 'pageSize'> = {}
+): Promise<BulkLink[]> => {
+  try {
+    const params = new URLSearchParams();
+    if (filters.organisationId) params.append('organisation_id', filters.organisationId.toString());
+    if (filters.projectId) params.append('project_id', filters.projectId.toString());
+    if (filters.deliverableId) params.append('deliverable_id', filters.deliverableId.toString());
+    if (filters.search) params.append('search', filters.search);
+    if (filters.showPrivate) params.append('show_private', 'true');
+    if (filters.status) params.append('status', filters.status);
+    const response = await apiClient.get(`/drawings/documents/guest-links/?${params.toString()}`);
+    return response.data.links ?? [];
+  } catch (error) {
+    console.error('Error fetching active guest links:', error);
+    throw new Error('Failed to fetch active guest links');
+  }
+};
+
+/** Revoke the guest link on many drawings at once. Max 300 ids per call. */
+export const bulkRevokeGuestLinks = async (
+  ids: number[]
+): Promise<{ revoked: number[]; skipped: number }> => {
+  try {
+    const response = await apiClient.post('/drawings/documents/bulk-revoke-guest-link/', { ids });
+    return response.data;
+  } catch (error) {
+    console.error('Error revoking bulk guest links:', error);
+    throw new Error('Failed to revoke guest links');
+  }
+};
+
 export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<void> => {
   try {
     const currentUser = await getCurrentUser();
