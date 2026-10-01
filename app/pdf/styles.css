@@ -1,0 +1,105 @@
+.pdfx {
+  --pdfx-bg: #f6f7f9; --pdfx-card: #fff; --pdfx-text: #1b1f27; --pdfx-muted: #6b7280;
+  --pdfx-border: #dfe3ea; --pdfx-accent: #2563eb; --pdfx-danger: #dc2626;
+  max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; color: var(--pdfx-text);
+}
+@media (prefers-color-scheme: dark) {
+  .pdfx {
+    --pdfx-bg: #111418; --pdfx-card: #1a1f26; --pdfx-text: #e8eaee; --pdfx-muted: #98a1b0;
+    --pdfx-border: #2c333d; --pdfx-accent: #5b8cff;
+  }
+}
+
+.pdfx-head h1 { font-size: 1.6rem; font-weight: 700; margin: 0 0 4px; }
+.pdfx-head p { margin: 0 0 20px; color: var(--pdfx-muted); font-size: 0.9rem; }
+
+.pdfx-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .pdfx-layout { grid-template-columns: 1fr; } }
+
+.pdfx-panel {
+  background: var(--pdfx-card); border: 1px solid var(--pdfx-border); border-radius: 12px;
+  padding: 16px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 12px;
+}
+@media (max-width: 900px) { .pdfx-panel { position: static; } }
+.pdfx-panel section { display: flex; flex-direction: column; gap: 10px; }
+.pdfx-panel h2, .pdfx-sub {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--pdfx-muted); margin: 0;
+}
+.pdfx-sub { margin: 24px 0 10px; }
+
+.pdfx label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--pdfx-muted); }
+.pdfx label.pdfx-check { flex-direction: row; align-items: center; gap: 8px; color: var(--pdfx-text); font-size: 0.88rem; cursor: pointer; }
+.pdfx input[type='number'], .pdfx input[type='text'], .pdfx select {
+  background: var(--pdfx-bg); color: var(--pdfx-text); border: 1px solid var(--pdfx-border);
+  border-radius: 8px; padding: 7px 9px; font-size: 0.9rem; width: 100%;
+}
+.pdfx input:focus, .pdfx select:focus { outline: 2px solid var(--pdfx-accent); outline-offset: -1px; }
+
+.pdfx-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pdfx-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.pdfx-drop {
+  border: 2px dashed var(--pdfx-border); border-radius: 10px; padding: 18px; text-align: center;
+  font-size: 0.85rem; color: var(--pdfx-muted); transition: 0.15s;
+}
+.pdfx-drop.is-over {
+  border-color: var(--pdfx-accent); background: color-mix(in srgb, var(--pdfx-accent) 8%, transparent); color: var(--pdfx-accent);
+}
+
+.pdfx-btn {
+  flex: 1; text-align: center; cursor: pointer; background: var(--pdfx-accent); color: #fff;
+  border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; font-weight: 600; white-space: nowrap;
+}
+.pdfx-btn.ghost { background: transparent; color: var(--pdfx-text); border-color: var(--pdfx-border); font-weight: 500; }
+.pdfx-btn.danger { color: var(--pdfx-danger); }
+.pdfx-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.pdfx-seg { display: grid; border: 1px solid var(--pdfx-border); border-radius: 8px; overflow: hidden; }
+.pdfx-seg button { background: transparent; color: var(--pdfx-text); border: 0; padding: 8px 4px; font-size: 0.8rem; cursor: pointer; }
+.pdfx-seg button + button { border-left: 1px solid var(--pdfx-border); }
+.pdfx-seg button.on { background: var(--pdfx-accent); color: #fff; font-weight: 600; }
+
+.pdfx-hint { margin: 0; font-size: 0.75rem; color: var(--pdfx-muted); line-height: 1.4; }
+
+.pdfx-go {
+  background: var(--pdfx-accent); color: #fff; border: 0; border-radius: 10px;
+  padding: 12px; font-size: 0.95rem; font-weight: 700; cursor: pointer;
+}
+.pdfx-go:disabled { opacity: 0.5; cursor: not-allowed; }
+.pdfx-error { margin: 0; color: var(--pdfx-danger); font-size: 0.82rem; }
+
+/* ---------- preview ---------- */
+.pdfx-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.pdfx-stats span {
+  background: var(--pdfx-card); border: 1px solid var(--pdfx-border); border-radius: 999px;
+  padding: 4px 12px; font-size: 0.78rem; color: var(--pdfx-muted);
+}
+.pdfx-empty {
+  border: 1px dashed var(--pdfx-border); border-radius: 12px; padding: 60px 20px;
+  text-align: center; color: var(--pdfx-muted);
+}
+
+.pdfx-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.pdfx-page-wrap { margin: 0; }
+.pdfx-page {
+  position: relative; background: #fff; border: 1px solid var(--pdfx-border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); overflow: hidden; container-type: inline-size;
+}
+.pdfx-cell { position: absolute; background: #eee; box-sizing: border-box; }
+.pdfx-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pdfx-cap {
+  position: absolute; top: 100%; left: 0; width: 100%; display: flex; align-items: center; justify-content: center;
+  color: #282828; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1;
+}
+.pdfx-page-wrap figcaption { text-align: center; font-size: 0.75rem; color: var(--pdfx-muted); margin-top: 6px; }
+
+.pdfx-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.pdfx-files li {
+  display: flex; align-items: center; gap: 10px; background: var(--pdfx-card);
+  border: 1px solid var(--pdfx-border); border-radius: 8px; padding: 6px 8px; font-size: 0.8rem;
+}
+.pdfx-files img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex: none; }
+.pdfx-files span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdfx-files small { color: var(--pdfx-muted); flex: none; }
+.pdfx-files button { background: none; border: 0; color: var(--pdfx-muted); cursor: pointer; padding: 2px 6px; }
+.pdfx-files button:hover { color: var(--pdfx-danger); }
