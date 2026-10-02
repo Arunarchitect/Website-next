@@ -32,6 +32,28 @@ const mono = IBM_Plex_Mono({
   variable: "--font-mono",
 });
 
+// ---------------------------------------------------------------------------
+// Access control
+// ---------------------------------------------------------------------------
+
+// Where to send people who shouldn't be on this page
+const LOGIN_PATH = "/login";
+const NON_ADMIN_REDIRECT = "/main/client";
+
+// Adjust this to match however your backend marks an admin user.
+// It treats the user as admin if ANY of these fields indicate it.
+function isAdminUser(user: User | null): boolean {
+  if (!user) return false;
+  const u = user as unknown as Record<string, unknown>;
+  return (
+    u.is_admin === true ||
+    u.is_staff === true ||
+    u.is_superuser === true ||
+    u.role === "admin" ||
+    u.user_type === "admin"
+  );
+}
+
 export default function MainAdminPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -48,6 +70,10 @@ export default function MainAdminPage() {
   });
   const [loadingOrganisations, setLoadingOrganisations] = useState(true);
 
+  // --- Auth guard state -----------------------------------------------------
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+
   // --- Upcoming meetings count ----------------------------------------------
   const [upcomingMeetingsCount, setUpcomingMeetingsCount] = useState(0);
   const [loadingMeetings, setLoadingMeetings] = useState(true);
@@ -56,24 +82,46 @@ export default function MainAdminPage() {
   const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
   const canAccessAreacalc = areacalcRole === "admin" || areacalcRole === "member";
 
-  // Fetch user info on mount
+  // Fetch user info on mount and verify the user is an admin
   useEffect(() => {
     const fetchUser = async () => {
-      const user = await getCurrentUser();
-      setCurrentUser(user);
+      try {
+        const user = await getCurrentUser();
+
+        if (!user) {
+          router.replace(LOGIN_PATH);
+          return;
+        }
+
+        if (!isAdminUser(user)) {
+          router.replace(NON_ADMIN_REDIRECT);
+          return;
+        }
+
+        setCurrentUser(user);
+        setAuthorized(true);
+      } catch (err) {
+        console.error("Error verifying user:", err);
+        router.replace(LOGIN_PATH);
+      } finally {
+        setAuthChecked(true);
+      }
     };
     fetchUser();
-  }, []);
+  }, [router]);
 
   // Fetch areacalc role on mount
   useEffect(() => {
+    if (!authorized) return;
     const token = localStorage.getItem("access");
     if (!token) return;
     fetchAreacalcRole(token).then(setAreacalcRole);
-  }, []);
+  }, [authorized]);
 
   // Fetch user's organisations on mount
   useEffect(() => {
+    if (!authorized) return;
+
     const fetchOrganisations = async () => {
       try {
         setLoadingOrganisations(true);
@@ -91,10 +139,12 @@ export default function MainAdminPage() {
       }
     };
     fetchOrganisations();
-  }, []);
+  }, [authorized]);
 
   // Fetch issue stats when organisation changes.
   useEffect(() => {
+    if (!authorized) return;
+
     if (selectedOrganisation === null && organisations.length > 0) {
       setSelectedOrganisation(organisations[0].id);
       return;
@@ -118,11 +168,11 @@ export default function MainAdminPage() {
     if (!loadingOrganisations) {
       fetchIssueStats();
     }
-  }, [selectedOrganisation, organisations, loadingOrganisations]);
+  }, [authorized, selectedOrganisation, organisations, loadingOrganisations]);
 
   // Fetch upcoming meetings count, scoped to the selected organisation.
   useEffect(() => {
-    if (loadingOrganisations) return;
+    if (!authorized || loadingOrganisations) return;
 
     const fetchMeetingsCount = async () => {
       try {
@@ -141,7 +191,7 @@ export default function MainAdminPage() {
     };
 
     fetchMeetingsCount();
-  }, [selectedOrganisation, loadingOrganisations]);
+  }, [authorized, selectedOrganisation, loadingOrganisations]);
 
   const getDisplayName = (): string => {
     if (!currentUser) return "Guest";
@@ -174,6 +224,20 @@ export default function MainAdminPage() {
     (link) => link.href !== "/tools/areacalc" || canAccessAreacalc
   );
 
+  // ---------------------------------------------------------------------------
+  // Guard: nothing from the dashboard renders until the user is verified admin.
+  // Non-admins see only this brief screen while being redirected.
+  // ---------------------------------------------------------------------------
+  if (!authChecked || !authorized) {
+    return (
+      <main className={`${display.variable} ${mono.variable} admin-page`}>
+        <div className="loading-text">
+          {authChecked ? "Redirecting…" : "Checking access…"}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className={`${display.variable} ${mono.variable} admin-page`}>
       <header className="admin-header">
@@ -201,6 +265,10 @@ export default function MainAdminPage() {
           <Link href="/product" className="admin-nav-link">
             <i className="ti ti-package" aria-hidden="true" />
             <span>Products</span>
+          </Link>
+          <Link href="/drawing" className="admin-nav-link">
+            <i className="ti ti-pencil" aria-hidden="true" />
+            <span>Drawing</span>
           </Link>
         </nav>
       </header>

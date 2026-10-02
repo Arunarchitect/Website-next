@@ -128,21 +128,48 @@ export default function DashClientPage() {
       ) : (
         <>
           <p className="section-label">Get Started</p>
-          <Link href="/product" className="client-product-card">
-            <div className="client-section-icon-wrapper">
-              <i className="ti ti-shopping-bag" aria-hidden="true" />
-            </div>
-            <div className="client-section-info">
-              <p className="client-section-label">Product Selection</p>
-              <p className="client-section-description">
-                Browse and choose the products available to your account.
-              </p>
-            </div>
-            <span className="client-product-btn-go">
-              Go
-              <i className="ti ti-arrow-right" aria-hidden="true" />
-            </span>
-          </Link>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+            }}
+          >
+            {/* Product Selection */}
+            <Link href="/product" className="client-product-card">
+              <div className="client-section-icon-wrapper">
+                <i className="ti ti-shopping-bag" aria-hidden="true" />
+              </div>
+              <div className="client-section-info">
+                <p className="client-section-label">Product Selection</p>
+                <p className="client-section-description">
+                  Browse and choose the products available to your account.
+                </p>
+              </div>
+              <span className="client-product-btn-go">
+                Go
+                <i className="ti ti-arrow-right" aria-hidden="true" />
+              </span>
+            </Link>
+
+            {/* Drawing */}
+            <Link href="/drawing" className="client-product-card">
+              <div className="client-section-icon-wrapper">
+                <i className="ti ti-pencil" aria-hidden="true" />
+              </div>
+              <div className="client-section-info">
+                <p className="client-section-label">Drawing</p>
+                <p className="client-section-description">
+                  View and access the drawings for your projects.
+                </p>
+              </div>
+              <span className="client-product-btn-go">
+                Go
+                <i className="ti ti-arrow-right" aria-hidden="true" />
+              </span>
+            </Link>
+          </div>
         </>
       )}
     </main>

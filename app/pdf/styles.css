@@ -74,6 +74,7 @@
   background: var(--pdfx-card); border: 1px solid var(--pdfx-border); border-radius: 999px;
   padding: 4px 12px; font-size: 0.78rem; color: var(--pdfx-muted);
 }
+.pdfx-stats span.warn { color: var(--pdfx-danger); border-color: var(--pdfx-danger); }
 .pdfx-empty {
   border: 1px dashed var(--pdfx-border); border-radius: 12px; padding: 60px 20px;
   text-align: center; color: var(--pdfx-muted);
