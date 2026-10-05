@@ -1364,16 +1364,18 @@ export function ResolvePanel({
 // ---------------------------------------------------------------------------
 // ActionsBar — edit/save/cancel/delete/resolve/reopen/add-comment/share
 //
-// Reopen is intentionally NOT gated by isCreator — it's visible to anybody
-// who can see the issue, matching the requirement that any viewer should
-// be able to reopen a resolved/closed issue. (Whether the BACKEND also
-// allows a non-creator, non-admin PATCH of `status` is a separate check —
-// this only controls what the UI offers.)
+// `canEdit` is the server-computed "may fully edit" flag (reporter-in-window
+// or org admin). `isCreator` is retained as a looser signal for
+// creator-only affordances (screenshot delete, Delete button) and is passed
+// through unchanged. Reopen is intentionally NOT gated by either — it's
+// visible to anybody who can see the issue.
 // ---------------------------------------------------------------------------
 
 interface ActionsBarProps {
   isEditing: boolean;
   isCreator: boolean;
+  /** Server-computed: full edit rights (title/description/status/priority/etc). */
+  canEdit: boolean;
   canResolve: boolean;
   canReopen: boolean;
   canManageAccess: boolean;
@@ -1386,15 +1388,14 @@ interface ActionsBarProps {
   onReopen: () => void;
   onToggleCommentInput: () => void;
   onToggleManageAccess: () => void;
-  /** True while the issue-edit save request is in flight — disables Cancel/Save so a slow request or a double-click can't save twice. */
   isSavingEdit?: boolean;
-  /** True while the reopen request is in flight — disables the Reopen button so a slow request or a double-click can't fire twice. */
   isReopening?: boolean;
 }
 
 export function ActionsBar({
   isEditing,
   isCreator,
+  canEdit,
   canManageAccess,
   canResolve,
   canReopen,
@@ -1415,12 +1416,10 @@ export function ActionsBar({
   const handleShare = async () => {
     if (!shareUrl) return;
     try {
-      // Mobile / modern desktop browsers
       if (typeof navigator !== "undefined" && navigator.share) {
         await navigator.share({ title: document.title, url: shareUrl });
         return;
       }
-      // Clipboard fallback
       if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareUrl);
       } else {
@@ -1451,15 +1450,16 @@ export function ActionsBar({
         </>
       ) : (
         <>
+          {canEdit && (
+            <button className="btn-outline" onClick={onEdit}>
+              <i className="ti ti-edit" /> Edit
+            </button>
+          )}
+
           {isCreator && (
-            <>
-              <button className="btn-outline" onClick={onEdit}>
-                <i className="ti ti-edit" /> Edit
-              </button>
-              <button className="btn-outline danger" onClick={onDeleteIssue}>
-                <i className="ti ti-trash" /> Delete
-              </button>
-            </>
+            <button className="btn-outline danger" onClick={onDeleteIssue}>
+              <i className="ti ti-trash" /> Delete
+            </button>
           )}
 
           {canManageAccess && (

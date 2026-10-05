@@ -11,8 +11,10 @@ import {
 import {
   autoSchedule,
   durationDays,
+  durationWorkdays,
   flatten,
   rollup,
+  setDurationWithCalendar,
   todayISO,
   toDay,
   wouldCycle,
@@ -20,12 +22,36 @@ import {
 import {
   DAY,
   computeCpm,
+  computeCpmWorkdays,
+  daysUntil,
   describe,
   findCurrentAndNext,
   fmtDate,
+  humanizeDaysUntil,
+  upcomingQueue,
 } from "./cpm";
+import {
+  deserialize,
+  emptyCalendar,
+  isHoliday,
+  serialize,
+  type SerializedCalendar,
+  type WorkingCalendar,
+} from "./calendar";
+import { CalendarButton, CalendarChips, CalendarModal } from "./CalendarUI";
 import { SearchAct } from "./SearchAct";
 import { PrintAct } from "./PrintAct";
+import ScheduleExport from "./ScheduleExport";
+import {
+  ActivityEditorModal,
+  RowMenu,
+  type MoveTarget,
+  type RowMenuAction,
+} from "./ActivityEditor";
+import { useScheduleSync } from "./useScheduleSync";
+import SyncBadge from "./SyncBadge";
+import ScheduleImport from "./ScheduleImport";
+import { listMyProjects, type MyProject } from "./api";
 
 const ROW_H = 28;
 const LEFT_COL_W = 256;
@@ -41,10 +67,35 @@ const MIN_MONTH_LABEL_W = 34;
 const LINK_ARROW_GAP = 6;
 const LINK_LANE_OFFSET = 4;
 
-// how long a picked row stays highlighted (ms)
 const HIGHLIGHT_MS = 2200;
 
-// ---------- Searchable task picker (inline dependency editor) ----------
+const SEED = {
+  tasks: demoSchedule.tasks,
+  sequences: demoSchedule.sequences,
+  calendar: serialize(emptyCalendar()),
+};
+
+const newId = (prefix = "a") =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+
+const todayISOForNew = () => {
+  const d = new Date();
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+// Read ?project= / ?schedule= from the URL (Next.js pages can't take custom props).
+const readParam = (key: string): number | null => {
+  if (typeof window === "undefined") return null;
+  const v = new URLSearchParams(window.location.search).get(key);
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+// ---------- Searchable task picker ----------
 type PickerMode = "pred" | "succ";
 
 function TaskPicker({
@@ -115,11 +166,11 @@ function TaskPicker({
     const base = leaves.filter((t) => !blocked.has(t.id));
     const matched = q
       ? base.filter(
-          (t) =>
-            t.name.toLowerCase().includes(q) ||
-            (t.workCode ?? "").toLowerCase().includes(q) ||
-            t.id.toLowerCase().includes(q)
-        )
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.workCode ?? "").toLowerCase().includes(q) ||
+          t.id.toLowerCase().includes(q)
+      )
       : base;
     return [...matched].sort(
       (a, b) => toDay(a.scheduleStart) - toDay(b.scheduleStart)
@@ -190,9 +241,108 @@ function TaskPicker({
   );
 }
 
-export default function SchedulePage() {
-  const [tasks, setTasks] = useState<Task[]>(demoSchedule.tasks);
-  const [sequences, setSequences] = useState<Sequence[]>(demoSchedule.sequences);
+// ---------- Org → Project → Schedule picker ----------
+function SchedulePicker({
+  projects,
+  orgName,
+  projectId,
+  scheduleId,
+  onPick,
+}: {
+  projects: MyProject[];
+  orgName: string | null;
+  projectId: number | null;
+  scheduleId: number | null;
+  onPick: (projectId: number, scheduleId: number | null) => void;
+}) {
+  const orgs = useMemo(() => {
+    const m = new Map<string, MyProject[]>();
+    for (const p of projects) {
+      if (!m.has(p.organisation)) m.set(p.organisation, []);
+      m.get(p.organisation)!.push(p);
+    }
+    return Array.from(m.entries());
+  }, [projects]);
+
+  const [selectedOrg, setSelectedOrg] = useState<string | null>(orgName);
+
+  useEffect(() => {
+    setSelectedOrg(orgName);
+  }, [orgName]);
+
+  const visibleProjects = useMemo(
+    () => projects.filter((p) => p.organisation === selectedOrg),
+    [projects, selectedOrg]
+  );
+
+  const currentProject = visibleProjects.find((p) => p.id === projectId) ?? null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <select
+        value={selectedOrg ?? ""}
+        onChange={(e) => setSelectedOrg(e.target.value || null)}
+        className="rounded border bg-white px-2 py-1.5"
+        title="Organisation"
+      >
+        {orgs.map(([name]) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={projectId ?? ""}
+        onChange={(e) => {
+          const pid = Number(e.target.value);
+          const p = projects.find((x) => x.id === pid);
+          onPick(pid, p?.schedules[0]?.id ?? null);
+        }}
+        className="rounded border bg-white px-2 py-1.5"
+        title="Project"
+      >
+        {visibleProjects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+            {p.isCompleted ? " (completed)" : ""}
+            {p.canEdit ? "" : " · read-only"}
+          </option>
+        ))}
+      </select>
+
+      {currentProject && currentProject.schedules.length > 1 && (
+        <select
+          value={scheduleId ?? ""}
+          onChange={(e) => onPick(currentProject.id, Number(e.target.value))}
+          className="rounded border bg-white px-2 py-1.5"
+          title="Schedule"
+        >
+          {currentProject.schedules.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.predefinedType})
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+export default function ScheduleView() {
+  const [myProjects, setMyProjects] = useState<MyProject[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(true);
+  const [pickerError, setPickerError] = useState<string | null>(null);
+
+  const [projectId, setProjectId] = useState<number | null>(() =>
+    readParam("project")
+  );
+  const [scheduleId, setScheduleId] = useState<number | null>(() =>
+    readParam("schedule")
+  );
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [sequences, setSequences] = useState<Sequence[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [zoom, setZoom] = useState(1);
   const [autoFit, setAutoFit] = useState(true);
@@ -203,14 +353,91 @@ export default function SchedulePage() {
     null
   );
 
-  // selection & highlight
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+
+  const [nextIdx, setNextIdx] = useState(0);
+
+  const [calendar, setCalendar] = useState<WorkingCalendar>(() => emptyCalendar());
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [useWorkdays, setUseWorkdays] = useState(false);
+
+  const calendarSer = useMemo(() => serialize(calendar), [calendar]);
+
+  // ── Fetch the accessible project list once ──────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    setPickerLoading(true);
+    setPickerError(null);
+    listMyProjects()
+      .then((rows) => {
+        if (cancelled) return;
+        setMyProjects(rows);
+        if (projectId == null && rows.length > 0) {
+          const first = rows[0];
+          setProjectId(first.id);
+          setScheduleId(first.schedules[0]?.id ?? null);
+        } else if (projectId != null && scheduleId == null) {
+          const p = rows.find((r) => r.id === projectId);
+          if (p) setScheduleId(p.schedules[0]?.id ?? null);
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setPickerError(e instanceof Error ? e.message : "Failed to load projects");
+      })
+      .finally(() => {
+        if (!cancelled) setPickerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror selection into the URL for deep-linking.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (projectId == null) return;
+    const q = new URLSearchParams(window.location.search);
+    q.set("project", String(projectId));
+    if (scheduleId != null) q.set("schedule", String(scheduleId));
+    else q.delete("schedule");
+    const next = `${window.location.pathname}?${q.toString()}`;
+    if (next !== window.location.pathname + window.location.search) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [projectId, scheduleId]);
+
+  // ---------- backend sync ----------
+  const sync = useScheduleSync({
+    projectId,
+    scheduleId,
+    seed: SEED,
+    tasks,
+    sequences,
+    calendar: calendarSer,
+    onLoaded: (d) => {
+      setTasks(d.tasks);
+      setSequences(d.sequences);
+      if (d.calendar) setCalendar(deserialize(d.calendar as SerializedCalendar));
+    },
+  });
+
+  const currentProject = myProjects.find((p) => p.id === projectId) ?? null;
+  const projectRole = currentProject?.role ?? null;
+  const isViewOnly = projectRole === "member" || projectRole === "manager";
+  const readOnly = isViewOnly || !sync.canEdit;
+  const ready = !["loading", "empty", "failed"].includes(sync.status);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [containerW, setContainerW] = useState(1000);
 
   useEffect(() => {
+    if (!ready) return;
     const el = scrollerRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
@@ -219,8 +446,20 @@ export default function SchedulePage() {
     ro.observe(el);
     setContainerW(el.clientWidth);
     return () => ro.disconnect();
-  }, []);
+  }, [ready]);
 
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("[data-row-menu]")) return;
+      setMenuFor(null);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuFor]);
+
+  // ---------- derived ----------
   const rolled = useMemo(() => rollup(tasks), [tasks]);
   const rows = useMemo(() => flatten(rolled, collapsed), [rolled, collapsed]);
 
@@ -236,11 +475,28 @@ export default function SchedulePage() {
   const todayDay = toDay(today);
   const todayInRange = todayDay >= minDay && todayDay <= maxDay;
 
-  const cpm = useMemo(() => computeCpm(tasks, sequences), [tasks, sequences]);
-  const { current, next } = useMemo(
+  const cpm = useMemo(
+    () =>
+      useWorkdays
+        ? computeCpmWorkdays(tasks, sequences, calendar)
+        : computeCpm(tasks, sequences),
+    [tasks, sequences, useWorkdays, calendar]
+  );
+
+  const { current, next: nextAuto } = useMemo(
     () => findCurrentAndNext(tasks, cpm, todayDay),
     [tasks, cpm, todayDay]
   );
+
+  const upcoming = useMemo(
+    () => upcomingQueue(tasks, cpm, todayDay),
+    [tasks, cpm, todayDay]
+  );
+  useEffect(() => {
+    setNextIdx((i) => Math.min(Math.max(0, i), Math.max(0, upcoming.length - 1)));
+  }, [upcoming.length]);
+
+  const next = upcoming[nextIdx] ?? nextAuto;
 
   const fitZoom = useMemo(() => {
     const usable = Math.max(120, containerW - 24);
@@ -273,10 +529,13 @@ export default function SchedulePage() {
       const segEnd = Math.min(maxDay, monthEnd);
       out.push({
         label: date.toLocaleString("en-US", {
-          month: "short", year: "numeric", timeZone: "UTC",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC",
         }),
         short: date.toLocaleString("en-US", {
-          month: "short", timeZone: "UTC",
+          month: "short",
+          timeZone: "UTC",
         }),
         days: segEnd - segStart + 1,
         px: (segEnd - segStart + 1) * zoom,
@@ -307,10 +566,12 @@ export default function SchedulePage() {
     return out;
   }, [minDay, maxDay, zoom]);
 
+  // ---------- helpers ----------
   const toggleCollapse = (id: string) =>
     setCollapsed((prev) => {
       const n = new Set(prev);
-      if (n.has(id)) n.delete(id); else n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
 
@@ -328,7 +589,26 @@ export default function SchedulePage() {
   const updateDates = (id: string, start: string, finish: string) =>
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id ? { ...t, scheduleStart: start, scheduleFinish: finish } : t
+        t.id === id
+          ? {
+            ...t,
+            scheduleStart: start,
+            scheduleFinish: finish < start ? start : finish,
+          }
+          : t
+      )
+    );
+
+  const updateDuration = (id: string, newDays: number) =>
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? setDurationWithCalendar(
+            t,
+            newDays,
+            useWorkdays ? calendar : undefined
+          )
+          : t
       )
     );
 
@@ -371,7 +651,89 @@ export default function SchedulePage() {
     return m;
   }, [rows]);
 
-  // ---------- selection helpers ----------
+  // ---------- CRUD ----------
+  const addChild = (parentId: string | null) => {
+    const d = todayISOForNew();
+    const id = newId(parentId ? "a" : "g");
+    const siblingCount = tasks.filter((t) => t.parentId === parentId).length;
+    const isRootGroup = parentId === null;
+    const newTask: Task = {
+      id,
+      name: isRootGroup ? `New phase ${siblingCount + 1}` : "New activity",
+      parentId,
+      scheduleStart: d,
+      scheduleFinish: d,
+      completion: 0,
+      isMilestone: false,
+    };
+    setTasks((prev) => [...prev, newTask]);
+    if (parentId) {
+      setCollapsed((prev) => {
+        const n = new Set(prev);
+        n.delete(parentId);
+        return n;
+      });
+    }
+    setEditingId(id);
+    setSelectedId(id);
+    setFlashId(id);
+    setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), HIGHLIGHT_MS);
+  };
+
+  const addSibling = (anchor: Task) => addChild(anchor.parentId ?? null);
+
+  const deleteTask = (id: string) => {
+    const toRemove = new Set<string>([id]);
+    const stack = [id];
+    while (stack.length) {
+      const x = stack.pop()!;
+      for (const t of tasks) {
+        if (t.parentId === x && !toRemove.has(t.id)) {
+          toRemove.add(t.id);
+          stack.push(t.id);
+        }
+      }
+    }
+    setTasks((prev) => prev.filter((t) => !toRemove.has(t.id)));
+    setSequences((prev) =>
+      prev.filter(
+        (s) => !toRemove.has(s.relatingTask) && !toRemove.has(s.relatedTask)
+      )
+    );
+    setSelectedId((cur) => (cur && toRemove.has(cur) ? null : cur));
+    setFlashId((cur) => (cur && toRemove.has(cur) ? null : cur));
+    setPicker((cur) => (cur && toRemove.has(cur.taskId) ? null : cur));
+    setMenuFor((cur) => (cur && toRemove.has(cur) ? null : cur));
+    setEditingId((cur) => (cur && toRemove.has(cur) ? null : cur));
+  };
+
+  const updateTask = (id: string, patch: Partial<Task>) =>
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+
+  const moveTask = (id: string, target: MoveTarget) => {
+    const newParent = target.kind === "root" ? null : target.id;
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, parentId: newParent } : t))
+    );
+    if (newParent) {
+      setCollapsed((prev) => {
+        const n = new Set(prev);
+        n.delete(newParent);
+        return n;
+      });
+    }
+    setSelectedId(id);
+    setFlashId(id);
+    setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), HIGHLIGHT_MS);
+  };
+
+  useEffect(() => {
+    if (selectedId && !tasks.some((t) => t.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [tasks, selectedId]);
+
+  // ---------- selection ----------
   const expandAncestors = (ids: string[]) => {
     if (!ids.length) return;
     setCollapsed((prev) => {
@@ -384,12 +746,10 @@ export default function SchedulePage() {
   const handleSelectFromSearch = (id: string) => {
     setSelectedId(id);
     setFlashId(id);
-    // scroll into view after layout settles
     setTimeout(() => {
       const el = document.getElementById(`row-${id}`);
       el?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 60);
-    // clear the flash after a moment
     setTimeout(() => {
       setFlashId((cur) => (cur === id ? null : cur));
     }, HIGHLIGHT_MS);
@@ -397,10 +757,12 @@ export default function SchedulePage() {
 
   const handleRowClick = (id: string, isGroup: boolean) => {
     setSelectedId(id);
-    // groups toggle themselves; leaves just highlight
     if (isGroup) toggleCollapse(id);
   };
 
+  const jumpToTask = (id: string) => handleSelectFromSearch(id);
+
+  // ---------- link geometry ----------
   const links = useMemo(() => {
     const out: {
       id: string;
@@ -455,6 +817,78 @@ export default function SchedulePage() {
     return out;
   }, [sequences, rowIndexById, rolled, minDay, zoom, cpm]);
 
+  // ---------- load gates (ALL hooks are above this line) ----------
+  if (pickerError) {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm">
+        <p className="mb-2 text-red-600">
+          Couldn&apos;t load your projects: {pickerError}
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded border px-3 py-1.5 hover:bg-gray-50"
+        >
+          Retry
+        </button>
+      </main>
+    );
+  }
+
+  if (pickerLoading && myProjects.length === 0) {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+        Loading your projects…
+      </main>
+    );
+  }
+
+  if (!pickerLoading && myProjects.length === 0) {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+        You don&apos;t have access to any projects yet. Ask your organisation
+        admin to add you to a project.
+      </main>
+    );
+  }
+
+  if (projectId == null) {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+        Pick a project to view its schedule.
+      </main>
+    );
+  }
+
+  if (sync.status === "loading") {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+        Loading schedule…
+      </main>
+    );
+  }
+  if (sync.status === "empty") {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+        No schedule has been created for this project yet.
+      </main>
+    );
+  }
+  if (sync.status === "failed") {
+    return (
+      <main className="mx-auto max-w-[1600px] p-6 text-sm">
+        <p className="mb-2 text-red-600">
+          Couldn&apos;t load the schedule{sync.message ? `: ${sync.message}` : "."}
+        </p>
+        <button
+          onClick={sync.reload}
+          className="rounded border px-3 py-1.5 hover:bg-gray-50"
+        >
+          Retry
+        </button>
+      </main>
+    );
+  }
+
   const rangeFor = (t: Task) => {
     const es = cpm.earlyStart.get(t.id) ?? toDay(t.scheduleStart);
     const ef = cpm.earlyFinish.get(t.id) ?? toDay(t.scheduleFinish);
@@ -464,24 +898,142 @@ export default function SchedulePage() {
   const criticalCount = cpm.criticalIds.size;
   const criticalDuration = cpm.projectFinish - cpm.projectStart + 1;
 
+  const editingTask = editingId
+    ? tasks.find((t) => t.id === editingId) ?? null
+    : null;
+
+  const handleRowAction = (task: Task, action: RowMenuAction) => {
+    switch (action.kind) {
+      case "edit":
+        setEditingId(task.id);
+        break;
+      case "addChild":
+        addChild(task.id);
+        break;
+      case "addSibling":
+        addSibling(task);
+        break;
+      case "delete":
+        if (
+          window.confirm(
+            `Delete "${task.name}" and everything under it? This cannot be undone.`
+          )
+        ) {
+          deleteTask(task.id);
+        }
+        break;
+      case "move":
+        moveTask(task.id, action.target);
+        break;
+    }
+  };
+
+  const nextDays = next ? daysUntil(next, cpm, todayDay) : 0;
+  const nextCountdownClass =
+    nextDays <= 0
+      ? "bg-red-100 text-red-700 ring-red-200"
+      : nextDays <= 2
+        ? "bg-red-100 text-red-700 ring-red-200"
+        : nextDays <= 7
+          ? "bg-amber-100 text-amber-800 ring-amber-200"
+          : "bg-gray-100 text-gray-700 ring-gray-200";
+
+  const hasNextQueue = upcoming.length > 1;
+
+  const currentScheduleMeta = currentProject?.schedules.find(
+    (s) => s.id === scheduleId
+  );
+  const heading = currentScheduleMeta?.name ?? currentProject?.name ?? demoSchedule.name;
+
   return (
     <main className="mx-auto max-w-[1600px] p-6">
       {/* ================= HEADER ================= */}
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">{demoSchedule.name}</h1>
+          <h1 className="text-2xl font-semibold">{heading}</h1>
           <p className="text-sm text-gray-500">
             {fmtDate(cpm.projectStart)} → {fmtDate(cpm.projectFinish)} ·{" "}
             {criticalDuration} days total · {criticalCount} critical activities
+            {useWorkdays && " · working-day mode"}
+            {isViewOnly && " · view-only"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-print-hide>
+          <SchedulePicker
+            projects={myProjects}
+            orgName={currentProject?.organisation ?? null}
+            projectId={projectId}
+            scheduleId={scheduleId}
+            onPick={(pid, sid) => {
+              setProjectId(pid);
+              setScheduleId(sid);
+            }}
+          />
+
+          <SyncBadge
+            status={sync.status}
+            savedAt={sync.savedAt}
+            message={sync.message}
+            onRetry={sync.saveNow}
+            onReload={sync.reload}
+          />
           <SearchAct
             tasks={tasks}
             onSelect={handleSelectFromSearch}
             onExpand={expandAncestors}
           />
+          {!readOnly && (
+            <CalendarButton
+              calendar={calendar}
+              onOpen={() => setCalendarOpen(true)}
+            />
+          )}
+          <label
+            className="flex items-center gap-1.5 rounded border bg-white px-2 py-1.5 text-xs text-gray-700"
+            title="Use the working calendar for durations, CPM, and holiday shading"
+          >
+            <input
+              type="checkbox"
+              checked={useWorkdays}
+              onChange={(e) => setUseWorkdays(e.target.checked)}
+            />
+            Working days
+          </label>
           <PrintAct tasks={tasks} />
+          {!readOnly && (
+            <ScheduleImport
+              scheduleId={scheduleId}
+              canEdit={!readOnly}
+              onImported={(doc) => {
+                setTasks(doc.tasks);
+                setSequences(doc.sequences);
+                const cal = doc.calendar
+                  ? deserialize(doc.calendar as SerializedCalendar)
+                  : emptyCalendar();
+                setCalendar(cal);
+                sync.setVersion(doc.version);
+                sync.markSaved({
+                  tasks: doc.tasks,
+                  sequences: doc.sequences,
+                  calendar: serialize(cal),
+                });
+              }}
+            />
+          )}
+          <ScheduleExport
+            tasks={tasks}
+            sequences={sequences}
+            calendar={calendarSer}
+          />
+          {!readOnly && (
+            <button
+              onClick={() => addChild(null)}
+              className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+              title="Create a new top-level phase"
+            >
+              + New phase
+            </button>
+          )}
           <button
             onClick={() => setCollapsed(new Set())}
             className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -494,30 +1046,35 @@ export default function SchedulePage() {
           >
             Collapse all
           </button>
-          <button
-            onClick={runAutoSchedule}
-            className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
-            title="Push successors later when a link is violated"
-          >
-            Auto-schedule
-          </button>
+          {!readOnly && (
+            <button
+              onClick={runAutoSchedule}
+              className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
+            >
+              Auto-schedule
+            </button>
+          )}
         </div>
       </header>
+
+      {useWorkdays && (
+        <div className="mb-3" data-print-hide>
+          <CalendarChips calendar={calendar} />
+        </div>
+      )}
 
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${
-            current
+          className={`rounded border-l-4 p-3 ${current
               ? "border-blue-500 bg-blue-50/60"
               : "border-gray-300 bg-gray-50"
-          }`}
+            }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${
-                current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
-              }`}
+              className={`h-2 w-2 rounded-full ${current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+                }`}
             />
             Now
           </div>
@@ -545,26 +1102,52 @@ export default function SchedulePage() {
           ) : (
             <p className="text-sm text-gray-600">
               No activity scheduled for {fmtDate(todayDay)}.
-              {next && <> Project resumes on {fmtDate(rangeFor(next).es)}.</>}
             </p>
           )}
         </div>
 
         <div
-          className={`rounded border-l-4 p-3 ${
-            next
+          className={`rounded border-l-4 p-3 ${next
               ? "border-emerald-500 bg-emerald-50/60"
               : "border-gray-300 bg-gray-50"
-          }`}
+            }`}
         >
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                next ? "bg-emerald-500" : "bg-gray-400"
-              }`}
-            />
-            Next up
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
+              <span
+                className={`h-2 w-2 rounded-full ${next ? "bg-emerald-500" : "bg-gray-400"
+                  }`}
+              />
+              Next up
+              {upcoming.length > 0 && (
+                <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 ring-1 ring-gray-200">
+                  {Math.min(nextIdx + 1, upcoming.length)} / {upcoming.length}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setNextIdx((i) => Math.max(0, i - 1))}
+                disabled={nextIdx === 0}
+                className="flex h-6 w-6 items-center justify-center rounded border bg-white text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Previous upcoming activity"
+              >
+                ◀
+              </button>
+              <button
+                onClick={() =>
+                  setNextIdx((i) => Math.min(upcoming.length - 1, i + 1))
+                }
+                disabled={!hasNextQueue || nextIdx >= upcoming.length - 1}
+                className="flex h-6 w-6 items-center justify-center rounded border bg-white text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Next upcoming activity"
+              >
+                ▶
+              </button>
+            </div>
           </div>
+
           {next ? (
             <>
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -576,14 +1159,44 @@ export default function SchedulePage() {
                     CRITICAL
                   </span>
                 )}
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${nextCountdownClass}`}
+                  title={`Early start: ${fmtDate(rangeFor(next).es)}`}
+                >
+                  {humanizeDaysUntil(nextDays)}
+                </span>
               </div>
+
               <div className="mt-0.5 text-xs text-gray-600">
                 Starts {fmtDate(rangeFor(next).es)} · runs{" "}
                 {rangeFor(next).dur} days · ends {fmtDate(rangeFor(next).ef)}
               </div>
+
               <p className="mt-1 text-xs text-gray-700">
                 {describe(next, tasks)}
               </p>
+
+              <div className="mt-2 flex items-center gap-2" data-print-hide>
+                <button
+                  onClick={() => jumpToTask(next.id)}
+                  className="rounded border bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50"
+                  title="Scroll to and highlight this activity"
+                >
+                  Jump to activity →
+                </button>
+                {hasNextQueue && (
+                  <button
+                    onClick={() =>
+                      setNextIdx((i) => Math.min(upcoming.length - 1, i + 1))
+                    }
+                    disabled={nextIdx >= upcoming.length - 1}
+                    className="rounded bg-emerald-600 px-2 py-1 text-[11px] text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Show the following upcoming activity"
+                  >
+                    Next activity ▶
+                  </button>
+                )}
+              </div>
             </>
           ) : (
             <p className="text-sm text-gray-600">All activities complete.</p>
@@ -667,8 +1280,8 @@ export default function SchedulePage() {
           {showDayHeader
             ? "Detail: days"
             : showWeekHeader
-            ? "Detail: weeks"
-            : "Detail: months"}
+              ? "Detail: weeks"
+              : "Detail: months"}
         </span>
       </div>
 
@@ -693,11 +1306,10 @@ export default function SchedulePage() {
                     key={task.id}
                     id={`row-${task.id}`}
                     onClick={() => handleRowClick(task.id, hasChildren)}
-                    className={`flex cursor-pointer items-center gap-1 truncate px-2 text-xs transition-colors ${
-                      selected
+                    className={`flex cursor-pointer items-center gap-1 truncate px-2 text-xs transition-colors ${selected
                         ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
                         : "hover:bg-gray-50"
-                    } ${flash ? "animate-pulse" : ""}`}
+                      } ${flash ? "animate-pulse" : ""}`}
                     style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                   >
                     {hasChildren ? (
@@ -716,15 +1328,13 @@ export default function SchedulePage() {
                     {!hasChildren && critical && showCritical && (
                       <span
                         className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                        title={`Critical · float ${
-                          cpm.totalFloat.get(task.id) ?? 0
-                        }d`}
+                        title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
+                          }d`}
                       />
                     )}
                     <span
-                      className={`truncate ${
-                        hasChildren ? "font-semibold" : ""
-                      }`}
+                      className={`truncate ${hasChildren ? "font-semibold" : ""
+                        }`}
                       title={task.name}
                     >
                       {task.name}
@@ -769,13 +1379,19 @@ export default function SchedulePage() {
                       const d = new Date((minDay + i) * DAY);
                       const isWeekend =
                         d.getUTCDay() === 0 || d.getUTCDay() === 6;
+                      const holiday =
+                        useWorkdays && isHoliday(minDay + i, calendar);
                       return (
                         <div
                           key={i}
-                          className={`overflow-hidden border-r text-center leading-5 ${
-                            isWeekend ? "bg-gray-100" : ""
-                          }`}
+                          className={`overflow-hidden border-r text-center leading-5 ${holiday
+                              ? "bg-pink-100"
+                              : isWeekend
+                                ? "bg-gray-100"
+                                : ""
+                            }`}
                           style={{ width: zoom }}
+                          title={holiday ? "Holiday" : undefined}
                         >
                           {zoom >= 12 ? d.getUTCDate() : ""}
                         </div>
@@ -788,15 +1404,20 @@ export default function SchedulePage() {
               <div className="relative" style={{ height: ganttBodyHeight }}>
                 <div className="absolute inset-0 flex">
                   {Array.from({ length: totalDays }).map((_, i) => {
-                    const d = new Date((minDay + i) * DAY);
+                    const dayNum = minDay + i;
+                    const d = new Date(dayNum * DAY);
                     const isWeekend =
                       d.getUTCDay() === 0 || d.getUTCDay() === 6;
+                    const holiday = useWorkdays && isHoliday(dayNum, calendar);
                     return (
                       <div
                         key={i}
-                        className={`h-full ${
-                          isWeekend ? "bg-gray-50" : ""
-                        } ${showDayGrid ? "border-r" : ""}`}
+                        className={`h-full ${holiday
+                            ? "bg-pink-50"
+                            : isWeekend
+                              ? "bg-gray-50"
+                              : ""
+                          } ${showDayGrid ? "border-r" : ""}`}
                         style={{ width: zoom }}
                       />
                     );
@@ -842,7 +1463,6 @@ export default function SchedulePage() {
                   </div>
                 )}
 
-                {/* Row-highlight bands (behind bars/links) */}
                 {rows.map(({ task }, i) => {
                   const selected = selectedId === task.id;
                   const flash = flashId === task.id;
@@ -850,9 +1470,8 @@ export default function SchedulePage() {
                   return (
                     <div
                       key={`hl-${task.id}`}
-                      className={`pointer-events-none absolute left-0 right-0 ${
-                        selected ? "bg-blue-100/60" : ""
-                      } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                      className={`pointer-events-none absolute left-0 right-0 ${selected ? "bg-blue-100/60" : ""
+                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
                       style={{ top: i * ROW_H, height: ROW_H }}
                     />
                   );
@@ -914,37 +1533,35 @@ export default function SchedulePage() {
                     task.isMilestone ? 6 : 2,
                     dur * zoom - (task.isMilestone ? 0 : 2)
                   );
-                  const critical =
-                    !hasChildren && cpm.criticalIds.has(task.id);
+                  const critical = !hasChildren && cpm.criticalIds.has(task.id);
                   const selected = selectedId === task.id;
                   const barColor = hasChildren
                     ? "bg-gray-800"
                     : task.isMilestone
-                    ? "bg-amber-500"
-                    : critical && showCritical
-                    ? "bg-red-500"
-                    : "bg-blue-500";
+                      ? "bg-amber-500"
+                      : critical && showCritical
+                        ? "bg-red-500"
+                        : "bg-blue-500";
                   const innerColor =
                     critical && showCritical ? "bg-red-700" : "bg-blue-700";
+                  const durLabel =
+                    useWorkdays && !hasChildren
+                      ? `${durationWorkdays(task, calendar)} working days`
+                      : `${dur}d`;
                   return (
                     <div
                       key={task.id}
                       onClick={() => handleRowClick(task.id, !!hasChildren)}
-                      className={`absolute h-3 cursor-pointer rounded ${barColor} z-10 ${
-                        selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                      }`}
+                      className={`absolute h-3 cursor-pointer rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                        }`}
                       style={{ left: s * zoom, top: i * ROW_H + 8, width: w }}
-                      title={`${task.name}\n${task.scheduleStart} → ${
-                        task.scheduleFinish
-                      } · ${dur}d${
-                        task.completion > 0 ? ` · ${task.completion}%` : ""
-                      }${
-                        critical
-                          ? `\nCRITICAL · float ${
-                              cpm.totalFloat.get(task.id) ?? 0
-                            }d`
+                      title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
+                        } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
+                        }${critical
+                          ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
+                          }d`
                           : ""
-                      }`}
+                        }`}
                     >
                       {!hasChildren &&
                         !task.isMilestone &&
@@ -999,25 +1616,39 @@ export default function SchedulePage() {
 
       {/* ================= TABLE ================= */}
       <section className="overflow-x-auto rounded border">
-        <table className="w-full min-w-[1300px] border-collapse text-sm">
+        <table className="w-full min-w-[1400px] border-collapse text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
+              <th className="w-10 px-2 py-2"></th>
               <th className="w-12 px-2 py-2">#</th>
               <th className="min-w-[200px] px-2 py-2">Task</th>
               <th className="w-28 px-2 py-2">Start</th>
               <th className="w-28 px-2 py-2">Finish</th>
-              <th className="w-14 px-2 py-2">Dur</th>
+              <th
+                className="w-24 px-2 py-2"
+                title={
+                  useWorkdays
+                    ? "Duration in working days (editable)"
+                    : "Duration in calendar days (editable)"
+                }
+              >
+                Dur
+              </th>
               <th className="w-16 px-2 py-2" title="Total float (days)">
                 Float
               </th>
               <th className="w-24 px-2 py-2">%</th>
               <th className="w-64 px-2 py-2">Predecessors</th>
               <th className="w-64 px-2 py-2">Successors</th>
+              <th className="w-10 px-2 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {rows.map(({ task, depth, hasChildren, wbs }) => {
-              const dur = durationDays(task);
+              const dur =
+                useWorkdays && !hasChildren
+                  ? durationWorkdays(task, calendar)
+                  : durationDays(task);
               const isGroup = hasChildren;
               const preds = predecessorsOf(task.id);
               const succs = successorsOf(task.id);
@@ -1026,19 +1657,44 @@ export default function SchedulePage() {
               const isPickerOpen = picker?.taskId === task.id;
               const selected = selectedId === task.id;
               const flash = flashId === task.id;
+              const isMenuOpen = menuFor === task.id;
               return (
                 <tr
                   key={task.id}
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
-                  className={`cursor-pointer border-t transition-colors ${
-                    selected
+                  className={`cursor-pointer border-t transition-colors ${selected
                       ? "bg-blue-100"
                       : critical && showCritical
-                      ? "bg-red-50/40 hover:bg-red-50/70"
-                      : "hover:bg-gray-50"
-                  } ${flash ? "animate-pulse" : ""}`}
+                        ? "bg-red-50/40 hover:bg-red-50/70"
+                        : "hover:bg-gray-50"
+                    } ${flash ? "animate-pulse" : ""}`}
                 >
+                  <td
+                    className="relative px-1 py-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!readOnly && (
+                      <button
+                        onClick={() => setMenuFor(isMenuOpen ? null : task.id)}
+                        className="rounded px-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                        title="Row actions"
+                        data-row-menu
+                      >
+                        ⋯
+                      </button>
+                    )}
+                    {!readOnly && isMenuOpen && (
+                      <div data-row-menu>
+                        <RowMenu
+                          task={task}
+                          tasks={tasks}
+                          onAction={(a) => handleRowAction(task, a)}
+                          onClose={() => setMenuFor(null)}
+                        />
+                      </div>
+                    )}
+                  </td>
                   <td className="px-2 py-1.5 font-mono text-xs text-gray-500">
                     {wbs}
                   </td>
@@ -1077,7 +1733,7 @@ export default function SchedulePage() {
                     <input
                       type="date"
                       value={task.scheduleStart}
-                      disabled={isGroup}
+                      disabled={isGroup || readOnly}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) =>
                         updateDates(task.id, e.target.value, task.scheduleFinish)
@@ -1089,7 +1745,7 @@ export default function SchedulePage() {
                     <input
                       type="date"
                       value={task.scheduleFinish}
-                      disabled={isGroup}
+                      disabled={isGroup || readOnly}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) =>
                         updateDates(task.id, task.scheduleStart, e.target.value)
@@ -1097,9 +1753,45 @@ export default function SchedulePage() {
                       className="w-full rounded border px-1 py-0.5 text-xs disabled:bg-gray-100"
                     />
                   </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">
-                    {dur}d
+
+                  <td
+                    className="px-2 py-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isGroup ? (
+                      <span className="block text-right tabular-nums text-xs text-gray-600">
+                        {dur}d
+                      </span>
+                    ) : (
+                      <div className="flex items-center justify-end gap-0.5">
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={dur}
+                          disabled={readOnly}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            if (!Number.isFinite(v)) return;
+                            updateDuration(task.id, v);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                          className="w-14 rounded border px-1 py-0.5 text-right text-xs tabular-nums disabled:bg-gray-100"
+                          title={
+                            useWorkdays
+                              ? "Change duration — finish date shifts by working days"
+                              : "Change duration — finish date shifts by calendar days"
+                          }
+                        />
+                        <span className="text-[10px] text-gray-500">d</span>
+                      </div>
+                    )}
                   </td>
+
                   <td className="px-2 py-1.5 text-right tabular-nums text-xs text-gray-600">
                     {!isGroup && float !== undefined ? `${float}d` : "—"}
                   </td>
@@ -1113,7 +1805,7 @@ export default function SchedulePage() {
                         min={0}
                         max={100}
                         value={task.completion}
-                        disabled={isGroup}
+                        disabled={isGroup || readOnly}
                         onChange={(e) =>
                           updateCompletion(task.id, Number(e.target.value))
                         }
@@ -1147,17 +1839,13 @@ export default function SchedulePage() {
                             </span>
                             <select
                               value={s.sequenceType}
+                              disabled={readOnly}
                               onChange={(e) =>
                                 updateSequence(s.id, {
                                   sequenceType: e.target.value as SequenceType,
                                 })
                               }
                               className="rounded border text-[10px]"
-                              title={
-                                SEQUENCE_TYPES.find(
-                                  (x) => x.value === s.sequenceType
-                                )?.label
-                              }
                             >
                               {SEQUENCE_TYPES.map((st) => (
                                 <option key={st.value} value={st.value}>
@@ -1168,7 +1856,7 @@ export default function SchedulePage() {
                             <input
                               type="number"
                               value={s.lagDays}
-                              title="Lag (days, negative = lead)"
+                              disabled={readOnly}
                               onChange={(e) =>
                                 updateSequence(s.id, {
                                   lagDays: Number(e.target.value),
@@ -1176,17 +1864,18 @@ export default function SchedulePage() {
                               }
                               className="w-10 rounded border text-[10px]"
                             />
-                            <button
-                              onClick={() => removeSequence(s.id)}
-                              className="text-red-600 hover:text-red-800"
-                              title="Remove link"
-                            >
-                              ×
-                            </button>
+                            {!readOnly && (
+                              <button
+                                onClick={() => removeSequence(s.id)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                ×
+                              </button>
+                            )}
                           </div>
                         );
                       })}
-                      {!isGroup && (
+                      {!isGroup && !readOnly && (
                         <button
                           onClick={() =>
                             setPicker(
@@ -1201,7 +1890,7 @@ export default function SchedulePage() {
                         </button>
                       )}
                     </div>
-                    {!isGroup && isPickerOpen && picker.mode === "pred" && (
+                    {!isGroup && !readOnly && isPickerOpen && picker.mode === "pred" && (
                       <TaskPicker
                         mode="pred"
                         anchorTask={task}
@@ -1237,17 +1926,13 @@ export default function SchedulePage() {
                             </span>
                             <select
                               value={s.sequenceType}
+                              disabled={readOnly}
                               onChange={(e) =>
                                 updateSequence(s.id, {
                                   sequenceType: e.target.value as SequenceType,
                                 })
                               }
                               className="rounded border text-[10px]"
-                              title={
-                                SEQUENCE_TYPES.find(
-                                  (x) => x.value === s.sequenceType
-                                )?.label
-                              }
                             >
                               {SEQUENCE_TYPES.map((st) => (
                                 <option key={st.value} value={st.value}>
@@ -1258,7 +1943,7 @@ export default function SchedulePage() {
                             <input
                               type="number"
                               value={s.lagDays}
-                              title="Lag (days, negative = lead)"
+                              disabled={readOnly}
                               onChange={(e) =>
                                 updateSequence(s.id, {
                                   lagDays: Number(e.target.value),
@@ -1266,17 +1951,18 @@ export default function SchedulePage() {
                               }
                               className="w-10 rounded border text-[10px]"
                             />
-                            <button
-                              onClick={() => removeSequence(s.id)}
-                              className="text-red-600 hover:text-red-800"
-                              title="Remove link"
-                            >
-                              ×
-                            </button>
+                            {!readOnly && (
+                              <button
+                                onClick={() => removeSequence(s.id)}
+                                className="text-red-600 hover:text-red-800"
+                              >
+                                ×
+                              </button>
+                            )}
                           </div>
                         );
                       })}
-                      {!isGroup && (
+                      {!isGroup && !readOnly && (
                         <button
                           onClick={() =>
                             setPicker(
@@ -1291,7 +1977,7 @@ export default function SchedulePage() {
                         </button>
                       )}
                     </div>
-                    {!isGroup && isPickerOpen && picker.mode === "succ" && (
+                    {!isGroup && !readOnly && isPickerOpen && picker.mode === "succ" && (
                       <TaskPicker
                         mode="succ"
                         anchorTask={task}
@@ -1304,12 +1990,47 @@ export default function SchedulePage() {
                       />
                     )}
                   </td>
+
+                  <td
+                    className="px-2 py-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!readOnly && (
+                      <button
+                        onClick={() => setEditingId(task.id)}
+                        className="rounded px-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                        title="Quick edit"
+                      >
+                        ✎
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </section>
+
+      {/* ================= EDIT MODAL ================= */}
+      {editingTask && !readOnly && (
+        <ActivityEditorModal
+          task={editingTask}
+          tasks={tasks}
+          onSave={(patch) => updateTask(editingTask.id, patch)}
+          onDelete={() => deleteTask(editingTask.id)}
+          onClose={() => setEditingId(null)}
+        />
+      )}
+
+      {/* ================= CALENDAR MODAL ================= */}
+      {calendarOpen && !readOnly && (
+        <CalendarModal
+          calendar={calendar}
+          onChange={setCalendar}
+          onClose={() => setCalendarOpen(false)}
+        />
+      )}
     </main>
   );
 }

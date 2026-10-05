@@ -1,12 +1,21 @@
+// app/schedule/cpm.ts
 // Pure CPM math + Now/Next helpers. No React, no DOM.
-// Everything here is testable in isolation with plain Node / Vitest.
+// Depends on data.ts, scheduling.ts, calendar.ts.
 
 import type { Sequence, Task } from "./data";
 import { durationDays, toDay } from "./scheduling";
+import {
+  addWorkdays,
+  countWorkdays,
+  nextWorkday,
+  type WorkingCalendar,
+} from "./calendar";
 
-export const DAY = 86400000;
+// Re-export DAY so `import { DAY } from "./cpm"` keeps working.
+// (The canonical definition lives in calendar.ts.)
+export { DAY } from "./calendar";
 
-// ---------- CPM (forward + backward pass) ----------
+// ---------- CPM result ----------
 export interface CpmResult {
   earlyStart: Map<string, number>;
   earlyFinish: Map<string, number>;
@@ -18,6 +27,7 @@ export interface CpmResult {
   projectFinish: number;
 }
 
+// ---------- CPM (forward + backward pass) ----------
 export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
   const earlyStart = new Map<string, number>();
   const earlyFinish = new Map<string, number>();
@@ -84,10 +94,10 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
       const pEF = earlyFinish.get(p.id) ?? pES + durationDays(p) - 1;
       let candidate: number;
       switch (s.sequenceType) {
-        case "FINISH_START": candidate = pEF + 1 + s.lagDays; break;
-        case "START_START":  candidate = pES + s.lagDays; break;
-        case "FINISH_FINISH":candidate = pEF + s.lagDays - dur; break;
-        case "START_FINISH": candidate = pES + s.lagDays - dur; break;
+        case "FINISH_START":  candidate = pEF + 1 + s.lagDays; break;
+        case "START_START":   candidate = pES + s.lagDays; break;
+        case "FINISH_FINISH": candidate = pEF + s.lagDays - dur; break;
+        case "START_FINISH":  candidate = pES + s.lagDays - dur; break;
       }
       if (candidate > es) es = candidate;
     }
@@ -130,10 +140,10 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
         const qLF = lateFinish.get(q.id) ?? projectFinish;
         let candidate: number;
         switch (s.sequenceType) {
-          case "FINISH_START": candidate = qLS - 1 - s.lagDays; break;
-          case "START_START":  candidate = qLS - s.lagDays + dur; break;
-          case "FINISH_FINISH":candidate = qLF - s.lagDays; break;
-          case "START_FINISH": candidate = qLF - s.lagDays + dur; break;
+          case "FINISH_START":  candidate = qLS - 1 - s.lagDays; break;
+          case "START_START":   candidate = qLS - s.lagDays + dur; break;
+          case "FINISH_FINISH": candidate = qLF - s.lagDays; break;
+          case "START_FINISH":  candidate = qLF - s.lagDays + dur; break;
         }
         if (candidate < lf) lf = candidate;
       }
@@ -155,6 +165,52 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
     earlyStart, earlyFinish, lateStart, lateFinish, totalFloat,
     criticalIds, projectStart, projectFinish,
   };
+}
+
+// ---------- working-day CPM ----------
+/**
+ * Working-day version of the CPM.
+ *
+ * Strategy: snap every leaf task's dates to the working calendar, run the
+ * standard CPM on the snapped dates, then convert the resulting float from
+ * calendar days to working days.
+ *
+ * Good enough for typical construction schedules (contiguous activities,
+ * FS/SS/FF/SF links with small lags). For schedules with long shutdowns in
+ * the middle of chains, a fully working-day backward pass would be more
+ * accurate — but this is a deliberate readability trade-off.
+ */
+export function computeCpmWorkdays(
+  tasks: Task[],
+  seqs: Sequence[],
+  cal: WorkingCalendar
+): CpmResult {
+  const parents = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+  );
+  const snappedTasks = tasks.map((t) => {
+    if (parents.has(t.id)) return t;
+    const s = nextWorkday(t.scheduleStart, cal);
+    const wd = Math.max(1, countWorkdays(s, t.scheduleFinish, cal));
+    const f = addWorkdays(s, wd, cal);
+    return { ...t, scheduleStart: s, scheduleFinish: f };
+  });
+
+  const cpm = computeCpm(snappedTasks, seqs);
+
+  const totalFloatWork = new Map<string, number>();
+  for (const [id, f] of cpm.totalFloat) {
+    const t = snappedTasks.find((x) => x.id === id);
+    if (!t) {
+      totalFloatWork.set(id, f);
+      continue;
+    }
+    const end = addWorkdays(t.scheduleFinish, f, cal);
+    const wf = Math.max(0, countWorkdays(t.scheduleFinish, end, cal) - 1);
+    totalFloatWork.set(id, wf);
+  }
+
+  return { ...cpm, totalFloat: totalFloatWork };
 }
 
 // ---------- "now / next" ----------
@@ -188,9 +244,56 @@ export function findCurrentAndNext(
   return { current, next };
 }
 
+// ---------- upcoming queue (for the "Next up" stepper) ----------
+/**
+ * All leaf tasks with early-start strictly after today, sorted by (es, name).
+ * Drives the Next-up stepper in the header card.
+ */
+export function upcomingQueue(
+  tasks: Task[],
+  cpm: CpmResult,
+  todayDay: number
+): Task[] {
+  const leaves = tasks.filter((t) => {
+    const hasKids = tasks.some((c) => c.parentId === t.id);
+    return !hasKids;
+  });
+
+  const withStart = leaves.map((t) => ({
+    t,
+    es: cpm.earlyStart.get(t.id) ?? toDay(t.scheduleStart),
+  }));
+
+  return withStart
+    .filter((x) => x.es > todayDay)
+    .sort((a, b) => a.es - b.es || a.t.name.localeCompare(b.t.name))
+    .map((x) => x.t);
+}
+
+/** Days from today to the task's early start (0 = today, negative = past). */
+export function daysUntil(
+  task: Task,
+  cpm: CpmResult,
+  todayDay: number
+): number {
+  const es = cpm.earlyStart.get(task.id) ?? toDay(task.scheduleStart);
+  return es - todayDay;
+}
+
+/** Human-friendly "in 2 days" / "tomorrow" / "today" label. */
+export function humanizeDaysUntil(d: number): string {
+  if (d <= 0) return "today";
+  if (d === 1) return "tomorrow";
+  if (d < 7) return `in ${d} days`;
+  if (d < 14) return "next week";
+  if (d < 30) return `in ${Math.round(d / 7)} weeks`;
+  if (d < 60) return "next month";
+  return `in ${Math.round(d / 30)} months`;
+}
+
 // ---------- formatting / description helpers ----------
 export const fmtDate = (day: number) =>
-  new Date(day * DAY).toLocaleDateString("en-GB", {
+  new Date(day * 86400000).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",

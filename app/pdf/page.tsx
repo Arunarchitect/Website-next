@@ -557,7 +557,9 @@ export default function PdfPage() {
             {style === 'grid' && <p className="pdfx-hint">Equal cells, each image fitted inside without cropping.</p>}
             {style === 'composed' && (
               <>
-                <p className="pdfx-hint">Images are resized so edges and widths line up in one tidy block per page. Nothing is cropped; the block is centered, leaving a small margin if the shapes don't fill the page exactly. Size limits steer the search toward arrangements that respect them.</p>
+                <p className="pdfx-hint">
+                  Images are resized so edges and widths line up in one tidy block per page. Nothing is cropped; the block is centered, leaving a small margin if the shapes don&apos;t fill the page exactly. Size limits steer the search toward arrangements that respect them.
+                </p>
                 <button className="pdfx-btn ghost" onClick={() => setSeed((s) => s + 1)}>
                   ↻ New composition
                 </button>

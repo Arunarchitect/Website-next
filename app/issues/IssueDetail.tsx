@@ -1,9 +1,6 @@
 // app/issues/IssueDetail.tsx
 //
-// Full single-issue view. This is exactly what used to be the "expanded"
-// branch of IssueCard, pulled out into its own component so it can be
-// rendered standalone on the dedicated /issues/[id] page instead of
-// inline-expanding inside the list.
+// Full single-issue view. Standalone on the /issues/[id] page.
 
 "use client";
 
@@ -27,8 +24,9 @@ import {
   IssueComment,
   BimIssue,
   isBimIssue,
+  IssueStatus,
+  IssuePriority,
 } from "./issueTypes";
-
 
 import { ExpandableText } from "./ExpandableText";
 
@@ -44,6 +42,8 @@ import {
   NonBimIssue,
   IssuePatch,
   CurrentUser,
+  STATUS_OPTIONS,
+  PRIORITY_OPTIONS,
 } from "./issueCardHelpers";
 import {
   IssueHeader,
@@ -105,34 +105,17 @@ export function IssueDetail({
   const [isResolving, setIsResolving] = useState(false);
   const [resolutionText, setResolutionText] = useState("");
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
-  // Reserved for genuine save/network failures now (create/update/delete
-  // requests to the backend) — image-too-large and similar upload
-  // validation errors are shown locally by each ScreenshotDropzone instead,
-  // via the .error field each useScreenshotUpload() instance returns below.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showManageAccess, setShowManageAccess] = useState(false);
   const [accessOrgMembers, setAccessOrgMembers] = useState<AssigneeOption[]>([]);
   const [loadingAccessMembers, setLoadingAccessMembers] = useState(false);
   const shareUrl =
-  typeof window !== "undefined"
-    ? `${window.location.origin}/issues/${issue.id}`
-    : "";
+    typeof window !== "undefined"
+      ? `${window.location.origin}/issues/${issue.id}`
+      : "";
 
   // ---------------------------------------------------------------------
   // In-flight submission guards.
-  //
-  // Each mutating action below (save issue edit, resolve, reopen, add
-  // comment, edit comment) can be triggered by a button click. On a slow
-  // connection, or from an impatient double-click, the handler could
-  // previously be invoked a second time before the first request settled,
-  // firing the mutation twice.
-  //
-  // We use a *ref* as the actual re-entrancy lock because it's read/written
-  // synchronously — two clicks that happen within the same tick (before
-  // React has re-rendered with a disabled button) will still both see the
-  // ref's true value immediately. The paired *state* value exists purely
-  // to drive the UI (disabling buttons, showing a saving indicator) since
-  // refs don't trigger re-renders.
   // ---------------------------------------------------------------------
   const isSavingEditRef = useRef(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -149,11 +132,6 @@ export function IssueDetail({
   const isSavingCommentEditRef = useRef(false);
   const [isSavingCommentEdit, setIsSavingCommentEdit] = useState(false);
 
-  // Screenshot upload flows — one hook instance per independent upload
-  // site, each with its OWN error state (see useScreenshotUpload). No
-  // onError callback is passed here anymore: validation errors ("image too
-  // large", "please drop a PNG or JPEG") now render locally, right under
-  // the dropzone that produced them, via each instance's `.error` field.
   const mainScreenshot = useScreenshotUpload(undefined, false);
   const resolutionScreenshot = useScreenshotUpload(undefined, true);
   const commentScreenshot = useScreenshotUpload(undefined, true);
@@ -179,8 +157,6 @@ export function IssueDetail({
     dueDate: issue.dueDate ?? "",
   });
 
-  // Keep the edit form in sync if the underlying issue changes out from
-  // under us (e.g. a refresh() landed while the user wasn't editing).
   useEffect(() => {
     if (!isEditing) {
       setForm({
@@ -206,7 +182,6 @@ export function IssueDetail({
   );
   const [drawingToAdd, setDrawingToAdd] = useState<number | "">("");
 
-  // --- Organisation / Project / Deliverable — edit-mode scope cascade -----
   const [editOrgId, setEditOrgId] = useState<number | "">("");
   const [editProjectId, setEditProjectId] = useState<number | "">("");
   const [editDeliverableId, setEditDeliverableId] = useState<number | "">("");
@@ -219,12 +194,20 @@ export function IssueDetail({
   const [loadingEditProjects, setLoadingEditProjects] = useState(false);
   const [loadingEditDeliverables, setLoadingEditDeliverables] = useState(false);
 
+  // --- Inline status/priority state (independent of the full edit form) ---
+  const [inlineStatus, setInlineStatus] = useState<IssueStatus>(issue.status);
+  const [inlinePriority, setInlinePriority] = useState<IssuePriority>(issue.priority);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setInlineStatus(issue.status);
+      setInlinePriority(issue.priority);
+    }
+  }, [isEditing, issue.status, issue.priority]);
+
   const issueProjectId = issue.project_id ?? issue.project;
   const issueOrganisationId = issue.organisationId;
 
-  // Falls back to the issue's saved org/project until the user changes the
-  // scope selects in edit mode — keeps assignee/drawing lookups correct
-  // whether or not org/project were touched this edit.
   const effectiveOrgId = editOrgId || issueOrganisationId;
   const effectiveProjectId = editProjectId || issueProjectId;
 
@@ -236,7 +219,6 @@ export function IssueDetail({
       .then((opts) => { if (!cancelled) setAssigneeOptions(opts); })
       .finally(() => { if (!cancelled) setLoadingAssignees(false); });
     return () => { cancelled = true; };
-
   }, [isEditing, effectiveOrgId]);
 
   useEffect(() => {
@@ -260,7 +242,6 @@ export function IssueDetail({
       .then((opts) => { if (!cancelled) setDrawingOptions(opts); })
       .finally(() => { if (!cancelled) setLoadingDrawings(false); });
     return () => { cancelled = true; };
-
   }, [isEditing, effectiveProjectId]);
 
   useEffect(() => {
@@ -269,8 +250,6 @@ export function IssueDetail({
     }
   }, [isEditing, issue.linkedDocuments]);
 
-  // Initializes the Organisation / Project / Deliverable selects once when
-  // edit mode starts, seeded from the issue's current scope.
   useEffect(() => {
     if (!isEditing) return;
     let cancelled = false;
@@ -356,16 +335,23 @@ export function IssueDetail({
     }
   };
 
+  const isCreator = isUserCreator(issue.reportedBy, currentUser) ||
+    (!!issue.reportedById && !!currentUser.id && issue.reportedById === currentUser.id);
+
   const canResolve = issue.status !== "Resolved" && issue.status !== "Closed";
   const canReopen = issue.status === "Resolved" || issue.status === "Closed";
   const isBim = isBimIssue(issue);
 
+  // Server-computed permission flags (see issueTypes.ts). Fall back to
+  // reporter-based `isCreator` for older payloads that predate the flags
+  // being exposed, so a plain reporter still sees Edit as before.
+  const canEditIssue = issue.canEdit || isCreator;
+  const canChangeStatus = issue.canChangeStatus || canEditIssue;
+  const canChangePriority = issue.canChangePriority || canEditIssue;
+
   const ifcElementCount = isBimIssue(issue) ? (issue.ifcElements?.length ?? 0) : 0;
 
-    const isCreator = isUserCreator(issue.reportedBy, currentUser) ||
-    (!!issue.reportedById && !!currentUser.id && issue.reportedById === currentUser.id);
-
-      const isCommentAuthor = useCallback((commentAuthor: string): boolean => {
+  const isCommentAuthor = useCallback((commentAuthor: string): boolean => {
     if (!commentAuthor || commentAuthor === 'Unknown') return false;
     const ca = commentAuthor.toLowerCase().trim().replace(/\s+/g, '');
     const candidates = [
@@ -404,10 +390,9 @@ export function IssueDetail({
     return commentSortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
 
-  // --- Add comment: guarded against double-submit -------------------------
   const handleAddComment = async () => {
     if (!commentText.trim()) return;
-    if (isSavingCommentRef.current) return; // already in flight — ignore re-click
+    if (isSavingCommentRef.current) return;
     isSavingCommentRef.current = true;
     setIsSavingComment(true);
     try {
@@ -419,17 +404,15 @@ export function IssueDetail({
       );
       setCommentText("");
       commentScreenshot.reset();
-      setShowCommentInput(false); // success -> close panel, so a further click needs the "add comment" button again
+      setShowCommentInput(false);
     } catch {
       setSaveError('Failed to add comment.');
-      // leave the panel open on failure so the user can retry without retyping
     } finally {
       isSavingCommentRef.current = false;
       setIsSavingComment(false);
     }
   };
 
-  // --- Edit comment: guarded against double-submit -------------------------
   const handleEditComment = async (commentId: string, originalHadSnapshot: boolean) => {
     if (!editingCommentText.trim()) return;
     if (isSavingCommentEditRef.current) return;
@@ -445,7 +428,7 @@ export function IssueDetail({
         editingCommentScreenshotUpload.screenshot ? editingCommentScreenshotUpload.format : undefined,
         removeSnapshot
       );
-      setEditingCommentId(null); // success -> closes the inline comment edit form
+      setEditingCommentId(null);
       setEditingCommentText("");
       editingCommentScreenshotUpload.reset();
       setEditingCommentHasExistingImage(false);
@@ -481,7 +464,6 @@ export function IssueDetail({
     }
   };
 
-  // --- Save issue edit: guarded against double-submit -----------------------
   const handleSave = async () => {
     if (isSavingEditRef.current) return;
     isSavingEditRef.current = true;
@@ -533,7 +515,7 @@ export function IssueDetail({
       patch.linkedDocumentIds = linkedDocIds;
 
       await onSave(patch as Partial<Issue>);
-      setIsEditing(false); // success -> closes edit UI; re-entering requires clicking Edit again
+      setIsEditing(false);
       mainScreenshot.setScreenshot(null);
     } catch (err: unknown) {
       console.error('Save error:', err);
@@ -562,7 +544,6 @@ export function IssueDetail({
     setShowManageAccess(false);
   };
 
-  // --- Resolve issue: guarded against double-submit -------------------------
   const handleResolveConfirm = async () => {
     if (!resolutionText.trim()) return;
     if (isSavingResolveRef.current) return;
@@ -577,7 +558,7 @@ export function IssueDetail({
       );
       setResolutionText("");
       resolutionScreenshot.reset();
-      setIsResolving(false); // success -> closes resolve UI; re-entering requires clicking Resolve again
+      setIsResolving(false);
     } catch (err: unknown) {
       console.error('Resolve error:', err);
       setSaveError('Failed to resolve issue. Please try again.');
@@ -587,13 +568,6 @@ export function IssueDetail({
     }
   };
 
-  // --- Reopen issue: anybody who can see the issue can do this. Guarded
-  // against double-submit like every other mutating action here. Routes
-  // through the same onSave prop the rest of the edit form uses — a plain
-  // status PATCH, no resolution/access fields touched. Resolution text is
-  // deliberately left in place as history rather than cleared, since
-  // there's currently nowhere in the UI that shows it anyway (see note
-  // above) — reconsider this if that changes. -------------------------------
   const handleReopen = async () => {
     if (isReopeningRef.current) return;
     isReopeningRef.current = true;
@@ -611,6 +585,44 @@ export function IssueDetail({
     } finally {
       isReopeningRef.current = false;
       setIsReopening(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------
+  // Inline status/priority save — independent of the full edit form.
+  // Only sends fields whose value actually changed, so a viewer who can
+  // only change `status` never accidentally sends `priority` along.
+  // ---------------------------------------------------------------------
+  const handleInlineSave = async () => {
+    if (isSavingEditRef.current) return;
+
+    const patch: Partial<Issue> = {};
+    if (canChangeStatus && inlineStatus !== issue.status) {
+      patch.status = inlineStatus;
+    }
+    if (canChangePriority && inlinePriority !== issue.priority) {
+      patch.priority = inlinePriority;
+    }
+
+    if (Object.keys(patch).length === 0) return;
+
+    isSavingEditRef.current = true;
+    setIsSavingEdit(true);
+    try {
+      setSaveError(null);
+      await onSave(patch);
+    } catch (err: unknown) {
+      console.error('Inline save error:', err);
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        const data = err.response.data as Record<string, unknown> | undefined;
+        const detail = (data?.error ?? data?.detail) as string | undefined;
+        setSaveError(detail || "You don't have permission to change that field.");
+      } else {
+        setSaveError('Failed to save. Please try again.');
+      }
+    } finally {
+      isSavingEditRef.current = false;
+      setIsSavingEdit(false);
     }
   };
 
@@ -665,7 +677,7 @@ export function IssueDetail({
     editingCommentScreenshotUpload.reset();
   };
 
-    const handleUnlinkDrawing = async (documentId: number) => {
+  const handleUnlinkDrawing = async (documentId: number) => {
     if (!window.confirm('Are you sure you want to unlink this drawing from the issue?')) return;
     try {
       setSaveError(null);
@@ -787,6 +799,62 @@ export function IssueDetail({
             />
           )}
 
+          {/* Inline status / priority editor — shown in view mode whenever
+              the viewer can change status and/or priority without being a
+              full editor. A reporter (or admin) who can fully edit still
+              gets the full Edit form via the ActionsBar Edit button; this
+              is for everyone else. */}
+          {!isEditing && (canChangeStatus || canChangePriority) && !canEditIssue && (
+            <div
+              className="inline-status-priority"
+              style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}
+            >
+              {canChangeStatus && (
+                <div className="form-field" style={{ minWidth: 140 }}>
+                  <label>Status</label>
+                  <select
+                    className="field-select"
+                    value={inlineStatus}
+                    onChange={(e) => setInlineStatus(e.target.value as IssueStatus)}
+                    disabled={isSavingEdit}
+                  >
+                    {STATUS_OPTIONS.filter((s) => s !== "Resolved").map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {canChangePriority && (
+                <div className="form-field" style={{ minWidth: 140 }}>
+                  <label>Priority</label>
+                  <select
+                    className="field-select"
+                    value={inlinePriority}
+                    onChange={(e) => setInlinePriority(e.target.value as IssuePriority)}
+                    disabled={isSavingEdit}
+                  >
+                    {PRIORITY_OPTIONS.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn-primary small"
+                onClick={handleInlineSave}
+                disabled={
+                  isSavingEdit ||
+                  (inlineStatus === issue.status &&
+                    (!canChangePriority || inlinePriority === issue.priority))
+                }
+              >
+                <i className={`ti ${isSavingEdit ? 'ti-loader' : 'ti-device-floppy'}`} />
+                {isSavingEdit ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          )}
+
           {!isEditing && (
             <LinkedDrawingsView
               linkedDocuments={issue.linkedDocuments}
@@ -880,10 +948,11 @@ export function IssueDetail({
           <ActionsBar
             isEditing={isEditing}
             isCreator={isCreator}
+            canEdit={canEditIssue}
             canManageAccess={issue.canManageAccess}
             canResolve={canResolve}
             canReopen={canReopen}
-            shareUrl={shareUrl}  
+            shareUrl={shareUrl}
             onCancelEdit={() => {
               setIsEditing(false);
               mainScreenshot.setScreenshot(null);

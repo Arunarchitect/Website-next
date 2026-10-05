@@ -44,8 +44,6 @@ export const CLASSIFICATION_OPTIONS: IssueClassification[] = [
   "confidential",
 ];
 
-// Classifications that require the viewer to be an org admin, hold an
-// allowed role, be the reporter/assignee, or be explicitly shared-with.
 export const GATED_CLASSIFICATIONS: IssueClassification[] = [
   "internal",
   "strategic",
@@ -153,6 +151,19 @@ interface BaseIssue {
   // sharedWith on this issue — server-computed (Issue.can_manage_access),
   // true for org admins/staff/superusers regardless of who reported it.
   canManageAccess: boolean;
+
+  // --- Field-level edit permissions (server-computed) ------------------
+  // Whether the CURRENT viewer may perform a FULL edit of this issue
+  // (title/description/status/priority/assignee/scope/etc.). True for the
+  // reporter inside the 24h window and for org admins/superusers at any
+  // time, regardless of authorship.
+  canEdit: boolean;
+  // Whether the CURRENT viewer may change ONLY the `status` field at any
+  // time. True for any user who can view the issue.
+  canChangeStatus: boolean;
+  // Whether the CURRENT viewer may change the `priority` field. True for
+  // the reporter (or an org admin).
+  canChangePriority: boolean;
 }
 
 export interface BimIssue extends BaseIssue {
@@ -344,6 +355,9 @@ export const getDefaultIssue = (domain: IssueDomain = "design"): Partial<Issue> 
     sharedWith: [],
     sharedWithDetails: [],
     canManageAccess: false,
+    canEdit: false,
+    canChangeStatus: false,
+    canChangePriority: false,
   };
 
   if (domain === "bim") {
@@ -422,6 +436,9 @@ export function fromBcfTopic(topic: BcfTopic, module = "BIM Coordination"): BimI
     sharedWith: [],
     sharedWithDetails: [],
     canManageAccess: false,
+    canEdit: false,
+    canChangeStatus: false,
+    canChangePriority: false,
   };
 }
 
@@ -486,12 +503,10 @@ export interface DjangoIssueData {
   linked_documents_details?: LinkedDocument[];
   comments?: DjangoCommentData[];
   project?: DjangoRef;
-  // Flat project display name, as returned by IssueListSerializer /
-  // IssueSerializer's `project_name` field.
   project_name?: string | null;
   deliverable?: DjangoRef;
   organisation?: string | null;
-  organisation_id?: number;   
+  organisation_id?: number;
   bcf_guid?: string;
   topic_type?: string;
   ifc_elements?: string[];
@@ -505,6 +520,11 @@ export interface DjangoIssueData {
   shared_with?: number[];
   shared_with_details?: DjangoSharedUserData[];
   can_manage_access?: boolean;
+  // Field-level edit permissions — exposed by IssueListSerializer and
+  // IssueDetailSerializer as SerializerMethodFields.
+  can_edit?: boolean;
+  can_change_status?: boolean;
+  can_change_priority?: boolean;
 }
 
 function extractId(value: DjangoRef): number | null {
@@ -554,7 +574,7 @@ export function fromDjangoIssue(data: DjangoIssueData): Issue {
     reported_by: extractId(data.reported_by) ?? undefined,
     assigned_to: extractId(data.assigned_to),
     organisation: data.organisation || null,
-    organisationId: typeof data.organisation_id === 'number' ? data.organisation_id : null, 
+    organisationId: typeof data.organisation_id === 'number' ? data.organisation_id : null,
     classification: (data.classification as IssueClassification) || 'general',
     classificationDisplay: data.classification_display,
     allowedRoles: data.allowed_roles || [],
@@ -566,6 +586,9 @@ export function fromDjangoIssue(data: DjangoIssueData): Issue {
       fullName: u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email || `User #${u.id}`,
     })),
     canManageAccess: !!data.can_manage_access,
+    canEdit: !!data.can_edit,
+    canChangeStatus: !!data.can_change_status,
+    canChangePriority: !!data.can_change_priority,
   };
 
   if (data.domain === 'bim') {

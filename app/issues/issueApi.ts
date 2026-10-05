@@ -82,9 +82,6 @@ export const getImageSource = (imageData: string | undefined, fallback?: string)
   return fallback || '/images/test.jpg';
 };
 
-
-
-
 // --- Pagination / stats support ---------------------------------------
 
 export interface IssueStats {
@@ -111,11 +108,11 @@ export interface GetIssuesParams {
   domain?: string;
   deliverable?: number;
   classification?: string;
-  status_in?: string;   // comma-separated backend status codes
-  priority_in?: string; // comma-separated backend priority codes
+  status_in?: string;
+  priority_in?: string;
   assigned_to?: number;
   search?: string;
-  ordering?: string;    // e.g. '-created', 'updated'
+  ordering?: string;
   page?: number;
   page_size?: number;
 }
@@ -126,7 +123,6 @@ export async function getIssuesPaginated(params?: GetIssuesParams): Promise<Pagi
     const data = response.data;
 
     if (Array.isArray(data)) {
-      // Defensive fallback if pagination is ever disabled server-side.
       return { results: data.map(convertDjangoIssue), count: data.length, next: null, previous: null };
     }
 
@@ -157,10 +153,6 @@ export async function getIssueStats(params?: {
     return { open: 0, in_progress: 0, resolved: 0, closed: 0, low: 0, medium: 0, high: 0, total: 0 };
   }
 }
-
-
-
-
 
 export const checkImageAccessibility = async (url: string): Promise<boolean> => {
   if (!url || url.startsWith('data:')) return true;
@@ -242,8 +234,6 @@ apiClient.interceptors.response.use(
       } else if (error.response.status === 401) {
         redirectToLogin();
       }
-      // 403: authenticated but not permitted — page shows an access message,
-      // no redirect (would otherwise loop since the user IS logged in).
     }
     return Promise.reject(error);
   }
@@ -313,11 +303,6 @@ export interface DrawingOption {
   file_type: string;
 }
 
-// ---------------------------------------------------------------------------
-// Lightweight summaries used to drive the Organisation → Project → Deliverable
-// filter cascade on the issues list page.
-// ---------------------------------------------------------------------------
-
 export interface OrganisationSummary {
   id: number;
   name: string;
@@ -382,15 +367,6 @@ export async function getOrganisationMembers(organisationId: number | string): P
   }
 }
 
-/**
- * Finds the current user's own membership role within an organisation, by
- * matching against the members list. Used to gate the classification
- * dropdown (and "share with" control) on the *new issue* form, before any
- * issue exists for the backend to compute `can_manage_access` on.
- *
- * Returns null if the user isn't a member (or the lookup fails) — callers
- * should treat null as "not privileged".
- */
 export async function getMyRoleInOrganisation(
   organisationId: number | string,
   currentUserId: number | null | undefined,
@@ -483,9 +459,6 @@ const convertDjangoIssue = (data: any): Issue => {
     assignedToId: extractIdSafe(data.assigned_to) ?? null,
     project: extractIdSafe(data.project),
     project_id: extractIdSafe(data.project),
-    // Flat project display name — comes straight from the list/detail
-    // serializers' `project_name` field (falls back to project_details.name
-    // on the detail endpoint, which nests it instead).
     projectName: data.project_name || data.project_details?.name || null,
     deliverable: extractIdSafe(data.deliverable) ?? null,
     organisationId:
@@ -527,6 +500,13 @@ const convertDjangoIssue = (data: any): Issue => {
         `User #${u.id}`,
     })),
     canManageAccess: !!data.can_manage_access,
+    // --- Field-level edit permissions (server-computed) ---
+    // Fall back to `false` when the backend hasn't been updated yet, so
+    // nothing renders a control the server would reject. Once the new
+    // SerializerMethodFields ship, these populate from the payload.
+    canEdit: !!data.can_edit,
+    canChangeStatus: !!data.can_change_status,
+    canChangePriority: !!data.can_change_priority,
   };
 
   if (data.domain === 'bim') {
@@ -615,10 +595,7 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
     payload.resolution = issue.resolution;
   }
 
-  // --- Access control: only included when explicitly set on the patch, so
-  // a plain-member's edit (which never touches these) can't accidentally
-  // clear them, and so the backend's privilege check only fires when the
-  // user actually tried to change something access-related. ---
+  // Access control: only included when explicitly set on the patch.
   if (issue.classification !== undefined) {
     payload.classification = issue.classification;
   }
@@ -691,9 +668,6 @@ const convertToDjangoPayload = (issue: Partial<Issue>, includeDomain: boolean = 
   return payload;
 };
 
-// Unwraps either a bare array or a DRF-paginated {count, next, previous,
-// results} envelope. Added after IssuePagination was applied to
-// IssueViewSet — /issues/issues/ now returns an object, not an array.
 function unwrapListResponse<T>(data: any): T[] {
   if (Array.isArray(data)) return data;
   if (data && Array.isArray(data.results)) return data.results;
@@ -769,15 +743,6 @@ export async function updateIssue(id: string | number, patch: Partial<Issue>): P
   }
 }
 
-/**
- * Admin-only: update classification / allowedRoles / sharedWith on an issue
- * the current user did NOT create. Hits the dedicated /access/ endpoint,
- * which only requires org-admin (or staff/superuser), not "is reporter".
- *
- * Sends only these three fields — never title/status/etc — so it can never
- * accidentally clobber the reporter's content, and so it passes even if the
- * caller isn't the reporter (which the main PATCH endpoint restricts).
- */
 export async function updateIssueAccess(
   id: string | number,
   access: {
@@ -953,7 +918,6 @@ export async function editComment(
     throw error;
   }
 }
-
 
 export async function linkIssue(id: string | number, linkedIssueId: string | number): Promise<void> {
   try {

@@ -1,8 +1,18 @@
-// Pure scheduling helpers (no React). Dates are YYYY-MM-DD strings, math is done on day numbers.
+// app/schedule/scheduling.ts
+// Pure date + hierarchy helpers. No React, no DOM.
+// Depends on calendar.ts for holiday-aware helpers.
+
 import type { Sequence, Task } from "./data";
+import {
+  addWorkdays,
+  countWorkdays,
+  isHoliday,
+  nextWorkday,
+  DAY,
+  type WorkingCalendar,
+} from "./calendar";
 
-const DAY = 86400000;
-
+// ---------- date math (day numbers) ----------
 export const toDay = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
   return Math.round(Date.UTC(y, m - 1, d) / DAY);
@@ -161,5 +171,62 @@ export function wouldCycle(
       if (s.relatingTask === id) stack.push(s.relatedTask);
     });
   }
+  return false;
+}
+
+// ---------- duration (calendar-day) ----------
+/**
+ * Change a task's duration by shifting its finish date.
+ * Start date is preserved; finish = start + newDays - 1 (inclusive).
+ * newDays is clamped to a minimum of 1.
+ *
+ * (Calendar-day version. Use setDurationWithCalendar for working-day mode.)
+ */
+export function setDuration(task: Task, newDays: number): Task {
+  const days = Math.max(1, Math.round(newDays));
+  const startDay = toDay(task.scheduleStart);
+  const finishDay = startDay + days - 1;
+  return { ...task, scheduleFinish: toISO(finishDay) };
+}
+
+// ---------- duration (working-day) ----------
+/**
+ * Duration in working days, using the calendar.
+ * Falls back to calendar-day duration if `cal` is undefined.
+ */
+export function durationWorkdays(task: Task, cal?: WorkingCalendar): number {
+  if (!cal) return durationDays(task);
+  return Math.max(1, countWorkdays(task.scheduleStart, task.scheduleFinish, cal));
+}
+
+/**
+ * Change duration by shifting the finish date.
+ *
+ * - If `cal` is undefined → calendar-day behaviour
+ *   (finish = start + days - 1).
+ * - If `cal` is given → working-day behaviour
+ *   (start snaps forward to the next workday; finish is the day that is
+ *    `newDays` working days after start, inclusive).
+ */
+export function setDurationWithCalendar(
+  task: Task,
+  newDays: number,
+  cal?: WorkingCalendar
+): Task {
+  const days = Math.max(1, Math.round(newDays));
+  if (!cal) {
+    const startDay = toDay(task.scheduleStart);
+    return { ...task, scheduleFinish: toISO(startDay + days - 1) };
+  }
+  const start = nextWorkday(task.scheduleStart, cal);
+  const finish = addWorkdays(start, days, cal);
+  return { ...task, scheduleStart: start, scheduleFinish: finish };
+}
+
+/** True if the task's span touches any holiday. Useful for warnings. */
+export function hasHolidayInside(task: Task, cal: WorkingCalendar): boolean {
+  const s = toDay(task.scheduleStart);
+  const f = toDay(task.scheduleFinish);
+  for (let d = s; d <= f; d++) if (isHoliday(d, cal)) return true;
   return false;
 }
