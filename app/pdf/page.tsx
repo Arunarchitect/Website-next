@@ -5,12 +5,15 @@ import './styles.css';
 
 /* ---------- types ---------- */
 type Item = { id: string; name: string; label: string; url: string; w: number; h: number };
-type P = { idx: number; x: number; y: number; w: number; h: number }; // image rect (mm, inside margins)
+type P = { idx: number; x: number; y: number; w: number; h: number; rot?: boolean }; // image rect (mm, inside margins); rot = rotated 90° CCW
 type Style = 'grid' | 'composed' | 'dense';
 type CountBy = 'perPage' | 'pages';
 type Orient = 'portrait' | 'landscape';
+type CropMode = 'uniform' | 'limit';
+type Unit = 'mm' | 'in';
 type Node = { al: number; be: number; idx?: number; dir?: 'h' | 'v'; l?: Node; r?: Node }; // width = al*height + be
 type Lim = { minL: number; maxL: number; minS: number; maxS: number }; // mm, 0 = off
+type Slot = { x: number; y: number; w: number; h: number };
 type Opts = {
   lim: Lim;
   style: Style;
@@ -22,6 +25,13 @@ type Opts = {
   gap: number;
   cap: number; // caption height in mm (0 = off)
   seed: number;
+  rotate: boolean; // allow 90° rotation to use space better
+  crop: boolean; // allow center crop to a common aspect ratio
+  cropMode: CropMode; // uniform = every image gets the ratio, limit = only images longer than the ratio are trimmed
+  ratio: number; // long:short target, 0 = auto (median of the images)
+  exact: boolean; // grid only: every image gets exactly exW x exH
+  exW: number; // exact image width in mm
+  exH: number; // exact image height in mm
 };
 
 const SIZES: Record<string, [number, number]> = {
@@ -31,7 +41,17 @@ const SIZES: Record<string, [number, number]> = {
   A1: [594, 841],
   A0: [841, 1189],
 };
+const RATIOS: Record<string, number> = {
+  auto: 0,
+  '1:1': 1,
+  '5:4': 1.25,
+  '4:3': 4 / 3,
+  '3:2': 1.5,
+  '16:9': 16 / 9,
+  '2:1': 2,
+};
 const PT = 0.3528; // mm per pt
+const MM_PER_IN = 25.4;
 
 /* ---------- helpers ---------- */
 const loadImg = (url: string) =>
@@ -69,6 +89,28 @@ const rng = (seed: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
+const median = (a: number[]) => {
+  const s = [...a].sort((x, y) => x - y);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+// "16:9", "16/9", "16x9", "1.75", "0.5" -> long:short ratio (>= 1), 0 if invalid
+const parseRatio = (s: string) => {
+  const t = s.trim().replace(/\s+/g, '');
+  let r = 0;
+  const m = t.match(/^(\d*\.?\d+)[:/x×](\d*\.?\d+)$/i);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a > 0 && b > 0) r = a / b;
+  } else if (/^\d*\.?\d+$/.test(t)) {
+    r = Number(t);
+  }
+  if (!Number.isFinite(r) || r <= 0) return 0;
+  return r >= 1 ? r : 1 / r;
+};
+
 const fit = (a: number, w: number, h: number) => {
   let bw = w;
   let bh = w / a;
@@ -99,6 +141,114 @@ const clampSize = (w: number, h: number, l: Lim) => {
   if (l.maxS > 0 && S > l.maxS) f = Math.min(f, l.maxS / S);
   return { w: w * f, h: h * f };
 };
+
+// aspect (w/h) an image will have after the optional center crop, in its OWN orientation:
+// landscape stays landscape, portrait stays portrait
+const cropAsp = (a: number, crop: boolean, mode: CropMode, r: number) => {
+  if (!crop) return a;
+  const L = Math.max(a, 1 / a); // long / short, >= 1
+  const t = mode === 'uniform' ? r : Math.min(L, r);
+  return a >= 1 ? t : 1 / t;
+};
+
+const areaOf = (pages: P[][]) => pages.flat().reduce((s, p) => s + p.w * p.h, 0);
+
+/* ---- exact size: every image gets the same w x h cell ---- */
+// Packs as many w x h cells as possible on a W x H page. With rotate on, cells may be
+// turned 90° (h x w): the main block uses one orientation, the leftover strips on the
+// right / bottom are filled with whichever orientation fits more.
+function packExact(W: number, H: number, gap: number, cap: number, w: number, h: number, rotate: boolean): Slot[] {
+  const EPS = 1e-6;
+  const dims: [number, number][] = rotate ? [[w, h], [h, w]] : [[w, h]];
+
+  const fill = (x0: number, y0: number, Wa: number, Ha: number, cw: number, ch: number) => {
+    const slots: Slot[] = [];
+    if (Wa <= 0 || Ha <= 0) return { slots, bw: 0, bh: 0 };
+    const cols = Math.floor((Wa + gap) / (cw + gap) + EPS);
+    const rows = Math.floor((Ha + gap) / (ch + cap + gap) + EPS);
+    if (cols < 1 || rows < 1) return { slots, bw: 0, bh: 0 };
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        slots.push({ x: x0 + c * (cw + gap), y: y0 + r * (ch + cap + gap), w: cw, h: ch });
+      }
+    }
+    return { slots, bw: cols * cw + (cols - 1) * gap, bh: rows * (ch + cap) + (rows - 1) * gap };
+  };
+
+  const fillBest = (x0: number, y0: number, Wa: number, Ha: number) => {
+    let best: Slot[] = [];
+    for (const [cw, ch] of dims) {
+      const f = fill(x0, y0, Wa, Ha, cw, ch);
+      if (f.slots.length > best.length) best = f.slots;
+    }
+    return best;
+  };
+
+  let best: Slot[] = [];
+  for (const [mw, mh] of dims) {
+    const m = fill(0, 0, W, H, mw, mh);
+    if (!m.slots.length) continue;
+    const cands: Slot[][] = [m.slots];
+    if (rotate) {
+      const rw = W - m.bw - gap;
+      const bhh = H - m.bh - gap;
+      // A) right strip full height + bottom strip under the block
+      cands.push([...m.slots, ...fillBest(m.bw + gap, 0, rw, H), ...fillBest(0, m.bh + gap, m.bw, bhh)]);
+      // B) bottom strip full width + right strip beside the block
+      cands.push([...m.slots, ...fillBest(0, m.bh + gap, W, bhh), ...fillBest(m.bw + gap, 0, rw, m.bh)]);
+    }
+    for (const c of cands) if (c.length > best.length) best = c;
+  }
+  return best;
+}
+
+function exactSlots(W: number, H: number, gap: number, cap: number, w: number, h: number, rotate: boolean): Slot[] {
+  if (W <= 0 || H - cap <= 0 || w <= 0 || h <= 0) return [];
+  let slots = packExact(W, H, gap, cap, w, h, rotate);
+  if (!slots.length) {
+    // cell is bigger than the printable area: shrink it (aspect kept) until it fits
+    const sA = Math.min(W / w, (H - cap) / h);
+    const sB = rotate ? Math.min(W / h, (H - cap) / w) : 0;
+    const s = Math.max(sA, sB) * 0.9999;
+    if (s > 0 && Number.isFinite(s)) slots = packExact(W, H, gap, cap, w * s, h * s, rotate);
+  }
+  if (!slots.length) return [];
+  // center the used block on the page
+  const maxX = Math.max(...slots.map((s) => s.x + s.w));
+  const maxY = Math.max(...slots.map((s) => s.y + s.h + cap));
+  const ox = Math.max(0, (W - maxX) / 2);
+  const oy = Math.max(0, (H - maxY) / 2);
+  return slots
+    .map((s) => ({ ...s, x: s.x + ox, y: s.y + oy }))
+    .sort((a, b) => (Math.abs(a.y - b.y) > 0.01 ? a.y - b.y : a.x - b.x));
+}
+
+// -1 portrait, 1 landscape, 0 (almost) square
+const ori = (a: number) => (a > 1.02 ? 1 : a < 0.98 ? -1 : 0);
+
+function exactLayout(raw: number[], o: Opts): P[][] {
+  const slots = exactSlots(o.W, o.H, o.gap, o.cap, o.exW, o.exH, o.rotate);
+  if (!slots.length) return [];
+  const per = slots.length;
+  const pages: P[][] = [];
+  for (let start = 0; start < raw.length; start += per) {
+    const free = slots.map((_, i) => i);
+    const pg: P[] = [];
+    for (let id = start; id < Math.min(start + per, raw.length); id++) {
+      const a = raw[id];
+      const oa = ori(a);
+      // prefer a slot with the same orientation so less of the image is cropped
+      let pick = o.rotate && oa !== 0 ? free.findIndex((si) => ori(slots[si].w / slots[si].h) === oa) : 0;
+      if (pick < 0) pick = 0;
+      const si = free.splice(pick, 1)[0];
+      const s = slots[si];
+      const rot = o.rotate && oa * ori(s.w / s.h) === -1;
+      pg.push({ idx: id, x: s.x, y: s.y, w: s.w, h: s.h, rot });
+    }
+    pages.push(pg);
+  }
+  return pages;
+}
 
 /* ---- uniform grid ---- */
 function gridLayout(asp: number[], k: number, o: Opts): P[][] {
@@ -190,7 +340,7 @@ function denseLayout(asp: number[], o: Opts): P[][] {
   return shelfPack(asp, o, lo);
 }
 
-/* ---- composed (aligned edges, guillotine tree, no cropping) ---- */
+/* ---- composed (aligned edges, guillotine tree) ---- */
 // each node: width = al * height + be (exact, includes gaps + captions)
 function build(ids: number[], asp: number[], rnd: () => number, gap: number, cap: number): Node {
   if (ids.length === 1) {
@@ -225,18 +375,42 @@ function place(n: Node, x: number, y: number, w: number, h: number, gap: number,
   }
 }
 
-function composePage(ids: number[], asp: number[], o: Opts, rnd: () => number): P[] {
+// b = base aspect of every image (global index). With rotate on, each trial also
+// picks which images to turn 90° (all landscape / all portrait / random mixes).
+function composePage(ids: number[], b: number[], o: Opts, rnd: () => number): P[] {
   const { W, H, gap, cap } = o;
   if (ids.length === 1) {
-    const f0 = fit(asp[ids[0]], W, Math.max(H - cap, 1));
-    const f = clampSize(f0.w, f0.h, o.lim);
-    return [{ idx: ids[0], x: (W - f.w) / 2, y: (H - cap - f.h) / 2, w: f.w, h: f.h }];
+    const a = b[ids[0]];
+    let one: P | null = null;
+    for (const flip of o.rotate ? [false, true] : [false]) {
+      const f0 = fit(flip ? 1 / a : a, W, Math.max(H - cap, 1));
+      const f = clampSize(f0.w, f0.h, o.lim);
+      if (!one || f.w * f.h > one.w * one.h * 1.001) {
+        one = { idx: ids[0], x: (W - f.w) / 2, y: (H - cap - f.h) / 2, w: f.w, h: f.h, rot: flip };
+      }
+    }
+    return [one as P];
   }
+  const loc = ids.map((_, k) => k);
+  const none = ids.map(() => false);
+  const allLand = ids.map((id) => b[id] < 1); // flip portraits -> everything landscape
+  const allPort = ids.map((id) => b[id] > 1); // flip landscapes -> everything portrait
   const trials = ids.length > 16 ? 200 : 500;
   let best: P[] = [];
   let bestScore = Infinity;
   for (let t = 0; t < trials; t++) {
-    const tree = build(ids, asp, rnd, gap, cap);
+    let flips = none;
+    if (o.rotate) {
+      if (t === 1) flips = allLand;
+      else if (t === 2) flips = allPort;
+      else if (t >= 3) {
+        const base = t % 3 === 0 ? none : t % 3 === 1 ? allLand : allPort;
+        const pf = t % 2 === 0 ? 0.5 : 0.12;
+        flips = base.map((v) => (rnd() < pf ? !v : v));
+      }
+    }
+    const asp = ids.map((id, k) => (flips[k] ? 1 / b[id] : b[id]));
+    const tree = build(loc, asp, rnd, gap, cap);
     // largest block of this structure that fits the page, aspect preserved exactly
     const bh = Math.min(H, (W - tree.be) / tree.al);
     const bw = tree.al * bh + tree.be;
@@ -251,29 +425,60 @@ function composePage(ids: number[], asp: number[], o: Opts, rnd: () => number): 
     const score = -Math.log(used / (W * H)) * 4 + small * 0.5 + viol * 20;
     if (score < bestScore) {
       bestScore = score;
-      best = out;
+      best = out.map((c) => ({ ...c, idx: ids[c.idx], rot: flips[c.idx] }));
     }
   }
   if (!best.length) {
-    return gridLayout(ids.map((i) => asp[i]), ids.length, o)[0].map((q) => ({ ...q, idx: ids[q.idx] }));
+    return gridLayout(ids.map((i) => b[i]), ids.length, o)[0].map((q) => ({ ...q, idx: ids[q.idx] }));
   }
   return best;
 }
 
 function computeLayout(items: Item[], o: Opts): P[][] {
   if (!items.length || o.W <= 0 || o.H <= 0) return [];
-  const asp = items.map((i) => i.w / i.h);
-  if (o.style === 'dense') return denseLayout(asp, o);
+  const raw = items.map((i) => i.w / i.h);
+
+  // 0) grid + exact size: every image gets the same cell, nothing else applies
+  if (o.style === 'grid' && o.exact) return exactLayout(raw, o);
+
+  // 1) crop: effective aspect of every image after the optional center crop
+  const target = o.crop ? Math.max(1, o.ratio > 0 ? o.ratio : median(raw.map((a) => Math.max(a, 1 / a)))) : 1;
+  const b = raw.map((a) => cropAsp(a, o.crop, o.cropMode, target));
+
   const n = items.length;
   const k = o.countBy === 'pages' ? Math.ceil(n / Math.max(1, o.pageCount)) : Math.max(1, o.perPage);
-  if (o.style === 'grid') return gridLayout(asp, k, o);
-  const rnd = rng(o.seed);
-  const pages: P[][] = [];
-  for (let s = 0; s < n; s += k) {
-    const ids = Array.from({ length: Math.min(k, n - s) }, (_, i) => s + i);
-    pages.push(composePage(ids, asp, o, rnd));
+
+  // 2) composed handles rotation internally (per page, per trial)
+  if (o.style === 'composed') {
+    const rnd = rng(o.seed);
+    const pages: P[][] = [];
+    for (let s = 0; s < n; s += k) {
+      const ids = Array.from({ length: Math.min(k, n - s) }, (_, i) => s + i);
+      pages.push(composePage(ids, b, o, rnd));
+    }
+    return pages;
   }
-  return pages;
+
+  // 3) grid / dense: try orientation sets and keep the one covering the most area
+  const none = b.map(() => false);
+  let cands: boolean[][] = [none];
+  if (o.rotate) {
+    cands = [none, b.map((a) => a < 1), b.map((a) => a > 1)];
+    cands = cands.filter((f, i) => cands.findIndex((g) => g.every((v, j) => v === f[j])) === i);
+  }
+  let best: P[][] = [];
+  let bestArea = -1;
+  for (const flip of cands) {
+    const asp = b.map((a, i) => (flip[i] ? 1 / a : a));
+    const laid = o.style === 'dense' ? denseLayout(asp, o) : gridLayout(asp, k, o);
+    const pages = laid.map((pg) => pg.map((p) => ({ ...p, rot: flip[p.idx] })));
+    const ar = areaOf(pages);
+    if (ar > bestArea * 1.001) {
+      best = pages;
+      bestArea = ar;
+    }
+  }
+  return best;
 }
 
 const naturalSort = (a: Item, b: Item) => a.name.localeCompare(b.name, undefined, { numeric: true });
@@ -286,9 +491,101 @@ const shuffle = <T,>(arr: T[]) => {
   return a;
 };
 
+/* ---------- number input ----------
+   value / min / max are always stored in the base unit (mm for lengths).
+   `k` converts to what the person sees (1 for mm, 25.4 for inches).
+   Free typing, backspace to empty, clamps on blur. */
+const fmtNum = (v: number, zeroOff: boolean, k: number) => {
+  if (zeroOff && v === 0) return '';
+  const d = k === 1 ? 100 : 1000;
+  return String(Math.round((v / k) * d) / d);
+};
+
+type NumProps = {
+  value: number;
+  onChange: (n: number) => void;
+  min: number;
+  max: number;
+  step?: number; // in displayed units
+  float?: boolean; // allow decimals
+  zeroOff?: boolean; // 0 shows as empty ("off")
+  placeholder?: string;
+  k?: number; // display unit factor
+};
+
+function NumInput({ value, onChange, min, max, step = 1, float = false, zeroOff = false, placeholder, k = 1 }: NumProps) {
+  const [text, setText] = useState(fmtNum(value, zeroOff, k));
+  const focused = useRef(false);
+
+  // follow external changes (and unit switches) only while the user isn't typing in this field
+  useEffect(() => {
+    if (!focused.current) setText(fmtNum(value, zeroOff, k));
+  }, [value, zeroOff, k]);
+
+  const decimals = float || k !== 1;
+  const re = decimals ? /^\d*\.?\d*$/ : /^\d*$/;
+  const toBase = (shown: number) => Math.round(shown * k * 100) / 100;
+
+  const handle = (t: string) => {
+    if (!re.test(t)) return;
+    setText(t);
+    if (t === '') {
+      if (zeroOff) onChange(0);
+      return;
+    }
+    if (t === '.') return;
+    const n = toBase(Number(t));
+    if (Number.isFinite(n) && n >= min - 1e-6 && n <= max + 1e-6) onChange(n);
+  };
+
+  const commit = () => {
+    focused.current = false;
+    if (text === '' || text === '.') {
+      if (zeroOff) {
+        onChange(0);
+        setText('');
+      } else {
+        setText(fmtNum(value, zeroOff, k));
+      }
+      return;
+    }
+    const n = Math.min(max, Math.max(min, toBase(Number(text))));
+    onChange(n);
+    setText(fmtNum(n, zeroOff, k));
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode={decimals ? 'decimal' : 'numeric'}
+      autoComplete="off"
+      value={text}
+      placeholder={placeholder}
+      onFocus={(e) => {
+        focused.current = true;
+        e.target.select();
+      }}
+      onChange={(e) => handle(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const cur = Number(text) || 0;
+          const shown = Math.round((cur + (e.key === 'ArrowUp' ? step : -step)) * 1000) / 1000;
+          const nv = Math.min(max, Math.max(min, toBase(shown)));
+          setText(fmtNum(nv, zeroOff, k));
+          onChange(nv);
+        }
+      }}
+    />
+  );
+}
+
 /* ---------- component ---------- */
 export default function PdfPage() {
   const [items, setItems] = useState<Item[]>([]);
+  const [unit, setUnit] = useState<Unit>('mm');
   const [paper, setPaper] = useState('A4');
   const [orient, setOrient] = useState<Orient>('portrait');
   const [margin, setMargin] = useState(10);
@@ -299,6 +596,14 @@ export default function PdfPage() {
   const [pageCount, setPageCount] = useState(1);
   const [seed, setSeed] = useState(1);
   const [lim, setLim] = useState<Lim>({ minL: 0, maxL: 0, minS: 0, maxS: 0 });
+  const [exW, setExW] = useState(100); // exact size, mm
+  const [exH, setExH] = useState(150);
+  const [useExact, setUseExact] = useState(false);
+  const [rotate, setRotate] = useState(false);
+  const [crop, setCrop] = useState(false);
+  const [cropMode, setCropMode] = useState<CropMode>('uniform');
+  const [ratioKey, setRatioKey] = useState('auto');
+  const [customRatio, setCustomRatio] = useState('1.75');
   const [border, setBorder] = useState(false);
   const [borderW, setBorderW] = useState(0.3);
   const [captions, setCaptions] = useState(false);
@@ -322,18 +627,59 @@ export default function PdfPage() {
     }
   }, []);
 
+  // unit helpers: everything is stored in mm, only the display changes
+  const k = unit === 'in' ? MM_PER_IN : 1;
+  const u = unit === 'in' ? 'in' : 'mm';
+  const st = (mm: number, inch: number) => (unit === 'in' ? inch : mm);
+  const fmtL = (mm: number) => (unit === 'in' ? `${(mm / MM_PER_IN).toFixed(2)} in` : `${Math.round(mm * 10) / 10} mm`);
+
   const [bw, bh] = SIZES[paper];
   const pw = orient === 'portrait' ? bw : bh;
   const ph = orient === 'portrait' ? bh : bw;
-  const W = pw - margin * 2;
-  const H = ph - margin * 2;
+  const W = Math.max(0, pw - margin * 2);
+  const H = Math.max(0, ph - margin * 2);
   const capMm = captions ? capPt * PT * 1.8 : 0;
+  const customParsed = parseRatio(customRatio);
+  const ratio = ratioKey === 'custom' ? customParsed : RATIOS[ratioKey] ?? 0;
+  const exactOn = style === 'grid' && useExact;
 
   const pages = useMemo(
-    () => computeLayout(items, { style, countBy, perPage, pageCount, W, H, gap, cap: capMm, seed, lim }),
-    [items, style, countBy, perPage, pageCount, W, H, gap, capMm, seed, lim],
+    () =>
+      computeLayout(items, {
+        style,
+        countBy,
+        perPage,
+        pageCount,
+        W,
+        H,
+        gap,
+        cap: capMm,
+        seed,
+        lim,
+        rotate,
+        crop,
+        cropMode,
+        ratio,
+        exact: exactOn,
+        exW,
+        exH,
+      }),
+    [items, style, countBy, perPage, pageCount, W, H, gap, capMm, seed, lim, rotate, crop, cropMode, ratio, exactOn, exW, exH],
   );
-  const outOfRange = useMemo(() => pages.flat().filter((p) => violation(p.w, p.h, lim) > 0.005).length, [pages, lim]);
+
+  // how many exact-size cells fit on one page (and whether they had to be shrunk)
+  const exactInfo = useMemo(() => {
+    if (!exactOn) return null;
+    const s = exactSlots(W, H, gap, capMm, exW, exH, rotate);
+    const shrunk = s.length > 0 && Math.max(...s.map((q) => q.w * q.h)) < exW * exH * 0.999;
+    return { count: s.length, shrunk };
+  }, [exactOn, W, H, gap, capMm, exW, exH, rotate]);
+
+  const outOfRange = useMemo(
+    () => (exactOn ? 0 : pages.flat().filter((p) => violation(p.w, p.h, lim) > 0.005).length),
+    [pages, lim, exactOn],
+  );
+  const rotatedCount = useMemo(() => pages.flat().filter((p) => p.rot).length, [pages]);
 
   const addFiles = async (list: FileList | File[] | null) => {
     if (!list) return;
@@ -374,8 +720,9 @@ export default function PdfPage() {
         for (const pl of pages[p]) {
           const it = items[pl.idx];
           const img = await loadImg(it.url);
-          // cover-crop source to the cell aspect (no-op when aspects match)
-          const ac = pl.w / pl.h;
+          // cover-crop source (centered) to the cell aspect, measured in the SOURCE frame:
+          // a rotated cell is h/w tall-vs-wide before the 90° turn
+          const ac = pl.rot ? pl.h / pl.w : pl.w / pl.h;
           const ia = it.w / it.h;
           let sx = 0;
           let sy = 0;
@@ -388,8 +735,13 @@ export default function PdfPage() {
             sh = it.w / ac;
             sy = (it.h - sh) / 2;
           }
-          const cw = Math.max(1, Math.round(Math.min(sw, (pl.w / 25.4) * dpi)));
-          const ch = Math.max(1, Math.round(cw / ac));
+          // target pixels at chosen dpi, never upscaled past the source crop
+          const tw = Math.max(1, (pl.w / 25.4) * dpi);
+          const th = Math.max(1, (pl.h / 25.4) * dpi);
+          const srcAlongW = pl.rot ? sh : sw;
+          const sc = Math.min(1, srcAlongW / tw);
+          const cw = Math.max(1, Math.round(tw * sc));
+          const ch = Math.max(1, Math.round(th * sc));
           const canvas = document.createElement('canvas');
           canvas.width = cw;
           canvas.height = ch;
@@ -397,7 +749,16 @@ export default function PdfPage() {
           if (!ctx) throw new Error('Canvas unsupported');
           ctx.fillStyle = '#fff';
           ctx.fillRect(0, 0, cw, ch);
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+          if (pl.rot) {
+            // turn 90° counter-clockwise (top of the image faces left)
+            ctx.save();
+            ctx.translate(cw / 2, ch / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.drawImage(img, sx, sy, sw, sh, -ch / 2, -cw / 2, ch, cw);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+          }
           const data = canvas.toDataURL('image/jpeg', quality);
           canvas.width = 0;
           canvas.height = 0;
@@ -432,15 +793,10 @@ export default function PdfPage() {
     }
   };
 
-  const num = (v: string, min: number, max: number, fallback: number) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
-  };
-
   const seg = <T extends string>(val: T, set: (v: T) => void, opts: [T, string][]) => (
     <div className="pdfx-seg" style={{ gridTemplateColumns: `repeat(${opts.length}, 1fr)` }}>
       {opts.map(([v, label]) => (
-        <button key={v} className={val === v ? 'on' : ''} onClick={() => set(v)}>
+        <button key={v} type="button" className={val === v ? 'on' : ''} onClick={() => set(v)}>
           {label}
         </button>
       ))}
@@ -503,16 +859,16 @@ export default function PdfPage() {
               </label>
             </div>
             <div className="pdfx-row">
-              <button className="pdfx-btn ghost" disabled={!items.length} onClick={() => setItems((p) => [...p].sort(naturalSort))}>
+              <button type="button" className="pdfx-btn ghost" disabled={!items.length} onClick={() => setItems((p) => [...p].sort(naturalSort))}>
                 A→Z
               </button>
-              <button className="pdfx-btn ghost" disabled={!items.length} onClick={() => setItems((p) => shuffle(p))}>
+              <button type="button" className="pdfx-btn ghost" disabled={!items.length} onClick={() => setItems((p) => shuffle(p))}>
                 Shuffle
               </button>
-              <button className="pdfx-btn ghost" disabled={!items.length} onClick={() => setItems((p) => [...p].reverse())}>
+              <button type="button" className="pdfx-btn ghost" disabled={!items.length} onClick={() => setItems((p) => [...p].reverse())}>
                 Reverse
               </button>
-              <button className="pdfx-btn ghost danger" disabled={!items.length} onClick={clearAll}>
+              <button type="button" className="pdfx-btn ghost danger" disabled={!items.length} onClick={clearAll}>
                 Clear
               </button>
             </div>
@@ -520,6 +876,13 @@ export default function PdfPage() {
 
           <section>
             <h2>Page</h2>
+            <div className="pdfx-field">
+              <span className="pdfx-label">Units</span>
+              {seg(unit, setUnit, [
+                ['mm', 'Millimetres'],
+                ['in', 'Inches'],
+              ])}
+            </div>
             <div className="pdfx-grid2">
               <label>
                 Paper
@@ -537,12 +900,12 @@ export default function PdfPage() {
                 </select>
               </label>
               <label>
-                Margin (mm)
-                <input type="number" min={0} max={50} value={margin} onChange={(e) => setMargin(num(e.target.value, 0, 50, 10))} />
+                Margin ({u})
+                <NumInput value={margin} onChange={setMargin} min={0} max={50} k={k} step={st(1, 0.05)} float />
               </label>
               <label>
-                Gap (mm)
-                <input type="number" min={0} max={50} value={gap} onChange={(e) => setGap(num(e.target.value, 0, 50, 4))} />
+                Gap ({u})
+                <NumInput value={gap} onChange={setGap} min={0} max={50} k={k} step={st(1, 0.05)} float />
               </label>
             </div>
           </section>
@@ -554,18 +917,56 @@ export default function PdfPage() {
               ['composed', 'Composed'],
               ['dense', 'Max dense'],
             ])}
-            {style === 'grid' && <p className="pdfx-hint">Equal cells, each image fitted inside without cropping.</p>}
+            {style === 'grid' && (
+              <>
+                <p className="pdfx-hint">
+                  {useExact
+                    ? 'Equal cells of the exact size below.'
+                    : 'Equal cells, each image fitted inside without cropping (unless Allow crop is on).'}
+                </p>
+                <label className="pdfx-check">
+                  <input type="checkbox" checked={useExact} onChange={(e) => setUseExact(e.target.checked)} />
+                  Exact image size (width × height)
+                </label>
+              </>
+            )}
             {style === 'composed' && (
               <>
                 <p className="pdfx-hint">
-                  Images are resized so edges and widths line up in one tidy block per page. Nothing is cropped; the block is centered, leaving a small margin if the shapes don&apos;t fill the page exactly. Size limits steer the search toward arrangements that respect them.
+                  Images are resized so edges and widths line up in one tidy block per page. Nothing is cropped unless Allow crop is on; the block is centered, leaving a small margin if the shapes don&apos;t fill the page exactly. Size limits steer the search toward arrangements that respect them.
                 </p>
-                <button className="pdfx-btn ghost" onClick={() => setSeed((s) => s + 1)}>
+                <button type="button" className="pdfx-btn ghost" onClick={() => setSeed((s) => s + 1)}>
                   ↻ New composition
                 </button>
               </>
             )}
-            {style !== 'dense' ? (
+
+            {exactOn ? (
+              <>
+                <div className="pdfx-grid2">
+                  <label>
+                    Width ({u})
+                    <NumInput value={exW} onChange={setExW} min={5} max={2000} k={k} step={st(5, 0.25)} float />
+                  </label>
+                  <label>
+                    Height ({u})
+                    <NumInput value={exH} onChange={setExH} min={5} max={2000} k={k} step={st(5, 0.25)} float />
+                  </label>
+                </div>
+                <p className="pdfx-hint">
+                  Every image is center-cropped to exactly {fmtL(exW)} × {fmtL(exH)}. Page count follows from how many fit. Size limits and per-page settings are ignored while this is on.
+                </p>
+                {exactInfo && exactInfo.count > 0 && (
+                  <p className="pdfx-hint">
+                    <strong>{exactInfo.count}</strong> image{exactInfo.count === 1 ? '' : 's'} fit on each page.
+                  </p>
+                )}
+                {exactInfo && exactInfo.count === 0 && <p className="pdfx-hint pdfx-warn-text">The printable area is too small for this size. Reduce the margin or caption size.</p>}
+                {exactInfo?.shrunk && (
+                  <p className="pdfx-hint pdfx-warn-text">This size is larger than the printable area, so it was scaled down (same shape) to fit one image per page.</p>
+                )}
+              </>
+            ) : style !== 'dense' ? (
               <>
                 {seg(countBy, setCountBy, [
                   ['perPage', 'Per page'],
@@ -574,12 +975,12 @@ export default function PdfPage() {
                 {countBy === 'perPage' ? (
                   <label>
                     Images per page
-                    <input type="number" min={1} max={200} value={perPage} onChange={(e) => setPerPage(num(e.target.value, 1, 200, 6))} />
+                    <NumInput value={perPage} onChange={setPerPage} min={1} max={200} />
                   </label>
                 ) : (
                   <label>
                     Number of pages
-                    <input type="number" min={1} max={500} value={pageCount} onChange={(e) => setPageCount(num(e.target.value, 1, 500, 1))} />
+                    <NumInput value={pageCount} onChange={setPageCount} min={1} max={500} />
                   </label>
                 )}
               </>
@@ -587,9 +988,75 @@ export default function PdfPage() {
               <>
                 <label>
                   Fit into max pages
-                  <input type="number" min={1} max={500} value={pageCount} onChange={(e) => setPageCount(num(e.target.value, 1, 500, 1))} />
+                  <NumInput value={pageCount} onChange={setPageCount} min={1} max={500} />
                 </label>
                 <p className="pdfx-hint">Packs rows tightly and scales images as large as possible so everything fits in this many pages.</p>
+              </>
+            )}
+          </section>
+
+          <section>
+            <h2>{exactOn ? 'Rotate' : 'Rotate & crop'}</h2>
+            <label className="pdfx-check">
+              <input type="checkbox" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />
+              Allow rotate (best fit, max space)
+            </label>
+            <p className="pdfx-hint">
+              {exactOn
+                ? 'Cells can turn 90° on the page (e.g. 100 × 150 becomes 150 × 100) wherever that fits more images. Landscape pictures go into turned cells, portrait pictures into upright ones, so little is cropped.'
+                : 'Turns images 90° (counter-clockwise) wherever that lets them fill more of the page. Mixed portrait/landscape sets benefit most.'}
+            </p>
+            {!exactOn && (
+              <>
+                <label className="pdfx-check">
+                  <input type="checkbox" checked={crop} onChange={(e) => setCrop(e.target.checked)} />
+                  Allow crop (centered)
+                </label>
+                {crop && (
+                  <>
+                    {seg(cropMode, setCropMode, [
+                      ['uniform', 'All same ratio'],
+                      ['limit', 'Only extra-long'],
+                    ])}
+                    <label>
+                      Aspect ratio (long : short)
+                      <select value={ratioKey} onChange={(e) => setRatioKey(e.target.value)}>
+                        {Object.keys(RATIOS).map((key) => (
+                          <option key={key} value={key}>
+                            {key === 'auto' ? 'Auto (median of images)' : key}
+                          </option>
+                        ))}
+                        <option value="custom">Custom…</option>
+                      </select>
+                    </label>
+                    {ratioKey === 'custom' && (
+                      <>
+                        <label>
+                          Custom ratio
+                          <input
+                            type="text"
+                            value={customRatio}
+                            placeholder="e.g. 1.75 or 7:4"
+                            spellCheck={false}
+                            autoComplete="off"
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => setCustomRatio(e.target.value)}
+                          />
+                        </label>
+                        {customParsed > 0 ? (
+                          <p className="pdfx-hint">= {Math.round(customParsed * 1000) / 1000} : 1 (long side : short side)</p>
+                        ) : (
+                          <p className="pdfx-hint pdfx-warn-text">Not a valid ratio, using Auto. Type a number like 1.75 or a pair like 7:4.</p>
+                        )}
+                      </>
+                    )}
+                    <p className="pdfx-hint">
+                      {cropMode === 'uniform'
+                        ? 'Every image is center-cropped to this ratio (landscape stays landscape, portrait stays portrait). Turn on Allow rotate too and every picture ends up with exactly the same shape.'
+                        : 'Only images longer than this ratio are center-cropped down to it; the rest stay untouched.'}
+                    </p>
+                  </>
+                )}
               </>
             )}
           </section>
@@ -602,8 +1069,8 @@ export default function PdfPage() {
             </label>
             {border && (
               <label>
-                Border width (mm)
-                <input type="number" min={0.1} max={3} step={0.1} value={borderW} onChange={(e) => setBorderW(Math.min(3, Math.max(0.1, Number(e.target.value) || 0.3)))} />
+                Border width ({u})
+                <NumInput value={borderW} onChange={setBorderW} min={0.1} max={3} k={k} step={st(0.1, 0.005)} float />
               </label>
             )}
             <label className="pdfx-check">
@@ -613,13 +1080,13 @@ export default function PdfPage() {
             {captions && (
               <label>
                 Caption size (pt)
-                <input type="number" min={4} max={36} value={capPt} onChange={(e) => setCapPt(num(e.target.value, 4, 36, 8))} />
+                <NumInput value={capPt} onChange={setCapPt} min={4} max={36} />
               </label>
             )}
           </section>
 
-          <section>
-            <h2>Image size limits (mm)</h2>
+          <section className={exactOn ? 'pdfx-off' : ''}>
+            <h2>Image size limits ({u})</h2>
             <div className="pdfx-grid2">
               {(
                 [
@@ -628,22 +1095,27 @@ export default function PdfPage() {
                   ['minS', 'Min short side'],
                   ['maxS', 'Max short side'],
                 ] as [keyof Lim, string][]
-              ).map(([k, label]) => (
-                <label key={k}>
+              ).map(([key, label]) => (
+                <label key={key}>
                   {label}
-                  <input
-                    type="number"
+                  <NumInput
+                    value={lim[key]}
+                    onChange={(n) => setLim((l) => ({ ...l, [key]: n }))}
                     min={0}
                     max={2000}
-                    value={lim[k] || ''}
+                    k={k}
+                    step={st(5, 0.25)}
+                    float
+                    zeroOff
                     placeholder="off"
-                    onChange={(e) => setLim((l) => ({ ...l, [k]: num(e.target.value, 0, 2000, 0) }))}
                   />
                 </label>
               ))}
             </div>
             <p className="pdfx-hint">
-              Long side = height for portrait images, width for landscape. Max is always enforced; min is respected where the layout allows, otherwise a warning shows.
+              {exactOn
+                ? 'Not used while Exact image size is on.'
+                : 'Long side = height for portrait images, width for landscape. Max is always enforced; min is respected where the layout allows, otherwise a warning shows.'}
             </p>
           </section>
 
@@ -670,7 +1142,7 @@ export default function PdfPage() {
             </label>
           </section>
 
-          <button className="pdfx-go" disabled={!items.length || busy} onClick={generate}>
+          <button type="button" className="pdfx-go" disabled={!items.length || busy || !pages.length} onClick={generate}>
             {busy ? `Building… ${progress}%` : `Download PDF (${pages.length} page${pages.length === 1 ? '' : 's'})`}
           </button>
           {error && <p className="pdfx-error">{error}</p>}
@@ -681,9 +1153,11 @@ export default function PdfPage() {
           <div className="pdfx-stats">
             <span>{items.length} images</span>
             <span>{pages.length} pages</span>
+            {exactInfo && exactInfo.count > 0 && <span>{exactInfo.count} per page</span>}
+            {rotatedCount > 0 && <span>{rotatedCount} rotated</span>}
             {outOfRange > 0 && <span className="warn">{outOfRange} outside size limits</span>}
             <span>
-              {paper} {orient} · {pw}×{ph} mm
+              {paper} {orient} · {fmtL(pw)} × {fmtL(ph)}
             </span>
           </div>
 
@@ -700,6 +1174,7 @@ export default function PdfPage() {
                           key={pl.idx}
                           className="pdfx-cell"
                           style={{
+                            position: 'absolute',
                             left: `${((margin + pl.x) / pw) * 100}%`,
                             top: `${((margin + pl.y) / ph) * 100}%`,
                             width: `${(pl.w / pw) * 100}%`,
@@ -708,7 +1183,24 @@ export default function PdfPage() {
                           }}
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={items[pl.idx].url} alt={items[pl.idx].label} />
+                          <img
+                            src={items[pl.idx].url}
+                            alt={items[pl.idx].label}
+                            style={
+                              pl.rot
+                                ? {
+                                    position: 'absolute',
+                                    left: '50%',
+                                    top: '50%',
+                                    width: `${(pl.h / pl.w) * 100}%`,
+                                    height: `${(pl.w / pl.h) * 100}%`,
+                                    maxWidth: 'none',
+                                    objectFit: 'cover',
+                                    transform: 'translate(-50%, -50%) rotate(-90deg)',
+                                  }
+                                : { display: 'block', width: '100%', height: '100%', objectFit: 'cover' }
+                            }
+                          />
                           {captions && (
                             <span
                               className="pdfx-cap"
@@ -740,7 +1232,7 @@ export default function PdfPage() {
                     <small>
                       {it.w}×{it.h}
                     </small>
-                    <button aria-label="Remove" onClick={() => removeItem(it.id)}>
+                    <button type="button" aria-label="Remove" onClick={() => removeItem(it.id)}>
                       ✕
                     </button>
                   </li>

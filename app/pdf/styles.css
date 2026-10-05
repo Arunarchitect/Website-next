@@ -1,106 +1,407 @@
 .pdfx {
-  --pdfx-bg: #f6f7f9; --pdfx-card: #fff; --pdfx-text: #1b1f27; --pdfx-muted: #6b7280;
-  --pdfx-border: #dfe3ea; --pdfx-accent: #2563eb; --pdfx-danger: #dc2626;
-  max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; color: var(--pdfx-text);
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --ink: #1b1f27;
+  --muted: #667085;
+  --line: #d9dde5;
+  --accent: #1f5eff;
+  --accent-ink: #ffffff;
+  --warn: #b45309;
+  --danger: #c0262d;
+  --radius: 6px;
+
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 24px clamp(12px, 3vw, 32px) 48px;
+  box-sizing: border-box;
 }
+.pdfx *,
+.pdfx *::before,
+.pdfx *::after {
+  box-sizing: border-box;
+}
+
 @media (prefers-color-scheme: dark) {
   .pdfx {
-    --pdfx-bg: #111418; --pdfx-card: #1a1f26; --pdfx-text: #e8eaee; --pdfx-muted: #98a1b0;
-    --pdfx-border: #2c333d; --pdfx-accent: #5b8cff;
+    --bg: #14161a;
+    --panel: #1d2027;
+    --ink: #e8eaef;
+    --muted: #97a0b0;
+    --line: #333844;
+    --accent: #6b93ff;
+    --accent-ink: #0b1020;
+    --warn: #f0b05a;
+    --danger: #ff7a80;
   }
 }
 
-.pdfx-head h1 { font-size: 1.6rem; font-weight: 700; margin: 0 0 4px; }
-.pdfx-head p { margin: 0 0 20px; color: var(--pdfx-muted); font-size: 0.9rem; }
+/* header */
+.pdfx-head {
+  max-width: 1400px;
+  margin: 0 auto 20px;
+}
+.pdfx-head h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.pdfx-head p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 70ch;
+}
 
-.pdfx-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 900px) { .pdfx-layout { grid-template-columns: 1fr; } }
+/* layout */
+.pdfx-layout {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .pdfx-layout {
+    grid-template-columns: 1fr;
+  }
+}
 
+/* control panel */
 .pdfx-panel {
-  background: var(--pdfx-card); border: 1px solid var(--pdfx-border); border-radius: 12px;
-  padding: 16px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 16px 16px;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
 }
-@media (max-width: 900px) { .pdfx-panel { position: static; } }
-.pdfx-panel section { display: flex; flex-direction: column; gap: 10px; }
-.pdfx-panel h2, .pdfx-sub {
-  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--pdfx-muted); margin: 0;
+@media (max-width: 900px) {
+  .pdfx-panel {
+    position: static;
+    max-height: none;
+  }
 }
-.pdfx-sub { margin: 24px 0 10px; }
-
-.pdfx label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--pdfx-muted); }
-.pdfx label.pdfx-check { flex-direction: row; align-items: center; gap: 8px; color: var(--pdfx-text); font-size: 0.88rem; cursor: pointer; }
-.pdfx input[type='number'], .pdfx input[type='text'], .pdfx select {
-  background: var(--pdfx-bg); color: var(--pdfx-text); border: 1px solid var(--pdfx-border);
-  border-radius: 8px; padding: 7px 9px; font-size: 0.9rem; width: 100%;
+.pdfx-panel section {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.pdfx input:focus, .pdfx select:focus { outline: 2px solid var(--pdfx-accent); outline-offset: -1px; }
+.pdfx-panel h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pdfx-off {
+  opacity: 0.5;
+}
 
-.pdfx-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.pdfx-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pdfx-panel label,
+.pdfx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pdfx-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.pdfx-panel input[type='text'],
+.pdfx-panel select {
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+.pdfx-panel input[type='text']:focus,
+.pdfx-panel select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.pdfx-panel input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
 
+.pdfx-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.pdfx-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pdfx-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  color: var(--ink) !important;
+  font-size: 13px !important;
+  cursor: pointer;
+}
+.pdfx-check input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.pdfx-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pdfx-warn-text {
+  color: var(--warn);
+}
+
+/* buttons */
+.pdfx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink) !important;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pdfx-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.pdfx-btn.ghost {
+  background: transparent;
+  color: var(--ink) !important;
+  border-color: var(--line);
+  font-weight: 500;
+}
+.pdfx-btn.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  filter: none;
+}
+.pdfx-btn.danger {
+  color: var(--danger) !important;
+}
+.pdfx-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pdfx-btn:focus-visible,
+.pdfx-seg button:focus-visible,
+.pdfx-go:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* segmented control */
+.pdfx-seg {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+}
+.pdfx-seg button {
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pdfx-seg button:last-child {
+  border-right: 0;
+}
+.pdfx-seg button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* drop zone */
 .pdfx-drop {
-  border: 2px dashed var(--pdfx-border); border-radius: 10px; padding: 18px; text-align: center;
-  font-size: 0.85rem; color: var(--pdfx-muted); transition: 0.15s;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 18px 10px;
+  text-align: center;
+  color: var(--muted);
 }
 .pdfx-drop.is-over {
-  border-color: var(--pdfx-accent); background: color-mix(in srgb, var(--pdfx-accent) 8%, transparent); color: var(--pdfx-accent);
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-.pdfx-btn {
-  flex: 1; text-align: center; cursor: pointer; background: var(--pdfx-accent); color: #fff;
-  border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; font-weight: 600; white-space: nowrap;
-}
-.pdfx-btn.ghost { background: transparent; color: var(--pdfx-text); border-color: var(--pdfx-border); font-weight: 500; }
-.pdfx-btn.danger { color: var(--pdfx-danger); }
-.pdfx-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.pdfx-seg { display: grid; border: 1px solid var(--pdfx-border); border-radius: 8px; overflow: hidden; }
-.pdfx-seg button { background: transparent; color: var(--pdfx-text); border: 0; padding: 8px 4px; font-size: 0.8rem; cursor: pointer; }
-.pdfx-seg button + button { border-left: 1px solid var(--pdfx-border); }
-.pdfx-seg button.on { background: var(--pdfx-accent); color: #fff; font-weight: 600; }
-
-.pdfx-hint { margin: 0; font-size: 0.75rem; color: var(--pdfx-muted); line-height: 1.4; }
-
+/* main action */
 .pdfx-go {
-  background: var(--pdfx-accent); color: #fff; border: 0; border-radius: 10px;
-  padding: 12px; font-size: 0.95rem; font-weight: 700; cursor: pointer;
+  margin-top: 14px;
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
 }
-.pdfx-go:disabled { opacity: 0.5; cursor: not-allowed; }
-.pdfx-error { margin: 0; color: var(--pdfx-danger); font-size: 0.82rem; }
+.pdfx-go:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pdfx-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
 
-/* ---------- preview ---------- */
-.pdfx-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+/* preview */
+.pdfx-main {
+  min-width: 0;
+}
+.pdfx-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
 .pdfx-stats span {
-  background: var(--pdfx-card); border: 1px solid var(--pdfx-border); border-radius: 999px;
-  padding: 4px 12px; font-size: 0.78rem; color: var(--pdfx-muted);
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--muted);
 }
-.pdfx-stats span.warn { color: var(--pdfx-danger); border-color: var(--pdfx-danger); }
+.pdfx-stats span.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
 .pdfx-empty {
-  border: 1px dashed var(--pdfx-border); border-radius: 12px; padding: 60px 20px;
-  text-align: center; color: var(--pdfx-muted);
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--muted);
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
-.pdfx-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-.pdfx-page-wrap { margin: 0; }
+.pdfx-pages {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+.pdfx-page-wrap {
+  margin: 0;
+}
+.pdfx-page-wrap figcaption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
 .pdfx-page {
-  position: relative; background: #fff; border: 1px solid var(--pdfx-border);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); overflow: hidden; container-type: inline-size;
+  position: relative;
+  width: 100%;
+  background: #fff;
+  container-type: inline-size; /* lets cqw units match the page width */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 6px 18px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
 }
-.pdfx-cell { position: absolute; background: #eee; box-sizing: border-box; }
-.pdfx-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pdfx-cell {
+  background: #e7e9ee;
+}
 .pdfx-cap {
-  position: absolute; top: 100%; left: 0; width: 100%; display: flex; align-items: center; justify-content: center;
-  color: #282828; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #282828;
+  line-height: 1;
 }
-.pdfx-page-wrap figcaption { text-align: center; font-size: 0.75rem; color: var(--pdfx-muted); margin-top: 6px; }
 
-.pdfx-files { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-.pdfx-files li {
-  display: flex; align-items: center; gap: 10px; background: var(--pdfx-card);
-  border: 1px solid var(--pdfx-border); border-radius: 8px; padding: 6px 8px; font-size: 0.8rem;
+/* file list */
+.pdfx-sub {
+  margin: 28px 0 10px;
+  font-size: 14px;
+  font-weight: 700;
 }
-.pdfx-files img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex: none; }
-.pdfx-files span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pdfx-files small { color: var(--pdfx-muted); flex: none; }
-.pdfx-files button { background: none; border: 0; color: var(--pdfx-muted); cursor: pointer; padding: 2px 6px; }
-.pdfx-files button:hover { color: var(--pdfx-danger); }
+.pdfx-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+.pdfx-files li {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.pdfx-files img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg);
+}
+.pdfx-files span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdfx-files small {
+  color: var(--muted);
+}
+.pdfx-files button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.pdfx-files button:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
