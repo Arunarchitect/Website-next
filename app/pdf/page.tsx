@@ -599,6 +599,8 @@ export default function PdfPage() {
   const [exW, setExW] = useState(100); // exact size, mm
   const [exH, setExH] = useState(150);
   const [useExact, setUseExact] = useState(false);
+  const [exactFit, setExactFit] = useState<'crop' | 'fit'>('crop'); // crop = fill the box, fit = whole image + padding
+  const [padColor, setPadColor] = useState('#ffffff');
   const [rotate, setRotate] = useState(false);
   const [crop, setCrop] = useState(false);
   const [cropMode, setCropMode] = useState<CropMode>('uniform');
@@ -642,6 +644,7 @@ export default function PdfPage() {
   const customParsed = parseRatio(customRatio);
   const ratio = ratioKey === 'custom' ? customParsed : RATIOS[ratioKey] ?? 0;
   const exactOn = style === 'grid' && useExact;
+  const objFit = exactOn && exactFit === 'fit' ? 'contain' : 'cover';
 
   const pages = useMemo(
     () =>
@@ -722,16 +725,17 @@ export default function PdfPage() {
           const img = await loadImg(it.url);
           // cover-crop source (centered) to the cell aspect, measured in the SOURCE frame:
           // a rotated cell is h/w tall-vs-wide before the 90° turn
+          const fitMode = objFit === 'contain';
           const ac = pl.rot ? pl.h / pl.w : pl.w / pl.h;
           const ia = it.w / it.h;
           let sx = 0;
           let sy = 0;
           let sw = it.w;
           let sh = it.h;
-          if (ia > ac) {
+          if (!fitMode && ia > ac) {
             sw = it.h * ac;
             sx = (it.w - sw) / 2;
-          } else {
+          } else if (!fitMode) {
             sh = it.w / ac;
             sy = (it.h - sh) / 2;
           }
@@ -739,7 +743,10 @@ export default function PdfPage() {
           const tw = Math.max(1, (pl.w / 25.4) * dpi);
           const th = Math.max(1, (pl.h / 25.4) * dpi);
           const srcAlongW = pl.rot ? sh : sw;
-          const sc = Math.min(1, srcAlongW / tw);
+          // cell width (mm) that image pixels actually cover (less than the cell when padded)
+          let drawnW = pl.w;
+          if (fitMode) drawnW = fit(pl.rot ? it.h / it.w : it.w / it.h, pl.w, pl.h).w;
+          const sc = Math.min(1, srcAlongW / Math.max(1, (drawnW / 25.4) * dpi));
           const cw = Math.max(1, Math.round(tw * sc));
           const ch = Math.max(1, Math.round(th * sc));
           const canvas = document.createElement('canvas');
@@ -747,17 +754,27 @@ export default function PdfPage() {
           canvas.height = ch;
           const ctx = canvas.getContext('2d');
           if (!ctx) throw new Error('Canvas unsupported');
-          ctx.fillStyle = '#fff';
+          ctx.fillStyle = fitMode ? padColor : '#fff';
           ctx.fillRect(0, 0, cw, ch);
+          // box available to the image, in the image's own (unrotated) frame
+          const dw = pl.rot ? ch : cw;
+          const dh = pl.rot ? cw : ch;
+          let iw = dw;
+          let ih = dh;
+          if (fitMode) {
+            const scl = Math.min(dw / sw, dh / sh);
+            iw = sw * scl;
+            ih = sh * scl;
+          }
           if (pl.rot) {
             // turn 90° counter-clockwise (top of the image faces left)
             ctx.save();
             ctx.translate(cw / 2, ch / 2);
             ctx.rotate(-Math.PI / 2);
-            ctx.drawImage(img, sx, sy, sw, sh, -ch / 2, -cw / 2, ch, cw);
+            ctx.drawImage(img, sx, sy, sw, sh, -iw / 2, -ih / 2, iw, ih);
             ctx.restore();
           } else {
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+            ctx.drawImage(img, sx, sy, sw, sh, (cw - iw) / 2, (ch - ih) / 2, iw, ih);
           }
           const data = canvas.toDataURL('image/jpeg', quality);
           canvas.width = 0;
@@ -953,8 +970,30 @@ export default function PdfPage() {
                     <NumInput value={exH} onChange={setExH} min={5} max={2000} k={k} step={st(5, 0.25)} float />
                   </label>
                 </div>
+                {seg(exactFit, setExactFit, [
+                  ['crop', 'Crop to fill'],
+                  ['fit', 'Fit + add space'],
+                ])}
+                {exactFit === 'fit' && (
+                  <div className="pdfx-color">
+                    <label>
+                      Space colour
+                      <input type="color" value={padColor} onChange={(e) => setPadColor(e.target.value)} />
+                    </label>
+                    <code>{padColor}</code>
+                    <button type="button" className="pdfx-btn ghost" onClick={() => setPadColor('#ffffff')}>
+                      White
+                    </button>
+                    <button type="button" className="pdfx-btn ghost" onClick={() => setPadColor('#000000')}>
+                      Black
+                    </button>
+                  </div>
+                )}
                 <p className="pdfx-hint">
-                  Every image is center-cropped to exactly {fmtL(exW)} × {fmtL(exH)}. Page count follows from how many fit. Size limits and per-page settings are ignored while this is on.
+                  {exactFit === 'crop'
+                    ? `Every image is zoomed to fill exactly ${fmtL(exW)} × ${fmtL(exH)}; the parts that stick out are cut off (centered).`
+                    : `Every image is scaled to fit inside ${fmtL(exW)} × ${fmtL(exH)} with nothing cut off; the leftover space is filled with the colour above.`}{' '}
+                  Page count follows from how many fit. Size limits and per-page settings are ignored while this is on.
                 </p>
                 {exactInfo && exactInfo.count > 0 && (
                   <p className="pdfx-hint">
@@ -1003,7 +1042,7 @@ export default function PdfPage() {
             </label>
             <p className="pdfx-hint">
               {exactOn
-                ? 'Cells can turn 90° on the page (e.g. 100 × 150 becomes 150 × 100) wherever that fits more images. Landscape pictures go into turned cells, portrait pictures into upright ones, so little is cropped.'
+                ? 'Cells can turn 90° on the page (e.g. 100 × 150 becomes 150 × 100) wherever that fits more images. Landscape pictures go into turned cells, portrait pictures into upright ones, so little is cropped or padded.'
                 : 'Turns images 90° (counter-clockwise) wherever that lets them fill more of the page. Mixed portrait/landscape sets benefit most.'}
             </p>
             {!exactOn && (
@@ -1179,6 +1218,7 @@ export default function PdfPage() {
                             top: `${((margin + pl.y) / ph) * 100}%`,
                             width: `${(pl.w / pw) * 100}%`,
                             height: `${(pl.h / ph) * 100}%`,
+                            background: objFit === 'contain' ? padColor : undefined,
                             outline: border ? `max(0.5px, ${(borderW / pw) * 100}cqw) solid #000` : 'none',
                           }}
                         >
@@ -1195,10 +1235,10 @@ export default function PdfPage() {
                                     width: `${(pl.h / pl.w) * 100}%`,
                                     height: `${(pl.w / pl.h) * 100}%`,
                                     maxWidth: 'none',
-                                    objectFit: 'cover',
+                                    objectFit: objFit,
                                     transform: 'translate(-50%, -50%) rotate(-90deg)',
                                   }
-                                : { display: 'block', width: '100%', height: '100%', objectFit: 'cover' }
+                                : { display: 'block', width: '100%', height: '100%', objectFit: objFit }
                             }
                           />
                           {captions && (

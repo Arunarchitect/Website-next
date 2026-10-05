@@ -405,3 +405,32 @@
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
+
+/* space colour picker (exact size, fit mode) */
+.pdfx-color {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pdfx-color label {
+  flex: 0 0 auto;
+}
+.pdfx-panel input[type='color'] {
+  width: 56px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+.pdfx-color code {
+  align-self: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pdfx-color .pdfx-btn {
+  height: 34px;
+  padding: 0 10px;
+}
