@@ -1,19 +1,18 @@
-// app/new/dash/page.tsx
+// app/main/admin/page.tsx  (same file works for app/new/dash/page.tsx)
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./styles.css";
 
 import {
-  getCurrentUser,
   getUserOrganisations,
   getDashboardStats,
+  checkIsAdmin,
 } from "./adminApi";
 import { tools, quickLinks } from "./constants";
-import {  Organisation, User, DashboardStats } from "./types";
+import { Organisation, User, DashboardStats } from "./types";
 import { fetchAreacalcRole } from "@/lib/resolveUserDestination";
 
 // NOTE: adjust this import path to wherever meetingApi.ts actually lives —
@@ -21,16 +20,7 @@ import { fetchAreacalcRole } from "@/lib/resolveUserDestination";
 import { getUpcomingMeetings } from "@/app/meeting/meetingApi";
 import type { Meeting } from "@/app/meeting/meetingTypes";
 
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
+// Fonts (--font-display, --font-mono) are now provided by ./layout.tsx
 
 // ---------------------------------------------------------------------------
 // Access control
@@ -39,20 +29,6 @@ const mono = IBM_Plex_Mono({
 // Where to send people who shouldn't be on this page
 const LOGIN_PATH = "/login";
 const NON_ADMIN_REDIRECT = "/main/client";
-
-// Adjust this to match however your backend marks an admin user.
-// It treats the user as admin if ANY of these fields indicate it.
-function isAdminUser(user: User | null): boolean {
-  if (!user) return false;
-  const u = user as unknown as Record<string, unknown>;
-  return (
-    u.is_admin === true ||
-    u.is_staff === true ||
-    u.is_superuser === true ||
-    u.role === "admin" ||
-    u.user_type === "admin"
-  );
-}
 
 export default function MainAdminPage() {
   const router = useRouter();
@@ -82,18 +58,20 @@ export default function MainAdminPage() {
   const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
   const canAccessAreacalc = areacalcRole === "admin" || areacalcRole === "member";
 
-  // Fetch user info on mount and verify the user is an admin
+  // Verify the user is an admin (same rules as the login redirect)
   useEffect(() => {
-    const fetchUser = async () => {
+    console.log("[admin page] mounted, running checkIsAdmin()");
+    const verify = async () => {
       try {
-        const user = await getCurrentUser();
+        const { user, isAdmin } = await checkIsAdmin();
 
         if (!user) {
+          console.log("[admin page] no user -> redirecting to", LOGIN_PATH);
           router.replace(LOGIN_PATH);
           return;
         }
-
-        if (!isAdminUser(user)) {
+        if (!isAdmin) {
+          console.log("[admin page] not admin -> redirecting to", NON_ADMIN_REDIRECT);
           router.replace(NON_ADMIN_REDIRECT);
           return;
         }
@@ -107,7 +85,7 @@ export default function MainAdminPage() {
         setAuthChecked(true);
       }
     };
-    fetchUser();
+    verify();
   }, [router]);
 
   // Fetch areacalc role on mount
@@ -230,7 +208,7 @@ export default function MainAdminPage() {
   // ---------------------------------------------------------------------------
   if (!authChecked || !authorized) {
     return (
-      <main className={`${display.variable} ${mono.variable} admin-page`}>
+      <main className="admin-page">
         <div className="loading-text">
           {authChecked ? "Redirecting…" : "Checking access…"}
         </div>
@@ -239,7 +217,7 @@ export default function MainAdminPage() {
   }
 
   return (
-    <main className={`${display.variable} ${mono.variable} admin-page`}>
+    <main className="admin-page">
       <header className="admin-header">
         <div className="admin-brand">
           <span className="admin-brand-icon">

@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 import { Organisation, User, DashboardIssue, DashboardStats } from './types';
+import { fetchAreacalcRole } from '@/lib/resolveUserDestination';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://localhost:8000';
 const API_URL = `${API_BASE_URL}/api`;
@@ -45,20 +46,27 @@ apiClient.interceptors.response.use(
   }
 );
 
-// Get current user info
+// Get current user info.
+// FIX: previously this rebuilt the user from only id/email/names, which threw
+// away every admin field (is_admin, is_staff, role, ...) and made the admin
+// check always fail. We now spread the stored user so those fields survive.
 export const getCurrentUser = async (): Promise<User | null> => {
   try {
     const userStr = localStorage.getItem('user');
     if (userStr) {
       const userData = JSON.parse(userStr);
       return {
+        ...userData,
         id: userData.id || 0,
         email: userData.email || '',
         first_name: userData.first_name || '',
         last_name: userData.last_name || '',
-        full_name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || userData.email || '',
+        full_name:
+          `${userData.first_name || ''} ${userData.last_name || ''}`.trim() ||
+          userData.email ||
+          '',
         username: userData.username || userData.email || '',
-      };
+      } as User;
     }
     return null;
   } catch (error) {
@@ -78,10 +86,87 @@ export const getUserOrganisations = async (): Promise<Organisation[]> => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Admin check
+// ---------------------------------------------------------------------------
+
+function hasAdminFlag(user: User | null): boolean {
+  if (!user) return false;
+  const u = user as unknown as Record<string, unknown>;
+  return (
+    u.is_admin === true ||
+    u.is_staff === true ||
+    u.is_superuser === true ||
+    u.is_org_admin === true ||
+    (typeof u.role === 'string' && u.role.toLowerCase() === 'admin') ||
+    (typeof u.user_type === 'string' && u.user_type.toLowerCase() === 'admin')
+  );
+}
+
+export interface AdminCheckResult {
+  user: User | null;
+  isAdmin: boolean;
+}
+
+type OrgRole = 'admin' | 'manager' | 'member' | 'client' | null;
+const ROLE_PRIORITY: Exclude<OrgRole, null>[] = ['admin', 'manager', 'member', 'client'];
+
+// Same source the login redirect uses: /api/my-memberships/.
+// Highest-priority role wins (admin > manager > member > client).
+export const getHighestOrgRole = async (): Promise<OrgRole> => {
+  try {
+    const res = await apiClient.get('/my-memberships/');
+    const data = res.data;
+    const list: Record<string, unknown>[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.results)
+        ? data.results
+        : [];
+
+    const roles = list.map((m) =>
+      String(m.role ?? m.membership_role ?? '').toLowerCase()
+    );
+    console.log('[admin check] membership roles:', roles, 'raw:', list);
+
+    return ROLE_PRIORITY.find((r) => roles.includes(r)) ?? null;
+  } catch (error) {
+    console.error('Error fetching memberships:', error);
+    return null;
+  }
+};
+
+// Mirrors login rules 1 and 2 for /main/admin:
+//   1. org role is admin or manager
+//   2. org role is member AND areacalc role is admin or member
+export const checkIsAdmin = async (): Promise<AdminCheckResult> => {
+  const user = await getCurrentUser();
+  if (!user) return { user: null, isAdmin: false };
+
+  if (hasAdminFlag(user)) return { user, isAdmin: true };
+
+  const orgRole = await getHighestOrgRole();
+  let isAdmin = orgRole === 'admin' || orgRole === 'manager';
+
+  if (!isAdmin && orgRole === 'member') {
+    try {
+      const token = getAuthToken();
+      const areacalcRole = token ? await fetchAreacalcRole(token) : null;
+      isAdmin = areacalcRole === 'admin' || areacalcRole === 'member';
+    } catch (e) {
+      console.error('Areacalc role check failed:', e);
+    }
+  }
+
+  console.log('[admin check] orgRole:', orgRole, '-> isAdmin:', isAdmin);
+  return { user, isAdmin };
+};
+
+// ---------------------------------------------------------------------------
+// Issues / stats (unchanged)
+// ---------------------------------------------------------------------------
+
 // Unwraps either a bare array or a DRF-paginated {count, next, previous,
-// results} envelope, so callers that still want the raw issue list (e.g.
-// for anything beyond simple counts) don't crash against the paginated
-// /issues/issues/ endpoint.
+// results} envelope.
 function unwrapListResponse<T>(data: unknown): T[] {
   if (Array.isArray(data)) return data as T[];
   if (
@@ -95,12 +180,8 @@ function unwrapListResponse<T>(data: unknown): T[] {
   return [];
 }
 
-// Fetch issues for a specific organisation.
-// NOTE: /issues/issues/ is paginated (page_size ~20), so this only ever
-// returns ONE PAGE of issues — it is NOT a reliable source for counts
-// across the whole organisation. Use getIssueStatsByOrganisation() below
-// for accurate open/resolved/priority counts. Kept here only for callers
-// that genuinely just want a page of recent issues to list.
+// NOTE: /issues/issues/ is paginated, so this only returns ONE PAGE of
+// issues. Use getDashboardStats() for accurate counts.
 export const getIssuesByOrganisation = async (organisationId: number): Promise<DashboardIssue[]> => {
   try {
     const response = await apiClient.get('/issues/issues/', {
@@ -128,11 +209,6 @@ interface RawIssueStats {
   total: number;
 }
 
-// Get dashboard stats — now backed by the dedicated stats endpoint, which
-// aggregates over the FULL filtered queryset in the database rather than
-// whatever page of issues happens to be loaded client-side. This is what
-// fixes "Resolved Issues" (and Open / High Priority) being wrong on the
-// admin dashboard.
 export const getDashboardStats = async (organisationId?: number): Promise<DashboardStats> => {
   try {
     const response = await apiClient.get('/issues/issues/stats/', {

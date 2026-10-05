@@ -1,29 +1,41 @@
+// app/main/client/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { useRouter } from "next/navigation";
 import "./styles.css";
 import { getCurrentUser, getAreacalcRole } from "./clientApi";
 import { User } from "./types";
+import { checkClientAccess } from "./clientAccess";
 
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
+// Fonts (--font-display, --font-mono) are provided by app/main/layout.tsx
 
 export default function DashClientPage() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [areacalcRole, setAreacalcRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Guard: only users who are a Client of at least one organisation may stay.
   useEffect(() => {
+    const verify = async () => {
+      const result = await checkClientAccess();
+      if (!result.allowed) {
+        console.log("[client page] not a client -> redirecting to", result.redirectTo);
+        router.replace(result.redirectTo);
+      } else {
+        setAuthorized(true);
+      }
+      setAuthChecked(true);
+    };
+    verify();
+  }, [router]);
+
+  useEffect(() => {
+    if (!authorized) return;
     const fetchUserData = async () => {
       try {
         const [user, role] = await Promise.all([
@@ -41,7 +53,7 @@ export default function DashClientPage() {
       }
     };
     fetchUserData();
-  }, []);
+  }, [authorized]);
 
   const getDisplayName = (): string => {
     if (!currentUser) return 'Guest';
@@ -65,8 +77,19 @@ export default function DashClientPage() {
     return 'Good evening';
   };
 
+  // Nothing from the portal renders until access is verified.
+  if (!authChecked || !authorized) {
+    return (
+      <main className="client-page">
+        <div className="loading-text">
+          {authChecked ? "Redirecting…" : "Checking access…"}
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className={`${display.variable} ${mono.variable} client-page`}>
+    <main className="client-page">
       {/* Header */}
       <header className="client-header">
         <div className="client-brand">
