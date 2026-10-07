@@ -25,6 +25,7 @@ import {
   toDay,
   wouldCycle,
   isoWeek,
+  completionBlocker
 } from "./scheduling";
 import {
   DAY,
@@ -425,19 +426,28 @@ export default function ScheduleView() {
     });
 
   // ── Auto-schedule: working-day aware when the toggle is on ──────────────
-  const runAutoSchedule = () =>
-    setTasks((prev) =>
-      useWorkdays
-        ? autoScheduleWorkdays(prev, sequences, calendar)
-        : autoSchedule(prev, sequences)
-    );
+  const runAutoSchedule = () => {
+    setUseWorkdays(true); // durations and holiday shading match the result
+    setTasks((prev) => autoScheduleWorkdays(prev, sequences, calendar));
+  };
 
-  const updateCompletion = (id: string, completion: number) =>
+  const notify = (msg: string) => {
+    setCopiedMsg(msg);
+    setTimeout(() => setCopiedMsg(null), 4000);
+  };
+
+  const updateCompletion = (id: string, completion: number) => {
+    const problem = completionBlocker(id, completion, tasks, sequences);
+    if (problem) {
+      notify(problem); // slider snaps back because it is controlled
+      return;
+    }
     setTasks((prev) =>
       prev.map((t) =>
         t.id === id ? applyProgress(t, completion, todayISO()) : t
       )
     );
+  };
 
   const updateActual = (
     id: string,
@@ -500,10 +510,10 @@ export default function ScheduleView() {
       prev.map((t) =>
         t.id === id
           ? setDurationWithCalendar(
-              t,
-              newDays,
-              useWorkdays ? calendar : undefined
-            )
+            t,
+            newDays,
+            useWorkdays ? calendar : undefined
+          )
           : t
       )
     );
@@ -603,9 +613,21 @@ export default function ScheduleView() {
     setEditingId((cur) => (cur && toRemove.has(cur) ? null : cur));
   };
 
-  const updateTask = (id: string, patch: Partial<Task>) =>
+  const updateTask = (id: string, patch: Partial<Task>) => {
+    // The edit modal can also change completion: apply the same rule.
+    if (patch.completion !== undefined) {
+      const current = tasks.find((t) => t.id === id);
+      if (current && patch.completion !== current.completion) {
+        const problem = completionBlocker(id, patch.completion, tasks, sequences);
+        if (problem) {
+          notify(problem);
+          const { completion: _drop, ...rest } = patch;
+          patch = rest; // save the other edits, ignore the % change
+        }
+      }
+    }
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-
+  };
   const moveTask = (id: string, target: MoveTarget) => {
     const newParent = target.kind === "root" ? null : target.id;
     setTasks((prev) =>
@@ -898,7 +920,7 @@ export default function ScheduleView() {
                 setScheduleId(id);
                 listMyProjects()
                   .then(setMyProjects)
-                  .catch(() => {});
+                  .catch(() => { });
               }
             }}
             className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
@@ -1256,17 +1278,15 @@ export default function ScheduleView() {
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${
-            current
-              ? "border-blue-500 bg-blue-50/60"
-              : "border-gray-300 bg-gray-50"
-          }`}
+          className={`rounded border-l-4 p-3 ${current
+            ? "border-blue-500 bg-blue-50/60"
+            : "border-gray-300 bg-gray-50"
+            }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${
-                current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
-              }`}
+              className={`h-2 w-2 rounded-full ${current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+                }`}
             />
             Now
           </div>
@@ -1299,18 +1319,16 @@ export default function ScheduleView() {
         </div>
 
         <div
-          className={`rounded border-l-4 p-3 ${
-            next
-              ? "border-emerald-500 bg-emerald-50/60"
-              : "border-gray-300 bg-gray-50"
-          }`}
+          className={`rounded border-l-4 p-3 ${next
+            ? "border-emerald-500 bg-emerald-50/60"
+            : "border-gray-300 bg-gray-50"
+            }`}
         >
           <div className="mb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
               <span
-                className={`h-2 w-2 rounded-full ${
-                  next ? "bg-emerald-500" : "bg-gray-400"
-                }`}
+                className={`h-2 w-2 rounded-full ${next ? "bg-emerald-500" : "bg-gray-400"
+                  }`}
               />
               Next up
               {upcoming.length > 0 && (
@@ -1570,11 +1588,10 @@ export default function ScheduleView() {
                       onTouchEnd={cancelLongPress}
                       onTouchCancel={cancelLongPress}
                       onContextMenu={(e) => e.preventDefault()}
-                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${
-                        selected
-                          ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                          : "hover:bg-gray-50"
-                      } ${flash ? "animate-pulse" : ""}`}
+                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${selected
+                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                        : "hover:bg-gray-50"
+                        } ${flash ? "animate-pulse" : ""}`}
                       style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                     >
                       {hasChildren ? (
@@ -1593,15 +1610,13 @@ export default function ScheduleView() {
                       {!hasChildren && critical && showCritical && (
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                          title={`Critical · float ${
-                            cpm.totalFloat.get(task.id) ?? 0
-                          }d`}
+                          title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
+                            }d`}
                         />
                       )}
                       <span
-                        className={`truncate ${
-                          hasChildren ? "font-semibold" : ""
-                        }`}
+                        className={`truncate ${hasChildren ? "font-semibold" : ""
+                          }`}
                         title={task.name}
                       >
                         {task.name}
@@ -1666,13 +1681,12 @@ export default function ScheduleView() {
                         return (
                           <div
                             key={i}
-                            className={`overflow-hidden border-r text-center leading-5 ${
-                              holiday
-                                ? "bg-pink-100"
-                                : isWeekend
-                                  ? "bg-gray-100"
-                                  : ""
-                            }`}
+                            className={`overflow-hidden border-r text-center leading-5 ${holiday
+                              ? "bg-pink-100"
+                              : isWeekend
+                                ? "bg-gray-100"
+                                : ""
+                              }`}
                             style={{ width: zoom }}
                             title={holiday ? "Holiday" : undefined}
                           >
@@ -1695,13 +1709,12 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={i}
-                          className={`h-full ${
-                            holiday
-                              ? "bg-pink-50"
-                              : isWeekend
-                                ? "bg-gray-50"
-                                : ""
-                          } ${showDayGrid ? "border-r" : ""}`}
+                          className={`h-full ${holiday
+                            ? "bg-pink-50"
+                            : isWeekend
+                              ? "bg-gray-50"
+                              : ""
+                            } ${showDayGrid ? "border-r" : ""}`}
                           style={{ width: zoom }}
                         />
                       );
@@ -1754,9 +1767,8 @@ export default function ScheduleView() {
                     return (
                       <div
                         key={`hl-${task.id}`}
-                        className={`pointer-events-none absolute left-0 right-0 ${
-                          selected ? "bg-blue-100/60" : ""
-                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                        className={`pointer-events-none absolute left-0 right-0 ${selected ? "bg-blue-100/60" : ""
+                          } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
                         style={{ top: i * ROW_H, height: ROW_H }}
                       />
                     );
@@ -1820,8 +1832,8 @@ export default function ScheduleView() {
                         (toDay(task.baselineFinish) -
                           toDay(task.baselineStart) +
                           1) *
-                          zoom -
-                          2
+                        zoom -
+                        2
                       );
                       return (
                         <div
@@ -1847,17 +1859,15 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={`ac-${task.id}`}
-                          className={`pointer-events-none absolute z-10 h-1 rounded ${
-                            late ? "bg-orange-500" : "bg-emerald-500"
-                          } ${task.actualFinish ? "" : "opacity-70"}`}
+                          className={`pointer-events-none absolute z-10 h-1 rounded ${late ? "bg-orange-500" : "bg-emerald-500"
+                            } ${task.actualFinish ? "" : "opacity-70"}`}
                           style={{
                             left: (aStartDay - minDay) * zoom,
                             top: i * ROW_H + 3,
                             width: Math.max(2, (aEndDay - aStartDay + 1) * zoom - 2),
                           }}
-                          title={`Actual ${task.actualStart} → ${
-                            task.actualFinish ?? "in progress"
-                          }`}
+                          title={`Actual ${task.actualStart} → ${task.actualFinish ?? "in progress"
+                            }`}
                         />
                       );
                     })}
@@ -1897,26 +1907,21 @@ export default function ScheduleView() {
                         onTouchEnd={cancelLongPress}
                         onTouchCancel={cancelLongPress}
                         onContextMenu={(e) => e.preventDefault()}
-                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${
-                          selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                        }`}
+                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                          }`}
                         style={{
                           left: s * zoom,
                           top: i * ROW_H + 8,
                           width: w,
                           WebkitTouchCallout: "none",
                         }}
-                        title={`${task.name}\n${task.scheduleStart} → ${
-                          task.scheduleFinish
-                        } · ${durLabel}${
-                          task.completion > 0 ? ` · ${task.completion}%` : ""
-                        }${
-                          critical
-                            ? `\nCRITICAL · float ${
-                                cpm.totalFloat.get(task.id) ?? 0
-                              }d`
+                        title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
+                          } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
+                          }${critical
+                            ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
+                            }d`
                             : ""
-                        }`}
+                          }`}
                       >
                         {!hasChildren &&
                           !task.isMilestone &&
@@ -2042,13 +2047,12 @@ export default function ScheduleView() {
                   key={task.id}
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
-                  className={`cursor-pointer border-t transition-colors ${
-                    selected
-                      ? "bg-blue-100"
-                      : critical && showCritical
-                        ? "bg-red-50/40 hover:bg-red-50/70"
-                        : "hover:bg-gray-50"
-                  } ${flash ? "animate-pulse" : ""}`}
+                  className={`cursor-pointer border-t transition-colors ${selected
+                    ? "bg-blue-100"
+                    : critical && showCritical
+                      ? "bg-red-50/40 hover:bg-red-50/70"
+                      : "hover:bg-gray-50"
+                    } ${flash ? "animate-pulse" : ""}`}
                 >
                   <td
                     className="px-2 py-1.5"
@@ -2234,15 +2238,14 @@ export default function ScheduleView() {
                     />
                   </td>
                   <td
-                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${
-                      variance === null
-                        ? "text-gray-400"
-                        : variance > 0
-                          ? "font-semibold text-red-600"
-                          : variance < 0
-                            ? "text-emerald-600"
-                            : "text-gray-600"
-                    }`}
+                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${variance === null
+                      ? "text-gray-400"
+                      : variance > 0
+                        ? "font-semibold text-red-600"
+                        : variance < 0
+                          ? "text-emerald-600"
+                          : "text-gray-600"
+                      }`}
                     title={
                       variance === null
                         ? "No baseline set"

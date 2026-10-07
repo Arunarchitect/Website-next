@@ -88,7 +88,7 @@ function stableKey(v: unknown): string {
 
 // Cheap pre-flight: catch what the backend serializer would reject so we
 // never send a payload that gets 400. Keeps the retry loop from starting.
-function findPayloadProblem(tasks: Task[]): string | null {
+function findPayloadProblem(tasks: Task[], sequences: Sequence[]): string | null {
   const seen = new Set<string>();
   for (const t of tasks) {
     if (seen.has(t.id)) return `Duplicate task id "${t.id}".`;
@@ -98,6 +98,14 @@ function findPayloadProblem(tasks: Task[]): string | null {
     }
     if (t.scheduleFinish < t.scheduleStart) {
       return `Task "${t.name || t.id}" finishes before it starts.`;
+    }
+  }
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  for (const s of sequences) {
+    const pred = byId.get(s.relatingTask);
+    const succ = byId.get(s.relatedTask);
+    if (pred && succ && succ.completion >= 100 && pred.completion < 100) {
+      return `"${succ.name}" is 100% but its predecessor "${pred.name}" is not.`;
     }
   }
   return null;
@@ -217,8 +225,8 @@ export function useScheduleSync({
         e instanceof ApiError
           ? e.message
           : e instanceof Error
-          ? e.message
-          : "Unknown error";
+            ? e.message
+            : "Unknown error";
       setMessage(msg);
       setStatus("failed");
     }
@@ -284,8 +292,8 @@ export function useScheduleSync({
         e instanceof ApiError
           ? e.message
           : e instanceof Error
-          ? e.message
-          : "Failed to create schedule";
+            ? e.message
+            : "Failed to create schedule";
       setMessage(msg);
       // Stay on the empty screen so the user can retry.
       setStatus("empty");
@@ -309,7 +317,7 @@ export function useScheduleSync({
     if (key === lastSavedRef.current) return;
 
     // Pre-flight: never send what the server will reject.
-    const problem = findPayloadProblem(tasks);
+    const problem = findPayloadProblem(tasks, cleanSeqs);
     if (problem) {
       setMessage(problem);
       setStatus("dirty");
@@ -344,10 +352,10 @@ export function useScheduleSync({
         const detail =
           typeof e.body === "object" && e.body !== null
             ? Object.entries(e.body as Record<string, unknown>)
-                .map(([k, v]) =>
-                  `${k}: ${Array.isArray(v) ? v.join("; ") : String(v)}`
-                )
-                .join(" | ")
+              .map(([k, v]) =>
+                `${k}: ${Array.isArray(v) ? v.join("; ") : String(v)}`
+              )
+              .join(" | ")
             : e.message;
         setMessage(`Invalid schedule — ${detail}`);
         setStatus("error");
@@ -356,8 +364,8 @@ export function useScheduleSync({
           e instanceof ApiError
             ? e.message
             : e instanceof Error
-            ? e.message
-            : "Save failed";
+              ? e.message
+              : "Save failed";
         setMessage(msg);
         setStatus("error");
       }
@@ -387,7 +395,7 @@ export function useScheduleSync({
     if (key === lastSavedRef.current) return;
     if (pausedRef.current && key === lastAttemptedRef.current) return;
 
-    const problem = findPayloadProblem(tasks);
+    const problem = findPayloadProblem(tasks, cleanSeqs);
     if (problem) {
       setMessage(problem);
       setStatus("dirty");

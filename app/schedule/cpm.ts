@@ -3,10 +3,11 @@
 // Depends on data.ts, scheduling.ts, calendar.ts.
 
 import type { Sequence, Task } from "./data";
-import { durationDays, toDay, toISO } from "./scheduling";
+import { durationDays, toDay } from "./scheduling";
 import {
   addWorkdays,
   countWorkdays,
+  isWorkday,
   nextWorkday,
   type WorkingCalendar,
 } from "./calendar";
@@ -27,36 +28,52 @@ export interface CpmResult {
   projectFinish: number;
 }
 
-// ---------- CPM (forward + backward pass) ----------
-export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
-  const earlyStart = new Map<string, number>();
-  const earlyFinish = new Map<string, number>();
-  const lateStart = new Map<string, number>();
-  const lateFinish = new Map<string, number>();
-  const totalFloat = new Map<string, number>();
-  const criticalIds = new Set<string>();
+const emptyResult = (): CpmResult => ({
+  earlyStart: new Map(),
+  earlyFinish: new Map(),
+  lateStart: new Map(),
+  lateFinish: new Map(),
+  totalFloat: new Map(),
+  criticalIds: new Set(),
+  projectStart: 0,
+  projectFinish: 0,
+});
 
-  // ignore group rows — CPM is over leaves
-  const parents = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
-  );
-  const leaves = tasks.filter((t) => !parents.has(t.id));
-  const byId = new Map(leaves.map((t) => [t.id, t]));
+// ---------- generic CPM core ----------
+/**
+ * One node = one leaf task expressed in an arbitrary integer "unit space".
+ *  - calendar mode: units are day numbers
+ *  - working mode : units are working-day indexes (weekends/holidays removed)
+ * es0 = the task's own start (acts as a floor), dur = length - 1 (inclusive).
+ */
+interface CoreNode {
+  id: string;
+  es0: number;
+  dur: number;
+}
 
-  if (!leaves.length) {
-    return {
-      earlyStart,
-      earlyFinish,
-      lateStart,
-      lateFinish,
-      totalFloat,
-      criticalIds,
-      projectStart: 0,
-      projectFinish: 0,
-    };
-  }
+interface CoreResult {
+  es: Map<string, number>;
+  ef: Map<string, number>;
+  ls: Map<string, number>;
+  lf: Map<string, number>;
+  float: Map<string, number>;
+  critical: Set<string>;
+  pStart: number;
+  pFinish: number;
+}
 
-  // Build adjacency (only between leaves)
+function runCore(nodes: CoreNode[], seqs: Sequence[]): CoreResult {
+  const es = new Map<string, number>();
+  const ef = new Map<string, number>();
+  const ls = new Map<string, number>();
+  const lf = new Map<string, number>();
+  const float = new Map<string, number>();
+  const critical = new Set<string>();
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // adjacency (only between the given nodes)
   const succ = new Map<string, Sequence[]>();
   const pred = new Map<string, Sequence[]>();
   for (const s of seqs) {
@@ -67,12 +84,10 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
     pred.get(s.relatedTask)!.push(s);
   }
 
-  // Topological order (Kahn)
+  // topological order (Kahn)
   const indeg = new Map<string, number>();
-  for (const t of leaves) indeg.set(t.id, pred.get(t.id)?.length ?? 0);
-  const queue: string[] = leaves
-    .filter((t) => indeg.get(t.id) === 0)
-    .map((t) => t.id);
+  for (const n of nodes) indeg.set(n.id, pred.get(n.id)?.length ?? 0);
+  const queue = nodes.filter((n) => indeg.get(n.id) === 0).map((n) => n.id);
   const order: string[] = [];
   while (queue.length) {
     const id = queue.shift()!;
@@ -82,170 +97,189 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
       if (indeg.get(s.relatedTask) === 0) queue.push(s.relatedTask);
     }
   }
-  // fallback if graph has cycles (shouldn't happen — wouldCycle prevents)
-  if (order.length < leaves.length) {
-    for (const t of leaves) if (!order.includes(t.id)) order.push(t.id);
+  if (order.length < nodes.length) {
+    for (const n of nodes) if (!order.includes(n.id)) order.push(n.id);
   }
 
-  // ---------- forward pass ----------
+  // forward pass
   for (const id of order) {
-    const t = byId.get(id)!;
-    const dur = durationDays(t) - 1; // inclusive-1
-    const manualStart = toDay(t.scheduleStart);
-
-    let es = manualStart; // honour user-set start as a minimum
+    const n = byId.get(id)!;
+    let e = n.es0; // user-set start is a floor
     for (const s of pred.get(id) ?? []) {
       const p = byId.get(s.relatingTask)!;
-      const pES = earlyStart.get(p.id) ?? toDay(p.scheduleStart);
-      const pEF = earlyFinish.get(p.id) ?? pES + durationDays(p) - 1;
-      let candidate: number;
+      const pES = es.get(p.id) ?? p.es0;
+      const pEF = ef.get(p.id) ?? pES + p.dur;
+      let cand: number;
       switch (s.sequenceType) {
         case "START_START":
-          candidate = pES + s.lagDays;
+          cand = pES + s.lagDays;
           break;
         case "FINISH_FINISH":
-          candidate = pEF + s.lagDays - dur;
+          cand = pEF + s.lagDays - n.dur;
           break;
         case "START_FINISH":
-          candidate = pES + s.lagDays - dur;
+          cand = pES + s.lagDays - n.dur;
           break;
         case "FINISH_START":
         default:
-          candidate = pEF + 1 + s.lagDays;
+          cand = pEF + 1 + s.lagDays;
           break;
       }
-      if (candidate > es) es = candidate;
+      if (cand > e) e = cand;
     }
-    earlyStart.set(id, es);
-    earlyFinish.set(id, es + dur);
+    es.set(id, e);
+    ef.set(id, e + n.dur);
   }
 
-  // project finish / start
-  let projectFinish = 0;
+  let pFinish = -Infinity;
+  let pStart = Infinity;
   for (const id of order) {
-    const ef = earlyFinish.get(id) ?? 0;
-    if (ef > projectFinish) projectFinish = ef;
+    pFinish = Math.max(pFinish, ef.get(id)!);
+    pStart = Math.min(pStart, es.get(id)!);
   }
-  let projectStart = Infinity;
-  for (const id of order) {
-    const es = earlyStart.get(id) ?? 0;
-    if (es < projectStart) projectStart = es;
-  }
-  if (!isFinite(projectStart)) projectStart = 0;
+  if (!isFinite(pFinish)) pFinish = 0;
+  if (!isFinite(pStart)) pStart = 0;
 
-  // ---------- backward pass ----------
-  for (const id of order) lateFinish.set(id, projectFinish);
-
+  // backward pass
   for (let i = order.length - 1; i >= 0; i--) {
     const id = order[i];
-    const t = byId.get(id)!;
-    const dur = durationDays(t) - 1;
-
-    const ss = succ.get(id);
-    if (!ss || ss.length === 0) {
-      // terminal task — keep LF = projectFinish
-      const lf = lateFinish.get(id) ?? projectFinish;
-      lateFinish.set(id, lf);
-      lateStart.set(id, lf - dur);
-    } else {
-      let lf = projectFinish;
-      for (const s of ss) {
-        const q = byId.get(s.relatedTask)!;
-        const qLS = lateStart.get(q.id) ?? projectFinish;
-        const qLF = lateFinish.get(q.id) ?? projectFinish;
-        let candidate: number;
-        switch (s.sequenceType) {
-          case "START_START":
-            candidate = qLS - s.lagDays + dur;
-            break;
-          case "FINISH_FINISH":
-            candidate = qLF - s.lagDays;
-            break;
-          case "START_FINISH":
-            candidate = qLF - s.lagDays + dur;
-            break;
-          case "FINISH_START":
-          default:
-            candidate = qLS - 1 - s.lagDays;
-            break;
-        }
-        if (candidate < lf) lf = candidate;
+    const n = byId.get(id)!;
+    let f = pFinish;
+    for (const s of succ.get(id) ?? []) {
+      const q = byId.get(s.relatedTask)!;
+      const qLS = ls.get(q.id) ?? pFinish - q.dur;
+      const qLF = lf.get(q.id) ?? pFinish;
+      let cand: number;
+      switch (s.sequenceType) {
+        case "START_START":
+          cand = qLS - s.lagDays + n.dur;
+          break;
+        case "FINISH_FINISH":
+          cand = qLF - s.lagDays;
+          break;
+        case "START_FINISH":
+          cand = qLF - s.lagDays + n.dur;
+          break;
+        case "FINISH_START":
+        default:
+          cand = qLS - 1 - s.lagDays;
+          break;
       }
-      lateFinish.set(id, lf);
-      lateStart.set(id, lf - dur);
+      if (cand < f) f = cand;
     }
+    lf.set(id, f);
+    ls.set(id, f - n.dur);
   }
 
-  // ---------- float + critical ----------
+  // float + critical
   for (const id of order) {
-    const es = earlyStart.get(id) ?? 0;
-    const ls = lateStart.get(id) ?? es;
-    const f = ls - es;
-    totalFloat.set(id, f);
-    if (f <= 0) criticalIds.add(id);
+    const fl = ls.get(id)! - es.get(id)!;
+    float.set(id, fl);
+    if (fl <= 0) critical.add(id);
   }
+
+  return { es, ef, ls, lf, float, critical, pStart, pFinish };
+}
+
+const leavesOf = (tasks: Task[]): Task[] => {
+  const parents = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+  );
+  return tasks.filter((t) => !parents.has(t.id));
+};
+
+// ---------- CPM (calendar days) ----------
+export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
+  const leaves = leavesOf(tasks);
+  if (!leaves.length) return emptyResult();
+
+  const core = runCore(
+    leaves.map((t) => ({
+      id: t.id,
+      es0: toDay(t.scheduleStart),
+      dur: durationDays(t) - 1,
+    })),
+    seqs
+  );
 
   return {
-    earlyStart,
-    earlyFinish,
-    lateStart,
-    lateFinish,
-    totalFloat,
-    criticalIds,
-    projectStart,
-    projectFinish,
+    earlyStart: core.es,
+    earlyFinish: core.ef,
+    lateStart: core.ls,
+    lateFinish: core.lf,
+    totalFloat: core.float,
+    criticalIds: core.critical,
+    projectStart: core.pStart,
+    projectFinish: core.pFinish,
   };
 }
 
-// ---------- working-day CPM ----------
+// ---------- CPM (working days) ----------
 /**
- * Working-day version of the CPM.
- *
- * Strategy: snap every leaf task's dates to the working calendar, run the
- * standard CPM on the snapped dates, then convert the resulting float from
- * calendar days to working days (counting only the working days inside the
- * float window) and recompute which tasks are critical from that float.
- *
- * Good enough for typical construction schedules (contiguous activities,
- * FS/SS/FF/SF links with small lags). For schedules with long shutdowns in
- * the middle of chains, a fully working-day backward pass would be more
- * accurate — but this is a deliberate readability trade-off.
+ * Working-day CPM. Saturdays, Sundays, holidays and shutdown ranges do not
+ * exist in the calculation:
+ *  - every date is mapped to a working-day index,
+ *  - durations and lags are counted in working days,
+ *  - float is in working days, so a Fri -> Mon link has zero float,
+ *  - results are mapped back to real dates (day numbers).
  */
 export function computeCpmWorkdays(
   tasks: Task[],
   seqs: Sequence[],
   cal: WorkingCalendar
 ): CpmResult {
-  const parents = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
-  );
-  const snappedTasks: Task[] = tasks.map((t) => {
-    if (parents.has(t.id)) return t;
-    const s = nextWorkday(t.scheduleStart, cal);
-    const wd = Math.max(1, countWorkdays(s, t.scheduleFinish, cal));
-    // addWorkdays(start, n) moves forward n working days, so a task of
-    // `wd` working days finishes `wd - 1` working days after its start.
-    const f = addWorkdays(s, wd - 1, cal);
-    return { ...t, scheduleStart: s, scheduleFinish: f };
+  const leaves = leavesOf(tasks);
+  if (!leaves.length) return emptyResult();
+
+  // Snap each leaf to a working start and a working-day length.
+  const snapped = leaves.map((t) => {
+    const start = nextWorkday(t.scheduleStart, cal);
+    const wd = Math.max(1, countWorkdays(start, t.scheduleFinish, cal));
+    return { id: t.id, startDay: toDay(start), wd };
   });
 
-  const cpm = computeCpm(snappedTasks, seqs);
+  // Working-day index table over a generous window.
+  const minStart = Math.min(...snapped.map((s) => s.startDay));
+  const maxStart = Math.max(...snapped.map((s) => s.startDay));
+  const base = minStart - 366; // room for negative lags
+  const horizon =
+    maxStart + snapped.reduce((a, s) => a + s.wd, 0) + 3650; // room to grow
 
-  const totalFloatWork = new Map<string, number>();
-  const criticalIds = new Set<string>();
-  for (const [id, f] of cpm.totalFloat) {
-    let wf = f;
-    if (f > 0) {
-      const ef = cpm.earlyFinish.get(id);
-      if (ef !== undefined) {
-        wf = countWorkdays(toISO(ef + 1), toISO(ef + f), cal);
-      }
-    }
-    totalFloatWork.set(id, wf);
-    if (wf <= 0) criticalIds.add(id);
+  const workDays: number[] = []; // index -> day number
+  const cum: number[] = []; // cum[d - base] = working days before day d
+  for (let d = base; d <= horizon; d++) {
+    cum.push(workDays.length);
+    if (isWorkday(d, cal)) workDays.push(d);
   }
+  const idxOf = (day: number) => cum[Math.min(cum.length - 1, day - base)];
+  const dayOf = (i: number) =>
+    workDays[Math.max(0, Math.min(workDays.length - 1, i))];
 
-  return { ...cpm, totalFloat: totalFloatWork, criticalIds };
+  const core = runCore(
+    snapped.map((s) => ({
+      id: s.id,
+      es0: idxOf(s.startDay),
+      dur: s.wd - 1,
+    })),
+    seqs
+  );
+
+  const toDays = (m: Map<string, number>) => {
+    const out = new Map<string, number>();
+    for (const [id, i] of m) out.set(id, dayOf(i));
+    return out;
+  };
+
+  return {
+    earlyStart: toDays(core.es),
+    earlyFinish: toDays(core.ef),
+    lateStart: toDays(core.ls),
+    lateFinish: toDays(core.lf),
+    totalFloat: core.float, // already in working days
+    criticalIds: core.critical,
+    projectStart: dayOf(core.pStart),
+    projectFinish: dayOf(core.pFinish),
+  };
 }
 
 // ---------- "now / next" ----------
@@ -280,10 +314,6 @@ export function findCurrentAndNext(
 }
 
 // ---------- upcoming queue (for the "Next up" stepper) ----------
-/**
- * All leaf tasks with early-start strictly after today, sorted by (es, name).
- * Drives the Next-up stepper in the header card.
- */
 export function upcomingQueue(
   tasks: Task[],
   cpm: CpmResult,

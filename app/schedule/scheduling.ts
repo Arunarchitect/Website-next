@@ -172,9 +172,73 @@ export function applyProgress(t: Task, completion: number, today: string): Task 
   return { ...t, completion: c, actualStart, actualFinish };
 }
 
+
+/**
+ * Completion rule: a task can only be 100% when every predecessor is 100%.
+ * Returns an error message when the change is not allowed, else null.
+ *  - going to 100%  -> blocked if any predecessor is below 100%
+ *  - dropping below 100% -> blocked if any successor is already 100%
+ */
+export function completionBlocker(
+  id: string,
+  pct: number,
+  tasks: Task[],
+  seqs: Sequence[]
+): string | null {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const names = (list: (Task | undefined)[]) =>
+    [...new Set(list.filter((t): t is Task => !!t).map((t) => `"${t.name}"`))].join(", ");
+
+  if (pct >= 100) {
+    const open = seqs
+      .filter((s) => s.relatedTask === id)
+      .map((s) => byId.get(s.relatingTask))
+      .filter((p) => p && p.completion < 100);
+    if (open.length) {
+      return `Can't mark 100%: predecessor ${names(open)} is not 100% yet.`;
+    }
+  } else {
+    const done = seqs
+      .filter((s) => s.relatingTask === id)
+      .map((s) => byId.get(s.relatedTask))
+      .filter((t) => t && t.completion >= 100);
+    if (done.length) {
+      return `Can't reduce below 100%: successor ${names(done)} is already 100%.`;
+    }
+  }
+  return null;
+}
 // ---------- dependencies ----------
-/** A task that has started (or finished) is never moved by auto-schedule. */
-const isLocked = (t: Task): boolean => !!t.actualStart || t.completion > 0;
+/** Started or finished tasks are never moved by auto-schedule. */
+const isLocked = (t: Task): boolean =>
+  !!t.actualStart || !!t.actualFinish || t.completion > 0;
+
+// Prefer real dates over planned dates when a predecessor has them.
+const effStart = (t: Task): string => t.actualStart ?? t.scheduleStart;
+const effFinish = (t: Task): string => t.actualFinish ?? t.scheduleFinish;
+
+/**
+ * Tasks at 100% get their actual dates filled in (then they are locked):
+ *  - actualFinish = planned finish if that is today or earlier, else today
+ *  - actualStart  = planned start (never later than actualFinish)
+ * Group rows are skipped (they roll up from their children).
+ */
+function finalizeCompleted(
+  tasks: Task[],
+  parents: Set<string>,
+  today: string
+): Task[] {
+  return tasks.map((t) => {
+    if (parents.has(t.id)) return t;
+    if (t.completion < 100 || t.actualFinish) return t;
+    const actualFinish = t.scheduleFinish <= today ? t.scheduleFinish : today;
+    let actualStart =
+      t.actualStart ??
+      (t.scheduleStart <= actualFinish ? t.scheduleStart : actualFinish);
+    if (actualStart > actualFinish) actualStart = actualFinish;
+    return { ...t, actualStart, actualFinish };
+  });
+}
 
 /**
  * Order task ids so every predecessor comes before its successors (Kahn).
@@ -208,20 +272,16 @@ function topoOrder(ids: string[], seqs: Sequence[]): string[] {
 }
 
 /**
- * Auto-schedule (calendar days).
+ * Auto-schedule (calendar days, ignores holidays).
  *
- * Walks the activities in dependency order. Each activity's earliest start is
- * the LATEST date allowed by all of its predecessors (link type + lag).
+ * - Completed / started tasks and groups are never moved.
+ * - Unfinished task with no predecessor -> anchor
+ *   (anchor = later of: earliest start in the schedule, today).
+ * - Unfinished task with predecessors -> latest date its links allow,
+ *   but never earlier than the anchor.
  *
- * compress = true (default): every activity is placed exactly at that
- *   earliest start, so the plan is squeezed to the left and the project
- *   finishes as early as possible. Activities with no predecessor but with
- *   successors start on the project start date (earliest start in the plan).
- * compress = false: activities are only pushed later when a link is
- *   violated, never pulled earlier, so deliberate gaps are kept.
- *
- * Activities that have started (actual start or % > 0), group rows, and
- * completely unlinked activities are never moved.
+ * compress = true (default): tasks sit exactly at their earliest start.
+ * compress = false: tasks are only pushed later, never pulled earlier.
  */
 export function autoSchedule(
   tasks: Task[],
@@ -231,11 +291,14 @@ export function autoSchedule(
   const parents = new Set(
     tasks.map((t) => t.parentId).filter((x): x is string => !!x)
   );
+  const today = todayISO();
+  tasks = finalizeCompleted(tasks, parents, today);
+
   const leaves = tasks.filter((t) => !parents.has(t.id));
   if (!leaves.length) return rollup(tasks);
 
-  const projectStart = Math.min(...leaves.map((t) => toDay(t.scheduleStart)));
-  const hasSucc = new Set(seqs.map((s) => s.relatingTask));
+  const earliest = Math.min(...leaves.map((t) => toDay(t.scheduleStart)));
+  const anchor = Math.max(earliest, toDay(today));
   const map = new Map(tasks.map((t) => [t.id, t]));
 
   for (const id of topoOrder(leaves.map((t) => t.id), seqs)) {
@@ -249,8 +312,8 @@ export function autoSchedule(
       if (s.relatedTask !== id) continue;
       const p = map.get(s.relatingTask);
       if (!p || parents.has(p.id)) continue;
-      const ps = toDay(p.scheduleStart);
-      const pf = toDay(p.scheduleFinish);
+      const ps = toDay(effStart(p));
+      const pf = toDay(effFinish(p));
       let candidate: number;
       switch (s.sequenceType) {
         case "START_START":
@@ -270,14 +333,11 @@ export function autoSchedule(
       if (target === null || candidate > target) target = candidate;
     }
 
-    if (target === null) {
-      // No predecessor: only compress tasks that other tasks depend on.
-      if (compress && hasSucc.has(id)) target = projectStart;
-      else continue;
-    }
+    // No predecessor -> anchor. Has predecessor -> never before anchor.
+    target = target === null ? anchor : Math.max(target, anchor);
+    if (!compress) target = Math.max(target, qs);
 
-    const move = compress ? target !== qs : target > qs;
-    if (move) {
+    if (target !== qs) {
       map.set(id, {
         ...q,
         scheduleStart: toISO(target),
@@ -289,8 +349,15 @@ export function autoSchedule(
 }
 
 /**
- * Working-day variant of autoSchedule. Same rules, but every start snaps to
- * a working day and each activity keeps its length in working days.
+ * Working-day variant of autoSchedule (holiday aware).
+ *
+ * Same rules as above, plus:
+ *  - every start snaps FORWARD to the next working day (weekly off days,
+ *    holidays and shutdown ranges are skipped), even for 1-day tasks;
+ *  - every task keeps its length in WORKING days, so a task that crosses a
+ *    holiday is stretched over it (Mon-Wed with a Tue holiday -> Mon-Thu);
+ *  - tasks that are not moved by links are still re-snapped, so nothing is
+ *    left sitting on a holiday.
  */
 export function autoScheduleWorkdays(
   tasks: Task[],
@@ -301,22 +368,23 @@ export function autoScheduleWorkdays(
   const parents = new Set(
     tasks.map((t) => t.parentId).filter((x): x is string => !!x)
   );
+  const today = todayISO();
+  tasks = finalizeCompleted(tasks, parents, today);
+
   const leaves = tasks.filter((t) => !parents.has(t.id));
   if (!leaves.length) return rollup(tasks);
 
-  const projectStart = toDay(
-    nextWorkday(
-      toISO(Math.min(...leaves.map((t) => toDay(t.scheduleStart)))),
-      cal
-    )
+  const earliest = Math.min(...leaves.map((t) => toDay(t.scheduleStart)));
+  const anchor = toDay(
+    nextWorkday(toISO(Math.max(earliest, toDay(today))), cal)
   );
-  const hasSucc = new Set(seqs.map((s) => s.relatingTask));
   const map = new Map(tasks.map((t) => [t.id, t]));
 
   for (const id of topoOrder(leaves.map((t) => t.id), seqs)) {
     const q = map.get(id);
     if (!q || isLocked(q)) continue;
     const qs = toDay(q.scheduleStart);
+    // Length in working days (a task sitting entirely on a holiday counts as 1).
     const wdur = Math.max(
       1,
       countWorkdays(q.scheduleStart, q.scheduleFinish, cal)
@@ -327,8 +395,8 @@ export function autoScheduleWorkdays(
       if (s.relatedTask !== id) continue;
       const p = map.get(s.relatingTask);
       if (!p || parents.has(p.id)) continue;
-      const ps = toDay(p.scheduleStart);
-      const pf = toDay(p.scheduleFinish);
+      const ps = toDay(effStart(p));
+      const pf = toDay(effFinish(p));
       let earliestDay: number;
       switch (s.sequenceType) {
         case "START_START":
@@ -345,23 +413,19 @@ export function autoScheduleWorkdays(
           earliestDay = pf + 1 + s.lagDays;
           break;
       }
-      const candidate = toDay(nextWorkday(toISO(earliestDay), cal));
-      if (target === null || candidate > target) target = candidate;
+      if (target === null || earliestDay > target) target = earliestDay;
     }
 
-    if (target === null) {
-      if (compress && hasSucc.has(id)) target = projectStart;
-      else continue;
-    }
+    // No predecessor -> anchor. Has predecessor -> never before anchor.
+    let startDay = target === null ? anchor : Math.max(target, anchor);
+    if (!compress) startDay = Math.max(startDay, qs);
 
-    const move = compress ? target !== qs : target > qs;
-    if (move) {
-      const start = toISO(target);
-      map.set(id, {
-        ...q,
-        scheduleStart: start,
-        scheduleFinish: addWorkdays(start, wdur - 1, cal),
-      });
+    // Holiday handling: land on a working day, then stretch over holidays.
+    const start = nextWorkday(toISO(startDay), cal);
+    const finish = addWorkdays(start, wdur - 1, cal);
+
+    if (start !== q.scheduleStart || finish !== q.scheduleFinish) {
+      map.set(id, { ...q, scheduleStart: start, scheduleFinish: finish });
     }
   }
   return rollup(tasks.map((t) => map.get(t.id)!));
