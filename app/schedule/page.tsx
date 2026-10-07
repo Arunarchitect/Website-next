@@ -9,15 +9,21 @@ import {
   type Task,
 } from "./data";
 import {
+  applyProgress,
   autoSchedule,
+  autoScheduleWorkdays,
   durationDays,
   durationWorkdays,
+  finishVariance,
   flatten,
   rollup,
+  setBaseline,
   setDurationWithCalendar,
+  snapRangeToWorkdays,
   todayISO,
   toDay,
   wouldCycle,
+  isoWeek,
 } from "./scheduling";
 import {
   DAY,
@@ -51,7 +57,18 @@ import {
 import { useScheduleSync } from "./useScheduleSync";
 import SyncBadge from "./SyncBadge";
 import ScheduleImport from "./ScheduleImport";
+import BaselineCompare from "./BaselineCompare";
 import { listMyProjects, type MyProject } from "./api";
+import TaskPicker, { type PickerMode } from "./TaskPicker";
+import SchedulePicker from "./SchedulePicker";
+import ScheduleExportODS from "./ScheduleExportODS";
+import {
+  PasteJsonModal,
+  applySelection,
+  copyTasksForAi,
+  withDescendants,
+} from "./JsonTool";
+import type { SelectionJson } from "./JsonTool";
 
 const ROW_H = 28;
 const LEFT_COL_W = 256;
@@ -86,7 +103,7 @@ const todayISOForNew = () => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
-// Read ?project= / ?schedule= from the URL (Next.js pages can't take custom props).
+// Read ?project= / ?schedule= from the URL.
 const readParam = (key: string): number | null => {
   if (typeof window === "undefined") return null;
   const v = new URLSearchParams(window.location.search).get(key);
@@ -94,240 +111,6 @@ const readParam = (key: string): number | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
-
-// ---------- Searchable task picker ----------
-type PickerMode = "pred" | "succ";
-
-function TaskPicker({
-  mode,
-  anchorTask,
-  allTasks,
-  sequences,
-  onPick,
-  onClose,
-}: {
-  mode: PickerMode;
-  anchorTask: Task;
-  allTasks: Task[];
-  sequences: Sequence[];
-  onPick: (otherId: string) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const boxRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (!boxRef.current) return;
-      if (!boxRef.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    setTimeout(() => inputRef.current?.focus(), 0);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const leaves = useMemo(() => {
-    const parents = new Set(
-      allTasks.map((t) => t.parentId).filter((x): x is string => !!x)
-    );
-    return allTasks.filter((t) => !parents.has(t.id) && t.id !== anchorTask.id);
-  }, [allTasks, anchorTask.id]);
-
-  const blocked = useMemo(() => {
-    const set = new Set<string>();
-    if (mode === "pred") {
-      for (const s of sequences) {
-        if (s.relatedTask === anchorTask.id) set.add(s.relatingTask);
-      }
-      for (const t of leaves) {
-        if (wouldCycle(sequences, t.id, anchorTask.id)) set.add(t.id);
-      }
-    } else {
-      for (const s of sequences) {
-        if (s.relatingTask === anchorTask.id) set.add(s.relatedTask);
-      }
-      for (const t of leaves) {
-        if (wouldCycle(sequences, anchorTask.id, t.id)) set.add(t.id);
-      }
-    }
-    return set;
-  }, [mode, sequences, anchorTask.id, leaves]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const base = leaves.filter((t) => !blocked.has(t.id));
-    const matched = q
-      ? base.filter(
-        (t) =>
-          t.name.toLowerCase().includes(q) ||
-          (t.workCode ?? "").toLowerCase().includes(q) ||
-          t.id.toLowerCase().includes(q)
-      )
-      : base;
-    return [...matched].sort(
-      (a, b) => toDay(a.scheduleStart) - toDay(b.scheduleStart)
-    );
-  }, [leaves, blocked, query]);
-
-  const title =
-    mode === "pred"
-      ? `Pick a predecessor for "${anchorTask.name}"`
-      : `Pick a successor for "${anchorTask.name}"`;
-
-  return (
-    <div
-      ref={boxRef}
-      className="absolute right-0 top-full z-50 mt-1 w-80 rounded-md border bg-white shadow-lg"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="border-b px-3 py-2 text-xs font-semibold text-gray-700">
-        {title}
-      </div>
-      <div className="border-b px-2 py-1.5">
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, code or id…"
-          className="w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-      </div>
-      <div className="max-h-64 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <div className="px-3 py-4 text-center text-xs text-gray-500">
-            No matching tasks.
-          </div>
-        ) : (
-          <ul className="py-1">
-            {filtered.map((t) => (
-              <li key={t.id}>
-                <button
-                  onClick={() => onPick(t.id)}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-blue-50"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-gray-800">
-                      {t.name}
-                    </div>
-                    <div className="truncate text-[10px] text-gray-500">
-                      {t.workCode ? `${t.workCode} · ` : ""}
-                      {t.scheduleStart} → {t.scheduleFinish}
-                    </div>
-                  </div>
-                  <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
-                    {durationDays(t)}d
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <div className="flex items-center justify-between border-t bg-gray-50 px-3 py-1.5 text-[10px] text-gray-500">
-        <span>{filtered.length} available</span>
-        <button onClick={onClose} className="hover:text-gray-800">
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---------- Org → Project → Schedule picker ----------
-function SchedulePicker({
-  projects,
-  orgName,
-  projectId,
-  scheduleId,
-  onPick,
-}: {
-  projects: MyProject[];
-  orgName: string | null;
-  projectId: number | null;
-  scheduleId: number | null;
-  onPick: (projectId: number, scheduleId: number | null) => void;
-}) {
-  const orgs = useMemo(() => {
-    const m = new Map<string, MyProject[]>();
-    for (const p of projects) {
-      if (!m.has(p.organisation)) m.set(p.organisation, []);
-      m.get(p.organisation)!.push(p);
-    }
-    return Array.from(m.entries());
-  }, [projects]);
-
-  const [selectedOrg, setSelectedOrg] = useState<string | null>(orgName);
-
-  useEffect(() => {
-    setSelectedOrg(orgName);
-  }, [orgName]);
-
-  const visibleProjects = useMemo(
-    () => projects.filter((p) => p.organisation === selectedOrg),
-    [projects, selectedOrg]
-  );
-
-  const currentProject = visibleProjects.find((p) => p.id === projectId) ?? null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <select
-        value={selectedOrg ?? ""}
-        onChange={(e) => setSelectedOrg(e.target.value || null)}
-        className="rounded border bg-white px-2 py-1.5"
-        title="Organisation"
-      >
-        {orgs.map(([name]) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
-
-      <select
-        value={projectId ?? ""}
-        onChange={(e) => {
-          const pid = Number(e.target.value);
-          const p = projects.find((x) => x.id === pid);
-          onPick(pid, p?.schedules[0]?.id ?? null);
-        }}
-        className="rounded border bg-white px-2 py-1.5"
-        title="Project"
-      >
-        {visibleProjects.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-            {p.isCompleted ? " (completed)" : ""}
-            {p.canEdit ? "" : " · read-only"}
-          </option>
-        ))}
-      </select>
-
-      {currentProject && currentProject.schedules.length > 1 && (
-        <select
-          value={scheduleId ?? ""}
-          onChange={(e) => onPick(currentProject.id, Number(e.target.value))}
-          className="rounded border bg-white px-2 py-1.5"
-          title="Schedule"
-        >
-          {currentProject.schedules.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.predefinedType})
-            </option>
-          ))}
-        </select>
-      )}
-    </div>
-  );
-}
 
 export default function ScheduleView() {
   const [myProjects, setMyProjects] = useState<MyProject[]>([]);
@@ -348,6 +131,8 @@ export default function ScheduleView() {
   const [autoFit, setAutoFit] = useState(true);
   const [showLinks, setShowLinks] = useState(true);
   const [showCritical, setShowCritical] = useState(true);
+  const [showBaseline, setShowBaseline] = useState(true);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   const [picker, setPicker] = useState<{ taskId: string; mode: PickerMode } | null>(
     null
@@ -358,6 +143,13 @@ export default function ScheduleView() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [copiedMsg, setCopiedMsg] = useState<string | null>(null);
+  const [ganttOpen, setGanttOpen] = useState(true);
+  const [scopedPasteOpen, setScopedPasteOpen] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [includeChildren, setIncludeChildren] = useState(false);
 
   const [nextIdx, setNextIdx] = useState(0);
 
@@ -377,7 +169,7 @@ export default function ScheduleView() {
         if (cancelled) return;
         setMyProjects(rows);
         if (projectId == null && rows.length > 0) {
-          const first = rows[0];
+          const first = rows.find((r) => r.schedules.length > 0) ?? rows[0];
           setProjectId(first.id);
           setScheduleId(first.schedules[0]?.id ?? null);
         } else if (projectId != null && scheduleId == null) {
@@ -428,12 +220,15 @@ export default function ScheduleView() {
   });
 
   const currentProject = myProjects.find((p) => p.id === projectId) ?? null;
-  const projectRole = currentProject?.role ?? null;
-  const isViewOnly = projectRole === "member" || projectRole === "manager";
+  const isViewOnly = currentProject ? !currentProject.canEdit : false;
   const readOnly = isViewOnly || !sync.canEdit;
   const ready = !["loading", "empty", "failed"].includes(sync.status);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
+
+  const longPressTimer = useRef<number | null>(null);
+  const pendingScroll = useRef<number | null>(null);
+  const pendingCenter = useRef<number | null>(null);
   const [containerW, setContainerW] = useState(1000);
 
   useEffect(() => {
@@ -446,7 +241,7 @@ export default function ScheduleView() {
     ro.observe(el);
     setContainerW(el.clientWidth);
     return () => ro.disconnect();
-  }, [ready]);
+  }, [ready, ganttOpen]);
 
   useEffect(() => {
     if (!menuFor) return;
@@ -507,6 +302,19 @@ export default function ScheduleView() {
     if (autoFit) setZoom(fitZoom);
   }, [autoFit, fitZoom]);
 
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (pendingScroll.current != null) {
+      if (el) el.scrollLeft = Math.max(0, pendingScroll.current * zoom);
+      pendingScroll.current = null;
+    } else if (pendingCenter.current != null) {
+      if (el) {
+        el.scrollLeft = Math.max(0, pendingCenter.current * zoom - el.clientWidth / 2);
+      }
+      pendingCenter.current = null;
+    }
+  }, [zoom]);
+
   const ganttWidth = Math.max(totalDays * zoom, containerW);
   const ganttBodyHeight = rows.length * ROW_H;
 
@@ -514,6 +322,9 @@ export default function ScheduleView() {
   const showWeekGrid = zoom >= SHOW_WEEK_GRID_ABOVE;
   const showWeekHeader = zoom >= SHOW_WEEK_HEADER_ABOVE;
   const showDayHeader = zoom >= SHOW_DAY_HEADER_ABOVE;
+
+  const headerH =
+    20 * (1 + (showWeekHeader ? 1 : 0) + (showDayHeader ? 1 : 0)) + 1;
 
   const months = useMemo(() => {
     const out: { label: string; short: string; days: number; px: number }[] = [];
@@ -575,39 +386,86 @@ export default function ScheduleView() {
       return n;
     });
 
-  const runAutoSchedule = () => setTasks((prev) => autoSchedule(prev, sequences));
+  // ── Auto-schedule: working-day aware when the toggle is on ──────────────
+  const runAutoSchedule = () =>
+    setTasks((prev) =>
+      useWorkdays
+        ? autoScheduleWorkdays(prev, sequences, calendar)
+        : autoSchedule(prev, sequences)
+    );
 
   const updateCompletion = (id: string, completion: number) =>
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id
-          ? { ...t, completion: Math.max(0, Math.min(100, completion)) }
-          : t
+        t.id === id ? applyProgress(t, completion, todayISO()) : t
       )
     );
 
+  const updateActual = (
+    id: string,
+    field: "actualStart" | "actualFinish",
+    value: string
+  ) =>
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        const next: Task = { ...t, [field]: value || null };
+        if (
+          next.actualStart &&
+          next.actualFinish &&
+          next.actualFinish < next.actualStart
+        ) {
+          next.actualFinish = next.actualStart;
+        }
+        return next;
+      })
+    );
+
+  const setBaselineNow = () => {
+    const hasOne = tasks.some((t) => t.baselineFinish);
+    const msg = hasOne
+      ? "Overwrite the existing baseline with the current planned dates?"
+      : "Freeze the current planned dates as the baseline?";
+    if (window.confirm(msg)) setTasks((prev) => setBaseline(prev));
+  };
+
+  /**
+   * Update planned dates for one task. In working-day mode, snap the range
+   * so it starts on a working day and ends on a working day (weekends and
+   * holidays are excluded). In calendar mode this is a direct assignment
+   * with the usual "finish must be ≥ start" clamp.
+   */
   const updateDates = (id: string, start: string, finish: string) =>
     setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if (!useWorkdays) {
+          return {
             ...t,
             scheduleStart: start,
             scheduleFinish: finish < start ? start : finish,
-          }
-          : t
-      )
+          };
+        }
+        const { start: s, finish: f } = snapRangeToWorkdays(
+          start,
+          finish,
+          calendar
+        );
+        return { ...t, scheduleStart: s, scheduleFinish: f };
+      })
     );
 
+  // Uses the shared helper from scheduling.ts: calendar-day math when no
+  // calendar is passed, working-day math (via addWorkdays) when it is.
   const updateDuration = (id: string, newDays: number) =>
     setTasks((prev) =>
       prev.map((t) =>
         t.id === id
           ? setDurationWithCalendar(
-            t,
-            newDays,
-            useWorkdays ? calendar : undefined
-          )
+              t,
+              newDays,
+              useWorkdays ? calendar : undefined
+            )
           : t
       )
     );
@@ -733,6 +591,14 @@ export default function ScheduleView() {
     }
   }, [tasks, selectedId]);
 
+  useEffect(() => {
+    setCheckedIds((prev) => {
+      const ids = new Set(tasks.map((t) => t.id));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [tasks]);
+
   // ---------- selection ----------
   const expandAncestors = (ids: string[]) => {
     if (!ids.length) return;
@@ -755,12 +621,90 @@ export default function ScheduleView() {
     }, HIGHLIGHT_MS);
   };
 
+  const LONG_PRESS_MS = 500;
+
+  const openEditorFromBar = (id: string) => {
+    if (readOnly) return;
+    setEditingId(id);
+    setSelectedId(id);
+  };
+
+  const startLongPress = (id: string) => {
+    if (readOnly) return;
+    cancelLongPress();
+    longPressTimer.current = window.setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(50);
+      openEditorFromBar(id);
+    }, LONG_PRESS_MS);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
   const handleRowClick = (id: string, isGroup: boolean) => {
     setSelectedId(id);
     if (isGroup) toggleCollapse(id);
   };
 
   const jumpToTask = (id: string) => handleSelectFromSearch(id);
+
+  // ---------- programmatic zoom ----------
+  const zoomToRange = (startDay: number, endDay: number, padDays = 2) => {
+    const span = Math.max(1, endDay - startDay + 1) + padDays * 2;
+    const usable = Math.max(120, containerW - 24);
+    const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, usable / span));
+    const offset = startDay - padDays - minDay;
+    setAutoFit(false);
+    if (Math.abs(z - zoom) < 1e-6) {
+      const el = scrollerRef.current;
+      if (el) el.scrollLeft = Math.max(0, offset * z);
+    } else {
+      pendingScroll.current = offset;
+      setZoom(z);
+    }
+  };
+
+  const zoomKeepCenter = (target: number) => {
+    const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, target));
+    if (Math.abs(z - zoom) < 1e-6) return;
+    const el = scrollerRef.current;
+    if (el && zoom > 0) {
+      if (selectedId) {
+        const t = rolled.find((x) => x.id === selectedId);
+        if (t) {
+          const s = toDay(t.scheduleStart) - minDay;
+          const f = toDay(t.scheduleFinish) - minDay;
+          const mid = (s + f) / 2;
+          const leftDay = el.scrollLeft / zoom;
+          const rightDay = (el.scrollLeft + el.clientWidth) / zoom;
+          if (mid >= leftDay && mid <= rightDay) {
+            pendingCenter.current = mid;
+            setZoom(z);
+            return;
+          }
+        }
+      }
+      pendingCenter.current = (el.scrollLeft + el.clientWidth / 2) / zoom;
+    }
+    setZoom(z);
+  };
+
+  const zoomToTask = (t: Task) => {
+    const s = toDay(t.scheduleStart);
+    const f = toDay(t.scheduleFinish);
+    const span = f - s + 1;
+    zoomToRange(s, f, Math.max(2, Math.round(span * 0.15)));
+  };
+
+  const TODAY_WINDOW_DAYS = 10;
+  const zoomToToday = () => {
+    if (!todayInRange) return;
+    zoomToRange(todayDay - TODAY_WINDOW_DAYS, todayDay + TODAY_WINDOW_DAYS, 0);
+  };
 
   // ---------- link geometry ----------
   const links = useMemo(() => {
@@ -868,14 +812,48 @@ export default function ScheduleView() {
   }
   if (sync.status === "empty") {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
-        No schedule has been created for this project yet.
+      <main className="mx-auto max-w-[1600px] p-6 text-sm">
+        <div className="mb-4">
+          <SchedulePicker
+            projects={myProjects}
+            orgName={currentProject?.organisation ?? null}
+            projectId={projectId}
+            scheduleId={scheduleId}
+            onPick={(pid, sid) => {
+              setProjectId(pid);
+              setScheduleId(sid);
+            }}
+          />
+        </div>
+        <p className="mb-3 text-gray-500">
+          No schedule has been created for this project yet.
+        </p>
+        {!isViewOnly && (
+          <button
+            onClick={() => void sync.createAndSeed()}
+            className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
+          >
+            + Create schedule
+          </button>
+        )}
       </main>
     );
   }
   if (sync.status === "failed") {
     return (
       <main className="mx-auto max-w-[1600px] p-6 text-sm">
+        <div className="mb-4">
+          <SchedulePicker
+            projects={myProjects}
+            orgName={currentProject?.organisation ?? null}
+            projectId={projectId}
+            scheduleId={scheduleId}
+            onPick={(pid, sid) => {
+              setProjectId(pid);
+              setScheduleId(sid);
+            }}
+          />
+        </div>
         <p className="mb-2 text-red-600">
           Couldn&apos;t load the schedule{sync.message ? `: ${sync.message}` : "."}
         </p>
@@ -896,6 +874,13 @@ export default function ScheduleView() {
   };
 
   const criticalCount = cpm.criticalIds.size;
+  const hasBaseline = tasks.some((t) => t.baselineFinish);
+  const parentIdSet = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+  );
+  const lateCount = tasks.filter(
+    (t) => !parentIdSet.has(t.id) && (finishVariance(t) ?? 0) > 0
+  ).length;
   const criticalDuration = cpm.projectFinish - cpm.projectStart + 1;
 
   const editingTask = editingId
@@ -913,6 +898,16 @@ export default function ScheduleView() {
       case "addSibling":
         addSibling(task);
         break;
+      case "copyJson": {
+        void copyTasksForAi(withDescendants(task.id, tasks), tasks, sequences).then((r) => {
+          setCopiedMsg(r.message);
+          setFlashId(task.id);
+          setTimeout(() => setFlashId((c) => (c === task.id ? null : c)), HIGHLIGHT_MS);
+          setTimeout(() => setCopiedMsg(null), 4000);
+          if (!r.ok) window.alert(r.message);
+        });
+        break;
+      }
       case "delete":
         if (
           window.confirm(
@@ -926,6 +921,47 @@ export default function ScheduleView() {
         moveTask(task.id, action.target);
         break;
     }
+  };
+
+  const toggleChecked = (id: string) =>
+    setCheckedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+
+  const allVisibleChecked =
+    rows.length > 0 && rows.every((r) => checkedIds.has(r.task.id));
+
+  const toggleAllVisible = () =>
+    setCheckedIds(
+      allVisibleChecked ? new Set() : new Set(rows.map((r) => r.task.id))
+    );
+
+  const selectionIds = (): string[] =>
+    includeChildren
+      ? [...new Set([...checkedIds].flatMap((id) => withDescendants(id, tasks)))]
+      : [...checkedIds];
+
+  const applyPaste = (data: SelectionJson) => {
+    const r = applySelection(data, tasks, sequences);
+    setTasks(r.tasks);
+    setSequences(r.sequences);
+    setPasteOpen(false);
+    setScopedPasteOpen(false);
+    setCopiedMsg("Changes applied.");
+    setTimeout(() => setCopiedMsg(null), 4000);
+  };
+
+  const copySelected = () => {
+    if (checkedIds.size === 0) return;
+    const ids = selectionIds();
+    void copyTasksForAi(ids, tasks, sequences).then((r) => {
+      setCopiedMsg(r.message);
+      setTimeout(() => setCopiedMsg(null), 4000);
+      if (!r.ok) window.alert(r.message);
+    });
   };
 
   const nextDays = next ? daysUntil(next, cpm, todayDay) : 0;
@@ -949,12 +985,18 @@ export default function ScheduleView() {
     <main className="mx-auto max-w-[1600px] p-6">
       {/* ================= HEADER ================= */}
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {copiedMsg && (
+          <div className="fixed bottom-4 right-4 z-[110] rounded bg-gray-900 px-3 py-2 text-xs text-white shadow-lg">
+            {copiedMsg}
+          </div>
+        )}
         <div>
           <h1 className="text-2xl font-semibold">{heading}</h1>
           <p className="text-sm text-gray-500">
             {fmtDate(cpm.projectStart)} → {fmtDate(cpm.projectFinish)} ·{" "}
             {criticalDuration} days total · {criticalCount} critical activities
             {useWorkdays && " · working-day mode"}
+            {hasBaseline && ` · ${lateCount} late vs baseline`}
             {isViewOnly && " · view-only"}
           </p>
         </div>
@@ -999,7 +1041,14 @@ export default function ScheduleView() {
             />
             Working days
           </label>
-          <PrintAct tasks={tasks} />
+          <PrintAct
+            tasks={tasks}
+            rows={rows}
+            criticalIds={cpm.criticalIds}
+            floats={cpm.totalFloat}
+            title={heading}
+            projectName={currentProject?.name ?? ""}
+          />
           {!readOnly && (
             <ScheduleImport
               scheduleId={scheduleId}
@@ -1020,10 +1069,63 @@ export default function ScheduleView() {
               }}
             />
           )}
+          {!readOnly && (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={copySelected}
+                disabled={checkedIds.size === 0}
+                className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Copy the ticked tasks as JSON (for AI editing)"
+              >
+                Copy selected ({checkedIds.size})
+              </button>
+              <button
+                onClick={() => setScopedPasteOpen(true)}
+                disabled={checkedIds.size === 0}
+                className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Paste edited JSON back into ONLY the ticked tasks"
+              >
+                Paste into selection
+              </button>
+              <label
+                className="flex items-center gap-1 text-xs text-gray-600"
+                title="Also include every child under the ticked tasks"
+              >
+                <input
+                  type="checkbox"
+                  checked={includeChildren}
+                  onChange={(e) => setIncludeChildren(e.target.checked)}
+                />
+                + children
+              </label>
+              {checkedIds.size > 0 && (
+                <button
+                  onClick={() => setCheckedIds(new Set())}
+                  className="text-xs text-gray-500 underline hover:text-gray-800"
+                >
+                  clear
+                </button>
+              )}
+            </div>
+          )}
+          {!readOnly && (
+            <button
+              onClick={() => setPasteOpen(true)}
+              className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+              title="Paste a task/phase JSON (e.g. edited by an AI) and validate it"
+            >
+              Paste JSON
+            </button>
+          )}
           <ScheduleExport
             tasks={tasks}
             sequences={sequences}
             calendar={calendarSer}
+          />
+          <ScheduleExportODS
+            rows={rows}
+            criticalIds={cpm.criticalIds}
+            name={heading}
           />
           {!readOnly && (
             <button
@@ -1034,6 +1136,13 @@ export default function ScheduleView() {
               + New phase
             </button>
           )}
+          <button
+            onClick={() => setCompareOpen(true)}
+            className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+            title="Compare planned dates with the baseline"
+          >
+            Compare
+          </button>
           <button
             onClick={() => setCollapsed(new Set())}
             className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -1046,6 +1155,15 @@ export default function ScheduleView() {
           >
             Collapse all
           </button>
+          {!readOnly && (
+            <button
+              onClick={setBaselineNow}
+              className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+              title="Freeze the current planned dates as the baseline"
+            >
+              Set baseline
+            </button>
+          )}
           {!readOnly && (
             <button
               onClick={runAutoSchedule}
@@ -1067,8 +1185,8 @@ export default function ScheduleView() {
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
           className={`rounded border-l-4 p-3 ${current
-              ? "border-blue-500 bg-blue-50/60"
-              : "border-gray-300 bg-gray-50"
+            ? "border-blue-500 bg-blue-50/60"
+            : "border-gray-300 bg-gray-50"
             }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
@@ -1108,8 +1226,8 @@ export default function ScheduleView() {
 
         <div
           className={`rounded border-l-4 p-3 ${next
-              ? "border-emerald-500 bg-emerald-50/60"
-              : "border-gray-300 bg-gray-50"
+            ? "border-emerald-500 bg-emerald-50/60"
+            : "border-gray-300 bg-gray-50"
             }`}
         >
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -1204,421 +1322,552 @@ export default function ScheduleView() {
         </div>
       </section>
 
-      {/* ================= ZOOM BAR ================= */}
-      <div
-        className="mb-3 flex flex-wrap items-center gap-3 rounded border bg-gray-50 px-3 py-2 text-sm"
-        data-print-hide
-      >
-        <span className="font-medium text-gray-700">Timeline</span>
-
-        <label className="flex items-center gap-1.5 text-xs text-gray-700">
-          <input
-            type="checkbox"
-            checked={autoFit}
-            onChange={(e) => setAutoFit(e.target.checked)}
-          />
-          Fit to width
-        </label>
-
-        <div
-          className={`flex items-center gap-1 ${autoFit ? "opacity-50" : ""}`}
-          title={autoFit ? "Uncheck 'Fit to width' to zoom manually" : ""}
+      {/* ================= GANTT SHOW / HIDE ================= */}
+      <div className="mb-2 flex items-center gap-2" data-print-hide>
+        <button
+          onClick={() => setGanttOpen((o) => !o)}
+          className="rounded border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+          title={ganttOpen ? "Collapse the Gantt chart" : "Expand the Gantt chart"}
         >
-          <button
-            disabled={autoFit}
-            onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z / 1.5))}
-            className="rounded border bg-white px-2 py-1 disabled:cursor-not-allowed"
-          >
-            −
-          </button>
-          <input
-            type="range"
-            min={Math.log(ZOOM_MIN)}
-            max={Math.log(ZOOM_MAX)}
-            step={0.01}
-            value={Math.log(zoom)}
-            disabled={autoFit}
-            onChange={(e) => setZoom(Math.exp(Number(e.target.value)))}
-            className="w-40"
-          />
-          <button
-            disabled={autoFit}
-            onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z * 1.5))}
-            className="rounded border bg-white px-2 py-1 disabled:cursor-not-allowed"
-          >
-            +
-          </button>
-        </div>
-
-        <span className="tabular-nums text-xs text-gray-500">
-          {zoom >= 1
-            ? `${zoom.toFixed(1)} px/day`
-            : `${(1 / zoom).toFixed(1)} day/px`}
-        </span>
-
-        <span className="mx-1 h-4 w-px bg-gray-300" />
-
-        <label className="flex items-center gap-1.5 text-xs text-gray-700">
-          <input
-            type="checkbox"
-            checked={showLinks}
-            onChange={(e) => setShowLinks(e.target.checked)}
-          />
-          Show links
-        </label>
-
-        <label className="flex items-center gap-1.5 text-xs text-gray-700">
-          <input
-            type="checkbox"
-            checked={showCritical}
-            onChange={(e) => setShowCritical(e.target.checked)}
-          />
-          Highlight critical path
-        </label>
-
-        <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-600 ring-1 ring-gray-200">
-          {showDayHeader
-            ? "Detail: days"
-            : showWeekHeader
-              ? "Detail: weeks"
-              : "Detail: months"}
-        </span>
+          {ganttOpen ? "▼ Hide Gantt chart" : "▶ Show Gantt chart"}
+        </button>
       </div>
 
-      {/* ================= GANTT ================= */}
-      <section className="mb-8 rounded border">
-        <div className="flex">
+      {/* ================= ZOOM BAR ================= */}
+      {ganttOpen && (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-3 rounded border bg-gray-50 px-3 py-2 text-sm"
+          data-print-hide
+        >
+          <span className="font-medium text-gray-700">Timeline</span>
+
+          <label className="flex items-center gap-1.5 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={autoFit}
+              onChange={(e) => setAutoFit(e.target.checked)}
+            />
+            Fit to width
+          </label>
+
           <div
-            className="shrink-0 border-r bg-white"
-            style={{ width: LEFT_COL_W }}
+            className={`flex items-center gap-1 ${autoFit ? "opacity-50" : ""}`}
+            title={autoFit ? "Uncheck 'Fit to width' to zoom manually" : ""}
           >
-            <div className="flex h-10 items-center border-b px-3 text-xs font-semibold text-gray-500">
-              Task
-            </div>
-            <div>
-              {rows.map(({ task, depth, hasChildren }) => {
-                const isCollapsed = collapsed.has(task.id);
-                const critical = cpm.criticalIds.has(task.id);
-                const selected = selectedId === task.id;
-                const flash = flashId === task.id;
-                return (
-                  <div
-                    key={task.id}
-                    id={`row-${task.id}`}
-                    onClick={() => handleRowClick(task.id, hasChildren)}
-                    className={`flex cursor-pointer items-center gap-1 truncate px-2 text-xs transition-colors ${selected
-                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                        : "hover:bg-gray-50"
-                      } ${flash ? "animate-pulse" : ""}`}
-                    style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
-                  >
-                    {hasChildren ? (
-                      <span
-                        className="w-3 text-gray-500"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleCollapse(task.id);
-                        }}
-                      >
-                        {isCollapsed ? "▶" : "▼"}
-                      </span>
-                    ) : (
-                      <span className="w-3" />
-                    )}
-                    {!hasChildren && critical && showCritical && (
-                      <span
-                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                        title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
-                          }d`}
-                      />
-                    )}
-                    <span
-                      className={`truncate ${hasChildren ? "font-semibold" : ""
-                        }`}
-                      title={task.name}
-                    >
-                      {task.name}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            <button
+              disabled={autoFit}
+              onClick={() => zoomKeepCenter(zoom / 1.5)}
+              className="rounded border bg-white px-2 py-1 disabled:cursor-not-allowed"
+            >
+              −
+            </button>
+            <input
+              type="range"
+              min={Math.log(ZOOM_MIN)}
+              max={Math.log(ZOOM_MAX)}
+              step={0.01}
+              value={Math.log(zoom)}
+              disabled={autoFit}
+              onChange={(e) => zoomKeepCenter(Math.exp(Number(e.target.value)))}
+              className="w-40"
+            />
+            <button
+              disabled={autoFit}
+              onClick={() => zoomKeepCenter(zoom * 1.5)}
+              className="rounded border bg-white px-2 py-1 disabled:cursor-not-allowed"
+            >
+              +
+            </button>
           </div>
 
-          <div ref={scrollerRef} className="flex-1 overflow-x-auto">
-            <div style={{ width: ganttWidth }}>
-              <div className="border-b bg-gray-50">
-                <div className="flex h-5 text-[10px] text-gray-700">
-                  {months.map((m, i) => (
+          <span className="tabular-nums text-xs text-gray-500">
+            {zoom >= 1
+              ? `${zoom.toFixed(1)} px/day`
+              : `${(1 / zoom).toFixed(1)} day/px`}
+          </span>
+
+          <button
+            onClick={() => setAutoFit(true)}
+            className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50"
+            title="Fit the whole schedule to the width"
+          >
+            Fit all
+          </button>
+          <button
+            onClick={() => {
+              const t = selectedId ? rolled.find((x) => x.id === selectedId) : null;
+              if (t) zoomToTask(t);
+            }}
+            disabled={!selectedId}
+            className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Zoom to the selected task"
+          >
+            Fit selected
+          </button>
+          <button
+            onClick={zoomToToday}
+            disabled={!todayInRange}
+            className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            title={
+              todayInRange
+                ? "Zoom to today (±10 days)"
+                : "Today is outside the schedule range"
+            }
+          >
+            Today
+          </button>
+
+          <span className="mx-1 h-4 w-px bg-gray-300" />
+
+          <label className="flex items-center gap-1.5 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={showLinks}
+              onChange={(e) => setShowLinks(e.target.checked)}
+            />
+            Show links
+          </label>
+
+          <label className="flex items-center gap-1.5 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={showCritical}
+              onChange={(e) => setShowCritical(e.target.checked)}
+            />
+            Highlight critical path
+          </label>
+
+          <label className="flex items-center gap-1.5 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={showBaseline}
+              onChange={(e) => setShowBaseline(e.target.checked)}
+            />
+            Show baseline &amp; actual
+          </label>
+
+          <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-600 ring-1 ring-gray-200">
+            {showDayHeader
+              ? "Detail: days"
+              : showWeekHeader
+                ? "Detail: weeks"
+                : "Detail: months"}
+          </span>
+        </div>
+      )}
+
+      {/* ================= GANTT ================= */}
+      {ganttOpen && (
+        <section className="mb-8 rounded border">
+          <div className="flex">
+            <div
+              className="shrink-0 border-r bg-white"
+              style={{ width: LEFT_COL_W }}
+            >
+              <div
+                className="box-border flex items-center border-b px-3 text-xs font-semibold text-gray-500"
+                style={{ height: headerH }}
+              >
+                Task
+              </div>
+              <div>
+                {rows.map(({ task, depth, hasChildren }) => {
+                  const isCollapsed = collapsed.has(task.id);
+                  const critical = cpm.criticalIds.has(task.id);
+                  const selected = selectedId === task.id;
+                  const flash = flashId === task.id;
+                  return (
                     <div
-                      key={i}
-                      className="overflow-hidden whitespace-nowrap border-r px-2 leading-5"
-                      style={{ width: m.days * zoom }}
-                      title={m.label}
+                      key={task.id}
+                      id={`row-${task.id}`}
+                      onClick={() => {
+                        handleRowClick(task.id, hasChildren);
+                        zoomToTask(task);
+                      }}
+                      onDoubleClick={() => openEditorFromBar(task.id)}
+                      onTouchStart={() => startLongPress(task.id)}
+                      onTouchEnd={cancelLongPress}
+                      onTouchMove={cancelLongPress}
+                      className={`flex cursor-pointer items-center gap-1 truncate px-2 text-xs transition-colors ${selected
+                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                        : "hover:bg-gray-50"
+                        } ${flash ? "animate-pulse" : ""}`}
+                      style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                     >
-                      {m.px >= MIN_MONTH_LABEL_W ? m.label : m.short}
+                      {hasChildren ? (
+                        <span
+                          className="w-3 text-gray-500"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCollapse(task.id);
+                          }}
+                        >
+                          {isCollapsed ? "▶" : "▼"}
+                        </span>
+                      ) : (
+                        <span className="w-3" />
+                      )}
+                      {!hasChildren && critical && showCritical && (
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
+                          title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
+                            }d`}
+                        />
+                      )}
+                      <span
+                        className={`truncate ${hasChildren ? "font-semibold" : ""
+                          }`}
+                        title={task.name}
+                      >
+                        {task.name}
+                      </span>
                     </div>
-                  ))}
-                </div>
-                {showWeekHeader && (
-                  <div className="flex h-5 border-t text-[10px] text-gray-500">
-                    {weeks.map((w, i) => (
+                  );
+                })}
+              </div>
+            </div>
+
+            <div ref={scrollerRef} className="flex-1 overflow-x-auto">
+              <div style={{ width: ganttWidth }}>
+                <div
+                  className="box-border border-b bg-gray-50"
+                  style={{ height: headerH }}
+                >
+                  <div className="flex h-5 text-[10px] text-gray-700">
+                    {months.map((m, i) => (
                       <div
                         key={i}
-                        className="overflow-hidden whitespace-nowrap border-r px-1 leading-5"
-                        style={{ width: w.days * zoom }}
+                        className="overflow-hidden whitespace-nowrap border-r px-2 leading-5"
+                        style={{ width: m.days * zoom }}
+                        title={m.label}
                       >
-                        {w.px > 26 ? w.label : ""}
+                        {m.px >= MIN_MONTH_LABEL_W ? m.label : m.short}
                       </div>
                     ))}
                   </div>
-                )}
-                {showDayHeader && (
-                  <div className="flex h-5 border-t text-[9px] text-gray-500">
-                    {Array.from({ length: totalDays }).map((_, i) => {
-                      const d = new Date((minDay + i) * DAY);
-                      const isWeekend =
-                        d.getUTCDay() === 0 || d.getUTCDay() === 6;
-                      const holiday =
-                        useWorkdays && isHoliday(minDay + i, calendar);
-                      return (
+                  {showWeekHeader && (
+                    <div className="flex h-5 border-t text-[10px] text-gray-500">
+                      {weeks.map((w, i) => (
                         <div
                           key={i}
-                          className={`overflow-hidden border-r text-center leading-5 ${holiday
+                          className="overflow-hidden whitespace-nowrap border-r px-1 leading-5"
+                          style={{ width: w.days * zoom }}
+                        >
+                          {w.px > 26 ? w.label : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {showDayHeader && (
+                    <div className="flex h-5 border-t text-[9px] text-gray-500">
+                      {Array.from({ length: totalDays }).map((_, i) => {
+                        const d = new Date((minDay + i) * DAY);
+                        const isWeekend =
+                          d.getUTCDay() === 0 || d.getUTCDay() === 6;
+                        const holiday =
+                          useWorkdays && isHoliday(minDay + i, calendar);
+                        return (
+                          <div
+                            key={i}
+                            className={`overflow-hidden border-r text-center leading-5 ${holiday
                               ? "bg-pink-100"
                               : isWeekend
                                 ? "bg-gray-100"
                                 : ""
-                            }`}
-                          style={{ width: zoom }}
-                          title={holiday ? "Holiday" : undefined}
-                        >
-                          {zoom >= 12 ? d.getUTCDate() : ""}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                              }`}
+                            style={{ width: zoom }}
+                            title={holiday ? "Holiday" : undefined}
+                          >
+                            {zoom >= 12 ? d.getUTCDate() : ""}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
-              <div className="relative" style={{ height: ganttBodyHeight }}>
-                <div className="absolute inset-0 flex">
-                  {Array.from({ length: totalDays }).map((_, i) => {
-                    const dayNum = minDay + i;
-                    const d = new Date(dayNum * DAY);
-                    const isWeekend =
-                      d.getUTCDay() === 0 || d.getUTCDay() === 6;
-                    const holiday = useWorkdays && isHoliday(dayNum, calendar);
-                    return (
-                      <div
-                        key={i}
-                        className={`h-full ${holiday
+                <div className="relative" style={{ height: ganttBodyHeight }}>
+                  <div className="absolute inset-0 flex">
+                    {Array.from({ length: totalDays }).map((_, i) => {
+                      const dayNum = minDay + i;
+                      const d = new Date(dayNum * DAY);
+                      const isWeekend =
+                        d.getUTCDay() === 0 || d.getUTCDay() === 6;
+                      const holiday = useWorkdays && isHoliday(dayNum, calendar);
+                      return (
+                        <div
+                          key={i}
+                          className={`h-full ${holiday
                             ? "bg-pink-50"
                             : isWeekend
                               ? "bg-gray-50"
                               : ""
-                          } ${showDayGrid ? "border-r" : ""}`}
-                        style={{ width: zoom }}
-                      />
-                    );
-                  })}
-                </div>
+                            } ${showDayGrid ? "border-r" : ""}`}
+                          style={{ width: zoom }}
+                        />
+                      );
+                    })}
+                  </div>
 
-                {showWeekGrid &&
-                  weeks.map((w, i) => {
-                    const leftDays = weeks
+                  {showWeekGrid &&
+                    weeks.map((w, i) => {
+                      const leftDays = weeks
+                        .slice(0, i)
+                        .reduce((a, x) => a + x.days, 0);
+                      return (
+                        <div
+                          key={i}
+                          className="pointer-events-none absolute top-0 h-full border-l border-gray-300/60"
+                          style={{ left: leftDays * zoom }}
+                        />
+                      );
+                    })}
+
+                  {months.map((m, i) => {
+                    const leftDays = months
                       .slice(0, i)
                       .reduce((a, x) => a + x.days, 0);
                     return (
                       <div
                         key={i}
-                        className="pointer-events-none absolute top-0 h-full border-l border-gray-300/60"
+                        className="pointer-events-none absolute top-0 h-full border-l border-gray-400/70"
                         style={{ left: leftDays * zoom }}
                       />
                     );
                   })}
 
-                {months.map((m, i) => {
-                  const leftDays = months
-                    .slice(0, i)
-                    .reduce((a, x) => a + x.days, 0);
-                  return (
+                  {todayInRange && (
                     <div
-                      key={i}
-                      className="pointer-events-none absolute top-0 h-full border-l border-gray-400/70"
-                      style={{ left: leftDays * zoom }}
-                    />
-                  );
-                })}
-
-                {todayInRange && (
-                  <div
-                    className="pointer-events-none absolute top-0 z-20 h-full w-px bg-red-500"
-                    style={{ left: (todayDay - minDay) * zoom }}
-                    title={`Today · ${today}`}
-                  >
-                    <div className="absolute -top-0.5 -translate-x-1/2 rounded bg-red-500 px-1 text-[9px] leading-tight text-white">
-                      today
+                      className="pointer-events-none absolute top-0 z-20 h-full w-px bg-red-500"
+                      style={{ left: (todayDay - minDay) * zoom }}
+                      title={`Today · ${today}`}
+                    >
+                      <div className="absolute -top-0.5 -translate-x-1/2 rounded bg-red-500 px-1 text-[9px] leading-tight text-white">
+                        today
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {rows.map(({ task }, i) => {
-                  const selected = selectedId === task.id;
-                  const flash = flashId === task.id;
-                  if (!selected && !flash) return null;
-                  return (
-                    <div
-                      key={`hl-${task.id}`}
-                      className={`pointer-events-none absolute left-0 right-0 ${selected ? "bg-blue-100/60" : ""
-                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
-                      style={{ top: i * ROW_H, height: ROW_H }}
-                    />
-                  );
-                })}
+                  {rows.map(({ task }, i) => {
+                    const selected = selectedId === task.id;
+                    const flash = flashId === task.id;
+                    if (!selected && !flash) return null;
+                    return (
+                      <div
+                        key={`hl-${task.id}`}
+                        className={`pointer-events-none absolute left-0 right-0 ${selected ? "bg-blue-100/60" : ""
+                          } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                        style={{ top: i * ROW_H, height: ROW_H }}
+                      />
+                    );
+                  })}
 
-                {showLinks && (
-                  <svg
-                    className="pointer-events-none absolute inset-0"
-                    width={ganttWidth}
-                    height={ganttBodyHeight}
-                  >
-                    <defs>
-                      <marker
-                        id="arrow"
-                        viewBox="0 0 10 10"
-                        refX="9"
-                        refY="5"
-                        markerWidth="7"
-                        markerHeight="7"
-                        orient="auto-start-reverse"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
-                      </marker>
-                      <marker
-                        id="arrowCrit"
-                        viewBox="0 0 10 10"
-                        refX="9"
-                        refY="5"
-                        markerWidth="8"
-                        markerHeight="8"
-                        orient="auto-start-reverse"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
-                      </marker>
-                    </defs>
-                    {links.map((l) => {
-                      const isCrit = l.critical && showCritical;
+                  {showLinks && (
+                    <svg
+                      className="pointer-events-none absolute inset-0"
+                      width={ganttWidth}
+                      height={ganttBodyHeight}
+                    >
+                      <defs>
+                        <marker
+                          id="arrow"
+                          viewBox="0 0 10 10"
+                          refX="9"
+                          refY="5"
+                          markerWidth="7"
+                          markerHeight="7"
+                          orient="auto-start-reverse"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
+                        </marker>
+                        <marker
+                          id="arrowCrit"
+                          viewBox="0 0 10 10"
+                          refX="9"
+                          refY="5"
+                          markerWidth="8"
+                          markerHeight="8"
+                          orient="auto-start-reverse"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
+                        </marker>
+                      </defs>
+                      {links.map((l) => {
+                        const isCrit = l.critical && showCritical;
+                        return (
+                          <path
+                            key={l.id}
+                            d={l.path}
+                            fill="none"
+                            stroke={isCrit ? "#dc2626" : "#9ca3af"}
+                            strokeWidth={isCrit ? 1.75 : 1}
+                            strokeOpacity={isCrit ? 1 : 0.7}
+                            markerEnd={
+                              isCrit ? "url(#arrowCrit)" : "url(#arrow)"
+                            }
+                          />
+                        );
+                      })}
+                    </svg>
+                  )}
+
+                  {showBaseline &&
+                    rows.map(({ task }, i) => {
+                      if (!task.baselineStart || !task.baselineFinish) return null;
+                      const bl = (toDay(task.baselineStart) - minDay) * zoom;
+                      const bw = Math.max(
+                        2,
+                        (toDay(task.baselineFinish) -
+                          toDay(task.baselineStart) +
+                          1) *
+                        zoom -
+                        2
+                      );
                       return (
-                        <path
-                          key={l.id}
-                          d={l.path}
-                          fill="none"
-                          stroke={isCrit ? "#dc2626" : "#9ca3af"}
-                          strokeWidth={isCrit ? 1.75 : 1}
-                          strokeOpacity={isCrit ? 1 : 0.7}
-                          markerEnd={
-                            isCrit ? "url(#arrowCrit)" : "url(#arrow)"
-                          }
+                        <div
+                          key={`bl-${task.id}`}
+                          className="pointer-events-none absolute z-10 h-1 rounded bg-gray-400/80"
+                          style={{ left: bl, top: i * ROW_H + 22, width: bw }}
+                          title={`Baseline ${task.baselineStart} → ${task.baselineFinish}`}
                         />
                       );
                     })}
-                  </svg>
-                )}
 
-                {rows.map(({ task, hasChildren }, i) => {
-                  const s = toDay(task.scheduleStart) - minDay;
-                  const dur = durationDays(task);
-                  const w = Math.max(
-                    task.isMilestone ? 6 : 2,
-                    dur * zoom - (task.isMilestone ? 0 : 2)
-                  );
-                  const critical = !hasChildren && cpm.criticalIds.has(task.id);
-                  const selected = selectedId === task.id;
-                  const barColor = hasChildren
-                    ? "bg-gray-800"
-                    : task.isMilestone
-                      ? "bg-amber-500"
-                      : critical && showCritical
-                        ? "bg-red-500"
-                        : "bg-blue-500";
-                  const innerColor =
-                    critical && showCritical ? "bg-red-700" : "bg-blue-700";
-                  const durLabel =
-                    useWorkdays && !hasChildren
-                      ? `${durationWorkdays(task, calendar)} working days`
-                      : `${dur}d`;
-                  return (
-                    <div
-                      key={task.id}
-                      onClick={() => handleRowClick(task.id, !!hasChildren)}
-                      className={`absolute h-3 cursor-pointer rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                        }`}
-                      style={{ left: s * zoom, top: i * ROW_H + 8, width: w }}
-                      title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
-                        } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
-                        }${critical
-                          ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
-                          }d`
-                          : ""
-                        }`}
-                    >
-                      {!hasChildren &&
-                        !task.isMilestone &&
-                        task.completion > 0 && (
-                          <div
-                            className={`h-full rounded ${innerColor}`}
-                            style={{ width: `${task.completion}%` }}
-                          />
-                        )}
-                    </div>
-                  );
-                })}
-
-                {showLinks && showCritical && (
-                  <svg
-                    className="pointer-events-none absolute inset-0 z-20"
-                    width={ganttWidth}
-                    height={ganttBodyHeight}
-                  >
-                    <defs>
-                      <marker
-                        id="arrowCritTop"
-                        viewBox="0 0 10 10"
-                        refX="9"
-                        refY="5"
-                        markerWidth="8"
-                        markerHeight="8"
-                        orient="auto-start-reverse"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
-                      </marker>
-                    </defs>
-                    {links
-                      .filter((l) => l.critical)
-                      .map((l) => (
-                        <path
-                          key={`crit-${l.id}`}
-                          d={l.path}
-                          fill="none"
-                          stroke="#dc2626"
-                          strokeWidth={1.75}
-                          markerEnd="url(#arrowCritTop)"
+                  {showBaseline &&
+                    rows.map(({ task }, i) => {
+                      if (!task.actualStart) return null;
+                      const aStartDay = toDay(task.actualStart);
+                      const aEndDay = task.actualFinish
+                        ? toDay(task.actualFinish)
+                        : Math.max(todayDay, aStartDay);
+                      const late =
+                        !!task.actualFinish &&
+                        !!task.baselineFinish &&
+                        task.actualFinish > task.baselineFinish;
+                      return (
+                        <div
+                          key={`ac-${task.id}`}
+                          className={`pointer-events-none absolute z-10 h-1 rounded ${late ? "bg-orange-500" : "bg-emerald-500"
+                            } ${task.actualFinish ? "" : "opacity-70"}`}
+                          style={{
+                            left: (aStartDay - minDay) * zoom,
+                            top: i * ROW_H + 3,
+                            width: Math.max(2, (aEndDay - aStartDay + 1) * zoom - 2),
+                          }}
+                          title={`Actual ${task.actualStart} → ${task.actualFinish ?? "in progress"
+                            }`}
                         />
-                      ))}
-                  </svg>
-                )}
+                      );
+                    })}
+
+                  {rows.map(({ task, hasChildren }, i) => {
+                    const s = toDay(task.scheduleStart) - minDay;
+                    const dur = durationDays(task);
+                    const w = Math.max(
+                      task.isMilestone ? 6 : 2,
+                      dur * zoom - (task.isMilestone ? 0 : 2)
+                    );
+                    const critical = !hasChildren && cpm.criticalIds.has(task.id);
+                    const selected = selectedId === task.id;
+                    const barColor = hasChildren
+                      ? "bg-gray-800"
+                      : task.isMilestone
+                        ? "bg-amber-500"
+                        : critical && showCritical
+                          ? "bg-red-500"
+                          : "bg-blue-500";
+                    const innerColor =
+                      critical && showCritical ? "bg-red-700" : "bg-blue-700";
+                    const durLabel =
+                      useWorkdays && !hasChildren
+                        ? `${durationWorkdays(task, calendar)} working days`
+                        : `${dur}d`;
+                    return (
+                      <div
+                        key={task.id}
+                        onClick={() => handleRowClick(task.id, !!hasChildren)}
+                        onDoubleClick={() => openEditorFromBar(task.id)}
+                        onTouchStart={() => startLongPress(task.id)}
+                        onTouchEnd={cancelLongPress}
+                        onTouchMove={cancelLongPress}
+                        className={`absolute h-3 cursor-pointer rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                          }`}
+                        style={{ left: s * zoom, top: i * ROW_H + 8, width: w }}
+                        title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
+                          } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
+                          }${critical
+                            ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
+                            }d`
+                            : ""
+                          }`}
+                      >
+                        {!hasChildren &&
+                          !task.isMilestone &&
+                          task.completion > 0 && (
+                            <div
+                              className={`h-full rounded ${innerColor}`}
+                              style={{ width: `${task.completion}%` }}
+                            />
+                          )}
+                      </div>
+                    );
+                  })}
+
+                  {showLinks && showCritical && (
+                    <svg
+                      className="pointer-events-none absolute inset-0 z-20"
+                      width={ganttWidth}
+                      height={ganttBodyHeight}
+                    >
+                      <defs>
+                        <marker
+                          id="arrowCritTop"
+                          viewBox="0 0 10 10"
+                          refX="9"
+                          refY="5"
+                          markerWidth="8"
+                          markerHeight="8"
+                          orient="auto-start-reverse"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
+                        </marker>
+                      </defs>
+                      {links
+                        .filter((l) => l.critical)
+                        .map((l) => (
+                          <path
+                            key={`crit-${l.id}`}
+                            d={l.path}
+                            fill="none"
+                            stroke="#dc2626"
+                            strokeWidth={1.75}
+                            markerEnd="url(#arrowCritTop)"
+                          />
+                        ))}
+                    </svg>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* ================= TABLE ================= */}
       <section className="overflow-x-auto rounded border">
-        <table className="w-full min-w-[1400px] border-collapse text-sm">
+        <table className="w-full min-w-[1750px] border-collapse text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
+              <th className="w-8 px-2 py-2">
+                {!readOnly && (
+                  <input
+                    type="checkbox"
+                    checked={allVisibleChecked}
+                    onChange={toggleAllVisible}
+                    title="Select / unselect all visible rows"
+                  />
+                )}
+              </th>
               <th className="w-10 px-2 py-2"></th>
               <th className="w-12 px-2 py-2">#</th>
               <th className="min-w-[200px] px-2 py-2">Task</th>
@@ -1638,6 +1887,18 @@ export default function ScheduleView() {
                 Float
               </th>
               <th className="w-24 px-2 py-2">%</th>
+              <th className="w-28 px-2 py-2" title="Actual start">
+                Act. start
+              </th>
+              <th className="w-28 px-2 py-2" title="Actual finish">
+                Act. finish
+              </th>
+              <th
+                className="w-16 px-2 py-2"
+                title="Finish vs baseline (days). + = late, − = early"
+              >
+                Var
+              </th>
               <th className="w-64 px-2 py-2">Predecessors</th>
               <th className="w-64 px-2 py-2">Successors</th>
               <th className="w-10 px-2 py-2"></th>
@@ -1654,6 +1915,7 @@ export default function ScheduleView() {
               const succs = successorsOf(task.id);
               const critical = !isGroup && cpm.criticalIds.has(task.id);
               const float = cpm.totalFloat.get(task.id);
+              const variance = finishVariance(task);
               const isPickerOpen = picker?.taskId === task.id;
               const selected = selectedId === task.id;
               const flash = flashId === task.id;
@@ -1664,12 +1926,24 @@ export default function ScheduleView() {
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
                   className={`cursor-pointer border-t transition-colors ${selected
-                      ? "bg-blue-100"
-                      : critical && showCritical
-                        ? "bg-red-50/40 hover:bg-red-50/70"
-                        : "hover:bg-gray-50"
+                    ? "bg-blue-100"
+                    : critical && showCritical
+                      ? "bg-red-50/40 hover:bg-red-50/70"
+                      : "hover:bg-gray-50"
                     } ${flash ? "animate-pulse" : ""}`}
                 >
+                  <td
+                    className="px-2 py-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!readOnly && (
+                      <input
+                        type="checkbox"
+                        checked={checkedIds.has(task.id)}
+                        onChange={() => toggleChecked(task.id)}
+                      />
+                    )}
+                  </td>
                   <td
                     className="relative px-1 py-1.5"
                     onClick={(e) => e.stopPropagation()}
@@ -1815,6 +2089,56 @@ export default function ScheduleView() {
                         {task.completion}%
                       </span>
                     </div>
+                  </td>
+
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="date"
+                      value={task.actualStart ?? ""}
+                      disabled={isGroup || readOnly}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) =>
+                        updateActual(task.id, "actualStart", e.target.value)
+                      }
+                      className="w-full rounded border px-1 py-0.5 text-xs disabled:bg-gray-100"
+                    />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="date"
+                      value={task.actualFinish ?? ""}
+                      disabled={isGroup || readOnly}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) =>
+                        updateActual(task.id, "actualFinish", e.target.value)
+                      }
+                      className="w-full rounded border px-1 py-0.5 text-xs disabled:bg-gray-100"
+                    />
+                  </td>
+                  <td
+                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${variance === null
+                      ? "text-gray-400"
+                      : variance > 0
+                        ? "font-semibold text-red-600"
+                        : variance < 0
+                          ? "text-emerald-600"
+                          : "text-gray-600"
+                      }`}
+                    title={
+                      variance === null
+                        ? "No baseline set"
+                        : variance > 0
+                          ? `${variance} day(s) later than baseline`
+                          : variance < 0
+                            ? `${-variance} day(s) earlier than baseline`
+                            : "On baseline"
+                    }
+                  >
+                    {variance === null
+                      ? "—"
+                      : variance > 0
+                        ? `+${variance}d`
+                        : `${variance}d`}
                   </td>
 
                   <td
@@ -2017,9 +2341,69 @@ export default function ScheduleView() {
         <ActivityEditorModal
           task={editingTask}
           tasks={tasks}
+          sequences={sequences}
+          calendar={calendar}
+          useWorkdays={useWorkdays}
           onSave={(patch) => updateTask(editingTask.id, patch)}
           onDelete={() => deleteTask(editingTask.id)}
           onClose={() => setEditingId(null)}
+          onAddSequence={(predId, succId) => {
+            if (wouldCycle(sequences, predId, succId)) {
+              alert("That would create a cycle.");
+              return;
+            }
+            setSequences((prev) => [
+              ...prev,
+              {
+                id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                relatingTask: predId,
+                relatedTask: succId,
+                sequenceType: "FINISH_START",
+                lagDays: 0,
+              },
+            ]);
+          }}
+          onUpdateSequence={(id, patch) => updateSequence(id, patch)}
+          onRemoveSequence={(id) => removeSequence(id)}
+        />
+      )}
+
+      {/* ================= PASTE JSON MODAL ================= */}
+      {pasteOpen && !readOnly && (
+        <PasteJsonModal
+          tasks={tasks}
+          sequences={sequences}
+          onApply={applyPaste}
+          onClose={() => setPasteOpen(false)}
+        />
+      )}
+      {scopedPasteOpen && !readOnly && (
+        <PasteJsonModal
+          tasks={tasks}
+          sequences={sequences}
+          restrictTo={new Set(selectionIds())}
+          onApply={applyPaste}
+          onClose={() => setScopedPasteOpen(false)}
+        />
+      )}
+
+      {/* ================= BASELINE COMPARE ================= */}
+      {compareOpen && (
+        <BaselineCompare
+          tasks={rolled}
+          onClose={() => setCompareOpen(false)}
+          onJump={(id) => {
+            const ancestors = new Set<string>();
+            let cur = tasks.find((t) => t.id === id)?.parentId ?? null;
+            while (cur && !ancestors.has(cur)) {
+              ancestors.add(cur);
+              const p: string = cur;
+              cur = tasks.find((t) => t.id === p)?.parentId ?? null;
+            }
+            expandAncestors(Array.from(ancestors));
+            setCompareOpen(false);
+            handleSelectFromSearch(id);
+          }}
         />
       )}
 
@@ -2033,14 +2417,4 @@ export default function ScheduleView() {
       )}
     </main>
   );
-}
-
-function isoWeek(date: Date): number {
-  const d = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  );
-  const day = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d.getTime() - yearStart.getTime()) / DAY + 1) / 7);
 }

@@ -56,6 +56,16 @@ export interface UseScheduleSyncResult {
     sequences: Sequence[];
     calendar: SerializedCalendar;
   }) => void;
+  /**
+   * Manually create a schedule for the current project and upload the seed.
+   * Only meaningful when `status === "empty"` and the user can edit.
+   * Never called automatically — an empty project stays empty until the
+   * user explicitly asks for a new schedule.
+   *
+   * The created schedule is BLANK (no tasks/sequences); the default calendar
+   * is still attached so weekend/holiday shading works out of the box.
+   */
+  createAndSeed: () => Promise<void>;
 }
 
 const debounceMs = 1500;
@@ -175,40 +185,10 @@ export function useScheduleSync({
       canEditRef.current = ce;
 
       if (results.length === 0) {
-        if (!ce) {
-          setStatus("empty");
-          return;
-        }
-        // Seed a brand new schedule
-        const created = await createSchedule(projectId, "Project Work Schedule");
-        idRef.current = created.id;
-        verRef.current = created.version;
-        const { sequences: cleanSeqs } = pruneOrphanSequences(
-          seed.tasks,
-          seed.sequences
-        );
-        const saved = await saveSchedule(created.id, {
-          version: created.version,
-          tasks: seed.tasks,
-          sequences: cleanSeqs,
-          calendar: seed.calendar,
-        });
-        verRef.current = saved.version;
-        const doc: ScheduleDoc = {
-          ...created,
-          tasks: seed.tasks,
-          sequences: cleanSeqs,
-          calendar: seed.calendar,
-          version: saved.version,
-          canEdit: true,
-        };
-        lastSavedRef.current = stableKey({
-          tasks: doc.tasks,
-          sequences: doc.sequences,
-          calendar: doc.calendar,
-        });
-        onLoaded(doc);
-        setStatus("saved");
+        // ⚠️ NO AUTOMATIC SEEDING.
+        // An empty project stays empty until the user explicitly calls
+        // `createAndSeed()`.
+        setStatus("empty");
         return;
       }
 
@@ -241,7 +221,7 @@ export function useScheduleSync({
       setMessage(msg);
       setStatus("failed");
     }
-  }, [projectId, scheduleId, seed, onLoaded]);
+  }, [projectId, scheduleId, onLoaded]);
 
   useEffect(() => {
     const key = `sched:${scheduleId ?? "p" + projectId}`;
@@ -254,6 +234,60 @@ export function useScheduleSync({
     pausedRef.current = false;
     void load();
   }, [scheduleId, projectId, load]);
+
+  // ── MANUAL "CREATE SCHEDULE" ────────────────────────────────────────────
+  // Only runs when the user explicitly asks. Creates a BLANK schedule —
+  // no demo tasks, no demo sequences — and attaches it to the current
+  // project. The default (empty) calendar is still uploaded so the schedule
+  // starts with Sat+Sun off.
+  const createAndSeed = useCallback(async () => {
+    if (projectId == null) return;
+    if (!canEditRef.current) return;
+    setMessage(null);
+    try {
+      const created = await createSchedule(projectId, "Project Work Schedule");
+      idRef.current = created.id;
+      verRef.current = created.version;
+
+      // ── Blank document ────────────────────────────────────────────────
+      const blankTasks: Task[] = [];
+      const blankSeqs: Sequence[] = [];
+      const blankCalendar = seed.calendar; // default empty calendar
+
+      const saved = await saveSchedule(created.id, {
+        version: created.version,
+        tasks: blankTasks,
+        sequences: blankSeqs,
+        calendar: blankCalendar,
+      });
+      verRef.current = saved.version;
+
+      const doc: ScheduleDoc = {
+        ...created,
+        tasks: blankTasks,
+        sequences: blankSeqs,
+        calendar: blankCalendar,
+        version: saved.version,
+        canEdit: true,
+      };
+      lastSavedRef.current = stableKey({
+        tasks: doc.tasks,
+        sequences: doc.sequences,
+        calendar: doc.calendar,
+      });
+      onLoaded(doc);
+      setStatus("saved");
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? e.message
+          : e instanceof Error
+          ? e.message
+          : "Failed to create schedule";
+      setMessage(msg);
+      setStatus("error");
+    }
+  }, [projectId, seed.calendar, onLoaded]);
 
   // ── SAVE ────────────────────────────────────────────────────────────────
   const doSave = useCallback(async () => {
@@ -401,5 +435,6 @@ export function useScheduleSync({
       setSavedAt(new Date().toISOString());
       setStatus("saved");
     },
+    createAndSeed,
   };
 }

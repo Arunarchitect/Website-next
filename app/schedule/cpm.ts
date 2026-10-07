@@ -3,7 +3,7 @@
 // Depends on data.ts, scheduling.ts, calendar.ts.
 
 import type { Sequence, Task } from "./data";
-import { durationDays, toDay } from "./scheduling";
+import { durationDays, toDay, toISO } from "./scheduling";
 import {
   addWorkdays,
   countWorkdays,
@@ -45,8 +45,14 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
 
   if (!leaves.length) {
     return {
-      earlyStart, earlyFinish, lateStart, lateFinish, totalFloat,
-      criticalIds, projectStart: 0, projectFinish: 0,
+      earlyStart,
+      earlyFinish,
+      lateStart,
+      lateFinish,
+      totalFloat,
+      criticalIds,
+      projectStart: 0,
+      projectFinish: 0,
     };
   }
 
@@ -94,10 +100,19 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
       const pEF = earlyFinish.get(p.id) ?? pES + durationDays(p) - 1;
       let candidate: number;
       switch (s.sequenceType) {
-        case "FINISH_START":  candidate = pEF + 1 + s.lagDays; break;
-        case "START_START":   candidate = pES + s.lagDays; break;
-        case "FINISH_FINISH": candidate = pEF + s.lagDays - dur; break;
-        case "START_FINISH":  candidate = pES + s.lagDays - dur; break;
+        case "START_START":
+          candidate = pES + s.lagDays;
+          break;
+        case "FINISH_FINISH":
+          candidate = pEF + s.lagDays - dur;
+          break;
+        case "START_FINISH":
+          candidate = pES + s.lagDays - dur;
+          break;
+        case "FINISH_START":
+        default:
+          candidate = pEF + 1 + s.lagDays;
+          break;
       }
       if (candidate > es) es = candidate;
     }
@@ -140,10 +155,19 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
         const qLF = lateFinish.get(q.id) ?? projectFinish;
         let candidate: number;
         switch (s.sequenceType) {
-          case "FINISH_START":  candidate = qLS - 1 - s.lagDays; break;
-          case "START_START":   candidate = qLS - s.lagDays + dur; break;
-          case "FINISH_FINISH": candidate = qLF - s.lagDays; break;
-          case "START_FINISH":  candidate = qLF - s.lagDays + dur; break;
+          case "START_START":
+            candidate = qLS - s.lagDays + dur;
+            break;
+          case "FINISH_FINISH":
+            candidate = qLF - s.lagDays;
+            break;
+          case "START_FINISH":
+            candidate = qLF - s.lagDays + dur;
+            break;
+          case "FINISH_START":
+          default:
+            candidate = qLS - 1 - s.lagDays;
+            break;
         }
         if (candidate < lf) lf = candidate;
       }
@@ -162,8 +186,14 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
   }
 
   return {
-    earlyStart, earlyFinish, lateStart, lateFinish, totalFloat,
-    criticalIds, projectStart, projectFinish,
+    earlyStart,
+    earlyFinish,
+    lateStart,
+    lateFinish,
+    totalFloat,
+    criticalIds,
+    projectStart,
+    projectFinish,
   };
 }
 
@@ -173,7 +203,8 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
  *
  * Strategy: snap every leaf task's dates to the working calendar, run the
  * standard CPM on the snapped dates, then convert the resulting float from
- * calendar days to working days.
+ * calendar days to working days (counting only the working days inside the
+ * float window) and recompute which tasks are critical from that float.
  *
  * Good enough for typical construction schedules (contiguous activities,
  * FS/SS/FF/SF links with small lags). For schedules with long shutdowns in
@@ -188,29 +219,33 @@ export function computeCpmWorkdays(
   const parents = new Set(
     tasks.map((t) => t.parentId).filter((x): x is string => !!x)
   );
-  const snappedTasks = tasks.map((t) => {
+  const snappedTasks: Task[] = tasks.map((t) => {
     if (parents.has(t.id)) return t;
     const s = nextWorkday(t.scheduleStart, cal);
     const wd = Math.max(1, countWorkdays(s, t.scheduleFinish, cal));
-    const f = addWorkdays(s, wd, cal);
+    // addWorkdays(start, n) moves forward n working days, so a task of
+    // `wd` working days finishes `wd - 1` working days after its start.
+    const f = addWorkdays(s, wd - 1, cal);
     return { ...t, scheduleStart: s, scheduleFinish: f };
   });
 
   const cpm = computeCpm(snappedTasks, seqs);
 
   const totalFloatWork = new Map<string, number>();
+  const criticalIds = new Set<string>();
   for (const [id, f] of cpm.totalFloat) {
-    const t = snappedTasks.find((x) => x.id === id);
-    if (!t) {
-      totalFloatWork.set(id, f);
-      continue;
+    let wf = f;
+    if (f > 0) {
+      const ef = cpm.earlyFinish.get(id);
+      if (ef !== undefined) {
+        wf = countWorkdays(toISO(ef + 1), toISO(ef + f), cal);
+      }
     }
-    const end = addWorkdays(t.scheduleFinish, f, cal);
-    const wf = Math.max(0, countWorkdays(t.scheduleFinish, end, cal) - 1);
     totalFloatWork.set(id, wf);
+    if (wf <= 0) criticalIds.add(id);
   }
 
-  return { ...cpm, totalFloat: totalFloatWork };
+  return { ...cpm, totalFloat: totalFloatWork, criticalIds };
 }
 
 // ---------- "now / next" ----------
@@ -292,7 +327,7 @@ export function humanizeDaysUntil(d: number): string {
 }
 
 // ---------- formatting / description helpers ----------
-export const fmtDate = (day: number) =>
+export const fmtDate = (day: number): string =>
   new Date(day * 86400000).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",

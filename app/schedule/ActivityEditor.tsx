@@ -1,23 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { Task } from "./data";
-
-/**
- * CRUD helpers for schedule activities.
- *
- * Two exports:
- *   <ActivityEditorModal>  — full edit dialog for one task
- *   <RowMenu>              — small dropdown with Edit / Add child / Add sibling / Delete / Move
- *
- * The parent (page.tsx) owns state; these are pure UI that call back with
- * concrete mutations.
- */
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Sequence, Task } from "./data";
+import { SEQUENCE_TYPES, type SequenceType } from "./data";
+import { durationDays, durationWorkdays, toDay, wouldCycle } from "./scheduling";
+import {
+  addWorkdays,
+  countWorkdays,
+  nextWorkday,
+  prevWorkday,
+  type WorkingCalendar,
+} from "./calendar";
 
 export type MoveTarget = { kind: "root" } | { kind: "under"; id: string };
 
 // ---------------- helper: cycles ----------------
-/** True if `candidateParentId` is inside the subtree of `taskId` (or is itself). */
 export function isDescendant(
   tasks: Task[],
   taskId: string,
@@ -32,24 +29,512 @@ export function isDescendant(
   return false;
 }
 
+// ---------------- helper: date math (calendar-day) ----------------
+const DAY = 86_400_000;
+
+function toISO(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function finishFromStart(iso: string, days: number): string {
+  const d = new Date(toDay(iso) * DAY);
+  d.setUTCDate(d.getUTCDate() + Math.max(0, days - 1));
+  return toISO(d);
+}
+
+function daysBetween(startISO: string, finishISO: string): number {
+  return Math.max(1, toDay(finishISO) - toDay(startISO) + 1);
+}
+
+// ---------------- number input (kept for lag fields) ----------------
+function NumberInput({
+  value,
+  min = 1,
+  max,
+  disabled,
+  onCommit,
+  onChange,
+  className,
+  title,
+  suffix,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+  onCommit: (n: number) => void;
+  onChange?: (n: number) => void;
+  className?: string;
+  title?: string;
+  suffix?: string;
+}) {
+  const [raw, setRaw] = useState<string>(String(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setRaw(String(value));
+  }, [value, focused]);
+
+  const commit = () => {
+    const trimmed = raw.trim();
+    let n = Number(trimmed);
+    if (!Number.isFinite(n)) n = value;
+    n = Math.round(n);
+    if (min != null) n = Math.max(min, n);
+    if (max != null) n = Math.min(max, n);
+    setRaw(String(n));
+    if (n !== value) onCommit(n);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        value={raw}
+        disabled={disabled}
+        title={title}
+        onChange={(e) => {
+          const v = e.target.value.replace(/[^\d-]/g, "");
+          setRaw(v);
+          if (onChange) {
+            const n = Number(v);
+            if (Number.isFinite(n)) onChange(Math.round(n));
+          }
+        }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          commit();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            setRaw(String(value));
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className={className}
+      />
+      {suffix && (
+        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-500">
+          {suffix}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------- searchable task picker ----------------
+function ParentPicker({
+  tasks,
+  excludeId,
+  value,
+  onChange,
+  allowRoot = true,
+  placeholder = "Search…",
+  inputCls = "rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400",
+  autoFocus = false,
+}: {
+  tasks: Task[];
+  excludeId?: string;
+  value: string | null;
+  onChange: (id: string | null) => void;
+  allowRoot?: boolean;
+  placeholder?: string;
+  inputCls?: string;
+  autoFocus?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const candidates = useMemo(() => {
+    const list = excludeId
+      ? tasks.filter(
+          (t) => t.id !== excludeId && !isDescendant(tasks, excludeId, t.id)
+        )
+      : tasks;
+    return [...list].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+  }, [tasks, excludeId]);
+
+  const options = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = q
+      ? candidates.filter((t) => t.name.toLowerCase().includes(q))
+      : candidates;
+    const rootOpt = allowRoot
+      ? [{ id: "__root__", name: "— Top level —", isRoot: true as const }]
+      : [];
+    return [
+      ...rootOpt,
+      ...matches.map((t) => ({
+        id: t.id,
+        name: t.name,
+        isRoot: false as const,
+      })),
+    ];
+  }, [candidates, query, allowRoot]);
+
+  const selectedLabel = useMemo(() => {
+    if (value == null) return allowRoot ? "— Top level —" : "";
+    return candidates.find((t) => t.id === value)?.name ?? value;
+  }, [value, candidates, allowRoot]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = wrapRef.current?.querySelector<HTMLElement>(
+      `[data-opt-idx="${highlight}"]`
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [highlight, open]);
+
+  const commit = (id: string | null) => {
+    onChange(id);
+    setOpen(false);
+    setQuery("");
+    setHighlight(0);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
+      e.preventDefault();
+      setOpen(true);
+      return;
+    }
+    if (!open) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((i) => Math.min(options.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((i) => Math.max(0, i - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const opt = options[highlight];
+      if (!opt) return;
+      commit(opt.isRoot ? null : opt.id);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (query) setQuery("");
+      else setOpen(false);
+    }
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="text"
+        value={open ? query : selectedLabel}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setHighlight(0);
+          if (!open) setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        className={`w-full ${inputCls}`}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        autoFocus={autoFocus}
+      />
+      {value != null && !open && (
+        <button
+          type="button"
+          onClick={() => commit(null)}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          title="Clear"
+        >
+          ✕
+        </button>
+      )}
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-[60] mt-1 max-h-56 overflow-y-auto rounded-md border bg-white text-xs shadow-lg">
+          {options.length === 0 ? (
+            <div className="px-2 py-1.5 text-gray-500">
+              No matches for “{query}”.
+            </div>
+          ) : (
+            options.map((opt, i) => {
+              const selected =
+                (opt.isRoot && value == null) ||
+                (!opt.isRoot && value === opt.id);
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-opt-idx={i}
+                  onMouseEnter={() => setHighlight(i)}
+                  onClick={() => commit(opt.isRoot ? null : opt.id)}
+                  className={`block w-full truncate px-2 py-1 text-left ${
+                    i === highlight ? "bg-blue-50" : ""
+                  } ${selected ? "font-semibold text-blue-700" : ""}`}
+                  title={opt.name}
+                >
+                  {opt.name}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------- link row ----------------
+function LinkRow({
+  kind,
+  other,
+  sequence,
+  readOnly,
+  onChange,
+  onRemove,
+}: {
+  kind: "pred" | "succ";
+  other: Task | undefined;
+  sequence: Sequence;
+  readOnly?: boolean;
+  onChange: (patch: Partial<Sequence>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 rounded border bg-white px-1.5 py-1 text-xs">
+      <span
+        className="min-w-0 flex-1 truncate font-medium text-gray-800"
+        title={other?.name ?? sequence.relatingTask}
+      >
+        {other?.name ?? (kind === "pred" ? sequence.relatingTask : sequence.relatedTask)}
+      </span>
+      <select
+        value={sequence.sequenceType}
+        disabled={readOnly}
+        onChange={(e) =>
+          onChange({ sequenceType: e.target.value as SequenceType })
+        }
+        className="rounded border bg-white px-1 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+        title="Dependency type"
+      >
+        {SEQUENCE_TYPES.map((st) => (
+          <option key={st.value} value={st.value}>
+            {st.short}
+          </option>
+        ))}
+      </select>
+      <NumberInput
+        value={sequence.lagDays}
+        min={-9999}
+        max={9999}
+        disabled={readOnly}
+        onCommit={(n) => onChange({ lagDays: n })}
+        onChange={(n) => onChange({ lagDays: n })}
+        className="w-12 rounded border px-1 py-0.5 text-right text-[10px] tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-gray-100"
+        title="Lag in days (negative = lead)"
+      />
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded px-1 text-red-600 hover:bg-red-50 hover:text-red-800"
+          title="Remove link"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------- links editor (pred or succ) ----------------
+function LinksEditor({
+  kind,
+  task,
+  tasks,
+  allSequences,
+  readOnly,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  kind: "pred" | "succ";
+  task: Task;
+  tasks: Task[];
+  allSequences: Sequence[];
+  readOnly?: boolean;
+  onAdd: (otherId: string) => void;
+  onChange: (id: string, patch: Partial<Sequence>) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+
+  const links: { seq: Sequence; otherId: string }[] = useMemo(() => {
+    return allSequences
+      .filter((s) =>
+        kind === "pred"
+          ? s.relatedTask === task.id
+          : s.relatingTask === task.id
+      )
+      .map((s) => ({
+        seq: s,
+        otherId: kind === "pred" ? s.relatingTask : s.relatedTask,
+      }));
+  }, [allSequences, task.id, kind]);
+
+  const linkedIds = useMemo(
+    () => new Set(links.map((l) => l.otherId)),
+    [links]
+  );
+
+  const candidates = useMemo(() => {
+    return tasks.filter((t) => {
+      if (t.id === task.id) return false;
+      if (linkedIds.has(t.id)) return false;
+      const hasChildren = tasks.some((c) => c.parentId === t.id);
+      if (hasChildren) return false;
+      const predId = kind === "pred" ? t.id : task.id;
+      const succId = kind === "pred" ? task.id : t.id;
+      if (wouldCycle(allSequences, predId, succId)) return false;
+      return true;
+    });
+  }, [tasks, task.id, linkedIds, kind, allSequences]);
+
+  const addLink = (otherId: string) => {
+    onAdd(otherId);
+    setAdding(false);
+  };
+
+  return (
+    <div className="rounded border border-gray-200 bg-gray-50/60 p-2.5">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+          {kind === "pred" ? "Predecessors" : "Successors"}
+        </span>
+        {!readOnly && !adding && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="rounded border bg-white px-1.5 py-0.5 text-[10px] text-gray-700 hover:bg-gray-50"
+          >
+            + Add
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {links.length === 0 && !adding && (
+          <div className="text-[11px] italic text-gray-400">
+            No {kind === "pred" ? "predecessors" : "successors"}.
+          </div>
+        )}
+        {links.map(({ seq, otherId }) => (
+          <LinkRow
+            key={seq.id}
+            kind={kind}
+            other={tasks.find((t) => t.id === otherId)}
+            sequence={seq}
+            readOnly={readOnly}
+            onChange={(patch) => onChange(seq.id, patch)}
+            onRemove={() => onRemove(seq.id)}
+          />
+        ))}
+
+        {adding && !readOnly && (
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1">
+              <ParentPicker
+                tasks={candidates}
+                value={null}
+                onChange={(id) => {
+                  if (id) addLink(id);
+                  else setAdding(false);
+                }}
+                allowRoot={false}
+                placeholder={`Search ${kind === "pred" ? "predecessor" : "successor"}…`}
+                inputCls="w-full rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                autoFocus
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="rounded border px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {adding && candidates.length === 0 && (
+          <div className="text-[11px] italic text-gray-400">
+            No eligible {kind === "pred" ? "predecessors" : "successors"} available.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------------- modal ----------------
 export function ActivityEditorModal({
   task,
   tasks,
+  sequences,
+  calendar,
+  useWorkdays,
   onSave,
   onDelete,
   onClose,
+  onAddSequence,
+  onUpdateSequence,
+  onRemoveSequence,
 }: {
   task: Task;
   tasks: Task[];
+  sequences: Sequence[];
+  calendar: WorkingCalendar;
+  useWorkdays: boolean;
   onSave: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onClose: () => void;
+  onAddSequence?: (predId: string, succId: string) => void;
+  onUpdateSequence?: (id: string, patch: Partial<Sequence>) => void;
+  onRemoveSequence?: (id: string) => void;
 }) {
   const [name, setName] = useState(task.name);
   const [code, setCode] = useState(task.workCode ?? "");
   const [start, setStart] = useState(task.scheduleStart);
   const [finish, setFinish] = useState(task.scheduleFinish);
+  const [duration, setDuration] = useState<number>(
+    useWorkdays ? durationWorkdays(task, calendar) : durationDays(task)
+  );
+  const [baseStart, setBaseStart] = useState(task.baselineStart ?? "");
+  const [baseFinish, setBaseFinish] = useState(task.baselineFinish ?? "");
+  const [actStart, setActStart] = useState(task.actualStart ?? "");
+  const [actFinish, setActFinish] = useState(task.actualFinish ?? "");
   const [completion, setCompletion] = useState(task.completion);
   const [milestone, setMilestone] = useState(task.isMilestone);
   const [remarks, setRemarks] = useState(task.remarks ?? "");
@@ -57,7 +542,9 @@ export function ActivityEditorModal({
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  // Close on Escape
+  const linksEnabled =
+    !!onAddSequence && !!onUpdateSequence && !!onRemoveSequence;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -66,21 +553,95 @@ export function ActivityEditorModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Valid parents: anything that is NOT this task or its descendants
-  const validParents = useMemo(
-    () =>
-      tasks.filter(
-        (t) => t.id !== task.id && !isDescendant(tasks, task.id, t.id)
-      ),
-    [tasks, task.id]
-  );
+  // ── Linked date / duration handlers ────────────────────────────────────
+
+  const recomputeFinish = (nextStart: string, nextDuration: number): string => {
+    const d = Math.max(1, Math.round(nextDuration));
+    if (milestone) return nextStart;
+    if (!useWorkdays) return finishFromStart(nextStart, d);
+    const s = nextWorkday(nextStart, calendar);
+    return addWorkdays(s, d - 1, calendar);
+  };
+
+  const onStartChange = (v: string) => {
+    if (!v) return;
+    const s = useWorkdays ? nextWorkday(v, calendar) : v;
+    setStart(s);
+    setFinish(recomputeFinish(s, duration));
+  };
+
+  // Native number input: fires on every keystroke, so we don't need a
+  // separate preview handler. Just update state and recompute finish.
+  const onDurationInput = (rawValue: string) => {
+    const n = Number(rawValue);
+    if (!Number.isFinite(n) || n < 1) {
+      setDuration(1);
+      setFinish(recomputeFinish(start, 1));
+      return;
+    }
+    const d = Math.round(n);
+    setDuration(d);
+    setFinish(recomputeFinish(start, d));
+  };
+
+  const onFinishChange = (v: string) => {
+    if (!v) return;
+    if (!useWorkdays) {
+      setFinish(v);
+      if (!start) return;
+      if (v < start) {
+        setFinish(start);
+        setDuration(1);
+      } else {
+        setDuration(daysBetween(start, v));
+      }
+      return;
+    }
+    let f = prevWorkday(v, calendar);
+    if (f < start) {
+      f = start;
+      setFinish(f);
+      setDuration(1);
+      return;
+    }
+    setFinish(f);
+    setDuration(Math.max(1, countWorkdays(start, f, calendar)));
+  };
 
   const save = () => {
+    const bs = baseStart || null;
+    let bf = baseFinish || null;
+    if (bs && bf && bf < bs) bf = bs;
+    const as = actStart || null;
+    let af = actFinish || null;
+    if (as && af && af < as) af = as;
+
+    // Recompute finish from start + duration in case the user typed and
+    // clicked Save without blurring.
+    let finalStart = start;
+    let finalFinish = finish;
+    if (milestone) {
+      finalFinish = finalStart;
+    } else if (!useWorkdays) {
+      finalFinish = finishFromStart(finalStart, Math.max(1, Math.round(duration)));
+    } else {
+      finalStart = nextWorkday(finalStart, calendar);
+      finalFinish = addWorkdays(
+        finalStart,
+        Math.max(1, Math.round(duration)) - 1,
+        calendar
+      );
+    }
+
     onSave({
       name: name.trim() || task.name,
       workCode: code.trim() || undefined,
-      scheduleStart: start,
-      scheduleFinish: finish,
+      scheduleStart: finalStart,
+      scheduleFinish: finalFinish,
+      baselineStart: bs,
+      baselineFinish: bf,
+      actualStart: as,
+      actualFinish: af,
       completion: Math.max(0, Math.min(100, Math.round(completion))),
       isMilestone: milestone,
       remarks: remarks.trim() || undefined,
@@ -89,13 +650,16 @@ export function ActivityEditorModal({
     onClose();
   };
 
+  const inputCls =
+    "rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400";
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-lg bg-white shadow-2xl"
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-4 py-2.5">
@@ -118,7 +682,7 @@ export function ActivityEditorModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
-              className="rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className={inputCls}
             />
           </label>
 
@@ -131,48 +695,165 @@ export function ActivityEditorModal({
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="e.g. 7-9"
-                className="rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className={inputCls}
               />
             </label>
 
-            <label className="grid gap-1">
+            <div className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">
                 Parent group
               </span>
-              <select
-                value={parentId ?? ""}
-                onChange={(e) => setParentId(e.target.value || null)}
-                className="rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              >
-                <option value="">— Top level —</option>
-                {validParents.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <ParentPicker
+                tasks={tasks}
+                excludeId={task.id}
+                value={parentId}
+                onChange={setParentId}
+                allowRoot
+                placeholder="Search parent…"
+                inputCls={inputCls}
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <label className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">Start</span>
               <input
                 type="date"
                 value={start}
-                onChange={(e) => setStart(e.target.value)}
-                className="rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                onChange={(e) => onStartChange(e.target.value)}
+                disabled={milestone}
+                className={`${inputCls} disabled:bg-gray-100`}
               />
             </label>
+            <div className="grid gap-1">
+              <span className="text-xs font-medium text-gray-600">
+                {useWorkdays ? "Duration (work days)" : "Duration (days)"}
+              </span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={milestone ? 1 : duration}
+                disabled={milestone}
+                onChange={(e) => onDurationInput(e.target.value)}
+                className={`${inputCls} w-full tabular-nums disabled:bg-gray-100`}
+                title={
+                  useWorkdays
+                    ? "Editing duration shifts the finish by working days"
+                    : "Editing duration shifts the finish by calendar days"
+                }
+              />
+            </div>
             <label className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">Finish</span>
               <input
                 type="date"
                 value={finish}
-                onChange={(e) => setFinish(e.target.value)}
-                className="rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                onChange={(e) => onFinishChange(e.target.value)}
+                disabled={milestone}
+                className={`${inputCls} disabled:bg-gray-100`}
               />
             </label>
+          </div>
+          <p className="-mt-1 text-[10px] text-gray-500">
+            Editing <strong>Duration</strong> keeps the start date fixed and
+            moves the finish. Editing <strong>Finish</strong> recalculates the
+            duration.{" "}
+            {useWorkdays
+              ? "In working-day mode, weekends and holidays are skipped."
+              : "Milestones are always 1 day."}
+          </p>
+
+          {linksEnabled && !milestone && (
+            <div className="grid grid-cols-2 gap-3">
+              <LinksEditor
+                kind="pred"
+                task={task}
+                tasks={tasks}
+                allSequences={sequences}
+                onAdd={(otherId) => onAddSequence?.(otherId, task.id)}
+                onChange={(id, patch) => onUpdateSequence?.(id, patch)}
+                onRemove={(id) => onRemoveSequence?.(id)}
+              />
+              <LinksEditor
+                kind="succ"
+                task={task}
+                tasks={tasks}
+                allSequences={sequences}
+                onAdd={(otherId) => onAddSequence?.(task.id, otherId)}
+                onChange={(id, patch) => onUpdateSequence?.(id, patch)}
+                onRemove={(id) => onRemoveSequence?.(id)}
+              />
+            </div>
+          )}
+
+          <div className="rounded border border-gray-200 bg-gray-50/60 p-2.5">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+              Baseline (frozen plan)
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-gray-600">
+                  Baseline start
+                </span>
+                <input
+                  type="date"
+                  value={baseStart}
+                  onChange={(e) => setBaseStart(e.target.value)}
+                  className={inputCls}
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-gray-600">
+                  Baseline finish
+                </span>
+                <input
+                  type="date"
+                  value={baseFinish}
+                  onChange={(e) => setBaseFinish(e.target.value)}
+                  className={inputCls}
+                />
+              </label>
+            </div>
+            <p className="mt-1.5 text-[10px] text-gray-500">
+              Normally set for every task at once with &quot;Set baseline&quot;
+              in the header.
+            </p>
+          </div>
+
+          <div className="rounded border border-emerald-200 bg-emerald-50/50 p-2.5">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              Actual (what really happened)
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-gray-600">
+                  Actual start
+                </span>
+                <input
+                  type="date"
+                  value={actStart}
+                  onChange={(e) => setActStart(e.target.value)}
+                  className={inputCls}
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-gray-600">
+                  Actual finish
+                </span>
+                <input
+                  type="date"
+                  value={actFinish}
+                  onChange={(e) => setActFinish(e.target.value)}
+                  className={inputCls}
+                />
+              </label>
+            </div>
+            <p className="mt-1.5 text-[10px] text-gray-500">
+              Filled automatically when you move the % slider; edit here to
+              correct a date.
+            </p>
           </div>
 
           <label className="grid gap-1">
@@ -194,7 +875,14 @@ export function ActivityEditorModal({
             <input
               type="checkbox"
               checked={milestone}
-              onChange={(e) => setMilestone(e.target.checked)}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setMilestone(v);
+                if (v && start) {
+                  setFinish(start);
+                  setDuration(1);
+                }
+              }}
             />
             <span className="text-xs text-gray-700">
               Milestone (single-day, no work)
@@ -207,7 +895,7 @@ export function ActivityEditorModal({
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               rows={3}
-              className="rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className={inputCls}
             />
           </label>
         </div>
@@ -216,7 +904,7 @@ export function ActivityEditorModal({
           {confirmDelete ? (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-red-700">
-                Delete “{task.name}” and all its children?
+                Delete &quot;{task.name}&quot; and all its children?
               </span>
               <button
                 onClick={() => {
@@ -268,6 +956,7 @@ export type RowMenuAction =
   | { kind: "edit" }
   | { kind: "addChild" }
   | { kind: "addSibling" }
+  | { kind: "copyJson" }
   | { kind: "delete" }
   | { kind: "move"; target: MoveTarget };
 
@@ -283,17 +972,6 @@ export function RowMenu({
   onClose: () => void;
 }) {
   const [moving, setMoving] = useState(false);
-
-  // Valid move targets: any task that isn't this task or its descendants
-  const validParents = useMemo(
-    () =>
-      tasks
-        .filter(
-          (t) => t.id !== task.id && !isDescendant(tasks, task.id, t.id)
-        )
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [tasks, task.id]
-  );
 
   return (
     <div
@@ -327,6 +1005,16 @@ export function RowMenu({
       >
         ＋  Add sibling…
       </button>
+      <button
+        onClick={() => {
+          onAction({ kind: "copyJson" });
+          onClose();
+        }}
+        className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
+        title="Copy this task/phase and everything under it as JSON (for AI editing)"
+      >
+        ⧉  Copy JSON for AI
+      </button>
 
       <div className="border-t" />
 
@@ -342,25 +1030,20 @@ export function RowMenu({
           <div className="mb-1 text-[10px] font-semibold uppercase text-gray-500">
             Move under
           </div>
-          <select
-            autoFocus
-            onChange={(e) => {
-              const v = e.target.value;
+          <ParentPicker
+            tasks={tasks}
+            excludeId={task.id}
+            value={null}
+            onChange={(id) => {
               const target: MoveTarget =
-                v === "__root__" ? { kind: "root" } : { kind: "under", id: v };
+                id == null ? { kind: "root" } : { kind: "under", id };
               onAction({ kind: "move", target });
               onClose();
             }}
-            className="w-full rounded border px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-          >
-            <option value="">Choose…</option>
-            <option value="__root__">— Top level —</option>
-            {validParents.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+            allowRoot
+            placeholder="Search parent…"
+            inputCls="w-full rounded border px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
         </div>
       )}
 

@@ -7,10 +7,16 @@
 //
 // Field names follow IFC4x3 so a later import/export is a 1:1 mapping:
 //   WorkSchedule -> IfcWorkSchedule
-//   Task         -> IfcTask (+ IfcTaskTime: ScheduleStart / ScheduleFinish / Completion)
+//   Task         -> IfcTask (+ IfcTaskTime: ScheduleStart / ScheduleFinish / ActualStart / ActualFinish / Completion)
 //   parentId     -> IfcRelNests (task decomposition)
 //   Sequence     -> IfcRelSequence (RelatingProcess / RelatedProcess / SequenceType / TimeLag)
 //   linkedElements -> IfcRelAssignsToProcess (IFC GlobalIds of walls, slabs, ...)
+//
+// Planned vs actual:
+//   scheduleStart/Finish   = current forecast (moves as the job progresses)
+//   baselineStart/Finish   = frozen plan, set once via "Set baseline"
+//   actualStart/Finish     = what really happened
+// The three optional fields come back as null from the server when unset.
 
 export type SequenceType =
   | "FINISH_START"
@@ -31,6 +37,10 @@ export interface Task {
   parentId: string | null; // IfcRelNests
   scheduleStart: string; // YYYY-MM-DD
   scheduleFinish: string; // YYYY-MM-DD (inclusive)
+  baselineStart?: string | null; // YYYY-MM-DD, frozen plan
+  baselineFinish?: string | null; // YYYY-MM-DD, frozen plan
+  actualStart?: string | null; // YYYY-MM-DD, IfcTaskTime.ActualStart
+  actualFinish?: string | null; // YYYY-MM-DD, IfcTaskTime.ActualFinish
   completion: number; // 0-100
   isMilestone: boolean;
   linkedElements?: string[]; // IFC GlobalIds (future)
@@ -62,7 +72,6 @@ const toDay = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
   return Math.round(Date.UTC(y, m - 1, d) / DAY);
 };
-const toISO = (d: number) => new Date(d * DAY).toISOString().slice(0, 10);
 
 /** A task finishing before today = 100% done. */
 const completionFor = (finishISO: string, explicit?: number) => {

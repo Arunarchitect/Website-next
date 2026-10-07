@@ -105,11 +105,11 @@ export function addWorkdays(
   n: number,
   cal: WorkingCalendar
 ): string {
-  if (n <= 0) return startISO;
   let d = toDay(startISO);
-  while (!isWorkday(d, cal)) d++;
-  let remaining = n - 1;
-  while (remaining > 0) {
+  let guard = 0;
+  while (!isWorkday(d, cal) && guard++ < 400) d++; // snap start forward
+  let remaining = Math.max(0, n);
+  while (remaining > 0 && guard++ < 100000) {
     d++;
     if (isWorkday(d, cal)) remaining--;
   }
