@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
 import {
   demoSchedule,
@@ -11,21 +11,20 @@ import {
 } from "./data";
 import {
   applyProgress,
-  autoSchedule,
   autoScheduleWorkdays,
+  completionBlocker,
   durationDays,
   durationWorkdays,
   finishVariance,
   flatten,
+  isoWeek,
   rollup,
   setBaseline,
   setDurationWithCalendar,
   snapRangeToWorkdays,
-  todayISO,
   toDay,
+  todayISO,
   wouldCycle,
-  isoWeek,
-  completionBlocker
 } from "./scheduling";
 import {
   DAY,
@@ -60,7 +59,7 @@ import { useScheduleSync } from "./useScheduleSync";
 import SyncBadge from "./SyncBadge";
 import ScheduleImport from "./ScheduleImport";
 import BaselineCompare from "./BaselineCompare";
-import { listMyProjects, type MyProject } from "./api";
+import { listMyProjects, type MyProject, type ScheduleDoc } from "./api";
 import TaskPicker, { type PickerMode } from "./TaskPicker";
 import SchedulePicker from "./SchedulePicker";
 import ScheduleExportODS from "./ScheduleExportODS";
@@ -156,9 +155,10 @@ export default function ScheduleView() {
   const [showBaseline, setShowBaseline] = useState(true);
   const [compareOpen, setCompareOpen] = useState(false);
 
-  const [picker, setPicker] = useState<{ taskId: string; mode: PickerMode } | null>(
-    null
-  );
+  const [picker, setPicker] = useState<{
+    taskId: string;
+    mode: PickerMode;
+  } | null>(null);
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -175,7 +175,9 @@ export default function ScheduleView() {
 
   const [nextIdx, setNextIdx] = useState(0);
 
-  const [calendar, setCalendar] = useState<WorkingCalendar>(() => emptyCalendar());
+  const [calendar, setCalendar] = useState<WorkingCalendar>(() =>
+    emptyCalendar()
+  );
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [useWorkdays, setUseWorkdays] = useState(false);
 
@@ -211,7 +213,9 @@ export default function ScheduleView() {
       })
       .catch((e) => {
         if (cancelled) return;
-        setPickerError(e instanceof Error ? e.message : "Failed to load projects");
+        setPickerError(
+          e instanceof Error ? e.message : "Failed to load projects"
+        );
       })
       .finally(() => {
         if (!cancelled) setPickerLoading(false);
@@ -238,6 +242,19 @@ export default function ScheduleView() {
 
   const seed = useMemo(() => makeSeed(), []);
 
+  // Stable callback (only uses state setters). Resets the calendar to the
+  // default when the server has none, so a previous schedule's holidays
+  // never leak into the next one.
+  const handleLoaded = useCallback((d: ScheduleDoc) => {
+    setTasks(d.tasks);
+    setSequences(d.sequences);
+    setCalendar(
+      d.calendar
+        ? deserialize(d.calendar as SerializedCalendar)
+        : emptyCalendar()
+    );
+  }, []);
+
   // ---------- backend sync ----------
   const sync = useScheduleSync({
     projectId,
@@ -246,11 +263,7 @@ export default function ScheduleView() {
     tasks,
     sequences,
     calendar: calendarSer,
-    onLoaded: (d) => {
-      setTasks(d.tasks);
-      setSequences(d.sequences);
-      if (d.calendar) setCalendar(deserialize(d.calendar as SerializedCalendar));
-    },
+    onLoaded: handleLoaded,
   });
 
   const currentProject = myProjects.find((p) => p.id === projectId) ?? null;
@@ -325,7 +338,9 @@ export default function ScheduleView() {
     [tasks, cpm, todayDay]
   );
   useEffect(() => {
-    setNextIdx((i) => Math.min(Math.max(0, i), Math.max(0, upcoming.length - 1)));
+    setNextIdx((i) =>
+      Math.min(Math.max(0, i), Math.max(0, upcoming.length - 1))
+    );
   }, [upcoming.length]);
 
   const next = upcoming[nextIdx] ?? nextAuto;
@@ -348,7 +363,10 @@ export default function ScheduleView() {
       pendingScroll.current = null;
     } else if (pendingCenter.current != null) {
       if (el) {
-        el.scrollLeft = Math.max(0, pendingCenter.current * zoom - el.clientWidth / 2);
+        el.scrollLeft = Math.max(
+          0,
+          pendingCenter.current * zoom - el.clientWidth / 2
+        );
       }
       pendingCenter.current = null;
     }
@@ -366,7 +384,8 @@ export default function ScheduleView() {
     20 * (1 + (showWeekHeader ? 1 : 0) + (showDayHeader ? 1 : 0)) + 1;
 
   const months = useMemo(() => {
-    const out: { label: string; short: string; days: number; px: number }[] = [];
+    const out: { label: string; short: string; days: number; px: number }[] =
+      [];
     let d = minDay;
     while (d <= maxDay) {
       const date = new Date(d * DAY);
@@ -425,7 +444,7 @@ export default function ScheduleView() {
       return n;
     });
 
-  // ── Auto-schedule: working-day aware when the toggle is on ──────────────
+  // ── Auto-schedule: always holiday aware ─────────────────────────────────
   const runAutoSchedule = () => {
     setUseWorkdays(true); // durations and holiday shading match the result
     setTasks((prev) => autoScheduleWorkdays(prev, sequences, calendar));
@@ -457,15 +476,15 @@ export default function ScheduleView() {
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
-        const next: Task = { ...t, [field]: value || null };
+        const nextTask: Task = { ...t, [field]: value || null };
         if (
-          next.actualStart &&
-          next.actualFinish &&
-          next.actualFinish < next.actualStart
+          nextTask.actualStart &&
+          nextTask.actualFinish &&
+          nextTask.actualFinish < nextTask.actualStart
         ) {
-          next.actualFinish = next.actualStart;
+          nextTask.actualFinish = nextTask.actualStart;
         }
-        return next;
+        return nextTask;
       })
     );
 
@@ -503,17 +522,16 @@ export default function ScheduleView() {
       })
     );
 
-  // Uses the shared helper from scheduling.ts: calendar-day math when no
-  // calendar is passed, working-day math (via addWorkdays) when it is.
+  // Calendar-day math when no calendar is passed, working-day math when it is.
   const updateDuration = (id: string, newDays: number) =>
     setTasks((prev) =>
       prev.map((t) =>
         t.id === id
           ? setDurationWithCalendar(
-            t,
-            newDays,
-            useWorkdays ? calendar : undefined
-          )
+              t,
+              newDays,
+              useWorkdays ? calendar : undefined
+            )
           : t
       )
     );
@@ -583,7 +601,10 @@ export default function ScheduleView() {
     setEditingId(id);
     setSelectedId(id);
     setFlashId(id);
-    setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), HIGHLIGHT_MS);
+    setTimeout(
+      () => setFlashId((cur) => (cur === id ? null : cur)),
+      HIGHLIGHT_MS
+    );
   };
 
   const addSibling = (anchor: Task) => addChild(anchor.parentId ?? null);
@@ -613,21 +634,29 @@ export default function ScheduleView() {
     setEditingId((cur) => (cur && toRemove.has(cur) ? null : cur));
   };
 
-  const updateTask = (id: string, patch: Partial<Task>) => {
+  const updateTask = (id: string, incoming: Partial<Task>) => {
+    let patch: Partial<Task> = incoming;
     // The edit modal can also change completion: apply the same rule.
-    if (patch.completion !== undefined) {
-      const current = tasks.find((t) => t.id === id);
-      if (current && patch.completion !== current.completion) {
-        const problem = completionBlocker(id, patch.completion, tasks, sequences);
+    if (incoming.completion !== undefined) {
+      const existing = tasks.find((t) => t.id === id);
+      if (existing && incoming.completion !== existing.completion) {
+        const problem = completionBlocker(
+          id,
+          incoming.completion,
+          tasks,
+          sequences
+        );
         if (problem) {
           notify(problem);
-          const { completion: _drop, ...rest } = patch;
-          patch = rest; // save the other edits, ignore the % change
+          const rest: Partial<Task> = { ...incoming };
+          delete rest.completion; // keep the other edits, ignore the % change
+          patch = rest;
         }
       }
     }
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   };
+
   const moveTask = (id: string, target: MoveTarget) => {
     const newParent = target.kind === "root" ? null : target.id;
     setTasks((prev) =>
@@ -642,7 +671,10 @@ export default function ScheduleView() {
     }
     setSelectedId(id);
     setFlashId(id);
-    setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), HIGHLIGHT_MS);
+    setTimeout(
+      () => setFlashId((cur) => (cur === id ? null : cur)),
+      HIGHLIGHT_MS
+    );
   };
 
   useEffect(() => {
@@ -654,8 +686,8 @@ export default function ScheduleView() {
   useEffect(() => {
     setCheckedIds((prev) => {
       const ids = new Set(tasks.map((t) => t.id));
-      const next = new Set([...prev].filter((id) => ids.has(id)));
-      return next.size === prev.size ? prev : next;
+      const nextSet = new Set([...prev].filter((id) => ids.has(id)));
+      return nextSet.size === prev.size ? prev : nextSet;
     });
   }, [tasks]);
 
@@ -845,6 +877,19 @@ export default function ScheduleView() {
     return out;
   }, [sequences, rowIndexById, rolled, minDay, zoom, cpm]);
 
+  // Direct predecessors / successors of the selected task (soft tint).
+  const { predIds, succIds } = useMemo(() => {
+    const p = new Set<string>();
+    const s = new Set<string>();
+    if (selectedId) {
+      for (const q of sequences) {
+        if (q.relatedTask === selectedId) p.add(q.relatingTask);
+        if (q.relatingTask === selectedId) s.add(q.relatedTask);
+      }
+    }
+    return { predIds: p, succIds: s };
+  }, [selectedId, sequences]);
+
   // ---------- load gates (ALL hooks are above this line) ----------
   if (pickerError) {
     return (
@@ -920,7 +965,7 @@ export default function ScheduleView() {
                 setScheduleId(id);
                 listMyProjects()
                   .then(setMyProjects)
-                  .catch(() => { });
+                  .catch(() => {});
               }
             }}
             className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
@@ -948,7 +993,8 @@ export default function ScheduleView() {
           />
         </div>
         <p className="mb-2 text-red-600">
-          Couldn&apos;t load the schedule{sync.message ? `: ${sync.message}` : "."}
+          Couldn&apos;t load the schedule
+          {sync.message ? `: ${sync.message}` : "."}
         </p>
         <button
           onClick={sync.reload}
@@ -992,10 +1038,17 @@ export default function ScheduleView() {
         addSibling(task);
         break;
       case "copyJson": {
-        void copyTasksForAi(withDescendants(task.id, tasks), tasks, sequences).then((r) => {
+        void copyTasksForAi(
+          withDescendants(task.id, tasks),
+          tasks,
+          sequences
+        ).then((r) => {
           setCopiedMsg(r.message);
           setFlashId(task.id);
-          setTimeout(() => setFlashId((c) => (c === task.id ? null : c)), HIGHLIGHT_MS);
+          setTimeout(
+            () => setFlashId((c) => (c === task.id ? null : c)),
+            HIGHLIGHT_MS
+          );
           setTimeout(() => setCopiedMsg(null), 4000);
           if (!r.ok) window.alert(r.message);
         });
@@ -1034,7 +1087,11 @@ export default function ScheduleView() {
 
   const selectionIds = (): string[] =>
     includeChildren
-      ? [...new Set([...checkedIds].flatMap((id) => withDescendants(id, tasks)))]
+      ? [
+          ...new Set(
+            [...checkedIds].flatMap((id) => withDescendants(id, tasks))
+          ),
+        ]
       : [...checkedIds];
 
   const applyPaste = (data: SelectionJson) => {
@@ -1278,15 +1335,17 @@ export default function ScheduleView() {
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${current
-            ? "border-blue-500 bg-blue-50/60"
-            : "border-gray-300 bg-gray-50"
-            }`}
+          className={`rounded border-l-4 p-3 ${
+            current
+              ? "border-blue-500 bg-blue-50/60"
+              : "border-gray-300 bg-gray-50"
+          }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
-                }`}
+              className={`h-2 w-2 rounded-full ${
+                current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+              }`}
             />
             Now
           </div>
@@ -1303,7 +1362,8 @@ export default function ScheduleView() {
                 )}
               </div>
               <div className="mt-0.5 text-xs text-gray-600">
-                {fmtDate(rangeFor(current).es)} → {fmtDate(rangeFor(current).ef)}
+                {fmtDate(rangeFor(current).es)} →{" "}
+                {fmtDate(rangeFor(current).ef)}
                 {" · "}
                 {rangeFor(current).dur} days · {current.completion}% complete
               </div>
@@ -1319,16 +1379,18 @@ export default function ScheduleView() {
         </div>
 
         <div
-          className={`rounded border-l-4 p-3 ${next
-            ? "border-emerald-500 bg-emerald-50/60"
-            : "border-gray-300 bg-gray-50"
-            }`}
+          className={`rounded border-l-4 p-3 ${
+            next
+              ? "border-emerald-500 bg-emerald-50/60"
+              : "border-gray-300 bg-gray-50"
+          }`}
         >
           <div className="mb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
               <span
-                className={`h-2 w-2 rounded-full ${next ? "bg-emerald-500" : "bg-gray-400"
-                  }`}
+                className={`h-2 w-2 rounded-full ${
+                  next ? "bg-emerald-500" : "bg-gray-400"
+                }`}
               />
               Next up
               {upcoming.length > 0 && (
@@ -1424,7 +1486,9 @@ export default function ScheduleView() {
         <button
           onClick={() => setGanttOpen((o) => !o)}
           className="rounded border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-          title={ganttOpen ? "Collapse the Gantt chart" : "Expand the Gantt chart"}
+          title={
+            ganttOpen ? "Collapse the Gantt chart" : "Expand the Gantt chart"
+          }
         >
           {ganttOpen ? "▼ Hide Gantt chart" : "▶ Show Gantt chart"}
         </button>
@@ -1492,7 +1556,9 @@ export default function ScheduleView() {
           </button>
           <button
             onClick={() => {
-              const t = selectedId ? rolled.find((x) => x.id === selectedId) : null;
+              const t = selectedId
+                ? rolled.find((x) => x.id === selectedId)
+                : null;
               if (t) zoomToTask(t);
             }}
             disabled={!selectedId}
@@ -1588,10 +1654,15 @@ export default function ScheduleView() {
                       onTouchEnd={cancelLongPress}
                       onTouchCancel={cancelLongPress}
                       onContextMenu={(e) => e.preventDefault()}
-                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${selected
-                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                        : "hover:bg-gray-50"
-                        } ${flash ? "animate-pulse" : ""}`}
+                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${
+                        selected
+                          ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                          : predIds.has(task.id)
+                            ? "bg-amber-50 hover:bg-amber-100/60"
+                            : succIds.has(task.id)
+                              ? "bg-emerald-50 hover:bg-emerald-100/60"
+                              : "hover:bg-gray-50"
+                      } ${flash ? "animate-pulse" : ""}`}
                       style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                     >
                       {hasChildren ? (
@@ -1610,13 +1681,15 @@ export default function ScheduleView() {
                       {!hasChildren && critical && showCritical && (
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                          title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
-                            }d`}
+                          title={`Critical · float ${
+                            cpm.totalFloat.get(task.id) ?? 0
+                          }d`}
                         />
                       )}
                       <span
-                        className={`truncate ${hasChildren ? "font-semibold" : ""
-                          }`}
+                        className={`truncate ${
+                          hasChildren ? "font-semibold" : ""
+                        }`}
                         title={task.name}
                       >
                         {task.name}
@@ -1681,12 +1754,13 @@ export default function ScheduleView() {
                         return (
                           <div
                             key={i}
-                            className={`overflow-hidden border-r text-center leading-5 ${holiday
-                              ? "bg-pink-100"
-                              : isWeekend
-                                ? "bg-gray-100"
-                                : ""
-                              }`}
+                            className={`overflow-hidden border-r text-center leading-5 ${
+                              holiday
+                                ? "bg-pink-100"
+                                : isWeekend
+                                  ? "bg-gray-100"
+                                  : ""
+                            }`}
                             style={{ width: zoom }}
                             title={holiday ? "Holiday" : undefined}
                           >
@@ -1705,16 +1779,18 @@ export default function ScheduleView() {
                       const d = new Date(dayNum * DAY);
                       const isWeekend =
                         d.getUTCDay() === 0 || d.getUTCDay() === 6;
-                      const holiday = useWorkdays && isHoliday(dayNum, calendar);
+                      const holiday =
+                        useWorkdays && isHoliday(dayNum, calendar);
                       return (
                         <div
                           key={i}
-                          className={`h-full ${holiday
-                            ? "bg-pink-50"
-                            : isWeekend
-                              ? "bg-gray-50"
-                              : ""
-                            } ${showDayGrid ? "border-r" : ""}`}
+                          className={`h-full ${
+                            holiday
+                              ? "bg-pink-50"
+                              : isWeekend
+                                ? "bg-gray-50"
+                                : ""
+                          } ${showDayGrid ? "border-r" : ""}`}
                           style={{ width: zoom }}
                         />
                       );
@@ -1763,12 +1839,21 @@ export default function ScheduleView() {
                   {rows.map(({ task }, i) => {
                     const selected = selectedId === task.id;
                     const flash = flashId === task.id;
-                    if (!selected && !flash) return null;
+                    const isPred = predIds.has(task.id);
+                    const isSucc = succIds.has(task.id);
+                    if (!selected && !flash && !isPred && !isSucc) return null;
                     return (
                       <div
                         key={`hl-${task.id}`}
-                        className={`pointer-events-none absolute left-0 right-0 ${selected ? "bg-blue-100/60" : ""
-                          } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                        className={`pointer-events-none absolute left-0 right-0 ${
+                          selected
+                            ? "bg-blue-100/60"
+                            : isPred
+                              ? "bg-amber-100/30"
+                              : isSucc
+                                ? "bg-emerald-100/30"
+                                : ""
+                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
                         style={{ top: i * ROW_H, height: ROW_H }}
                       />
                     );
@@ -1825,15 +1910,16 @@ export default function ScheduleView() {
 
                   {showBaseline &&
                     rows.map(({ task }, i) => {
-                      if (!task.baselineStart || !task.baselineFinish) return null;
+                      if (!task.baselineStart || !task.baselineFinish)
+                        return null;
                       const bl = (toDay(task.baselineStart) - minDay) * zoom;
                       const bw = Math.max(
                         2,
                         (toDay(task.baselineFinish) -
                           toDay(task.baselineStart) +
                           1) *
-                        zoom -
-                        2
+                          zoom -
+                          2
                       );
                       return (
                         <div
@@ -1859,15 +1945,20 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={`ac-${task.id}`}
-                          className={`pointer-events-none absolute z-10 h-1 rounded ${late ? "bg-orange-500" : "bg-emerald-500"
-                            } ${task.actualFinish ? "" : "opacity-70"}`}
+                          className={`pointer-events-none absolute z-10 h-1 rounded ${
+                            late ? "bg-orange-500" : "bg-emerald-500"
+                          } ${task.actualFinish ? "" : "opacity-70"}`}
                           style={{
                             left: (aStartDay - minDay) * zoom,
                             top: i * ROW_H + 3,
-                            width: Math.max(2, (aEndDay - aStartDay + 1) * zoom - 2),
+                            width: Math.max(
+                              2,
+                              (aEndDay - aStartDay + 1) * zoom - 2
+                            ),
                           }}
-                          title={`Actual ${task.actualStart} → ${task.actualFinish ?? "in progress"
-                            }`}
+                          title={`Actual ${task.actualStart} → ${
+                            task.actualFinish ?? "in progress"
+                          }`}
                         />
                       );
                     })}
@@ -1879,7 +1970,8 @@ export default function ScheduleView() {
                       task.isMilestone ? 6 : 2,
                       dur * zoom - (task.isMilestone ? 0 : 2)
                     );
-                    const critical = !hasChildren && cpm.criticalIds.has(task.id);
+                    const critical =
+                      !hasChildren && cpm.criticalIds.has(task.id);
                     const selected = selectedId === task.id;
                     const barColor = hasChildren
                       ? "bg-gray-800"
@@ -1907,21 +1999,26 @@ export default function ScheduleView() {
                         onTouchEnd={cancelLongPress}
                         onTouchCancel={cancelLongPress}
                         onContextMenu={(e) => e.preventDefault()}
-                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                          }`}
+                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${
+                          selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                        }`}
                         style={{
                           left: s * zoom,
                           top: i * ROW_H + 8,
                           width: w,
                           WebkitTouchCallout: "none",
                         }}
-                        title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
-                          } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
-                          }${critical
-                            ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
-                            }d`
+                        title={`${task.name}\n${task.scheduleStart} → ${
+                          task.scheduleFinish
+                        } · ${durLabel}${
+                          task.completion > 0 ? ` · ${task.completion}%` : ""
+                        }${
+                          critical
+                            ? `\nCRITICAL · float ${
+                                cpm.totalFloat.get(task.id) ?? 0
+                              }d`
                             : ""
-                          }`}
+                        }`}
                       >
                         {!hasChildren &&
                           !task.isMilestone &&
@@ -2047,12 +2144,17 @@ export default function ScheduleView() {
                   key={task.id}
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
-                  className={`cursor-pointer border-t transition-colors ${selected
-                    ? "bg-blue-100"
-                    : critical && showCritical
-                      ? "bg-red-50/40 hover:bg-red-50/70"
-                      : "hover:bg-gray-50"
-                    } ${flash ? "animate-pulse" : ""}`}
+                  className={`cursor-pointer border-t transition-colors ${
+                    selected
+                      ? "bg-blue-100"
+                      : predIds.has(task.id)
+                        ? "bg-amber-50/70 hover:bg-amber-50"
+                        : succIds.has(task.id)
+                          ? "bg-emerald-50/70 hover:bg-emerald-50"
+                          : critical && showCritical
+                            ? "bg-red-50/40 hover:bg-red-50/70"
+                            : "hover:bg-gray-50"
+                  } ${flash ? "animate-pulse" : ""}`}
                 >
                   <td
                     className="px-2 py-1.5"
@@ -2132,7 +2234,11 @@ export default function ScheduleView() {
                       disabled={isGroup || readOnly}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) =>
-                        updateDates(task.id, e.target.value, task.scheduleFinish)
+                        updateDates(
+                          task.id,
+                          e.target.value,
+                          task.scheduleFinish
+                        )
                       }
                       className="w-full rounded border px-1 py-0.5 text-xs disabled:bg-gray-100"
                     />
@@ -2238,14 +2344,15 @@ export default function ScheduleView() {
                     />
                   </td>
                   <td
-                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${variance === null
-                      ? "text-gray-400"
-                      : variance > 0
-                        ? "font-semibold text-red-600"
-                        : variance < 0
-                          ? "text-emerald-600"
-                          : "text-gray-600"
-                      }`}
+                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${
+                      variance === null
+                        ? "text-gray-400"
+                        : variance > 0
+                          ? "font-semibold text-red-600"
+                          : variance < 0
+                            ? "text-emerald-600"
+                            : "text-gray-600"
+                    }`}
                     title={
                       variance === null
                         ? "No baseline set"
@@ -2269,9 +2376,7 @@ export default function ScheduleView() {
                   >
                     <div className="flex flex-col gap-1">
                       {preds.map((s) => {
-                        const pred = tasks.find(
-                          (t) => t.id === s.relatingTask
-                        );
+                        const pred = tasks.find((t) => t.id === s.relatingTask);
                         return (
                           <div
                             key={s.id}
@@ -2336,18 +2441,21 @@ export default function ScheduleView() {
                         </button>
                       )}
                     </div>
-                    {!isGroup && !readOnly && isPickerOpen && picker.mode === "pred" && (
-                      <TaskPicker
-                        mode="pred"
-                        anchorTask={task}
-                        allTasks={tasks}
-                        sequences={sequences}
-                        onPick={(otherId) =>
-                          handlePick(task.id, "pred", otherId)
-                        }
-                        onClose={() => setPicker(null)}
-                      />
-                    )}
+                    {!isGroup &&
+                      !readOnly &&
+                      isPickerOpen &&
+                      picker.mode === "pred" && (
+                        <TaskPicker
+                          mode="pred"
+                          anchorTask={task}
+                          allTasks={tasks}
+                          sequences={sequences}
+                          onPick={(otherId) =>
+                            handlePick(task.id, "pred", otherId)
+                          }
+                          onClose={() => setPicker(null)}
+                        />
+                      )}
                   </td>
 
                   <td
@@ -2356,9 +2464,7 @@ export default function ScheduleView() {
                   >
                     <div className="flex flex-col gap-1">
                       {succs.map((s) => {
-                        const succ = tasks.find(
-                          (t) => t.id === s.relatedTask
-                        );
+                        const succ = tasks.find((t) => t.id === s.relatedTask);
                         return (
                           <div
                             key={s.id}
@@ -2423,18 +2529,21 @@ export default function ScheduleView() {
                         </button>
                       )}
                     </div>
-                    {!isGroup && !readOnly && isPickerOpen && picker.mode === "succ" && (
-                      <TaskPicker
-                        mode="succ"
-                        anchorTask={task}
-                        allTasks={tasks}
-                        sequences={sequences}
-                        onPick={(otherId) =>
-                          handlePick(task.id, "succ", otherId)
-                        }
-                        onClose={() => setPicker(null)}
-                      />
-                    )}
+                    {!isGroup &&
+                      !readOnly &&
+                      isPickerOpen &&
+                      picker.mode === "succ" && (
+                        <TaskPicker
+                          mode="succ"
+                          anchorTask={task}
+                          allTasks={tasks}
+                          sequences={sequences}
+                          onPick={(otherId) =>
+                            handlePick(task.id, "succ", otherId)
+                          }
+                          onClose={() => setPicker(null)}
+                        />
+                      )}
                   </td>
 
                   <td
