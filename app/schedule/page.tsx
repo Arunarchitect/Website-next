@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { TouchEvent as ReactTouchEvent } from "react";
 import {
   demoSchedule,
   SEQUENCE_TYPES,
@@ -71,7 +72,8 @@ import {
 import type { SelectionJson } from "./JsonTool";
 
 const ROW_H = 28;
-const LEFT_COL_W = 256;
+const LEFT_COL_W = 256; // desktop width
+const LEFT_COL_W_MOBILE = 128; // phones (< 640px)
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 80;
@@ -86,11 +88,9 @@ const LINK_LANE_OFFSET = 4;
 
 const HIGHLIGHT_MS = 2200;
 
-const SEED = {
-  tasks: demoSchedule.tasks,
-  sequences: demoSchedule.sequences,
-  calendar: serialize(emptyCalendar()),
-};
+// Long-press (touch) tuning
+const LONG_PRESS_MS = 400; // shorter than Android's ~500ms native long-press
+const MOVE_TOLERANCE = 10; // px of finger drift allowed before cancelling
 
 const newId = (prefix = "a") =>
   `${prefix}-${Date.now().toString(36)}-${Math.random()
@@ -101,6 +101,27 @@ const todayISOForNew = () => {
   const d = new Date();
   const p = (x: number) => String(x).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+// Basic template uploaded when the user clicks "Create schedule":
+// one empty phase, default calendar.
+const makeSeed = () => {
+  const d = todayISOForNew();
+  return {
+    tasks: [
+      {
+        id: newId("g"),
+        name: "Phase 1",
+        parentId: null,
+        scheduleStart: d,
+        scheduleFinish: d,
+        completion: 0,
+        isMilestone: false,
+      } as Task,
+    ],
+    sequences: [] as Sequence[],
+    calendar: serialize(emptyCalendar()),
+  };
 };
 
 // Read ?project= / ?schedule= from the URL.
@@ -159,6 +180,16 @@ export default function ScheduleView() {
 
   const calendarSer = useMemo(() => serialize(calendar), [calendar]);
 
+  // Left task column width: narrower on phones so the timeline gets room.
+  const [leftW, setLeftW] = useState(LEFT_COL_W);
+  useEffect(() => {
+    const update = () =>
+      setLeftW(window.innerWidth < 640 ? LEFT_COL_W_MOBILE : LEFT_COL_W);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
   // ── Fetch the accessible project list once ──────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -204,11 +235,13 @@ export default function ScheduleView() {
     }
   }, [projectId, scheduleId]);
 
+  const seed = useMemo(() => makeSeed(), []);
+
   // ---------- backend sync ----------
   const sync = useScheduleSync({
     projectId,
     scheduleId,
-    seed: SEED,
+    seed,
     tasks,
     sequences,
     calendar: calendarSer,
@@ -221,12 +254,15 @@ export default function ScheduleView() {
 
   const currentProject = myProjects.find((p) => p.id === projectId) ?? null;
   const isViewOnly = currentProject ? !currentProject.canEdit : false;
+  const isAdmin = currentProject?.role === "admin";
   const readOnly = isViewOnly || !sync.canEdit;
   const ready = !["loading", "empty", "failed"].includes(sync.status);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   const longPressTimer = useRef<number | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const longPressFired = useRef(false);
   const pendingScroll = useRef<number | null>(null);
   const pendingCenter = useRef<number | null>(null);
   const [containerW, setContainerW] = useState(1000);
@@ -293,8 +329,10 @@ export default function ScheduleView() {
 
   const next = upcoming[nextIdx] ?? nextAuto;
 
+  // Minimum 320px of timeline so on phones the chart is wider than the
+  // screen and scrolls horizontally instead of being crushed.
   const fitZoom = useMemo(() => {
-    const usable = Math.max(120, containerW - 24);
+    const usable = Math.max(320, containerW - 24);
     return Math.max(ZOOM_MIN, usable / totalDays);
   }, [containerW, totalDays]);
 
@@ -621,21 +659,11 @@ export default function ScheduleView() {
     }, HIGHLIGHT_MS);
   };
 
-  const LONG_PRESS_MS = 500;
-
+  // ---------- long-press (touch) ----------
   const openEditorFromBar = (id: string) => {
     if (readOnly) return;
     setEditingId(id);
     setSelectedId(id);
-  };
-
-  const startLongPress = (id: string) => {
-    if (readOnly) return;
-    cancelLongPress();
-    longPressTimer.current = window.setTimeout(() => {
-      if (navigator.vibrate) navigator.vibrate(50);
-      openEditorFromBar(id);
-    }, LONG_PRESS_MS);
   };
 
   const cancelLongPress = () => {
@@ -643,6 +671,40 @@ export default function ScheduleView() {
       window.clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
+    touchStartPos.current = null;
+  };
+
+  const startLongPress = (id: string, e: ReactTouchEvent) => {
+    if (readOnly) return;
+    cancelLongPress();
+    longPressFired.current = false;
+    const t = e.touches[0];
+    touchStartPos.current = { x: t.clientX, y: t.clientY };
+    longPressTimer.current = window.setTimeout(() => {
+      longPressFired.current = true;
+      if (navigator.vibrate) navigator.vibrate(50);
+      openEditorFromBar(id);
+    }, LONG_PRESS_MS);
+  };
+
+  // A real finger always drifts a few px; only cancel on real movement.
+  const moveLongPress = (e: ReactTouchEvent) => {
+    const s = touchStartPos.current;
+    if (!s) return;
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - s.x, t.clientY - s.y) > MOVE_TOLERANCE) {
+      cancelLongPress();
+    }
+  };
+
+  // Swallow the click that follows a long press so it doesn't select/zoom
+  // or hit the modal backdrop and close the editor immediately.
+  const consumeLongPress = () => {
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      return true;
+    }
+    return false;
   };
 
   const handleRowClick = (id: string, isGroup: boolean) => {
@@ -764,7 +826,7 @@ export default function ScheduleView() {
   // ---------- load gates (ALL hooks are above this line) ----------
   if (pickerError) {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm sm:p-6">
         <p className="mb-2 text-red-600">
           Couldn&apos;t load your projects: {pickerError}
         </p>
@@ -780,7 +842,7 @@ export default function ScheduleView() {
 
   if (pickerLoading && myProjects.length === 0) {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm text-gray-500 sm:p-6">
         Loading your projects…
       </main>
     );
@@ -788,7 +850,7 @@ export default function ScheduleView() {
 
   if (!pickerLoading && myProjects.length === 0) {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm text-gray-500 sm:p-6">
         You don&apos;t have access to any projects yet. Ask your organisation
         admin to add you to a project.
       </main>
@@ -797,7 +859,7 @@ export default function ScheduleView() {
 
   if (projectId == null) {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm text-gray-500 sm:p-6">
         Pick a project to view its schedule.
       </main>
     );
@@ -805,14 +867,14 @@ export default function ScheduleView() {
 
   if (sync.status === "loading") {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm text-gray-500">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm text-gray-500 sm:p-6">
         Loading schedule…
       </main>
     );
   }
   if (sync.status === "empty") {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm sm:p-6">
         <div className="mb-4">
           <SchedulePicker
             projects={myProjects}
@@ -830,18 +892,27 @@ export default function ScheduleView() {
         </p>
         {!isViewOnly && (
           <button
-            onClick={() => void sync.createAndSeed()}
+            onClick={async () => {
+              const id = await sync.createAndSeed();
+              if (id != null) {
+                setScheduleId(id);
+                listMyProjects()
+                  .then(setMyProjects)
+                  .catch(() => {});
+              }
+            }}
             className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
           >
             + Create schedule
           </button>
         )}
+        {sync.message && <p className="mt-2 text-red-600">{sync.message}</p>}
       </main>
     );
   }
   if (sync.status === "failed") {
     return (
-      <main className="mx-auto max-w-[1600px] p-6 text-sm">
+      <main className="mx-auto max-w-[1600px] p-3 text-sm sm:p-6">
         <div className="mb-4">
           <SchedulePicker
             projects={myProjects}
@@ -979,10 +1050,11 @@ export default function ScheduleView() {
   const currentScheduleMeta = currentProject?.schedules.find(
     (s) => s.id === scheduleId
   );
-  const heading = currentScheduleMeta?.name ?? currentProject?.name ?? demoSchedule.name;
+  const heading =
+    currentScheduleMeta?.name ?? currentProject?.name ?? demoSchedule.name;
 
   return (
-    <main className="mx-auto max-w-[1600px] p-6">
+    <main className="mx-auto max-w-[1600px] p-3 sm:p-6">
       {/* ================= HEADER ================= */}
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         {copiedMsg && (
@@ -1155,7 +1227,7 @@ export default function ScheduleView() {
           >
             Collapse all
           </button>
-          {!readOnly && (
+          {!readOnly && isAdmin && (
             <button
               onClick={setBaselineNow}
               className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -1184,15 +1256,17 @@ export default function ScheduleView() {
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${current
-            ? "border-blue-500 bg-blue-50/60"
-            : "border-gray-300 bg-gray-50"
-            }`}
+          className={`rounded border-l-4 p-3 ${
+            current
+              ? "border-blue-500 bg-blue-50/60"
+              : "border-gray-300 bg-gray-50"
+          }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
-                }`}
+              className={`h-2 w-2 rounded-full ${
+                current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+              }`}
             />
             Now
           </div>
@@ -1225,16 +1299,18 @@ export default function ScheduleView() {
         </div>
 
         <div
-          className={`rounded border-l-4 p-3 ${next
-            ? "border-emerald-500 bg-emerald-50/60"
-            : "border-gray-300 bg-gray-50"
-            }`}
+          className={`rounded border-l-4 p-3 ${
+            next
+              ? "border-emerald-500 bg-emerald-50/60"
+              : "border-gray-300 bg-gray-50"
+          }`}
         >
           <div className="mb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
               <span
-                className={`h-2 w-2 rounded-full ${next ? "bg-emerald-500" : "bg-gray-400"
-                  }`}
+                className={`h-2 w-2 rounded-full ${
+                  next ? "bg-emerald-500" : "bg-gray-400"
+                }`}
               />
               Next up
               {upcoming.length > 0 && (
@@ -1323,7 +1399,10 @@ export default function ScheduleView() {
       </section>
 
       {/* ================= GANTT SHOW / HIDE ================= */}
-      <div className="mb-2 flex items-center gap-2" data-print-hide>
+      <div
+        className="sticky top-0 z-30 mb-2 flex items-center gap-2 bg-white/90 py-1 backdrop-blur"
+        data-print-hide
+      >
         <button
           onClick={() => setGanttOpen((o) => !o)}
           className="rounded border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
@@ -1462,7 +1541,7 @@ export default function ScheduleView() {
           <div className="flex">
             <div
               className="shrink-0 border-r bg-white"
-              style={{ width: LEFT_COL_W }}
+              style={{ width: leftW }}
             >
               <div
                 className="box-border flex items-center border-b px-3 text-xs font-semibold text-gray-500"
@@ -1481,17 +1560,21 @@ export default function ScheduleView() {
                       key={task.id}
                       id={`row-${task.id}`}
                       onClick={() => {
+                        if (consumeLongPress()) return;
                         handleRowClick(task.id, hasChildren);
                         zoomToTask(task);
                       }}
                       onDoubleClick={() => openEditorFromBar(task.id)}
-                      onTouchStart={() => startLongPress(task.id)}
+                      onTouchStart={(e) => startLongPress(task.id, e)}
+                      onTouchMove={moveLongPress}
                       onTouchEnd={cancelLongPress}
-                      onTouchMove={cancelLongPress}
-                      className={`flex cursor-pointer items-center gap-1 truncate px-2 text-xs transition-colors ${selected
-                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                        : "hover:bg-gray-50"
-                        } ${flash ? "animate-pulse" : ""}`}
+                      onTouchCancel={cancelLongPress}
+                      onContextMenu={(e) => e.preventDefault()}
+                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${
+                        selected
+                          ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                          : "hover:bg-gray-50"
+                      } ${flash ? "animate-pulse" : ""}`}
                       style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                     >
                       {hasChildren ? (
@@ -1510,24 +1593,38 @@ export default function ScheduleView() {
                       {!hasChildren && critical && showCritical && (
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                          title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
-                            }d`}
+                          title={`Critical · float ${
+                            cpm.totalFloat.get(task.id) ?? 0
+                          }d`}
                         />
                       )}
                       <span
-                        className={`truncate ${hasChildren ? "font-semibold" : ""
-                          }`}
+                        className={`truncate ${
+                          hasChildren ? "font-semibold" : ""
+                        }`}
                         title={task.name}
                       >
                         {task.name}
                       </span>
+                      {!readOnly && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditorFromBar(task.id);
+                          }}
+                          className="ml-auto shrink-0 px-1.5 text-gray-500 hover:text-gray-800"
+                          title="Edit"
+                        >
+                          ✎
+                        </button>
+                      )}
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            <div ref={scrollerRef} className="flex-1 overflow-x-auto">
+            <div ref={scrollerRef} className="min-w-0 flex-1 overflow-x-auto">
               <div style={{ width: ganttWidth }}>
                 <div
                   className="box-border border-b bg-gray-50"
@@ -1569,12 +1666,13 @@ export default function ScheduleView() {
                         return (
                           <div
                             key={i}
-                            className={`overflow-hidden border-r text-center leading-5 ${holiday
-                              ? "bg-pink-100"
-                              : isWeekend
-                                ? "bg-gray-100"
-                                : ""
-                              }`}
+                            className={`overflow-hidden border-r text-center leading-5 ${
+                              holiday
+                                ? "bg-pink-100"
+                                : isWeekend
+                                  ? "bg-gray-100"
+                                  : ""
+                            }`}
                             style={{ width: zoom }}
                             title={holiday ? "Holiday" : undefined}
                           >
@@ -1597,12 +1695,13 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={i}
-                          className={`h-full ${holiday
-                            ? "bg-pink-50"
-                            : isWeekend
-                              ? "bg-gray-50"
-                              : ""
-                            } ${showDayGrid ? "border-r" : ""}`}
+                          className={`h-full ${
+                            holiday
+                              ? "bg-pink-50"
+                              : isWeekend
+                                ? "bg-gray-50"
+                                : ""
+                          } ${showDayGrid ? "border-r" : ""}`}
                           style={{ width: zoom }}
                         />
                       );
@@ -1655,8 +1754,9 @@ export default function ScheduleView() {
                     return (
                       <div
                         key={`hl-${task.id}`}
-                        className={`pointer-events-none absolute left-0 right-0 ${selected ? "bg-blue-100/60" : ""
-                          } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                        className={`pointer-events-none absolute left-0 right-0 ${
+                          selected ? "bg-blue-100/60" : ""
+                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
                         style={{ top: i * ROW_H, height: ROW_H }}
                       />
                     );
@@ -1720,8 +1820,8 @@ export default function ScheduleView() {
                         (toDay(task.baselineFinish) -
                           toDay(task.baselineStart) +
                           1) *
-                        zoom -
-                        2
+                          zoom -
+                          2
                       );
                       return (
                         <div
@@ -1747,15 +1847,17 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={`ac-${task.id}`}
-                          className={`pointer-events-none absolute z-10 h-1 rounded ${late ? "bg-orange-500" : "bg-emerald-500"
-                            } ${task.actualFinish ? "" : "opacity-70"}`}
+                          className={`pointer-events-none absolute z-10 h-1 rounded ${
+                            late ? "bg-orange-500" : "bg-emerald-500"
+                          } ${task.actualFinish ? "" : "opacity-70"}`}
                           style={{
                             left: (aStartDay - minDay) * zoom,
                             top: i * ROW_H + 3,
                             width: Math.max(2, (aEndDay - aStartDay + 1) * zoom - 2),
                           }}
-                          title={`Actual ${task.actualStart} → ${task.actualFinish ?? "in progress"
-                            }`}
+                          title={`Actual ${task.actualStart} → ${
+                            task.actualFinish ?? "in progress"
+                          }`}
                         />
                       );
                     })}
@@ -1785,21 +1887,36 @@ export default function ScheduleView() {
                     return (
                       <div
                         key={task.id}
-                        onClick={() => handleRowClick(task.id, !!hasChildren)}
+                        onClick={() => {
+                          if (consumeLongPress()) return;
+                          handleRowClick(task.id, !!hasChildren);
+                        }}
                         onDoubleClick={() => openEditorFromBar(task.id)}
-                        onTouchStart={() => startLongPress(task.id)}
+                        onTouchStart={(e) => startLongPress(task.id, e)}
+                        onTouchMove={moveLongPress}
                         onTouchEnd={cancelLongPress}
-                        onTouchMove={cancelLongPress}
-                        className={`absolute h-3 cursor-pointer rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                          }`}
-                        style={{ left: s * zoom, top: i * ROW_H + 8, width: w }}
-                        title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
-                          } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
-                          }${critical
-                            ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
-                            }d`
+                        onTouchCancel={cancelLongPress}
+                        onContextMenu={(e) => e.preventDefault()}
+                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${
+                          selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                        }`}
+                        style={{
+                          left: s * zoom,
+                          top: i * ROW_H + 8,
+                          width: w,
+                          WebkitTouchCallout: "none",
+                        }}
+                        title={`${task.name}\n${task.scheduleStart} → ${
+                          task.scheduleFinish
+                        } · ${durLabel}${
+                          task.completion > 0 ? ` · ${task.completion}%` : ""
+                        }${
+                          critical
+                            ? `\nCRITICAL · float ${
+                                cpm.totalFloat.get(task.id) ?? 0
+                              }d`
                             : ""
-                          }`}
+                        }`}
                       >
                         {!hasChildren &&
                           !task.isMilestone &&
@@ -1925,12 +2042,13 @@ export default function ScheduleView() {
                   key={task.id}
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
-                  className={`cursor-pointer border-t transition-colors ${selected
-                    ? "bg-blue-100"
-                    : critical && showCritical
-                      ? "bg-red-50/40 hover:bg-red-50/70"
-                      : "hover:bg-gray-50"
-                    } ${flash ? "animate-pulse" : ""}`}
+                  className={`cursor-pointer border-t transition-colors ${
+                    selected
+                      ? "bg-blue-100"
+                      : critical && showCritical
+                        ? "bg-red-50/40 hover:bg-red-50/70"
+                        : "hover:bg-gray-50"
+                  } ${flash ? "animate-pulse" : ""}`}
                 >
                   <td
                     className="px-2 py-1.5"
@@ -2116,14 +2234,15 @@ export default function ScheduleView() {
                     />
                   </td>
                   <td
-                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${variance === null
-                      ? "text-gray-400"
-                      : variance > 0
-                        ? "font-semibold text-red-600"
-                        : variance < 0
-                          ? "text-emerald-600"
-                          : "text-gray-600"
-                      }`}
+                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${
+                      variance === null
+                        ? "text-gray-400"
+                        : variance > 0
+                          ? "font-semibold text-red-600"
+                          : variance < 0
+                            ? "text-emerald-600"
+                            : "text-gray-600"
+                    }`}
                     title={
                       variance === null
                         ? "No baseline set"
@@ -2335,6 +2454,20 @@ export default function ScheduleView() {
           </tbody>
         </table>
       </section>
+
+      {/* ================= MOBILE ACTION BAR (selected row) ================= */}
+      {selectedId && !readOnly && !editingId && (
+        <div
+          className="fixed bottom-4 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-4 rounded-full bg-gray-900 px-4 py-2 text-xs text-white shadow-lg md:hidden"
+          data-print-hide
+        >
+          <button onClick={() => setEditingId(selectedId)}>Edit</button>
+          <button onClick={() => addChild(selectedId)}>+ Child</button>
+          <button onClick={() => setSelectedId(null)} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ================= EDIT MODAL ================= */}
       {editingTask && !readOnly && (
