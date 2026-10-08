@@ -223,22 +223,81 @@ const effFinish = (t: Task): string => t.actualFinish ?? t.scheduleFinish;
  *  - actualStart  = planned start (never later than actualFinish)
  * Group rows are skipped (they roll up from their children).
  */
+/**
+ * Tasks at 100% are normalised so nothing "completed" sits in the future:
+ *  - actualFinish: filled if missing (planned finish if <= today, else today),
+ *    and clamped to today if it is later.
+ *  - actualStart: filled if missing (planned start, never after actualFinish),
+ *    and pulled back to actualFinish if it is later.
+ *  - planned start/finish: clamped so finish <= today and start <= finish.
+ * Group rows are skipped (they roll up from their children).
+ */
 function finalizeCompleted(
   tasks: Task[],
   parents: Set<string>,
-  today: string
+  today: string,
+  cal?: WorkingCalendar
 ): Task[] {
   return tasks.map((t) => {
     if (parents.has(t.id)) return t;
-    if (t.completion < 100 || t.actualFinish) return t;
-    const actualFinish = t.scheduleFinish <= today ? t.scheduleFinish : today;
+
+    if (t.completion < 100) {
+      // "Started" in the future: invalid. Drop it (or use today if it has progress).
+      if (t.actualStart && t.actualStart > today && !t.actualFinish) {
+        return { ...t, actualStart: t.completion > 0 ? today : null };
+      }
+
+      // Started, not finished: planned dates follow reality.
+      // Start = actual start, same length, finish never before today.
+      if (t.actualStart && !t.actualFinish && !t.isMilestone) {
+        const start = t.actualStart;
+        let finish: string;
+        if (cal) {
+          const wdur = Math.max(
+            1,
+            countWorkdays(t.scheduleStart, t.scheduleFinish, cal)
+          );
+          finish = addWorkdays(nextWorkday(start, cal), wdur - 1, cal);
+          if (finish < today) finish = nextWorkday(today, cal);
+        } else {
+          const dur = toDay(t.scheduleFinish) - toDay(t.scheduleStart);
+          finish = toISO(toDay(start) + Math.max(0, dur));
+          if (finish < today) finish = today;
+        }
+        if (start === t.scheduleStart && finish === t.scheduleFinish) return t;
+        return { ...t, scheduleStart: start, scheduleFinish: finish };
+      }
+      return t;
+    }
+
+    // ---- completed tasks: nothing may sit in the future ----
+    let actualFinish =
+      t.actualFinish ??
+      (t.scheduleFinish <= today ? t.scheduleFinish : today);
+    if (actualFinish > today) actualFinish = today;
+
     let actualStart =
       t.actualStart ??
       (t.scheduleStart <= actualFinish ? t.scheduleStart : actualFinish);
     if (actualStart > actualFinish) actualStart = actualFinish;
-    return { ...t, actualStart, actualFinish };
+
+    const scheduleFinish =
+      t.scheduleFinish > today ? today : t.scheduleFinish;
+    const scheduleStart =
+      t.scheduleStart > scheduleFinish ? scheduleFinish : t.scheduleStart;
+
+    if (
+      actualStart === t.actualStart &&
+      actualFinish === t.actualFinish &&
+      scheduleStart === t.scheduleStart &&
+      scheduleFinish === t.scheduleFinish
+    ) {
+      return t;
+    }
+    return { ...t, actualStart, actualFinish, scheduleStart, scheduleFinish };
   });
 }
+
 
 /**
  * Order task ids so every predecessor comes before its successors (Kahn).
@@ -369,7 +428,7 @@ export function autoScheduleWorkdays(
     tasks.map((t) => t.parentId).filter((x): x is string => !!x)
   );
   const today = todayISO();
-  tasks = finalizeCompleted(tasks, parents, today);
+  tasks = finalizeCompleted(tasks, parents, today, cal);
 
   const leaves = tasks.filter((t) => !parents.has(t.id));
   if (!leaves.length) return rollup(tasks);

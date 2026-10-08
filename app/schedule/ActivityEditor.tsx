@@ -49,7 +49,9 @@ function daysBetween(startISO: string, finishISO: string): number {
   return Math.max(1, toDay(finishISO) - toDay(startISO) + 1);
 }
 
-// ---------------- number input (kept for lag fields) ----------------
+// ---------------- number input ----------------
+// Keeps the raw typed text so you can backspace to empty and retype.
+// onChange fires live (only for real numbers); onCommit fires on blur/Enter.
 function NumberInput({
   value,
   min = 1,
@@ -81,7 +83,7 @@ function NumberInput({
   const commit = () => {
     const trimmed = raw.trim();
     let n = Number(trimmed);
-    if (!Number.isFinite(n)) n = value;
+    if (trimmed === "" || trimmed === "-" || !Number.isFinite(n)) n = value;
     n = Math.round(n);
     if (min != null) n = Math.max(min, n);
     if (max != null) n = Math.min(max, n);
@@ -101,12 +103,15 @@ function NumberInput({
         onChange={(e) => {
           const v = e.target.value.replace(/[^\d-]/g, "");
           setRaw(v);
-          if (onChange) {
+          if (onChange && v !== "" && v !== "-") {
             const n = Number(v);
             if (Number.isFinite(n)) onChange(Math.round(n));
           }
         }}
-        onFocus={() => setFocused(true)}
+        onFocus={(e) => {
+          setFocused(true);
+          e.target.select();
+        }}
         onBlur={() => {
           setFocused(false);
           commit();
@@ -116,6 +121,7 @@ function NumberInput({
             e.preventDefault();
             (e.target as HTMLInputElement).blur();
           } else if (e.key === "Escape") {
+            e.stopPropagation();
             setRaw(String(value));
             (e.target as HTMLInputElement).blur();
           }
@@ -128,6 +134,62 @@ function NumberInput({
         </span>
       )}
     </div>
+  );
+}
+
+// ---------------- date input ----------------
+// Native date inputs fire onChange on partial years (0002, 0020, 0202...).
+// This keeps a local draft, only commits plausible full dates, and does not
+// resync from the saved value while the field is focused.
+function DateField({
+  value,
+  onCommit,
+  disabled,
+  className,
+  allowEmpty = false,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+  disabled?: boolean;
+  className?: string;
+  allowEmpty?: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(value);
+  }, [value]);
+
+  const plausible = (v: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const y = Number(v.slice(0, 4));
+    return y >= 1900 && y <= 2200;
+  };
+
+  return (
+    <input
+      type="date"
+      value={draft}
+      disabled={disabled}
+      className={className}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onChange={(e) => {
+        const v = e.target.value;
+        setDraft(v);
+        if (v === "") {
+          if (allowEmpty) onCommit("");
+          return;
+        }
+        if (plausible(v)) onCommit(v);
+      }}
+      onBlur={() => {
+        focusedRef.current = false;
+        setDraft(value);
+      }}
+    />
   );
 }
 
@@ -237,6 +299,7 @@ function ParentPicker({
       commit(opt.isRoot ? null : opt.id);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       if (query) setQuery("");
       else setOpen(false);
     }
@@ -328,7 +391,8 @@ function LinkRow({
         className="min-w-0 flex-1 truncate font-medium text-gray-800"
         title={other?.name ?? sequence.relatingTask}
       >
-        {other?.name ?? (kind === "pred" ? sequence.relatingTask : sequence.relatedTask)}
+        {other?.name ??
+          (kind === "pred" ? sequence.relatingTask : sequence.relatedTask)}
       </span>
       <select
         value={sequence.sequenceType}
@@ -370,6 +434,7 @@ function LinkRow({
 }
 
 // ---------------- links editor (pred or succ) ----------------
+// Works on a LOCAL draft list; nothing reaches the schedule until Save.
 function LinksEditor({
   kind,
   task,
@@ -490,7 +555,8 @@ function LinksEditor({
 
         {adding && candidates.length === 0 && (
           <div className="text-[11px] italic text-gray-400">
-            No eligible {kind === "pred" ? "predecessors" : "successors"} available.
+            No eligible {kind === "pred" ? "predecessors" : "successors"}{" "}
+            available.
           </div>
         )}
       </div>
@@ -505,24 +571,23 @@ export function ActivityEditorModal({
   sequences,
   calendar,
   useWorkdays,
+  isAdmin,
   onSave,
   onDelete,
   onClose,
-  onAddSequence,
-  onUpdateSequence,
-  onRemoveSequence,
+  onApplyLinks,
 }: {
   task: Task;
   tasks: Task[];
   sequences: Sequence[];
   calendar: WorkingCalendar;
   useWorkdays: boolean;
+  isAdmin: boolean;
   onSave: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onClose: () => void;
-  onAddSequence?: (predId: string, succId: string) => void;
-  onUpdateSequence?: (id: string, patch: Partial<Sequence>) => void;
-  onRemoveSequence?: (id: string) => void;
+  /** Called once on Save with this task's full, edited list of links. */
+  onApplyLinks?: (next: Sequence[]) => void;
 }) {
   const [name, setName] = useState(task.name);
   const [code, setCode] = useState(task.workCode ?? "");
@@ -542,8 +607,47 @@ export function ActivityEditorModal({
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const linksEnabled =
-    !!onAddSequence && !!onUpdateSequence && !!onRemoveSequence;
+  // Group heads: dates, progress, baseline and actuals come from the children.
+  const isGroup = tasks.some((t) => t.parentId === task.id);
+  // Baseline is admin-only, and never editable on a group (derived).
+  const canEditBaseline = isAdmin && !isGroup;
+
+  const linksEnabled = !!onApplyLinks;
+
+  // ── Local draft of this task's links (applied only on Save) ────────────
+  const isMine = (s: Sequence) =>
+    s.relatingTask === task.id || s.relatedTask === task.id;
+
+  const [draftLinks, setDraftLinks] = useState<Sequence[]>(() =>
+    sequences.filter(isMine).map((s) => ({ ...s }))
+  );
+
+  // Everything else + the draft, so cycle checks see the edited state.
+  const draftAllSeqs = useMemo(
+    () => [...sequences.filter((s) => !isMine(s)), ...draftLinks],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sequences, draftLinks, task.id]
+  );
+
+  const addDraftLink = (predId: string, succId: string) =>
+    setDraftLinks((prev) => [
+      ...prev,
+      {
+        id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        relatingTask: predId,
+        relatedTask: succId,
+        sequenceType: "FINISH_START",
+        lagDays: 0,
+      } as Sequence,
+    ]);
+
+  const updateDraftLink = (id: string, patch: Partial<Sequence>) =>
+    setDraftLinks((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+    );
+
+  const removeDraftLink = (id: string) =>
+    setDraftLinks((prev) => prev.filter((s) => s.id !== id));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -570,16 +674,8 @@ export function ActivityEditorModal({
     setFinish(recomputeFinish(s, duration));
   };
 
-  // Native number input: fires on every keystroke, so we don't need a
-  // separate preview handler. Just update state and recompute finish.
-  const onDurationInput = (rawValue: string) => {
-    const n = Number(rawValue);
-    if (!Number.isFinite(n) || n < 1) {
-      setDuration(1);
-      setFinish(recomputeFinish(start, 1));
-      return;
-    }
-    const d = Math.round(n);
+  const onDurationCommit = (n: number) => {
+    const d = Math.max(1, Math.round(n));
     setDuration(d);
     setFinish(recomputeFinish(start, d));
   };
@@ -609,21 +705,47 @@ export function ActivityEditorModal({
   };
 
   const save = () => {
+    // Group heads: only send the fields that are genuinely editable, so
+    // derived dates / progress / baseline / actuals are never written back.
+    if (isGroup) {
+      onSave({
+        name: name.trim() || task.name,
+        workCode: code.trim() || undefined,
+        remarks: remarks.trim() || undefined,
+        parentId,
+      });
+      onClose();
+      return;
+    }
+
     const bs = baseStart || null;
     let bf = baseFinish || null;
     if (bs && bf && bf < bs) bf = bs;
-    const as = actStart || null;
+    let as = actStart || null;
     let af = actFinish || null;
     if (as && af && af < as) af = as;
 
-    // Recompute finish from start + duration in case the user typed and
-    // clicked Save without blurring.
+    const todayStr = (() => {
+      const n = new Date();
+      const p = (x: number) => String(x).padStart(2, "0");
+      return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+    })();
+    const done = completion >= 100;
+
+    // Completed tasks: actual dates can't be in the future.
+    if (done && af && af > todayStr) af = todayStr;
+    if (done && as && af && as > af) as = af;
+
+    // Recompute finish from start + duration so the saved values agree.
     let finalStart = start;
     let finalFinish = finish;
     if (milestone) {
       finalFinish = finalStart;
     } else if (!useWorkdays) {
-      finalFinish = finishFromStart(finalStart, Math.max(1, Math.round(duration)));
+      finalFinish = finishFromStart(
+        finalStart,
+        Math.max(1, Math.round(duration))
+      );
     } else {
       finalStart = nextWorkday(finalStart, calendar);
       finalFinish = addWorkdays(
@@ -633,13 +755,17 @@ export function ActivityEditorModal({
       );
     }
 
+    // Completed tasks: planned dates can't be in the future either.
+    if (done && finalFinish > todayStr) finalFinish = todayStr;
+    if (finalStart > finalFinish) finalStart = finalFinish;
+
     onSave({
       name: name.trim() || task.name,
       workCode: code.trim() || undefined,
       scheduleStart: finalStart,
       scheduleFinish: finalFinish,
-      baselineStart: bs,
-      baselineFinish: bf,
+      // Non-admins never send baseline fields, so they can't overwrite them.
+      ...(isAdmin ? { baselineStart: bs, baselineFinish: bf } : {}),
       actualStart: as,
       actualFinish: af,
       completion: Math.max(0, Math.min(100, Math.round(completion))),
@@ -647,6 +773,25 @@ export function ActivityEditorModal({
       remarks: remarks.trim() || undefined,
       parentId,
     });
+
+    // Links: apply only if something actually changed.
+    if (onApplyLinks) {
+      const orig = sequences.filter(isMine);
+      const same =
+        orig.length === draftLinks.length &&
+        orig.every((o) => {
+          const d = draftLinks.find((x) => x.id === o.id);
+          return (
+            !!d &&
+            d.sequenceType === o.sequenceType &&
+            d.lagDays === o.lagDays &&
+            d.relatingTask === o.relatingTask &&
+            d.relatedTask === o.relatedTask
+          );
+        });
+      if (!same) onApplyLinks(draftLinks);
+    }
+
     onClose();
   };
 
@@ -716,27 +861,28 @@ export function ActivityEditorModal({
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            <label className="grid gap-1">
+            <div className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">Start</span>
-              <input
-                type="date"
+              <DateField
                 value={start}
-                onChange={(e) => onStartChange(e.target.value)}
-                disabled={milestone}
+                onCommit={onStartChange}
+                disabled={milestone || isGroup}
                 className={`${inputCls} disabled:bg-gray-100`}
               />
-            </label>
+            </div>
             <div className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">
                 {useWorkdays ? "Duration (work days)" : "Duration (days)"}
               </span>
-              <input
-                type="number"
-                min={1}
-                step={1}
+              <NumberInput
                 value={milestone ? 1 : duration}
-                disabled={milestone}
-                onChange={(e) => onDurationInput(e.target.value)}
+                min={1}
+                max={9999}
+                disabled={milestone || isGroup}
+                onChange={(n) => {
+                  if (n >= 1) onDurationCommit(n);
+                }}
+                onCommit={onDurationCommit}
                 className={`${inputCls} w-full tabular-nums disabled:bg-gray-100`}
                 title={
                   useWorkdays
@@ -745,16 +891,15 @@ export function ActivityEditorModal({
                 }
               />
             </div>
-            <label className="grid gap-1">
+            <div className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">Finish</span>
-              <input
-                type="date"
+              <DateField
                 value={finish}
-                onChange={(e) => onFinishChange(e.target.value)}
-                disabled={milestone}
+                onCommit={onFinishChange}
+                disabled={milestone || isGroup}
                 className={`${inputCls} disabled:bg-gray-100`}
               />
-            </label>
+            </div>
           </div>
           <p className="-mt-1 text-[10px] text-gray-500">
             Editing <strong>Duration</strong> keeps the start date fixed and
@@ -762,28 +907,35 @@ export function ActivityEditorModal({
             duration.{" "}
             {useWorkdays
               ? "In working-day mode, weekends and holidays are skipped."
-              : "Milestones are always 1 day."}
+              : "Milestones are always 1 day."}{" "}
+            Nothing is applied until you press <strong>Save</strong>.
           </p>
+          {isGroup && (
+            <p className="-mt-1 text-[10px] text-amber-700">
+              Group dates, progress, baseline and actuals are derived from the
+              children. Use Auto-schedule to refresh them.
+            </p>
+          )}
 
-          {linksEnabled && !milestone && (
+          {linksEnabled && !milestone && !isGroup && (
             <div className="grid grid-cols-2 gap-3">
               <LinksEditor
                 kind="pred"
                 task={task}
                 tasks={tasks}
-                allSequences={sequences}
-                onAdd={(otherId) => onAddSequence?.(otherId, task.id)}
-                onChange={(id, patch) => onUpdateSequence?.(id, patch)}
-                onRemove={(id) => onRemoveSequence?.(id)}
+                allSequences={draftAllSeqs}
+                onAdd={(otherId) => addDraftLink(otherId, task.id)}
+                onChange={updateDraftLink}
+                onRemove={removeDraftLink}
               />
               <LinksEditor
                 kind="succ"
                 task={task}
                 tasks={tasks}
-                allSequences={sequences}
-                onAdd={(otherId) => onAddSequence?.(task.id, otherId)}
-                onChange={(id, patch) => onUpdateSequence?.(id, patch)}
-                onRemove={(id) => onRemoveSequence?.(id)}
+                allSequences={draftAllSeqs}
+                onAdd={(otherId) => addDraftLink(task.id, otherId)}
+                onChange={updateDraftLink}
+                onRemove={removeDraftLink}
               />
             </div>
           )}
@@ -793,32 +945,37 @@ export function ActivityEditorModal({
               Baseline (frozen plan)
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <label className="grid gap-1">
+              <div className="grid gap-1">
                 <span className="text-xs font-medium text-gray-600">
                   Baseline start
                 </span>
-                <input
-                  type="date"
+                <DateField
                   value={baseStart}
-                  onChange={(e) => setBaseStart(e.target.value)}
-                  className={inputCls}
+                  onCommit={setBaseStart}
+                  allowEmpty
+                  disabled={!canEditBaseline}
+                  className={`${inputCls} disabled:bg-gray-100`}
                 />
-              </label>
-              <label className="grid gap-1">
+              </div>
+              <div className="grid gap-1">
                 <span className="text-xs font-medium text-gray-600">
                   Baseline finish
                 </span>
-                <input
-                  type="date"
+                <DateField
                   value={baseFinish}
-                  onChange={(e) => setBaseFinish(e.target.value)}
-                  className={inputCls}
+                  onCommit={setBaseFinish}
+                  allowEmpty
+                  disabled={!canEditBaseline}
+                  className={`${inputCls} disabled:bg-gray-100`}
                 />
-              </label>
+              </div>
             </div>
             <p className="mt-1.5 text-[10px] text-gray-500">
-              Normally set for every task at once with &quot;Set baseline&quot;
-              in the header.
+              {isGroup
+                ? "Derived from the children."
+                : isAdmin
+                  ? 'Normally set for every task at once with "Set baseline" in the header.'
+                  : "Only admins can edit the baseline."}
             </p>
           </div>
 
@@ -827,32 +984,35 @@ export function ActivityEditorModal({
               Actual (what really happened)
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <label className="grid gap-1">
+              <div className="grid gap-1">
                 <span className="text-xs font-medium text-gray-600">
                   Actual start
                 </span>
-                <input
-                  type="date"
+                <DateField
                   value={actStart}
-                  onChange={(e) => setActStart(e.target.value)}
-                  className={inputCls}
+                  onCommit={setActStart}
+                  allowEmpty
+                  disabled={isGroup}
+                  className={`${inputCls} disabled:bg-gray-100`}
                 />
-              </label>
-              <label className="grid gap-1">
+              </div>
+              <div className="grid gap-1">
                 <span className="text-xs font-medium text-gray-600">
                   Actual finish
                 </span>
-                <input
-                  type="date"
+                <DateField
                   value={actFinish}
-                  onChange={(e) => setActFinish(e.target.value)}
-                  className={inputCls}
+                  onCommit={setActFinish}
+                  allowEmpty
+                  disabled={isGroup}
+                  className={`${inputCls} disabled:bg-gray-100`}
                 />
-              </label>
+              </div>
             </div>
             <p className="mt-1.5 text-[10px] text-gray-500">
-              Filled automatically when you move the % slider; edit here to
-              correct a date.
+              {isGroup
+                ? "Derived from the children: starts with the earliest child start, finishes once every child has finished."
+                : "Filled automatically when you move the % slider; edit here to correct a date."}
             </p>
           </div>
 
@@ -866,6 +1026,7 @@ export function ActivityEditorModal({
               min={0}
               max={100}
               value={completion}
+              disabled={isGroup}
               onChange={(e) => setCompletion(Number(e.target.value))}
               className="w-full"
             />
@@ -875,6 +1036,7 @@ export function ActivityEditorModal({
             <input
               type="checkbox"
               checked={milestone}
+              disabled={isGroup}
               onChange={(e) => {
                 const v = e.target.checked;
                 setMilestone(v);

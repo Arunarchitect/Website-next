@@ -70,6 +70,7 @@ import {
   withDescendants,
 } from "./JsonTool";
 import type { SelectionJson } from "./JsonTool";
+import { useUndo } from "./useUndo";
 
 const ROW_H = 28;
 const LEFT_COL_W = 256; // desktop width
@@ -183,6 +184,17 @@ export default function ScheduleView() {
 
   const calendarSer = useMemo(() => serialize(calendar), [calendar]);
 
+  const undo = useUndo({
+    tasks,
+    sequences,
+    calendar,
+    apply: (s) => {
+      setTasks(s.tasks);
+      setSequences(s.sequences);
+      setCalendar(s.calendar);
+    },
+  });
+
   // Left task column width: narrower on phones so the timeline gets room.
   const [leftW, setLeftW] = useState(LEFT_COL_W);
   useEffect(() => {
@@ -245,15 +257,19 @@ export default function ScheduleView() {
   // Stable callback (only uses state setters). Resets the calendar to the
   // default when the server has none, so a previous schedule's holidays
   // never leak into the next one.
-  const handleLoaded = useCallback((d: ScheduleDoc) => {
-    setTasks(d.tasks);
-    setSequences(d.sequences);
-    setCalendar(
-      d.calendar
-        ? deserialize(d.calendar as SerializedCalendar)
-        : emptyCalendar()
-    );
-  }, []);
+  const handleLoaded = useCallback(
+    (d: ScheduleDoc) => {
+      setTasks(d.tasks);
+      setSequences(d.sequences);
+      setCalendar(
+        d.calendar
+          ? deserialize(d.calendar as SerializedCalendar)
+          : emptyCalendar()
+      );
+      undo.clear();
+    },
+    [undo.clear]
+  );
 
   // ---------- backend sync ----------
   const sync = useScheduleSync({
@@ -280,6 +296,45 @@ export default function ScheduleView() {
   const pendingScroll = useRef<number | null>(null);
   const pendingCenter = useRef<number | null>(null);
   const [containerW, setContainerW] = useState(1000);
+
+  useEffect(() => {
+    if (readOnly || !ready) return;
+    const isTextEntry = (el: HTMLElement | null) => {
+      if (!el) return false;
+      if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+      if (el.tagName === "INPUT") {
+        const t = (el as HTMLInputElement).type;
+        return !["checkbox", "radio", "range", "button"].includes(t);
+      }
+      return false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      if (isTextEntry(e.target as HTMLElement | null)) return; // native text undo
+      if (editingId || pasteOpen || scopedPasteOpen || calendarOpen || compareOpen)
+        return;
+      e.preventDefault();
+      const isRedo = k === "y" || e.shiftKey;
+      const ok = isRedo ? undo.redo() : undo.undo();
+      if (ok) {
+        setCopiedMsg(isRedo ? "Redone" : "Undone");
+        setTimeout(() => setCopiedMsg(null), 1500);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [
+    readOnly,
+    ready,
+    editingId,
+    pasteOpen,
+    scopedPasteOpen,
+    calendarOpen,
+    compareOpen,
+    undo,
+  ]);
 
   useEffect(() => {
     if (!ready) return;
@@ -528,10 +583,10 @@ export default function ScheduleView() {
       prev.map((t) =>
         t.id === id
           ? setDurationWithCalendar(
-              t,
-              newDays,
-              useWorkdays ? calendar : undefined
-            )
+            t,
+            newDays,
+            useWorkdays ? calendar : undefined
+          )
           : t
       )
     );
@@ -609,6 +664,27 @@ export default function ScheduleView() {
 
   const addSibling = (anchor: Task) => addChild(anchor.parentId ?? null);
 
+  const freezeIfLeaf = (prev: Task[], parentId: string | null): Task[] => {
+    if (!parentId) return prev;
+    if (prev.some((t) => t.parentId === parentId)) return prev;
+    const r = rolled.find((t) => t.id === parentId);
+    if (!r) return prev;
+    return prev.map((t) =>
+      t.id === parentId
+        ? {
+          ...t,
+          scheduleStart: r.scheduleStart,
+          scheduleFinish: r.scheduleFinish,
+          baselineStart: r.baselineStart,
+          baselineFinish: r.baselineFinish,
+          actualStart: r.actualStart,
+          actualFinish: r.actualFinish,
+          completion: r.completion,
+        }
+        : t
+    );
+  };
+
   const deleteTask = (id: string) => {
     const toRemove = new Set<string>([id]);
     const stack = [id];
@@ -621,7 +697,13 @@ export default function ScheduleView() {
         }
       }
     }
-    setTasks((prev) => prev.filter((t) => !toRemove.has(t.id)));
+    const parentOfRoot = tasks.find((t) => t.id === id)?.parentId ?? null;
+    setTasks((prev) =>
+      freezeIfLeaf(
+        prev.filter((t) => !toRemove.has(t.id)),
+        parentOfRoot && !toRemove.has(parentOfRoot) ? parentOfRoot : null
+      )
+    );
     setSequences((prev) =>
       prev.filter(
         (s) => !toRemove.has(s.relatingTask) && !toRemove.has(s.relatedTask)
@@ -659,8 +741,12 @@ export default function ScheduleView() {
 
   const moveTask = (id: string, target: MoveTarget) => {
     const newParent = target.kind === "root" ? null : target.id;
+    const oldParent = tasks.find((t) => t.id === id)?.parentId ?? null;
     setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, parentId: newParent } : t))
+      freezeIfLeaf(
+        prev.map((t) => (t.id === id ? { ...t, parentId: newParent } : t)),
+        oldParent === newParent ? null : oldParent
+      )
     );
     if (newParent) {
       setCollapsed((prev) => {
@@ -965,7 +1051,7 @@ export default function ScheduleView() {
                 setScheduleId(id);
                 listMyProjects()
                   .then(setMyProjects)
-                  .catch(() => {});
+                  .catch(() => { });
               }
             }}
             className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
@@ -1023,7 +1109,7 @@ export default function ScheduleView() {
   const criticalDuration = cpm.projectFinish - cpm.projectStart + 1;
 
   const editingTask = editingId
-    ? tasks.find((t) => t.id === editingId) ?? null
+    ? rolled.find((t) => t.id === editingId) ?? null
     : null;
 
   const handleRowAction = (task: Task, action: RowMenuAction) => {
@@ -1088,10 +1174,10 @@ export default function ScheduleView() {
   const selectionIds = (): string[] =>
     includeChildren
       ? [
-          ...new Set(
-            [...checkedIds].flatMap((id) => withDescendants(id, tasks))
-          ),
-        ]
+        ...new Set(
+          [...checkedIds].flatMap((id) => withDescendants(id, tasks))
+        ),
+      ]
       : [...checkedIds];
 
   const applyPaste = (data: SelectionJson) => {
@@ -1279,6 +1365,26 @@ export default function ScheduleView() {
             name={heading}
           />
           {!readOnly && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => undo.undo()}
+                disabled={!undo.canUndo}
+                className="rounded border bg-white px-2.5 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Undo (Ctrl+Z)"
+              >
+                ↶ Undo
+              </button>
+              <button
+                onClick={() => undo.redo()}
+                disabled={!undo.canRedo}
+                className="rounded border bg-white px-2.5 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Redo (Ctrl+Shift+Z / Ctrl+Y)"
+              >
+                ↷ Redo
+              </button>
+            </div>
+          )}
+          {!readOnly && (
             <button
               onClick={() => addChild(null)}
               className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -1335,17 +1441,15 @@ export default function ScheduleView() {
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${
-            current
-              ? "border-blue-500 bg-blue-50/60"
-              : "border-gray-300 bg-gray-50"
-          }`}
+          className={`rounded border-l-4 p-3 ${current
+            ? "border-blue-500 bg-blue-50/60"
+            : "border-gray-300 bg-gray-50"
+            }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${
-                current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
-              }`}
+              className={`h-2 w-2 rounded-full ${current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+                }`}
             />
             Now
           </div>
@@ -1379,18 +1483,16 @@ export default function ScheduleView() {
         </div>
 
         <div
-          className={`rounded border-l-4 p-3 ${
-            next
-              ? "border-emerald-500 bg-emerald-50/60"
-              : "border-gray-300 bg-gray-50"
-          }`}
+          className={`rounded border-l-4 p-3 ${next
+            ? "border-emerald-500 bg-emerald-50/60"
+            : "border-gray-300 bg-gray-50"
+            }`}
         >
           <div className="mb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
               <span
-                className={`h-2 w-2 rounded-full ${
-                  next ? "bg-emerald-500" : "bg-gray-400"
-                }`}
+                className={`h-2 w-2 rounded-full ${next ? "bg-emerald-500" : "bg-gray-400"
+                  }`}
               />
               Next up
               {upcoming.length > 0 && (
@@ -1654,15 +1756,14 @@ export default function ScheduleView() {
                       onTouchEnd={cancelLongPress}
                       onTouchCancel={cancelLongPress}
                       onContextMenu={(e) => e.preventDefault()}
-                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${
-                        selected
-                          ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                          : predIds.has(task.id)
-                            ? "bg-amber-50 hover:bg-amber-100/60"
-                            : succIds.has(task.id)
-                              ? "bg-emerald-50 hover:bg-emerald-100/60"
-                              : "hover:bg-gray-50"
-                      } ${flash ? "animate-pulse" : ""}`}
+                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${selected
+                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                        : predIds.has(task.id)
+                          ? "bg-amber-50 hover:bg-amber-100/60"
+                          : succIds.has(task.id)
+                            ? "bg-emerald-50 hover:bg-emerald-100/60"
+                            : "hover:bg-gray-50"
+                        } ${flash ? "animate-pulse" : ""}`}
                       style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                     >
                       {hasChildren ? (
@@ -1681,15 +1782,13 @@ export default function ScheduleView() {
                       {!hasChildren && critical && showCritical && (
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                          title={`Critical · float ${
-                            cpm.totalFloat.get(task.id) ?? 0
-                          }d`}
+                          title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
+                            }d`}
                         />
                       )}
                       <span
-                        className={`truncate ${
-                          hasChildren ? "font-semibold" : ""
-                        }`}
+                        className={`truncate ${hasChildren ? "font-semibold" : ""
+                          }`}
                         title={task.name}
                       >
                         {task.name}
@@ -1754,13 +1853,12 @@ export default function ScheduleView() {
                         return (
                           <div
                             key={i}
-                            className={`overflow-hidden border-r text-center leading-5 ${
-                              holiday
-                                ? "bg-pink-100"
-                                : isWeekend
-                                  ? "bg-gray-100"
-                                  : ""
-                            }`}
+                            className={`overflow-hidden border-r text-center leading-5 ${holiday
+                              ? "bg-pink-100"
+                              : isWeekend
+                                ? "bg-gray-100"
+                                : ""
+                              }`}
                             style={{ width: zoom }}
                             title={holiday ? "Holiday" : undefined}
                           >
@@ -1784,13 +1882,12 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={i}
-                          className={`h-full ${
-                            holiday
-                              ? "bg-pink-50"
-                              : isWeekend
-                                ? "bg-gray-50"
-                                : ""
-                          } ${showDayGrid ? "border-r" : ""}`}
+                          className={`h-full ${holiday
+                            ? "bg-pink-50"
+                            : isWeekend
+                              ? "bg-gray-50"
+                              : ""
+                            } ${showDayGrid ? "border-r" : ""}`}
                           style={{ width: zoom }}
                         />
                       );
@@ -1845,15 +1942,14 @@ export default function ScheduleView() {
                     return (
                       <div
                         key={`hl-${task.id}`}
-                        className={`pointer-events-none absolute left-0 right-0 ${
-                          selected
-                            ? "bg-blue-100/60"
-                            : isPred
-                              ? "bg-amber-100/30"
-                              : isSucc
-                                ? "bg-emerald-100/30"
-                                : ""
-                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                        className={`pointer-events-none absolute left-0 right-0 ${selected
+                          ? "bg-blue-100/60"
+                          : isPred
+                            ? "bg-amber-100/30"
+                            : isSucc
+                              ? "bg-emerald-100/30"
+                              : ""
+                          } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
                         style={{ top: i * ROW_H, height: ROW_H }}
                       />
                     );
@@ -1918,8 +2014,8 @@ export default function ScheduleView() {
                         (toDay(task.baselineFinish) -
                           toDay(task.baselineStart) +
                           1) *
-                          zoom -
-                          2
+                        zoom -
+                        2
                       );
                       return (
                         <div
@@ -1945,9 +2041,8 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={`ac-${task.id}`}
-                          className={`pointer-events-none absolute z-10 h-1 rounded ${
-                            late ? "bg-orange-500" : "bg-emerald-500"
-                          } ${task.actualFinish ? "" : "opacity-70"}`}
+                          className={`pointer-events-none absolute z-10 h-1 rounded ${late ? "bg-orange-500" : "bg-emerald-500"
+                            } ${task.actualFinish ? "" : "opacity-70"}`}
                           style={{
                             left: (aStartDay - minDay) * zoom,
                             top: i * ROW_H + 3,
@@ -1956,9 +2051,8 @@ export default function ScheduleView() {
                               (aEndDay - aStartDay + 1) * zoom - 2
                             ),
                           }}
-                          title={`Actual ${task.actualStart} → ${
-                            task.actualFinish ?? "in progress"
-                          }`}
+                          title={`Actual ${task.actualStart} → ${task.actualFinish ?? "in progress"
+                            }`}
                         />
                       );
                     })}
@@ -1999,26 +2093,21 @@ export default function ScheduleView() {
                         onTouchEnd={cancelLongPress}
                         onTouchCancel={cancelLongPress}
                         onContextMenu={(e) => e.preventDefault()}
-                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${
-                          selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                        }`}
+                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                          }`}
                         style={{
                           left: s * zoom,
                           top: i * ROW_H + 8,
                           width: w,
                           WebkitTouchCallout: "none",
                         }}
-                        title={`${task.name}\n${task.scheduleStart} → ${
-                          task.scheduleFinish
-                        } · ${durLabel}${
-                          task.completion > 0 ? ` · ${task.completion}%` : ""
-                        }${
-                          critical
-                            ? `\nCRITICAL · float ${
-                                cpm.totalFloat.get(task.id) ?? 0
-                              }d`
+                        title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
+                          } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
+                          }${critical
+                            ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
+                            }d`
                             : ""
-                        }`}
+                          }`}
                       >
                         {!hasChildren &&
                           !task.isMilestone &&
@@ -2144,17 +2233,16 @@ export default function ScheduleView() {
                   key={task.id}
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
-                  className={`cursor-pointer border-t transition-colors ${
-                    selected
-                      ? "bg-blue-100"
-                      : predIds.has(task.id)
-                        ? "bg-amber-50/70 hover:bg-amber-50"
-                        : succIds.has(task.id)
-                          ? "bg-emerald-50/70 hover:bg-emerald-50"
-                          : critical && showCritical
-                            ? "bg-red-50/40 hover:bg-red-50/70"
-                            : "hover:bg-gray-50"
-                  } ${flash ? "animate-pulse" : ""}`}
+                  className={`cursor-pointer border-t transition-colors ${selected
+                    ? "bg-blue-100"
+                    : predIds.has(task.id)
+                      ? "bg-amber-50/70 hover:bg-amber-50"
+                      : succIds.has(task.id)
+                        ? "bg-emerald-50/70 hover:bg-emerald-50"
+                        : critical && showCritical
+                          ? "bg-red-50/40 hover:bg-red-50/70"
+                          : "hover:bg-gray-50"
+                    } ${flash ? "animate-pulse" : ""}`}
                 >
                   <td
                     className="px-2 py-1.5"
@@ -2344,15 +2432,14 @@ export default function ScheduleView() {
                     />
                   </td>
                   <td
-                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${
-                      variance === null
-                        ? "text-gray-400"
-                        : variance > 0
-                          ? "font-semibold text-red-600"
-                          : variance < 0
-                            ? "text-emerald-600"
-                            : "text-gray-600"
-                    }`}
+                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${variance === null
+                      ? "text-gray-400"
+                      : variance > 0
+                        ? "font-semibold text-red-600"
+                        : variance < 0
+                          ? "text-emerald-600"
+                          : "text-gray-600"
+                      }`}
                     title={
                       variance === null
                         ? "No baseline set"
@@ -2589,27 +2676,20 @@ export default function ScheduleView() {
           sequences={sequences}
           calendar={calendar}
           useWorkdays={useWorkdays}
+          isAdmin={isAdmin}
           onSave={(patch) => updateTask(editingTask.id, patch)}
           onDelete={() => deleteTask(editingTask.id)}
           onClose={() => setEditingId(null)}
-          onAddSequence={(predId, succId) => {
-            if (wouldCycle(sequences, predId, succId)) {
-              alert("That would create a cycle.");
-              return;
-            }
+          onApplyLinks={(next) =>
             setSequences((prev) => [
-              ...prev,
-              {
-                id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                relatingTask: predId,
-                relatedTask: succId,
-                sequenceType: "FINISH_START",
-                lagDays: 0,
-              },
-            ]);
-          }}
-          onUpdateSequence={(id, patch) => updateSequence(id, patch)}
-          onRemoveSequence={(id) => removeSequence(id)}
+              ...prev.filter(
+                (s) =>
+                  s.relatingTask !== editingTask.id &&
+                  s.relatedTask !== editingTask.id
+              ),
+              ...next,
+            ])
+          }
         />
       )}
 
