@@ -7,12 +7,6 @@ export interface Subtitle {
 
 /* ---------- Rich text content model ---------- */
 
-/**
- * A single inline run of text within a paragraph, list item, or callout.
- * Keeping this as a flat union (rather than nested marks) keeps the
- * renderer simple and keeps content authoring straightforward in mock data
- * or a future CMS/admin form.
- */
 export type InlineRun =
   | { type: "text"; text: string }
   | { type: "bold"; text: string }
@@ -20,7 +14,6 @@ export type InlineRun =
   | { type: "highlight"; text: string }
   | { type: "code"; text: string }
   | { type: "link"; text: string; href: string }
-  /** Superscript citation marker, e.g. renders as a linked [3] */
   | { type: "ref"; refId: string };
 
 export type ContentBlock =
@@ -38,7 +31,6 @@ export type ContentBlock =
       src: string;
       alt: string;
       caption?: string;
-      /** Attribution / source line shown under the caption, e.g. "Photo: Jane Doe / Unsplash" */
       source?: string;
       width?: number;
       height?: number;
@@ -48,12 +40,28 @@ export type ContentBlock =
 export type CitationStyle = "apa" | "mla";
 
 export interface Reference {
-  /** Stable id referenced by InlineRun of type "ref" (refId) */
   id: string;
   style?: CitationStyle;
-  /** Fully formatted citation text, e.g. "BuildingSMART International. (2023). IFC4.3 Documentation." */
   text: string;
   url?: string;
+}
+
+/* ---------- Course preface ---------- */
+
+export interface PrefaceSection {
+  id: string;
+  heading: string;
+  blocks: ContentBlock[];
+}
+
+export interface CoursePreface {
+  /** Small label above the title, e.g. "Preface" */
+  eyebrow?: string;
+  title: string;
+  /** Short lead-in paragraph rendered under the title */
+  intro: string;
+  sections: PrefaceSection[];
+  references?: Reference[];
 }
 
 /* ---------- Course structure ---------- */
@@ -66,10 +74,9 @@ export interface Chapter {
   video?: string;
   poster?: string;
   subtitles?: Subtitle[];
-  /** Rich text/notes body for the lesson. Independent of video — a chapter can have either, both, or neither. */
   content?: ContentBlock[];
   references?: Reference[];
-  order: number; // global order within the course, used for prev/next
+  order: number;
   completed?: boolean;
 }
 
@@ -87,5 +94,7 @@ export interface Course {
   title: string;
   description: string;
   thumbnail: string;
+  /** Optional preface shown at the top of the course detail page */
+  preface?: CoursePreface;
   modules: Module[];
 }

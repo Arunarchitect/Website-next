@@ -10,8 +10,11 @@ export default async function CoursesPage() {
   const courses = await getCourses();
 
   return (
-    <main className={`${display.variable} ${mono.variable} courses-page`}>
+    <div className={`${display.variable} ${mono.variable} courses-page`}>
       <style>{`
+        /* Prevent sideways scroll from 100vw (scrollbar width) while this page is mounted */
+        body:has(.courses-page) { overflow-x: clip; }
+
         .courses-page {
           --paper: #F7F5EF;
           --ink: #1E1E1A;
@@ -20,23 +23,37 @@ export default async function CoursesPage() {
           --slate: #6E6B62;
           --line: #DFDACB;
 
-          max-width: 1120px;
-          margin: 0 auto;
-          padding: 2px 24px 10px;
+          /* Break out of layout.tsx wrapper (max-w-7xl + my-8) */
+          width: 100vw;
+          margin-left: calc(50% - 50vw);
+          margin-top: -2rem;
+          margin-bottom: -2rem;
+          box-sizing: border-box;
+
+          min-height: 80vh;
           background: var(--paper);
           color: var(--ink);
+        }
+        .courses-inner {
+          width: 100%;
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 40px clamp(20px, 4vw, 64px) 80px;
+          box-sizing: border-box;
         }
         .courses-header-row {
           display: grid;
           grid-template-columns: 1.4fr 1fr;
-          gap: 48px;
+          gap: clamp(24px, 4vw, 56px);
           align-items: start;
-          margin-bottom: 2px;
+          margin-bottom: 40px;
+          padding-bottom: 32px;
+          border-bottom: 1px solid var(--line);
         }
         @media (max-width: 780px) {
           .courses-header-row {
             grid-template-columns: 1fr;
-            gap: 10px;
+            gap: 20px;
           }
         }
         .courses-eyebrow {
@@ -44,18 +61,20 @@ export default async function CoursesPage() {
           font-size: 12px;
           letter-spacing: 0.14em;
           color: var(--blue);
+          margin: 0 0 8px;
         }
         .courses-title {
           font-family: var(--font-display), sans-serif;
           font-weight: 700;
-          font-size: clamp(2rem, 4vw, 2.6rem);
-          letter-spacing: -0.02em;
-          margin: 0 0 2px;
+          font-size: clamp(2.2rem, 4.6vw, 3.4rem);
+          line-height: 1.08;
+          letter-spacing: -0.03em;
+          margin: 0 0 8px;
         }
         .courses-sub {
-          font-size: 15px;
+          font-size: 1.05rem;
           color: var(--slate);
-          margin: 0 0 12px;
+          margin: 0 0 18px;
           line-height: 1.55;
         }
         .courses-oss {
@@ -65,10 +84,11 @@ export default async function CoursesPage() {
           line-height: 1.6;
           padding-left: 14px;
           border-left: 2px solid var(--blue);
+          max-width: 620px;
         }
         .courses-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
           gap: 28px;
         }
         .course-card {
@@ -76,7 +96,7 @@ export default async function CoursesPage() {
           text-decoration: none;
           color: inherit;
           border: 1px solid var(--line);
-          border-radius: 4px;
+          border-radius: 10px;
           overflow: hidden;
           background: #fff;
           transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
@@ -84,8 +104,8 @@ export default async function CoursesPage() {
         .course-card:hover,
         .course-card:focus-visible {
           border-color: var(--blue);
-          transform: translateY(-2px);
-          box-shadow: 0 6px 18px rgba(23, 50, 74, 0.1);
+          transform: translateY(-3px);
+          box-shadow: 0 10px 28px rgba(23, 50, 74, 0.12);
           outline: none;
         }
         .course-thumb {
@@ -168,39 +188,39 @@ export default async function CoursesPage() {
         }
       `}</style>
 
-      <div className="courses-header-row">
-        <div>
-          <p className="courses-eyebrow">Modelflick — index</p>
-          <h1 className="courses-title">Courses</h1>
-          <p className="courses-sub">Pick a course to get started.</p>
-          <p className="courses-oss">
-            Beyond course delivery, Modelflick backs open source initiatives and shares the
-            actual workflows behind them — so what you learn here maps to tools you can
-            inspect, run, and contribute to yourself.
-          </p>
+      <main className="courses-inner">
+        <div className="courses-header-row">
+          <div>
+            <p className="courses-eyebrow">Modelflick — index</p>
+            <h1 className="courses-title">Courses</h1>
+            <p className="courses-sub">Pick a course to get started.</p>
+            <p className="courses-oss">
+              Beyond course delivery, Modelflick backs open source initiatives and shares the
+              actual workflows behind them — so what you learn here maps to tools you can
+              inspect, run, and contribute to yourself.
+            </p>
+          </div>
+          <CertificateVerifier />
         </div>
-        <CertificateVerifier />
-      </div>
 
-      <div className="courses-grid">
-        {courses.map((course, i) => (
-          <Link key={course.id} href={`/course/${course.slug}`} className="course-card">
-            <div className="course-thumb">
-              <span className="course-num">N&deg;{String(i + 1).padStart(2, "0")}</span>
-              <span className="course-monogram">{course.title.charAt(0)}</span>
-              {/* Swap in a real thumbnail once available:
-              <Image src={course.thumbnail} alt={course.title} fill style={{ objectFit: "cover" }} /> */}
-            </div>
-            <div className="course-body">
-              <h2 className="course-title">{course.title}</h2>
-              <p className="course-desc">{course.description}</p>
-              <p className="course-meta">
-                {course.modules.length} modules &middot; {totalChapterCount(course)} chapters
-              </p>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </main>
+        <div className="courses-grid">
+          {courses.map((course, i) => (
+            <Link key={course.id} href={`/course/${course.slug}`} className="course-card">
+              <div className="course-thumb">
+                <span className="course-num">N&deg;{String(i + 1).padStart(2, "0")}</span>
+                <span className="course-monogram">{course.title.charAt(0)}</span>
+              </div>
+              <div className="course-body">
+                <h2 className="course-title">{course.title}</h2>
+                <p className="course-desc">{course.description}</p>
+                <p className="course-meta">
+                  {course.modules.length} modules &middot; {totalChapterCount(course)} chapters
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </main>
+    </div>
   );
 }

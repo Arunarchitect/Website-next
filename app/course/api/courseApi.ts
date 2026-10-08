@@ -4,10 +4,211 @@ const COURSES: Course[] = [
   {
     id: 1,
     slug: "bonsai-bim-openbim",
-    title: "BonsaiBIM (OpenBIM / Blender) Architectural BIM",
+    title: "OpenBIM for Architecture: A Multi-Disciplinary Course",
     description:
-      "A full architectural BIM workflow using BonsaiBIM and Blender, from client brief to final IFC deliverables.",
+      "A practical openBIM workflow for architects, engineers, and designers — from client brief to IFC deliverables.",
     thumbnail: "/courses/bonsai-bim/thumb.jpg",
+    preface: {
+      eyebrow: "Preface",
+      title: "OpenBIM for Architecture",
+      intro:
+        "A practical guide to architectural BIM using openBIM principles and standards, designed for architects, engineers, designers, and other AEC professionals who want to understand and apply openBIM workflows from project inception to final deliverables.",
+      sections: [
+        {
+          id: "scope",
+          heading: "Scope",
+          blocks: [
+            {
+              type: "paragraph",
+              runs: [
+                {
+                  type: "text",
+                  text: "This course covers the architectural BIM process using openBIM standards, primarily IFC. It focuses on:",
+                },
+              ],
+            },
+            {
+              type: "list",
+              items: [
+                [{ type: "text", text: "BIM fundamentals and project setup" }],
+                [{ type: "text", text: "Client requirements and information management" }],
+                [{ type: "text", text: "Architectural modeling using openBIM tools" }],
+                [{ type: "text", text: "Data, properties, classifications, and quantities" }],
+                [{ type: "text", text: "Documentation, schedules, and coordination" }],
+                [{ type: "text", text: "IFC export, checking, and delivery" }],
+              ],
+            },
+            {
+              type: "paragraph",
+              runs: [
+                {
+                  type: "text",
+                  text: "While Bonsai (Blender) is used as a primary example for demonstration, the course is ",
+                },
+                { type: "italic", text: "tool-agnostic in its principles" },
+                {
+                  type: "text",
+                  text: ". Learners are encouraged to apply the workflows to other openBIM software such as FreeCAD, IfcOpenShell, or commercial tools that support IFC.",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: "audience",
+          heading: "Who This Course Is For",
+          blocks: [
+            {
+              type: "list",
+              items: [
+                [{ type: "text", text: "Architects and architectural technologists" }],
+                [{ type: "text", text: "Civil, structural, and MEP engineers" }],
+                [{ type: "text", text: "Designers and draftspersons" }],
+                [{ type: "text", text: "BIM managers and coordinators" }],
+                [{ type: "text", text: "AEC students and graduates" }],
+                [{ type: "text", text: "Professionals transitioning from 2D CAD to BIM" }],
+              ],
+            },
+            {
+              type: "paragraph",
+              runs: [
+                {
+                  type: "text",
+                  text: "No prior BIM or IFC experience is required, but basic knowledge of building design and 3D modeling is helpful.",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: "prerequisites",
+          heading: "Prerequisites",
+          blocks: [
+            {
+              type: "list",
+              items: [
+                [{ type: "text", text: "Basic computer literacy" }],
+                [
+                  {
+                    type: "text",
+                    text: "Familiarity with architectural drawings and building systems",
+                  },
+                ],
+                [{ type: "text", text: "A computer capable of running BIM software" }],
+                [
+                  {
+                    type: "text",
+                    text: "Optional: Blender with Bonsai, Inkscape, or other openBIM tools",
+                  },
+                ],
+              ],
+            },
+          ],
+        },
+        {
+          id: "outcomes",
+          heading: "Learning Outcomes",
+          blocks: [
+            {
+              type: "paragraph",
+              runs: [
+                { type: "text", text: "By the end of this course, you will be able to:" },
+              ],
+            },
+            {
+              type: "list",
+              ordered: true,
+              items: [
+                [{ type: "text", text: "Explain openBIM principles and the role of IFC" }],
+                [{ type: "text", text: "Set up an architectural BIM project" }],
+                [
+                  {
+                    type: "text",
+                    text: "Translate a client brief into BIM requirements",
+                  },
+                ],
+                [
+                  {
+                    type: "text",
+                    text: "Model architectural elements using openBIM tools",
+                  },
+                ],
+                [{ type: "text", text: "Add and manage IFC data" }],
+                [
+                  {
+                    type: "text",
+                    text: "Produce schedules, drawings, and documentation",
+                  },
+                ],
+                [{ type: "text", text: "Export and verify IFC deliverables" }],
+                [
+                  {
+                    type: "text",
+                    text: "Coordinate with other disciplines using openBIM",
+                  },
+                ],
+              ],
+            },
+          ],
+        },
+        {
+          id: "structure",
+          heading: "Course Structure",
+          blocks: [
+            {
+              type: "paragraph",
+              runs: [
+                {
+                  type: "text",
+                  text: "The course is organized into three modules:",
+                },
+              ],
+            },
+            {
+              type: "list",
+              items: [
+                [
+                  { type: "bold", text: "Module 1: Foundations" },
+                  { type: "text", text: " — Client Requirements & BIM Project Setup" },
+                ],
+                [
+                  { type: "bold", text: "Module 2: Modeling" },
+                  { type: "text", text: " — Creating the Architectural BIM Model" },
+                ],
+                [
+                  { type: "bold", text: "Module 3: Delivery" },
+                  { type: "text", text: " — Preparing Client Deliverables" },
+                ],
+              ],
+            },
+            {
+              type: "paragraph",
+              runs: [
+                {
+                  type: "text",
+                  text: "Each module builds on the previous one, with practical exercises and real-world examples.",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: "how-to-use",
+          heading: "How to Use This Course",
+          blocks: [
+            {
+              type: "paragraph",
+              runs: [
+                {
+                  type: "text",
+                  text: "Follow the modules in order. Practice with your own project or the provided examples. Adapt the workflows to your local standards and tools. The goal is not just to learn software, but to master a repeatable openBIM process that delivers clear, coordinated, and usable building information.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
     modules: [
       {
         id: 1,
