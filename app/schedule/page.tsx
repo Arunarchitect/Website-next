@@ -10,6 +10,7 @@ import {
   type Task,
 } from "./data";
 import {
+  addDays,
   applyProgress,
   autoScheduleWorkdays,
   completionBlocker,
@@ -18,13 +19,17 @@ import {
   finishVariance,
   flatten,
   isoWeek,
+  moveTaskWithinSiblings,
   rollup,
   setBaseline,
   setDurationWithCalendar,
   snapRangeToWorkdays,
+  sortLeafTasks,
+  sortTasks,
   toDay,
   todayISO,
   wouldCycle,
+  type SortKey,
 } from "./scheduling";
 import {
   DAY,
@@ -41,6 +46,8 @@ import {
   deserialize,
   emptyCalendar,
   isHoliday,
+  nextWorkday,
+  prevWorkday,
   serialize,
   type SerializedCalendar,
   type WorkingCalendar,
@@ -92,6 +99,28 @@ const HIGHLIGHT_MS = 2200;
 // Long-press (touch) tuning
 const LONG_PRESS_MS = 400; // shorter than Android's ~500ms native long-press
 const MOVE_TOLERANCE = 10; // px of finger drift allowed before cancelling
+
+// Sort menu entries: [key, direction, label]
+const SORT_OPTIONS: [SortKey, "asc" | "desc", string][] = [
+  ["start", "asc", "Start date – earliest first"],
+  ["start", "desc", "Start date – latest first"],
+  ["finish", "asc", "Finish date – earliest first"],
+  ["finish", "desc", "Finish date – latest first"],
+  ["name", "asc", "Name A → Z"],
+  ["name", "desc", "Name Z → A"],
+  ["duration", "desc", "Duration – longest first"],
+  ["duration", "asc", "Duration – shortest first"],
+  ["completion", "desc", "Completion – highest first"],
+  ["completion", "asc", "Completion – lowest first"],
+];
+
+const SORT_KEY_LABEL: Record<SortKey, string> = {
+  start: "start date",
+  finish: "finish date",
+  name: "name",
+  duration: "duration",
+  completion: "completion",
+};
 
 const newId = (prefix = "a") =>
   `${prefix}-${Date.now().toString(36)}-${Math.random()
@@ -173,6 +202,11 @@ export default function ScheduleView() {
   const [scopedPasteOpen, setScopedPasteOpen] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [includeChildren, setIncludeChildren] = useState(false);
+
+  // Sort menu
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [sortDeep, setSortDeep] = useState(false);
+  const [sortLeavesOnly, setSortLeavesOnly] = useState(false);
 
   const [nextIdx, setNextIdx] = useState(0);
 
@@ -348,16 +382,18 @@ export default function ScheduleView() {
     return () => ro.disconnect();
   }, [ready, ganttOpen]);
 
+  // Close the row menu / sort menu on an outside click.
   useEffect(() => {
-    if (!menuFor) return;
+    if (!menuFor && !sortMenuOpen) return;
     const onDoc = (e: MouseEvent) => {
       const t = e.target as HTMLElement;
       if (t.closest("[data-row-menu]")) return;
       setMenuFor(null);
+      setSortMenuOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [menuFor]);
+  }, [menuFor, sortMenuOpen]);
 
   // ---------- derived ----------
   const rolled = useMemo(() => rollup(tasks), [tasks]);
@@ -663,6 +699,134 @@ export default function ScheduleView() {
   };
 
   const addSibling = (anchor: Task) => addChild(anchor.parentId ?? null);
+
+  /**
+   * Sort the children of one group.
+   * Target group = the selected row if it is a group (its children),
+   * otherwise the selected row's siblings. Nothing selected = top level.
+   * Row order comes from the order of the `tasks` array, so the new order
+   * is saved with the schedule and is undoable (Ctrl+Z).
+   */
+  /**
+   * Sort the children of one group.
+   * Target group = the selected row if it is a group (its children),
+   * otherwise the selected row's siblings. Nothing selected = top level.
+   * When the "Sort end tasks only" box is ticked, no group or top-level row
+   * ever moves — only the lowest-level tasks inside each group are sorted.
+   * Row order comes from the order of the `tasks` array, so the new order
+   * is saved with the schedule and is undoable (Ctrl+Z).
+   */
+  const applySort = (key: SortKey, dir: "asc" | "desc") => {
+    if (sortLeavesOnly) {
+      setTasks((prev) => sortLeafTasks(prev, rolled, key, dir));
+      notify(
+        `Sorted end tasks by ${SORT_KEY_LABEL[key]} (${dir === "asc" ? "ascending" : "descending"})`
+      );
+      setSortMenuOpen(false);
+      return;
+    }
+    const sel = selectedId ? tasks.find((t) => t.id === selectedId) : null;
+    const parent: string | null = !sel
+      ? null
+      : tasks.some((c) => c.parentId === sel.id)
+        ? sel.id
+        : sel.parentId ?? null;
+    setTasks((prev) => sortTasks(prev, rolled, parent, key, dir, sortDeep));
+    const where = parent
+      ? `"${tasks.find((t) => t.id === parent)?.name ?? "group"}"`
+      : "top level";
+    notify(
+      `Sorted ${where} by ${SORT_KEY_LABEL[key]} (${dir === "asc" ? "ascending" : "descending"})`
+    );
+    setSortMenuOpen(false);
+  };
+
+  /** Manual reorder: move the selected task one row up/down among its siblings. */
+  const moveSelected = (dir: "up" | "down") => {
+    if (!selectedId) return;
+    const id = selectedId;
+    setTasks((prev) => moveTaskWithinSiblings(prev, id, dir));
+    setFlashId(id);
+    setTimeout(
+      () => setFlashId((cur) => (cur === id ? null : cur)),
+      HIGHLIGHT_MS
+    );
+  };
+
+  /**
+   * Create a NEW activity in the SAME group as `anchorId`, linked to it as a
+   * predecessor or successor (FS, 0d), then open its editor — the same flow
+   * as "+ New phase" / "Add child…".
+   *
+   * It is called right after the editor's save(), so the task is read from
+   * the latest state inside the updater (picks up just-saved date/group edits).
+   */
+  const addLinkedTask = (anchorId: string, mode: PickerMode) => {
+    const anchorNow = tasks.find((t) => t.id === anchorId);
+    if (!anchorNow) return;
+
+    const id = newId("a");
+
+    setTasks((prev) => {
+      const a = prev.find((t) => t.id === anchorId);
+      if (!a) return prev;
+
+      // Successor: day after the anchor finishes. Predecessor: day before it starts.
+      let start =
+        mode === "succ"
+          ? addDays(a.scheduleFinish, 1)
+          : addDays(a.scheduleStart, -1);
+      if (useWorkdays) {
+        start =
+          mode === "succ"
+            ? nextWorkday(start, calendar)
+            : prevWorkday(start, calendar);
+      }
+
+      const newTask: Task = {
+        id,
+        name: mode === "succ" ? "New successor" : "New predecessor",
+        parentId: a.parentId, // same group as the selected activity
+        scheduleStart: start,
+        scheduleFinish: start,
+        completion: 0,
+        isMilestone: false,
+      };
+
+      // Place it right beside the anchor: before it (pred) or after it (succ).
+      const i = prev.findIndex((t) => t.id === anchorId);
+      const at = mode === "succ" ? i + 1 : i;
+      return [...prev.slice(0, at), newTask, ...prev.slice(at)];
+    });
+
+    setSequences((prev) => [
+      ...prev,
+      {
+        id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        relatingTask: mode === "succ" ? anchorId : id,
+        relatedTask: mode === "succ" ? id : anchorId,
+        sequenceType: "FINISH_START",
+        lagDays: 0,
+      },
+    ]);
+
+    if (anchorNow.parentId) {
+      const pid = anchorNow.parentId;
+      setCollapsed((prev) => {
+        const n = new Set(prev);
+        n.delete(pid);
+        return n;
+      });
+    }
+
+    setEditingId(id);
+    setSelectedId(id);
+    setFlashId(id);
+    setTimeout(
+      () => setFlashId((cur) => (cur === id ? null : cur)),
+      HIGHLIGHT_MS
+    );
+  };
 
   const freezeIfLeaf = (prev: Task[], parentId: string | null): Task[] => {
     if (!parentId) return prev;
@@ -1123,6 +1287,12 @@ export default function ScheduleView() {
       case "addSibling":
         addSibling(task);
         break;
+      case "addPred":
+        addLinkedTask(task.id, "pred");
+        break;
+      case "addSucc":
+        addLinkedTask(task.id, "succ");
+        break;
       case "copyJson": {
         void copyTasksForAi(
           withDescendants(task.id, tasks),
@@ -1384,6 +1554,81 @@ export default function ScheduleView() {
               </button>
             </div>
           )}
+
+          {!readOnly && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => moveSelected("up")}
+                disabled={!selectedId}
+                className="rounded border bg-white px-2.5 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Move selected task up one row (within its group)"
+              >
+                ↑
+              </button>
+              <button
+                onClick={() => moveSelected("down")}
+                disabled={!selectedId}
+                className="rounded border bg-white px-2.5 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Move selected task down one row (within its group)"
+              >
+                ↓
+              </button>
+            </div>
+          )}
+
+          {/* ---- Sort menu ---- */}
+          {!readOnly && (
+            <div className="relative" data-row-menu>
+              <button
+                onClick={() => setSortMenuOpen((o) => !o)}
+                className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+                title="Sort the tasks inside the selected group"
+              >
+                ⇅ Sort
+              </button>
+              {sortMenuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-md border bg-white text-xs shadow-lg">
+                  <div className="border-b bg-gray-50 px-3 py-1.5 text-[10px] text-gray-500">
+                    Applies to the selected group (or the siblings of the selected
+                    activity). Nothing selected = top level.
+                  </div>
+                  {SORT_OPTIONS.map(([k, d, label]) => (
+                    <button
+                      key={`${k}-${d}`}
+                      onClick={() => applySort(k, d)}
+                      className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <label className="flex items-center gap-1.5 border-t px-3 py-1.5 text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={sortDeep}
+                      onChange={(e) => setSortDeep(e.target.checked)}
+                    />
+                    Include sub-groups
+                  </label>
+                  <label
+                    className="flex items-start gap-1.5 border-t px-3 py-1.5 text-gray-600"
+                    title="Keep every phase/group in place; sort only the lowest-level tasks inside each group"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={sortLeavesOnly}
+                      onChange={(e) => setSortLeavesOnly(e.target.checked)}
+                    />
+                    <span>
+                      Sort end tasks only — never reorder phases or the top level, just the
+                      lowest-level tasks inside each group
+                    </span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
           {!readOnly && (
             <button
               onClick={() => addChild(null)}
@@ -2662,6 +2907,8 @@ export default function ScheduleView() {
         >
           <button onClick={() => setEditingId(selectedId)}>Edit</button>
           <button onClick={() => addChild(selectedId)}>+ Child</button>
+          <button onClick={() => moveSelected("up")}>↑</button>
+          <button onClick={() => moveSelected("down")}>↓</button>
           <button onClick={() => setSelectedId(null)} aria-label="Dismiss">
             ✕
           </button>
@@ -2671,6 +2918,7 @@ export default function ScheduleView() {
       {/* ================= EDIT MODAL ================= */}
       {editingTask && !readOnly && (
         <ActivityEditorModal
+          key={editingTask.id}
           task={editingTask}
           tasks={tasks}
           sequences={sequences}
@@ -2680,6 +2928,7 @@ export default function ScheduleView() {
           onSave={(patch) => updateTask(editingTask.id, patch)}
           onDelete={() => deleteTask(editingTask.id)}
           onClose={() => setEditingId(null)}
+          onCreateLinked={(mode) => addLinkedTask(editingTask.id, mode)}
           onApplyLinks={(next) =>
             setSequences((prev) => [
               ...prev.filter(

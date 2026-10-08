@@ -221,8 +221,8 @@ function ParentPicker({
   const candidates = useMemo(() => {
     const list = excludeId
       ? tasks.filter(
-          (t) => t.id !== excludeId && !isDescendant(tasks, excludeId, t.id)
-        )
+        (t) => t.id !== excludeId && !isDescendant(tasks, excludeId, t.id)
+      )
       : tasks;
     return [...list].sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
@@ -353,9 +353,8 @@ function ParentPicker({
                   data-opt-idx={i}
                   onMouseEnter={() => setHighlight(i)}
                   onClick={() => commit(opt.isRoot ? null : opt.id)}
-                  className={`block w-full truncate px-2 py-1 text-left ${
-                    i === highlight ? "bg-blue-50" : ""
-                  } ${selected ? "font-semibold text-blue-700" : ""}`}
+                  className={`block w-full truncate px-2 py-1 text-left ${i === highlight ? "bg-blue-50" : ""
+                    } ${selected ? "font-semibold text-blue-700" : ""}`}
                   title={opt.name}
                 >
                   {opt.name}
@@ -444,6 +443,7 @@ function LinksEditor({
   onAdd,
   onChange,
   onRemove,
+  onCreateNew,
 }: {
   kind: "pred" | "succ";
   task: Task;
@@ -453,6 +453,8 @@ function LinksEditor({
   onAdd: (otherId: string) => void;
   onChange: (id: string, patch: Partial<Sequence>) => void;
   onRemove: (id: string) => void;
+  /** Create a brand-new activity (same group) linked as pred/succ. */
+  onCreateNew?: () => void;
 }) {
   const [adding, setAdding] = useState(false);
 
@@ -499,13 +501,27 @@ function LinksEditor({
           {kind === "pred" ? "Predecessors" : "Successors"}
         </span>
         {!readOnly && !adding && (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="rounded border bg-white px-1.5 py-0.5 text-[10px] text-gray-700 hover:bg-gray-50"
-          >
-            + Add
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="rounded border bg-white px-1.5 py-0.5 text-[10px] text-gray-700 hover:bg-gray-50"
+              title="Link an existing activity"
+            >
+              + Add
+            </button>
+            {onCreateNew && (
+              <button
+                type="button"
+                onClick={onCreateNew}
+                className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+                title={`Save, then create a new activity in this group as ${kind === "pred" ? "predecessor" : "successor"
+                  }`}
+              >
+                ＋ New
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -576,6 +592,7 @@ export function ActivityEditorModal({
   onDelete,
   onClose,
   onApplyLinks,
+  onCreateLinked,
 }: {
   task: Task;
   tasks: Task[];
@@ -588,6 +605,11 @@ export function ActivityEditorModal({
   onClose: () => void;
   /** Called once on Save with this task's full, edited list of links. */
   onApplyLinks?: (next: Sequence[]) => void;
+  /**
+   * Create a NEW activity in the same group as this one, linked as its
+   * predecessor or successor, and open it for editing (like "+ New phase").
+   */
+  onCreateLinked?: (mode: "pred" | "succ") => void;
 }) {
   const [name, setName] = useState(task.name);
   const [code, setCode] = useState(task.workCode ?? "");
@@ -795,6 +817,16 @@ export function ActivityEditorModal({
     onClose();
   };
 
+  // "＋ New" next to Predecessors / Successors:
+  // 1) save what has been typed so far (also closes this editor),
+  // 2) the parent creates the new activity in the same group, links it,
+  //    and opens ITS editor — exactly like "+ New phase".
+  const createLinked = (mode: "pred" | "succ") => {
+    if (!onCreateLinked) return;
+    save();
+    onCreateLinked(mode);
+  };
+
   const inputCls =
     "rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400";
 
@@ -927,6 +959,9 @@ export function ActivityEditorModal({
                 onAdd={(otherId) => addDraftLink(otherId, task.id)}
                 onChange={updateDraftLink}
                 onRemove={removeDraftLink}
+                onCreateNew={
+                  onCreateLinked ? () => createLinked("pred") : undefined
+                }
               />
               <LinksEditor
                 kind="succ"
@@ -936,6 +971,9 @@ export function ActivityEditorModal({
                 onAdd={(otherId) => addDraftLink(task.id, otherId)}
                 onChange={updateDraftLink}
                 onRemove={removeDraftLink}
+                onCreateNew={
+                  onCreateLinked ? () => createLinked("succ") : undefined
+                }
               />
             </div>
           )}
@@ -1118,6 +1156,8 @@ export type RowMenuAction =
   | { kind: "edit" }
   | { kind: "addChild" }
   | { kind: "addSibling" }
+  | { kind: "addPred" }
+  | { kind: "addSucc" }
   | { kind: "copyJson" }
   | { kind: "delete" }
   | { kind: "move"; target: MoveTarget };
@@ -1167,6 +1207,30 @@ export function RowMenu({
       >
         ＋  Add sibling…
       </button>
+      {!task.isMilestone && !tasks.some((t) => t.parentId === task.id) && (
+        <>
+          <button
+            onClick={() => {
+              onAction({ kind: "addPred" });
+              onClose();
+            }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
+            title="Create a new activity in this group, linked before this one"
+          >
+            ＋  Add predecessor…
+          </button>
+          <button
+            onClick={() => {
+              onAction({ kind: "addSucc" });
+              onClose();
+            }}
+            className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
+            title="Create a new activity in this group, linked after this one"
+          >
+            ＋  Add successor…
+          </button>
+        </>
+      )}
       <button
         onClick={() => {
           onAction({ kind: "copyJson" });

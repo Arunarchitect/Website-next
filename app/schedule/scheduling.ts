@@ -172,7 +172,6 @@ export function applyProgress(t: Task, completion: number, today: string): Task 
   return { ...t, completion: c, actualStart, actualFinish };
 }
 
-
 /**
  * Completion rule: a task can only be 100% when every predecessor is 100%.
  * Returns an error message when the change is not allowed, else null.
@@ -208,6 +207,7 @@ export function completionBlocker(
   }
   return null;
 }
+
 // ---------- dependencies ----------
 /** Started or finished tasks are never moved by auto-schedule. */
 const isLocked = (t: Task): boolean =>
@@ -217,12 +217,6 @@ const isLocked = (t: Task): boolean =>
 const effStart = (t: Task): string => t.actualStart ?? t.scheduleStart;
 const effFinish = (t: Task): string => t.actualFinish ?? t.scheduleFinish;
 
-/**
- * Tasks at 100% get their actual dates filled in (then they are locked):
- *  - actualFinish = planned finish if that is today or earlier, else today
- *  - actualStart  = planned start (never later than actualFinish)
- * Group rows are skipped (they roll up from their children).
- */
 /**
  * Tasks at 100% are normalised so nothing "completed" sits in the future:
  *  - actualFinish: filled if missing (planned finish if <= today, else today),
@@ -297,7 +291,6 @@ function finalizeCompleted(
     return { ...t, actualStart, actualFinish, scheduleStart, scheduleFinish };
   });
 }
-
 
 /**
  * Order task ids so every predecessor comes before its successors (Kahn).
@@ -583,4 +576,186 @@ export function isoWeek(date: Date): number {
   d.setUTCDate(d.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   return Math.ceil(((d.getTime() - yearStart.getTime()) / DAY + 1) / 7);
+}
+
+// ---------- sorting ----------
+export type SortKey = "start" | "finish" | "name" | "duration" | "completion";
+
+/** Shared comparator for sortTasks / sortLeafTasks (uses rolled-up dates). */
+function compareTasks(
+  rolled: Map<string, Task>,
+  a: Task,
+  b: Task,
+  key: SortKey
+): number {
+  const ra = rolled.get(a.id) ?? a;
+  const rb = rolled.get(b.id) ?? b;
+  switch (key) {
+    case "name":
+      return a.name.localeCompare(b.name, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    case "finish":
+      return toDay(ra.scheduleFinish) - toDay(rb.scheduleFinish);
+    case "duration":
+      return durationDays(ra) - durationDays(rb);
+    case "completion":
+      return ra.completion - rb.completion;
+    case "start":
+    default:
+      return (
+        toDay(ra.scheduleStart) - toDay(rb.scheduleStart) ||
+        toDay(ra.scheduleFinish) - toDay(rb.scheduleFinish)
+      );
+  }
+}
+
+/**
+ * Reorder the children of one group (parentId = null for top level).
+ * Uses the rolled-up dates so sub-groups sort by their derived dates.
+ * deep = true also sorts every sub-group below it.
+ * Stable: ties keep their current order.
+ *
+ * Row order in the Gantt/table comes from the order of the `tasks` array
+ * (flatten filters by parentId), so sorting = reordering the siblings'
+ * slots inside that array. The new order is therefore saved with the schedule.
+ */
+export function sortTasks(
+  tasks: Task[],
+  rolled: Task[],
+  parentId: string | null,
+  key: SortKey,
+  dir: "asc" | "desc" = "asc",
+  deep = false
+): Task[] {
+  const r = new Map(rolled.map((t) => [t.id, t]));
+  const sign = dir === "asc" ? 1 : -1;
+
+  // Which groups (parent ids) get their children sorted.
+  const groups = new Set<string | null>([parentId]);
+  if (deep) {
+    const stack: (string | null)[] = [parentId];
+    while (stack.length) {
+      const p = stack.pop()!;
+      for (const t of tasks) {
+        if ((t.parentId ?? null) === p && !groups.has(t.id)) {
+          if (tasks.some((c) => c.parentId === t.id)) {
+            groups.add(t.id);
+            stack.push(t.id);
+          }
+        }
+      }
+    }
+  }
+
+  const out = [...tasks];
+  for (const g of groups) {
+    const slots: number[] = [];
+    const sibs: Task[] = [];
+    tasks.forEach((t, i) => {
+      if ((t.parentId ?? null) === g) {
+        slots.push(i);
+        sibs.push(t);
+      }
+    });
+    // Array.prototype.sort is stable, so ties keep their current order.
+    const sorted = [...sibs].sort(
+      (a, b) => sign * compareTasks(r, a, b, key)
+    );
+    slots.forEach((slot, i) => (out[slot] = sorted[i]));
+  }
+  return out;
+}
+
+/**
+ * Sort ONLY the leaf (end) tasks, inside every group, without touching any
+ * group row or the top level:
+ *  - top-level rows (phases) keep their order;
+ *  - group rows keep their position inside their parent;
+ *  - leaf activities are re-sorted among themselves inside each group.
+ *
+ * Useful when phases must stay in a fixed order but the activities inside
+ * them should be ordered by start date etc.
+ */
+export function sortLeafTasks(
+  tasks: Task[],
+  rolled: Task[],
+  key: SortKey,
+  dir: "asc" | "desc" = "asc"
+): Task[] {
+  const r = new Map(rolled.map((t) => [t.id, t]));
+  const hasKids = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+  );
+  const sign = dir === "asc" ? 1 : -1;
+
+  // Every parent group in the tree. The top level (null) is skipped on
+  // purpose so no root-level row ever moves in this mode.
+  const groups = new Set<string>();
+  tasks.forEach((t) => {
+    if (t.parentId) groups.add(t.parentId);
+  });
+
+  const out = [...tasks];
+  for (const g of groups) {
+    const slots: number[] = [];
+    const leaves: Task[] = [];
+    tasks.forEach((t, i) => {
+      if (t.parentId === g && !hasKids.has(t.id)) {
+        slots.push(i);
+        leaves.push(t);
+      }
+    });
+    if (leaves.length < 2) continue;
+    const sorted = [...leaves].sort(
+      (a, b) => sign * compareTasks(r, a, b, key)
+    );
+    slots.forEach((slot, i) => {
+      out[slot] = sorted[i];
+    });
+  }
+  return out;
+}
+
+/**
+ * Move a task one position up or down among its siblings (manual ordering).
+ * Display order comes from the order of the `tasks` array (flatten walks it
+ * filtered by parentId), so swapping with the adjacent sibling in the array
+ * is enough. No-op when there is no sibling in that direction. Works for
+ * group rows as well as activities. The new order is saved with the schedule
+ * and is undoable (Ctrl+Z).
+ */
+export function moveTaskWithinSiblings(
+  tasks: Task[],
+  id: string,
+  dir: "up" | "down"
+): Task[] {
+  const idx = tasks.findIndex((t) => t.id === id);
+  if (idx < 0) return tasks;
+  const parent = tasks[idx].parentId ?? null;
+
+  let swapIdx = -1;
+  if (dir === "up") {
+    for (let i = idx - 1; i >= 0; i--) {
+      if ((tasks[i].parentId ?? null) === parent) {
+        swapIdx = i;
+        break;
+      }
+    }
+  } else {
+    for (let i = idx + 1; i < tasks.length; i++) {
+      if ((tasks[i].parentId ?? null) === parent) {
+        swapIdx = i;
+        break;
+      }
+    }
+  }
+  if (swapIdx < 0) return tasks;
+
+  const out = [...tasks];
+  const tmp = out[idx];
+  out[idx] = out[swapIdx];
+  out[swapIdx] = tmp;
+  return out;
 }
