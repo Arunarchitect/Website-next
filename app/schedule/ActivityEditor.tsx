@@ -745,7 +745,6 @@ export function ActivityEditorModal({
     if (bs && bf && bf < bs) bf = bs;
     let as = actStart || null;
     let af = actFinish || null;
-    if (as && af && af < as) af = as;
 
     const todayStr = (() => {
       const n = new Date();
@@ -753,6 +752,12 @@ export function ActivityEditorModal({
       return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
     })();
     const done = completion >= 100;
+
+    // Unfinished tasks never have an actual finish; 0% has no actual start.
+    if (!done) af = null;
+    if (completion <= 0) as = null;
+
+    if (as && af && af < as) af = as;
 
     // Completed tasks: actual dates can't be in the future.
     if (done && af && af > todayStr) af = todayStr;
@@ -779,6 +784,12 @@ export function ActivityEditorModal({
 
     // Completed tasks: planned dates can't be in the future either.
     if (done && finalFinish > todayStr) finalFinish = todayStr;
+
+    // In progress (1-99%): planned finish can't be in the past -> extend to today.
+    if (!done && completion > 0 && !milestone && finalFinish < todayStr) {
+      finalFinish = useWorkdays ? nextWorkday(todayStr, calendar) : todayStr;
+    }
+
     if (finalStart > finalFinish) finalStart = finalFinish;
 
     onSave({
@@ -816,6 +827,7 @@ export function ActivityEditorModal({
 
     onClose();
   };
+
 
   // "＋ New" next to Predecessors / Successors:
   // 1) save what has been typed so far (also closes this editor),
@@ -1065,7 +1077,12 @@ export function ActivityEditorModal({
               max={100}
               value={completion}
               disabled={isGroup}
-              onChange={(e) => setCompletion(Number(e.target.value))}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setCompletion(v);
+                if (v < 100) setActFinish(""); // unfinished = no actual finish
+                if (v === 0) setActStart("");  // not started = no actual start
+              }}
               className="w-full"
             />
           </label>

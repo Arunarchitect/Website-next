@@ -20,6 +20,7 @@ import {
   flatten,
   isoWeek,
   moveTaskWithinSiblings,
+  reopenDownstream,
   rollup,
   setBaseline,
   setDurationWithCalendar,
@@ -548,16 +549,49 @@ export default function ScheduleView() {
   };
 
   const updateCompletion = (id: string, completion: number) => {
-    const problem = completionBlocker(id, completion, tasks, sequences);
+    const problem = completionBlocker(
+      id,
+      completion,
+      tasks,
+      sequences,
+      useWorkdays ? calendar : undefined
+    );
     if (problem) {
       notify(problem); // slider snaps back because it is controlled
       return;
     }
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? applyProgress(t, completion, todayISO()) : t
-      )
-    );
+    const todayStr = todayISO();
+
+    if (completion < 100) {
+      const n = reopenDownstream(tasks, sequences, id).reopened.length;
+      if (n > 0) notify(`Reopened ${n} downstream task${n > 1 ? "s" : ""}.`);
+    }
+
+    setTasks((prev) => {
+      let next = prev.map((t) => {
+        if (t.id !== id) return t;
+        let u = applyProgress(t, completion, todayStr);
+        if (
+          u.completion > 0 &&
+          u.completion < 100 &&
+          !u.isMilestone &&
+          u.scheduleFinish < todayStr
+        ) {
+          u = {
+            ...u,
+            scheduleFinish: useWorkdays
+              ? nextWorkday(todayStr, calendar)
+              : todayStr,
+          };
+        }
+        return u;
+      });
+      if (completion < 100) {
+        next = reopenDownstream(next, sequences, id).tasks;
+      }
+      // push-only pass: successors move later, nothing is pulled earlier
+      return autoScheduleWorkdays(next, sequences, calendar, false);
+    });
   };
 
   const updateActual = (
@@ -568,6 +602,7 @@ export default function ScheduleView() {
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
+        if (field === "actualFinish" && t.completion < 100) return t;
         const nextTask: Task = { ...t, [field]: value || null };
         if (
           nextTask.actualStart &&
@@ -883,25 +918,51 @@ export default function ScheduleView() {
 
   const updateTask = (id: string, incoming: Partial<Task>) => {
     let patch: Partial<Task> = incoming;
-    // The edit modal can also change completion: apply the same rule.
-    if (incoming.completion !== undefined) {
-      const existing = tasks.find((t) => t.id === id);
-      if (existing && incoming.completion !== existing.completion) {
-        const problem = completionBlocker(
-          id,
-          incoming.completion,
-          tasks,
-          sequences
-        );
-        if (problem) {
-          notify(problem);
-          const rest: Partial<Task> = { ...incoming };
-          delete rest.completion; // keep the other edits, ignore the % change
-          patch = rest;
-        }
+    const existing = tasks.find((t) => t.id === id);
+
+    if (
+      incoming.completion !== undefined &&
+      existing &&
+      incoming.completion !== existing.completion
+    ) {
+      const problem = completionBlocker(
+        id,
+        incoming.completion,
+        tasks,
+        sequences,
+        useWorkdays ? calendar : undefined
+      );
+      if (problem) {
+        notify(problem);
+        const rest: Partial<Task> = { ...incoming };
+        delete rest.completion;
+        delete rest.actualStart;
+        delete rest.actualFinish;
+        delete rest.scheduleStart;
+        delete rest.scheduleFinish;
+        patch = rest;
       }
     }
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+
+    const completionChanged =
+      patch.completion !== undefined &&
+      !!existing &&
+      patch.completion !== existing.completion;
+    const unfinished = completionChanged && (patch.completion as number) < 100;
+
+    if (unfinished) {
+      const n = reopenDownstream(tasks, sequences, id).reopened.length;
+      if (n > 0) notify(`Reopened ${n} downstream task${n > 1 ? "s" : ""}.`);
+    }
+
+    setTasks((prev) => {
+      let next = prev.map((t) => (t.id === id ? { ...t, ...patch } : t));
+      if (unfinished) next = reopenDownstream(next, sequences, id).tasks;
+      if (completionChanged) {
+        next = autoScheduleWorkdays(next, sequences, calendar, false);
+      }
+      return next;
+    });
   };
 
   const moveTask = (id: string, target: MoveTarget) => {

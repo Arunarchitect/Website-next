@@ -182,40 +182,127 @@ export function completionBlocker(
   id: string,
   pct: number,
   tasks: Task[],
-  seqs: Sequence[]
+  seqs: Sequence[],
+  cal?: WorkingCalendar
 ): string | null {
+  if (pct < 100) return null; // lowering is allowed; successors are reopened instead
+
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const names = (list: (Task | undefined)[]) =>
     [...new Set(list.filter((t): t is Task => !!t).map((t) => `"${t.name}"`))].join(", ");
 
-  if (pct >= 100) {
-    const open = seqs
-      .filter((s) => s.relatedTask === id)
-      .map((s) => byId.get(s.relatingTask))
-      .filter((p) => p && p.completion < 100);
-    if (open.length) {
-      return `Can't mark 100%: predecessor ${names(open)} is not 100% yet.`;
-    }
-  } else {
-    const done = seqs
-      .filter((s) => s.relatingTask === id)
-      .map((s) => byId.get(s.relatedTask))
-      .filter((t) => t && t.completion >= 100);
-    if (done.length) {
-      return `Can't reduce below 100%: successor ${names(done)} is already 100%.`;
-    }
+  const open = seqs
+    .filter((s) => s.relatedTask === id)
+    .map((s) => byId.get(s.relatingTask))
+    .filter((p) => p && p.completion < 100);
+  if (open.length) {
+    return `Can't mark 100%: predecessor ${names(open)} is not 100% yet.`;
+  }
+
+  // Predecessor finished today (or later) -> this task can only finish after it.
+  const floor = earliestCompletionDate(id, byId, seqs, cal);
+  if (floor && floor > todayISO()) {
+    return `Can't mark 100% yet: its predecessor finishes too recently. Earliest completion is ${floor}.`;
   }
   return null;
 }
 
+/**
+ * Reopen every successor (direct and downstream) of `id` that is at 100%:
+ * completion -> 0, actual start and finish cleared. They become unlocked, so
+ * the next schedule pass places them after their predecessor.
+ * Returns the updated tasks and the ids that were reopened.
+ */
+export function reopenDownstream(
+  tasks: Task[],
+  seqs: Sequence[],
+  id: string
+): { tasks: Task[]; reopened: string[] } {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const reopened = new Set<string>();
+  const seen = new Set<string>([id]);
+  const stack = [id];
+
+  while (stack.length) {
+    const cur = stack.pop()!;
+    for (const s of seqs) {
+      if (s.relatingTask !== cur) continue;
+      const nxt = s.relatedTask;
+      if (seen.has(nxt)) continue;
+      seen.add(nxt);
+      stack.push(nxt); // keep walking so the whole chain is checked
+      const t = byId.get(nxt);
+      if (t && t.completion >= 100) reopened.add(nxt);
+    }
+  }
+
+  if (!reopened.size) return { tasks, reopened: [] };
+  return {
+    tasks: tasks.map((t) =>
+      reopened.has(t.id)
+        ? { ...t, completion: 0, actualStart: null, actualFinish: null }
+        : t
+    ),
+    reopened: [...reopened],
+  };
+}
 // ---------- dependencies ----------
 /** Started or finished tasks are never moved by auto-schedule. */
 const isLocked = (t: Task): boolean =>
   !!t.actualStart || !!t.actualFinish || t.completion > 0;
 
+/** Finished tasks: never moved by auto-schedule. */
+const isFinished = (t: Task): boolean => t.completion >= 100 || !!t.actualFinish;
+
+/** Has real progress but is not finished. */
+const isInProgress = (t: Task): boolean =>
+  !isFinished(t) && (t.completion > 0 || !!t.actualStart);
+
 // Prefer real dates over planned dates when a predecessor has them.
 const effStart = (t: Task): string => t.actualStart ?? t.scheduleStart;
 const effFinish = (t: Task): string => t.actualFinish ?? t.scheduleFinish;
+
+/**
+ * Earliest date a task can be COMPLETED, given its predecessors
+ * (FS: day after pred finish + lag; SS: pred start + lag;
+ *  FF: pred finish + lag; SF: pred start + lag).
+ * Returns null when it has no predecessors.
+ */
+export function earliestCompletionDate(
+  id: string,
+  byId: Map<string, Task>,
+  seqs: Sequence[],
+  cal?: WorkingCalendar
+): string | null {
+  let best: number | null = null;
+  for (const s of seqs) {
+    if (s.relatedTask !== id) continue;
+    const p = byId.get(s.relatingTask);
+    if (!p) continue;
+    const ps = toDay(effStart(p));
+    const pf = toDay(effFinish(p));
+    let d: number;
+    switch (s.sequenceType) {
+      case "START_START":
+        d = ps + s.lagDays;
+        break;
+      case "FINISH_FINISH":
+        d = pf + s.lagDays;
+        break;
+      case "START_FINISH":
+        d = ps + s.lagDays;
+        break;
+      case "FINISH_START":
+      default:
+        d = pf + 1 + s.lagDays;
+        break;
+    }
+    if (best === null || d > best) best = d;
+  }
+  if (best === null) return null;
+  const iso = toISO(best);
+  return cal ? nextWorkday(iso, cal) : iso;
+}
 
 /**
  * Tasks at 100% are normalised so nothing "completed" sits in the future:
@@ -236,32 +323,49 @@ function finalizeCompleted(
     if (parents.has(t.id)) return t;
 
     if (t.completion < 100) {
-      // "Started" in the future: invalid. Drop it (or use today if it has progress).
-      if (t.actualStart && t.actualStart > today && !t.actualFinish) {
-        return { ...t, actualStart: t.completion > 0 ? today : null };
+      let u: Task = t;
+
+      // Unfinished: no actual finish. 0% = not started, so no actual start.
+      if (u.actualFinish) u = { ...u, actualFinish: null };
+      if (u.completion <= 0 && u.actualStart) u = { ...u, actualStart: null };
+
+      // "Started" in the future is invalid: use today if it has progress.
+      if (u.actualStart && u.actualStart > today) {
+        u = { ...u, actualStart: u.completion > 0 ? today : null };
       }
+
+      if (u.isMilestone) return u;
 
       // Started, not finished: planned dates follow reality.
       // Start = actual start, same length, finish never before today.
-      if (t.actualStart && !t.actualFinish && !t.isMilestone) {
-        const start = t.actualStart;
+      if (u.actualStart) {
+        const start = u.actualStart;
         let finish: string;
         if (cal) {
           const wdur = Math.max(
             1,
-            countWorkdays(t.scheduleStart, t.scheduleFinish, cal)
+            countWorkdays(u.scheduleStart, u.scheduleFinish, cal)
           );
           finish = addWorkdays(nextWorkday(start, cal), wdur - 1, cal);
           if (finish < today) finish = nextWorkday(today, cal);
         } else {
-          const dur = toDay(t.scheduleFinish) - toDay(t.scheduleStart);
+          const dur = toDay(u.scheduleFinish) - toDay(u.scheduleStart);
           finish = toISO(toDay(start) + Math.max(0, dur));
           if (finish < today) finish = today;
         }
-        if (start === t.scheduleStart && finish === t.scheduleFinish) return t;
-        return { ...t, scheduleStart: start, scheduleFinish: finish };
+        if (start === u.scheduleStart && finish === u.scheduleFinish) return u;
+        return { ...u, scheduleStart: start, scheduleFinish: finish };
       }
-      return t;
+
+      // Has progress but no actual start: just extend a past finish to today.
+      // (0% tasks are left alone; the scheduler re-places them.)
+      if (u.completion > 0 && u.scheduleFinish < today) {
+        return {
+          ...u,
+          scheduleFinish: cal ? nextWorkday(today, cal) : today,
+        };
+      }
+      return u;
     }
 
     // ---- completed tasks: nothing may sit in the future ----
@@ -433,10 +537,20 @@ export function autoScheduleWorkdays(
   const map = new Map(tasks.map((t) => [t.id, t]));
 
   for (const id of topoOrder(leaves.map((t) => t.id), seqs)) {
-    const q = map.get(id);
-    if (!q || isLocked(q)) continue;
+    let q = map.get(id);
+    if (!q) continue;
+
+    // Predecessor priority: a finished task that breaks a link and would
+    // have to finish AFTER today is reopened and re-placed.
+    if (isFinished(q)) {
+      const floor = earliestCompletionDate(id, map, seqs, cal);
+      if (!floor || floor <= today) continue;
+      q = { ...q, completion: 0, actualStart: null, actualFinish: null };
+      map.set(id, q);
+    }
+
+    const inProgress = isInProgress(q);
     const qs = toDay(q.scheduleStart);
-    // Length in working days (a task sitting entirely on a holiday counts as 1).
     const wdur = Math.max(
       1,
       countWorkdays(q.scheduleStart, q.scheduleFinish, cal)
@@ -468,11 +582,19 @@ export function autoScheduleWorkdays(
       if (target === null || earliestDay > target) target = earliestDay;
     }
 
-    // No predecessor -> anchor. Has predecessor -> never before anchor.
-    let startDay = target === null ? anchor : Math.max(target, anchor);
-    if (!compress) startDay = Math.max(startDay, qs);
+    let startDay: number;
+    if (inProgress) {
+      // Started task: only push later, never pull earlier, never to the anchor.
+      if (target === null) {
+        if (map.get(id) !== q) map.set(id, q);
+        continue;
+      }
+      startDay = Math.max(target, qs);
+    } else {
+      startDay = target === null ? anchor : Math.max(target, anchor);
+      if (!compress) startDay = Math.max(startDay, qs);
+    }
 
-    // Holiday handling: land on a working day, then stretch over holidays.
     const start = nextWorkday(toISO(startDay), cal);
     const finish = addWorkdays(start, wdur - 1, cal);
 
@@ -482,6 +604,7 @@ export function autoScheduleWorkdays(
   }
   return rollup(tasks.map((t) => map.get(t.id)!));
 }
+
 
 // Would adding predecessor -> successor create a loop?
 export function wouldCycle(
