@@ -416,7 +416,7 @@ function LinkRow({
         onCommit={(n) => onChange({ lagDays: n })}
         onChange={(n) => onChange({ lagDays: n })}
         className="w-12 rounded border px-1 py-0.5 text-right text-[10px] tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:bg-gray-100"
-        title="Lag in days (negative = lead)"
+        title="Lag in calendar days (Sundays/holidays count). Negative = lead"
       />
       {!readOnly && (
         <button

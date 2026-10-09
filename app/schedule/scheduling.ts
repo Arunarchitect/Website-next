@@ -569,11 +569,13 @@ export function autoScheduleWorkdays(
           earliestDay = ps + s.lagDays;
           break;
         case "FINISH_FINISH":
-          earliestDay = pf + s.lagDays - (wdur - 1);
+        case "START_FINISH": {
+          const anchorDay = s.sequenceType === "FINISH_FINISH" ? pf : ps;
+          let d = nextWorkday(toISO(anchorDay + s.lagDays), cal);
+          for (let i = 0; i < wdur - 1; i++) d = prevWorkday(toISO(toDay(d) - 1), cal);
+          earliestDay = toDay(d);
           break;
-        case "START_FINISH":
-          earliestDay = ps + s.lagDays - (wdur - 1);
-          break;
+        }
         case "FINISH_START":
         default:
           earliestDay = pf + 1 + s.lagDays;

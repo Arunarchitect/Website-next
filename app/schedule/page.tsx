@@ -1419,6 +1419,54 @@ export default function ScheduleView() {
     }
   };
 
+  const copyBaselineJson = async () => {
+    const withBaseline = rolled.filter((t) => t.baselineStart && t.baselineFinish);
+    if (!withBaseline.length) {
+      notify("No baseline set yet.");
+      return;
+    }
+    const ids = new Set(withBaseline.map((t) => t.id));
+
+    const payload = {
+      tasks: withBaseline.map((t) => ({
+        id: t.id,
+        name: t.name,
+        // keep the parent only if it is also in the export, else top level
+        parentId: t.parentId && ids.has(t.parentId) ? t.parentId : null,
+        scheduleStart: t.baselineStart as string,
+        scheduleFinish: t.baselineFinish as string,
+        baselineStart: t.baselineStart as string,
+        baselineFinish: t.baselineFinish as string,
+        completion: t.completion,
+        isMilestone: t.isMilestone,
+        ...(t.workCode ? { workCode: t.workCode } : {}),
+        ...(t.remarks ? { remarks: t.remarks } : {}),
+      })),
+      sequences: sequences.filter(
+        (s) => ids.has(s.relatingTask) && ids.has(s.relatedTask)
+      ),
+    };
+
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (!ok) {
+        notify("Couldn't copy to clipboard.");
+        return;
+      }
+    }
+    notify(`Baseline JSON copied (${withBaseline.length} tasks).`);
+  };
+  
   const toggleChecked = (id: string) =>
     setCheckedIds((prev) => {
       const n = new Set(prev);
@@ -1751,6 +1799,20 @@ export default function ScheduleView() {
           >
             Collapse all
           </button>
+          {!readOnly && isAdmin && (
+            <button
+              onClick={copyBaselineJson}
+              disabled={!hasBaseline}
+              className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              title={
+                hasBaseline
+                  ? "Copy the baseline dates as JSON"
+                  : "No baseline set yet"
+              }
+            >
+              Copy baseline JSON
+            </button>
+          )}
           {!readOnly && isAdmin && (
             <button
               onClick={setBaselineNow}
@@ -2580,8 +2642,8 @@ export default function ScheduleView() {
               >
                 Var
               </th>
-              <th className="w-64 px-2 py-2">Predecessors</th>
-              <th className="w-64 px-2 py-2">Successors</th>
+              <th className="w-64 px-2 py-2" title="Lag is in calendar days">Predecessors</th>
+              <th className="w-64 px-2 py-2" title="Lag is in calendar days">Successors</th>
               <th className="w-10 px-2 py-2"></th>
             </tr>
           </thead>
@@ -2867,12 +2929,14 @@ export default function ScheduleView() {
                             <input
                               type="number"
                               value={s.lagDays}
+                              title="Lag in calendar days (Sundays/holidays count). Negative = lead"
                               disabled={readOnly}
                               onChange={(e) =>
                                 updateSequence(s.id, {
                                   lagDays: Number(e.target.value),
                                 })
                               }
+
                               className="w-10 rounded border text-[10px]"
                             />
                             {!readOnly && (
@@ -2955,6 +3019,7 @@ export default function ScheduleView() {
                             <input
                               type="number"
                               value={s.lagDays}
+                              title="Lag in calendar days (Sundays/holidays count). Negative = lead"
                               disabled={readOnly}
                               onChange={(e) =>
                                 updateSequence(s.id, {

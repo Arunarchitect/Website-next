@@ -63,7 +63,19 @@ interface CoreResult {
   pFinish: number;
 }
 
-function runCore(nodes: CoreNode[], seqs: Sequence[]): CoreResult {
+/**
+ * Calendar map, only passed in working-day mode. It lets the core convert
+ * between working-day indexes and real day numbers so that LAG can be
+ * counted in calendar days (curing, drying) and then snapped forward to the
+ * next working day.
+ */
+interface CalMap {
+  dayOf: (i: number) => number; // working-day index -> day number
+  idxOf: (day: number) => number; // day number -> index of first workday on/after it
+  size: number; // number of working days in the table
+}
+
+function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult {
   const es = new Map<string, number>();
   const ef = new Map<string, number>();
   const ls = new Map<string, number>();
@@ -72,6 +84,18 @@ function runCore(nodes: CoreNode[], seqs: Sequence[]): CoreResult {
   const critical = new Set<string>();
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // Largest working-day index i with f(i) <= limit (f is non-decreasing).
+  const latestIdx = (f: (i: number) => number, limit: number): number => {
+    let lo = -1;
+    let hi = cal!.size - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (f(mid) <= limit) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
 
   // adjacency (only between the given nodes)
   const succ = new Map<string, Sequence[]>();
@@ -110,20 +134,39 @@ function runCore(nodes: CoreNode[], seqs: Sequence[]): CoreResult {
       const pES = es.get(p.id) ?? p.es0;
       const pEF = ef.get(p.id) ?? pES + p.dur;
       let cand: number;
-      switch (s.sequenceType) {
-        case "START_START":
-          cand = pES + s.lagDays;
-          break;
-        case "FINISH_FINISH":
-          cand = pEF + s.lagDays - n.dur;
-          break;
-        case "START_FINISH":
-          cand = pES + s.lagDays - n.dur;
-          break;
-        case "FINISH_START":
-        default:
-          cand = pEF + 1 + s.lagDays;
-          break;
+      if (cal) {
+        // lag = calendar days; result snaps forward to the next workday
+        switch (s.sequenceType) {
+          case "START_START":
+            cand = cal.idxOf(cal.dayOf(pES) + s.lagDays);
+            break;
+          case "FINISH_FINISH":
+            cand = cal.idxOf(cal.dayOf(pEF) + s.lagDays) - n.dur;
+            break;
+          case "START_FINISH":
+            cand = cal.idxOf(cal.dayOf(pES) + s.lagDays) - n.dur;
+            break;
+          case "FINISH_START":
+          default:
+            cand = cal.idxOf(cal.dayOf(pEF) + 1 + s.lagDays);
+            break;
+        }
+      } else {
+        switch (s.sequenceType) {
+          case "START_START":
+            cand = pES + s.lagDays;
+            break;
+          case "FINISH_FINISH":
+            cand = pEF + s.lagDays - n.dur;
+            break;
+          case "START_FINISH":
+            cand = pES + s.lagDays - n.dur;
+            break;
+          case "FINISH_START":
+          default:
+            cand = pEF + 1 + s.lagDays;
+            break;
+        }
       }
       if (cand > e) e = cand;
     }
@@ -150,20 +193,46 @@ function runCore(nodes: CoreNode[], seqs: Sequence[]): CoreResult {
       const qLS = ls.get(q.id) ?? pFinish - q.dur;
       const qLF = lf.get(q.id) ?? pFinish;
       let cand: number;
-      switch (s.sequenceType) {
-        case "START_START":
-          cand = qLS - s.lagDays + n.dur;
-          break;
-        case "FINISH_FINISH":
-          cand = qLF - s.lagDays;
-          break;
-        case "START_FINISH":
-          cand = qLF - s.lagDays + n.dur;
-          break;
-        case "FINISH_START":
-        default:
-          cand = qLS - 1 - s.lagDays;
-          break;
+      if (cal) {
+        // latest predecessor position that still satisfies the forward rule
+        switch (s.sequenceType) {
+          case "START_START":
+            cand =
+              latestIdx((k) => cal.idxOf(cal.dayOf(k) + s.lagDays), qLS) +
+              n.dur;
+            break;
+          case "FINISH_FINISH":
+            cand = latestIdx((k) => cal.idxOf(cal.dayOf(k) + s.lagDays), qLF);
+            break;
+          case "START_FINISH":
+            cand =
+              latestIdx((k) => cal.idxOf(cal.dayOf(k) + s.lagDays), qLF) +
+              n.dur;
+            break;
+          case "FINISH_START":
+          default:
+            cand = latestIdx(
+              (k) => cal.idxOf(cal.dayOf(k) + 1 + s.lagDays),
+              qLS
+            );
+            break;
+        }
+      } else {
+        switch (s.sequenceType) {
+          case "START_START":
+            cand = qLS - s.lagDays + n.dur;
+            break;
+          case "FINISH_FINISH":
+            cand = qLF - s.lagDays;
+            break;
+          case "START_FINISH":
+            cand = qLF - s.lagDays + n.dur;
+            break;
+          case "FINISH_START":
+          default:
+            cand = qLS - 1 - s.lagDays;
+            break;
+        }
       }
       if (cand < f) f = cand;
     }
@@ -219,7 +288,9 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
  * Working-day CPM. Saturdays, Sundays, holidays and shutdown ranges do not
  * exist in the calculation:
  *  - every date is mapped to a working-day index,
- *  - durations and lags are counted in working days,
+ *  - task durations are counted in working days,
+ *  - LAG is counted in CALENDAR days (curing/drying), then snapped forward
+ *    to the next working day, matching autoScheduleWorkdays,
  *  - float is in working days, so a Fri -> Mon link has zero float,
  *  - results are mapped back to real dates (day numbers).
  */
@@ -251,17 +322,16 @@ export function computeCpmWorkdays(
     cum.push(workDays.length);
     if (isWorkday(d, cal)) workDays.push(d);
   }
-  const idxOf = (day: number) => cum[Math.min(cum.length - 1, day - base)];
+  // Number of workdays before `day` = index of the first workday on/after it.
+  const idxOf = (day: number) =>
+    cum[Math.max(0, Math.min(cum.length - 1, day - base))];
   const dayOf = (i: number) =>
     workDays[Math.max(0, Math.min(workDays.length - 1, i))];
 
   const core = runCore(
-    snapped.map((s) => ({
-      id: s.id,
-      es0: idxOf(s.startDay),
-      dur: s.wd - 1,
-    })),
-    seqs
+    snapped.map((s) => ({ id: s.id, es0: idxOf(s.startDay), dur: s.wd - 1 })),
+    seqs,
+    { dayOf, idxOf, size: workDays.length }
   );
 
   const toDays = (m: Map<string, number>) => {
