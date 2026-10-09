@@ -242,7 +242,7 @@ export default function IssuesPage() {
   const [loadingFilterDeliverables, setLoadingFilterDeliverables] = useState(false);
 
   const [activeStatFilters, setActiveStatFilters] = useState<Set<StatFilterKey>>(
-    () => new Set(loadPersistedFilters().activeStatFilters ?? ["open"])
+    () => new Set(loadPersistedFilters().activeStatFilters ?? [])
   );
 
   // Guards so the org->project and project->deliverable cascade effects
