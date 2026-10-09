@@ -27,6 +27,7 @@ import {
   sortLeafTasks,
   sortTasks,
   toDay,
+  toISO,
   todayISO,
   wouldCycle,
   type SortKey,
@@ -1271,6 +1272,38 @@ export default function ScheduleView() {
     (t) => !parentIdSet.has(t.id) && (finishVariance(t) ?? 0) > 0
   ).length;
   const criticalDuration = cpm.projectFinish - cpm.projectStart + 1;
+  // TEMP DEBUG: root causes of drift
+  // Schedule consistency check: links that push a task later than its stored finish
+  const cpmISO = (id: string) => {
+    const ef = cpm.earlyFinish.get(id);
+    return ef == null ? "" : toISO(ef);
+  };
+  const isDrifted = (id: string) => {
+    const t = tasks.find((x) => x.id === id);
+    return !!t && !parentIdSet.has(id) && cpmISO(id) > t.scheduleFinish;
+  };
+  const linkProblems = tasks
+    .filter((t) => isDrifted(t.id))
+    .filter(
+      (t) =>
+        !sequences.some((s) => s.relatedTask === t.id && isDrifted(s.relatingTask))
+    )
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      stored: t.scheduleFinish,
+      cpm: cpmISO(t.id),
+      daysLate: toDay(cpmISO(t.id)) - toDay(t.scheduleFinish),
+      preds: sequences
+        .filter((s) => s.relatedTask === t.id)
+        .map((s) => {
+          const p = tasks.find((x) => x.id === s.relatingTask);
+          return `${p?.name ?? "?"} (${s.sequenceType.replace("_", "→")}, lag ${s.lagDays})`;
+        })
+        .join("; "),
+    }))
+    .sort((a, b) => b.daysLate - a.daysLate)
+    .slice(0, 5);
 
   const editingTask = editingId
     ? rolled.find((t) => t.id === editingId) ?? null
@@ -1680,6 +1713,40 @@ export default function ScheduleView() {
       {useWorkdays && (
         <div className="mb-3" data-print-hide>
           <CalendarChips calendar={calendar} />
+        </div>
+      )}
+
+      {linkProblems.length > 0 && (
+        <div
+          className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"
+          data-print-hide
+        >
+          <div className="mb-1 text-sm font-semibold">
+            ⚠ There&apos;s a problem with the schedule links
+          </div>
+          <p className="mb-2">
+            The links push these tasks later than their planned dates, so the header
+            finish ({fmtDate(cpm.projectFinish)}) differs from the Gantt finish (
+            {fmtDate(maxDay)}). Fix the link type or lag in the Predecessors column,
+            or move the task&apos;s dates.
+          </p>
+          <ul className="space-y-1">
+            {linkProblems.map((r) => (
+              <li key={r.id} className="rounded bg-white/70 px-2 py-1">
+                <button
+                  onClick={() => handleSelectFromSearch(r.id)}
+                  className="font-semibold underline hover:text-amber-700"
+                  title="Jump to this task"
+                >
+                  {r.name}
+                </button>
+                : planned finish {r.stored}, links force {r.cpm} (+{r.daysLate}d).
+                <span className="block text-amber-800">
+                  Predecessors: {r.preds || "none"}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
