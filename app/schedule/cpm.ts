@@ -383,6 +383,36 @@ export function findCurrentAndNext(
   return { current, next };
 }
 
+
+// ---------- all tasks running today ----------
+/**
+ * Every unfinished leaf task whose early window covers today.
+ * Critical first, then earliest finish, then name.
+ */
+export function findAllCurrent(
+  tasks: Task[],
+  cpm: CpmResult,
+  todayDay: number
+): Task[] {
+  const parents = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+  );
+  const fin = (t: Task) =>
+    cpm.earlyFinish.get(t.id) ?? toDay(t.scheduleFinish);
+
+  return tasks
+    .filter((t) => {
+      if (parents.has(t.id)) return false;
+      if (t.completion >= 100) return false;
+      const es = cpm.earlyStart.get(t.id) ?? toDay(t.scheduleStart);
+      return es <= todayDay && todayDay <= fin(t);
+    })
+    .sort((a, b) => {
+      const ca = cpm.criticalIds.has(a.id) ? 0 : 1;
+      const cb = cpm.criticalIds.has(b.id) ? 0 : 1;
+      return ca - cb || fin(a) - fin(b) || a.name.localeCompare(b.name);
+    });
+}
 // ---------- upcoming queue (for the "Next up" stepper) ----------
 export function upcomingQueue(
   tasks: Task[],

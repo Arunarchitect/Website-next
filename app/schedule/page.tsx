@@ -40,6 +40,7 @@ import {
   daysUntil,
   describe,
   findCurrentAndNext,
+  findAllCurrent,
   fmtDate,
   humanizeDaysUntil,
   upcomingQueue,
@@ -425,6 +426,11 @@ export default function ScheduleView() {
     () => findCurrentAndNext(tasks, cpm, todayDay),
     [tasks, cpm, todayDay]
   );
+
+  const nowList = useMemo(() => {
+    const list = findAllCurrent(tasks, cpm, todayDay);
+    return list.length === 0 && current ? [current] : list;
+  }, [tasks, cpm, todayDay, current]);
 
   const upcoming = useMemo(
     () => upcomingQueue(tasks, cpm, todayDay),
@@ -1466,7 +1472,7 @@ export default function ScheduleView() {
     }
     notify(`Baseline JSON copied (${withBaseline.length} tasks).`);
   };
-  
+
   const toggleChecked = (id: string) =>
     setCheckedIds((prev) => {
       const n = new Set(prev);
@@ -1595,6 +1601,7 @@ export default function ScheduleView() {
             rows={rows}
             criticalIds={cpm.criticalIds}
             floats={cpm.totalFloat}
+            sequences={sequences}
             title={heading}
             projectName={currentProject?.name ?? ""}
           />
@@ -1876,40 +1883,66 @@ export default function ScheduleView() {
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${current
+          className={`rounded border-l-4 p-3 ${nowList.length
             ? "border-blue-500 bg-blue-50/60"
             : "border-gray-300 bg-gray-50"
             }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${current ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+              className={`h-2 w-2 rounded-full ${nowList.length ? "bg-blue-500 animate-pulse" : "bg-gray-400"
                 }`}
             />
             Now
+            {nowList.length > 1 && (
+              <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 ring-1 ring-gray-200">
+                {nowList.length} running
+              </span>
+            )}
           </div>
-          {current ? (
-            <>
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="text-base font-semibold text-gray-900">
-                  {current.name}
-                </span>
-                {cpm.criticalIds.has(current.id) && (
-                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-                    CRITICAL
-                  </span>
-                )}
-              </div>
-              <div className="mt-0.5 text-xs text-gray-600">
-                {fmtDate(rangeFor(current).es)} →{" "}
-                {fmtDate(rangeFor(current).ef)}
-                {" · "}
-                {rangeFor(current).dur} days · {current.completion}% complete
-              </div>
-              <p className="mt-1 text-xs text-gray-700">
-                {describe(current, tasks)}
-              </p>
-            </>
+
+          {nowList.length ? (
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              {nowList.map((t) => {
+                const r = rangeFor(t);
+                return (
+                  <div
+                    key={t.id}
+                    className={
+                      nowList.length > 1
+                        ? "rounded bg-white/70 p-2 ring-1 ring-blue-100"
+                        : ""
+                    }
+                  >
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="text-base font-semibold text-gray-900">
+                        {t.name}
+                      </span>
+                      {cpm.criticalIds.has(t.id) && (
+                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                          CRITICAL
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-gray-600">
+                      {fmtDate(r.es)} → {fmtDate(r.ef)}
+                      {" · "}
+                      {r.dur} days · {t.completion}% complete
+                    </div>
+                    <p className="mt-1 text-xs text-gray-700">
+                      {describe(t, tasks)}
+                    </p>
+                    <button
+                      onClick={() => jumpToTask(t.id)}
+                      data-print-hide
+                      className="mt-1 rounded border bg-white px-2 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50"
+                    >
+                      Jump to activity →
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <p className="text-sm text-gray-600">
               No activity scheduled for {fmtDate(todayDay)}.
