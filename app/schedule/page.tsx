@@ -617,6 +617,10 @@ export default function ScheduleView() {
         ) {
           nextTask.actualFinish = nextTask.actualStart;
         }
+        if (nextTask.completion >= 100) {
+          if (nextTask.actualStart) nextTask.scheduleStart = nextTask.actualStart;
+          if (nextTask.actualFinish) nextTask.scheduleFinish = nextTask.actualFinish;
+        }
         return nextTask;
       })
     );
@@ -1347,7 +1351,13 @@ export default function ScheduleView() {
   };
   const isDrifted = (id: string) => {
     const t = tasks.find((x) => x.id === id);
-    return !!t && !parentIdSet.has(id) && cpmISO(id) > t.scheduleFinish;
+    return (
+      !!t &&
+      !parentIdSet.has(id) &&
+      t.completion < 100 &&
+      !t.actualFinish &&
+      cpmISO(id) > t.scheduleFinish
+    );
   };
   const linkProblems = tasks
     .filter((t) => isDrifted(t.id))

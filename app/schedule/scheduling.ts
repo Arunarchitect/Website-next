@@ -246,6 +246,7 @@ export function reopenDownstream(
     reopened: [...reopened],
   };
 }
+
 // ---------- dependencies ----------
 /** Started or finished tasks are never moved by auto-schedule. */
 const isLocked = (t: Task): boolean =>
@@ -305,12 +306,13 @@ export function earliestCompletionDate(
 }
 
 /**
- * Tasks at 100% are normalised so nothing "completed" sits in the future:
+ * Tasks at 100% are normalised so nothing "completed" sits in the future,
+ * and so their PLANNED dates always equal their ACTUAL dates:
  *  - actualFinish: filled if missing (planned finish if <= today, else today),
  *    and clamped to today if it is later.
  *  - actualStart: filled if missing (planned start, never after actualFinish),
  *    and pulled back to actualFinish if it is later.
- *  - planned start/finish: clamped so finish <= today and start <= finish.
+ *  - planned start/finish: set to the actual start/finish (history is truth).
  * Group rows are skipped (they roll up from their children).
  */
 function finalizeCompleted(
@@ -368,7 +370,7 @@ function finalizeCompleted(
       return u;
     }
 
-    // ---- completed tasks: nothing may sit in the future ----
+    // ---- completed tasks: actual dates are the truth, nothing in the future ----
     let actualFinish =
       t.actualFinish ??
       (t.scheduleFinish <= today ? t.scheduleFinish : today);
@@ -379,10 +381,9 @@ function finalizeCompleted(
       (t.scheduleStart <= actualFinish ? t.scheduleStart : actualFinish);
     if (actualStart > actualFinish) actualStart = actualFinish;
 
-    const scheduleFinish =
-      t.scheduleFinish > today ? today : t.scheduleFinish;
-    const scheduleStart =
-      t.scheduleStart > scheduleFinish ? scheduleFinish : t.scheduleStart;
+    // Planned dates follow the actual dates for finished tasks.
+    const scheduleStart = actualStart;
+    const scheduleFinish = actualFinish;
 
     if (
       actualStart === t.actualStart &&
@@ -513,7 +514,10 @@ export function autoSchedule(
  *  - every task keeps its length in WORKING days, so a task that crosses a
  *    holiday is stretched over it (Mon-Wed with a Tue holiday -> Mon-Thu);
  *  - tasks that are not moved by links are still re-snapped, so nothing is
- *    left sitting on a holiday.
+ *    left sitting on a holiday;
+ *  - FINISHED tasks are history: they are never moved, snapped or reopened,
+ *    even when their links contradict their actual dates. They still act as
+ *    predecessors using their real dates.
  */
 export function autoScheduleWorkdays(
   tasks: Task[],
@@ -537,17 +541,11 @@ export function autoScheduleWorkdays(
   const map = new Map(tasks.map((t) => [t.id, t]));
 
   for (const id of topoOrder(leaves.map((t) => t.id), seqs)) {
-    let q = map.get(id);
+    const q = map.get(id);
     if (!q) continue;
 
-    // Predecessor priority: a finished task that breaks a link and would
-    // have to finish AFTER today is reopened and re-placed.
-    if (isFinished(q)) {
-      const floor = earliestCompletionDate(id, map, seqs, cal);
-      if (!floor || floor <= today) continue;
-      q = { ...q, completion: 0, actualStart: null, actualFinish: null };
-      map.set(id, q);
-    }
+    // Finished = history. Never moved, never reopened, links ignored.
+    if (isFinished(q)) continue;
 
     const inProgress = isInProgress(q);
     const qs = toDay(q.scheduleStart);
@@ -587,10 +585,7 @@ export function autoScheduleWorkdays(
     let startDay: number;
     if (inProgress) {
       // Started task: only push later, never pull earlier, never to the anchor.
-      if (target === null) {
-        if (map.get(id) !== q) map.set(id, q);
-        continue;
-      }
+      if (target === null) continue;
       startDay = Math.max(target, qs);
     } else {
       startDay = target === null ? anchor : Math.max(target, anchor);
@@ -606,7 +601,6 @@ export function autoScheduleWorkdays(
   }
   return rollup(tasks.map((t) => map.get(t.id)!));
 }
-
 
 // Would adding predecessor -> successor create a loop?
 export function wouldCycle(

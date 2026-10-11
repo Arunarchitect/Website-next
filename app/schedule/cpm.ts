@@ -5,7 +5,6 @@
 import type { Sequence, Task } from "./data";
 import { durationDays, toDay } from "./scheduling";
 import {
-  addWorkdays,
   countWorkdays,
   isWorkday,
   nextWorkday,
@@ -15,6 +14,17 @@ import {
 // Re-export DAY so `import { DAY } from "./cpm"` keeps working.
 // (The canonical definition lives in calendar.ts.)
 export { DAY } from "./calendar";
+
+// ---------- finished-task helpers ----------
+/**
+ * A finished task is history: its ACTUAL dates are the truth.
+ * CPM never moves it, never snaps it to the working calendar, and ignores
+ * any incoming link that would contradict it. It still acts as a
+ * predecessor, using its real dates.
+ */
+const isDone = (t: Task): boolean => t.completion >= 100 || !!t.actualFinish;
+const doneStart = (t: Task): string => t.actualStart ?? t.scheduleStart;
+const doneFinish = (t: Task): string => t.actualFinish ?? t.scheduleFinish;
 
 // ---------- CPM result ----------
 export interface CpmResult {
@@ -45,11 +55,18 @@ const emptyResult = (): CpmResult => ({
  *  - calendar mode: units are day numbers
  *  - working mode : units are working-day indexes (weekends/holidays removed)
  * es0 = the task's own start (acts as a floor), dur = length - 1 (inclusive).
+ *
+ * fixed = finished task: pinned to its real dates. startDay / finishDay are
+ * the real day numbers (used in working mode, where the index space cannot
+ * represent a Sunday / holiday date exactly).
  */
 interface CoreNode {
   id: string;
   es0: number;
   dur: number;
+  fixed?: boolean;
+  startDay?: number;
+  finishDay?: number;
 }
 
 interface CoreResult {
@@ -129,26 +146,34 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
   for (const id of order) {
     const n = byId.get(id)!;
     let e = n.es0; // user-set start is a floor
-    for (const s of pred.get(id) ?? []) {
+    // Finished tasks ignore their incoming links entirely.
+    const incoming = n.fixed ? [] : pred.get(id) ?? [];
+    for (const s of incoming) {
       const p = byId.get(s.relatingTask)!;
       const pES = es.get(p.id) ?? p.es0;
       const pEF = ef.get(p.id) ?? pES + p.dur;
       let cand: number;
       if (cal) {
+        // A finished predecessor uses its REAL day numbers (it may sit on a
+        // Sunday/holiday). Otherwise convert the working-day index.
+        const pSD =
+          p.fixed && p.startDay != null ? p.startDay : cal.dayOf(pES);
+        const pFD =
+          p.fixed && p.finishDay != null ? p.finishDay : cal.dayOf(pEF);
         // lag = calendar days; result snaps forward to the next workday
         switch (s.sequenceType) {
           case "START_START":
-            cand = cal.idxOf(cal.dayOf(pES) + s.lagDays);
+            cand = cal.idxOf(pSD + s.lagDays);
             break;
           case "FINISH_FINISH":
-            cand = cal.idxOf(cal.dayOf(pEF) + s.lagDays) - n.dur;
+            cand = cal.idxOf(pFD + s.lagDays) - n.dur;
             break;
           case "START_FINISH":
-            cand = cal.idxOf(cal.dayOf(pES) + s.lagDays) - n.dur;
+            cand = cal.idxOf(pSD + s.lagDays) - n.dur;
             break;
           case "FINISH_START":
           default:
-            cand = cal.idxOf(cal.dayOf(pEF) + 1 + s.lagDays);
+            cand = cal.idxOf(pFD + 1 + s.lagDays);
             break;
         }
       } else {
@@ -187,9 +212,18 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
   for (let i = order.length - 1; i >= 0; i--) {
     const id = order[i];
     const n = byId.get(id)!;
+
+    // Finished task: no slack, late dates = early dates.
+    if (n.fixed) {
+      lf.set(id, ef.get(id)!);
+      ls.set(id, es.get(id)!);
+      continue;
+    }
+
     let f = pFinish;
     for (const s of succ.get(id) ?? []) {
       const q = byId.get(s.relatedTask)!;
+      if (q.fixed) continue; // a finished successor does not constrain us
       const qLS = ls.get(q.id) ?? pFinish - q.dur;
       const qLF = lf.get(q.id) ?? pFinish;
       let cand: number;
@@ -240,8 +274,12 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
     ls.set(id, f - n.dur);
   }
 
-  // float + critical
+  // float + critical (finished tasks: 0 float, never critical)
   for (const id of order) {
+    if (byId.get(id)!.fixed) {
+      float.set(id, 0);
+      continue;
+    }
     const fl = ls.get(id)! - es.get(id)!;
     float.set(id, fl);
     if (fl <= 0) critical.add(id);
@@ -263,11 +301,22 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
   if (!leaves.length) return emptyResult();
 
   const core = runCore(
-    leaves.map((t) => ({
-      id: t.id,
-      es0: toDay(t.scheduleStart),
-      dur: durationDays(t) - 1,
-    })),
+    leaves.map((t): CoreNode => {
+      if (isDone(t)) {
+        const s = toDay(doneStart(t));
+        return {
+          id: t.id,
+          es0: s,
+          dur: Math.max(0, toDay(doneFinish(t)) - s),
+          fixed: true,
+        };
+      }
+      return {
+        id: t.id,
+        es0: toDay(t.scheduleStart),
+        dur: durationDays(t) - 1,
+      };
+    }),
     seqs
   );
 
@@ -293,6 +342,9 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
  *    to the next working day, matching autoScheduleWorkdays,
  *  - float is in working days, so a Fri -> Mon link has zero float,
  *  - results are mapped back to real dates (day numbers).
+ *
+ * Finished tasks are NOT snapped: they keep their real actual dates (even
+ * on an off day), ignore their incoming links, and report 0 float.
  */
 export function computeCpmWorkdays(
   tasks: Task[],
@@ -302,16 +354,27 @@ export function computeCpmWorkdays(
   const leaves = leavesOf(tasks);
   if (!leaves.length) return emptyResult();
 
-  // Snap each leaf to a working start and a working-day length.
+  // Snap each unfinished leaf to a working start and a working-day length.
+  // Finished leaves keep their real dates.
   const snapped = leaves.map((t) => {
-    const start = nextWorkday(t.scheduleStart, cal);
-    const wd = Math.max(1, countWorkdays(start, t.scheduleFinish, cal));
-    return { id: t.id, startDay: toDay(start), wd };
+    const done = isDone(t);
+    const start = done ? doneStart(t) : nextWorkday(t.scheduleStart, cal);
+    const finish = done ? doneFinish(t) : t.scheduleFinish;
+    const wd = Math.max(1, countWorkdays(start, finish, cal));
+    return {
+      id: t.id,
+      startDay: toDay(start),
+      finishDay: toDay(finish),
+      wd,
+      fixed: done,
+    };
   });
 
   // Working-day index table over a generous window.
   const minStart = Math.min(...snapped.map((s) => s.startDay));
-  const maxStart = Math.max(...snapped.map((s) => s.startDay));
+  const maxStart = Math.max(
+    ...snapped.map((s) => Math.max(s.startDay, s.finishDay))
+  );
   const base = minStart - 366; // room for negative lags
   const horizon =
     maxStart + snapped.reduce((a, s) => a + s.wd, 0) + 3650; // room to grow
@@ -329,7 +392,16 @@ export function computeCpmWorkdays(
     workDays[Math.max(0, Math.min(workDays.length - 1, i))];
 
   const core = runCore(
-    snapped.map((s) => ({ id: s.id, es0: idxOf(s.startDay), dur: s.wd - 1 })),
+    snapped.map(
+      (s): CoreNode => ({
+        id: s.id,
+        es0: idxOf(s.startDay),
+        dur: s.wd - 1,
+        fixed: s.fixed,
+        startDay: s.startDay,
+        finishDay: s.finishDay,
+      })
+    ),
     seqs,
     { dayOf, idxOf, size: workDays.length }
   );
@@ -340,11 +412,25 @@ export function computeCpmWorkdays(
     return out;
   };
 
+  const eS = toDays(core.es);
+  const eF = toDays(core.ef);
+  const lS = toDays(core.ls);
+  const lF = toDays(core.lf);
+
+  // Finished tasks report their real dates, even on an off day.
+  for (const s of snapped) {
+    if (!s.fixed) continue;
+    eS.set(s.id, s.startDay);
+    lS.set(s.id, s.startDay);
+    eF.set(s.id, s.finishDay);
+    lF.set(s.id, s.finishDay);
+  }
+
   return {
-    earlyStart: toDays(core.es),
-    earlyFinish: toDays(core.ef),
-    lateStart: toDays(core.ls),
-    lateFinish: toDays(core.lf),
+    earlyStart: eS,
+    earlyFinish: eF,
+    lateStart: lS,
+    lateFinish: lF,
     totalFloat: core.float, // already in working days
     criticalIds: core.critical,
     projectStart: dayOf(core.pStart),
@@ -383,7 +469,6 @@ export function findCurrentAndNext(
   return { current, next };
 }
 
-
 // ---------- all tasks running today ----------
 /**
  * Every unfinished leaf task whose early window covers today.
@@ -413,6 +498,7 @@ export function findAllCurrent(
       return ca - cb || fin(a) - fin(b) || a.name.localeCompare(b.name);
     });
 }
+
 // ---------- upcoming queue (for the "Next up" stepper) ----------
 export function upcomingQueue(
   tasks: Task[],
