@@ -86,6 +86,9 @@ const ROW_H = 28;
 const LEFT_COL_W = 256; // desktop width
 const LEFT_COL_W_MOBILE = 128; // phones (< 640px)
 
+const LEFT_COL_MIN = 100;
+const LEFT_COL_MAX = 900;
+
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 80;
 const SHOW_DAY_GRID_ABOVE = 6;
@@ -233,14 +236,50 @@ export default function ScheduleView() {
   });
 
   // Left task column width: narrower on phones so the timeline gets room.
+  // Left task column width: default by screen size, user can drag to override.
   const [leftW, setLeftW] = useState(LEFT_COL_W);
+  const userResized = useRef(false);
   useEffect(() => {
-    const update = () =>
+    const update = () => {
+      if (userResized.current) return; // keep the user's dragged width
       setLeftW(window.innerWidth < 640 ? LEFT_COL_W_MOBILE : LEFT_COL_W);
+    };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
+
+  const startColDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = leftW;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const move = (ev: PointerEvent) => {
+      userResized.current = true;
+      setLeftW(
+        Math.min(
+          LEFT_COL_MAX,
+          Math.max(LEFT_COL_MIN, startW + ev.clientX - startX)
+        )
+      );
+    };
+    const up = () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  };
+
+  const resetColWidth = () => {
+    userResized.current = false;
+    setLeftW(window.innerWidth < 640 ? LEFT_COL_W_MOBILE : LEFT_COL_W);
+  };
 
   // ── Fetch the accessible project list once ──────────────────────────────
   useEffect(() => {
@@ -2204,9 +2243,23 @@ export default function ScheduleView() {
         <section className="mb-8 rounded border">
           <div className="flex">
             <div
-              className="shrink-0 border-r bg-white"
+              className="relative shrink-0 border-r bg-white"
               style={{ width: leftW }}
             >
+              {/* drag handle: full-height strip on the divider */}
+              <div
+                onPointerDown={startColDrag}
+                onDoubleClick={resetColWidth}
+                className="group absolute -right-1.5 top-0 z-40 h-full w-3 cursor-col-resize"
+                style={{ touchAction: "none" }}
+                title="Drag to resize the task column (double-click to reset)"
+                data-print-hide
+              >
+                <div className="mx-auto h-full w-0.5 bg-transparent group-hover:bg-blue-400" />
+                <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full border border-blue-600 bg-blue-600 px-1.5 py-0.5 text-xs font-bold leading-none text-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-active:opacity-100">
+                  ⇄
+                </div>
+              </div>
               <div
                 className="box-border flex items-center border-b px-3 text-xs font-semibold text-gray-500"
                 style={{ height: headerH }}
