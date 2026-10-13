@@ -2271,6 +2271,7 @@ export default function ScheduleView() {
                   const isCollapsed = collapsed.has(task.id);
                   const critical = cpm.criticalIds.has(task.id);
                   const selected = selectedId === task.id;
+
                   const flash = flashId === task.id;
                   return (
                     <div
@@ -2598,6 +2599,9 @@ export default function ScheduleView() {
                     const critical =
                       !hasChildren && cpm.criticalIds.has(task.id);
                     const selected = selectedId === task.id;
+                    const floatD = hasChildren
+                      ? undefined
+                      : cpm.totalFloat.get(task.id);
                     const barColor = hasChildren
                       ? "bg-gray-800"
                       : task.isMilestone
@@ -2632,13 +2636,13 @@ export default function ScheduleView() {
                           width: w,
                           WebkitTouchCallout: "none",
                         }}
-                        title={`${task.name}\n${task.scheduleStart} → ${task.scheduleFinish
-                          } · ${durLabel}${task.completion > 0 ? ` · ${task.completion}%` : ""
-                          }${critical
-                            ? `\nCRITICAL · float ${cpm.totalFloat.get(task.id) ?? 0
-                            }d`
-                            : ""
-                          }`}
+                        title={
+                          `${task.name}\n${task.scheduleStart} → ${task.scheduleFinish} · ${durLabel}` +
+                          (task.completion > 0 ? ` · ${task.completion}%` : "") +
+                          (floatD !== undefined
+                            ? `\nFloat: ${floatD}d${critical ? " · CRITICAL" : ""}`
+                            : "")
+                        }
                       >
                         {!hasChildren &&
                           !task.isMilestone &&
@@ -3214,6 +3218,7 @@ export default function ScheduleView() {
           calendar={calendar}
           useWorkdays={useWorkdays}
           isAdmin={isAdmin}
+          float={cpm.totalFloat.get(editingTask.id)}
           onSave={(patch) => updateTask(editingTask.id, patch)}
           onDelete={() => deleteTask(editingTask.id)}
           onClose={() => setEditingId(null)}

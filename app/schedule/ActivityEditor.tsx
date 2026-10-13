@@ -588,6 +588,7 @@ export function ActivityEditorModal({
   calendar,
   useWorkdays,
   isAdmin,
+  float,
   onSave,
   onDelete,
   onClose,
@@ -600,6 +601,7 @@ export function ActivityEditorModal({
   calendar: WorkingCalendar;
   useWorkdays: boolean;
   isAdmin: boolean;
+  float?: number;
   onSave: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -959,6 +961,23 @@ export function ActivityEditorModal({
               Group dates, progress, baseline and actuals are derived from the
               children. Use Auto-schedule to refresh them.
             </p>
+          )}
+          {!isGroup && float !== undefined && (
+            <div className="-mt-1 flex items-center gap-2 text-xs">
+              <span className="font-medium text-gray-600">Total float</span>
+              <span
+                className={`rounded px-1.5 py-0.5 font-semibold tabular-nums ${float <= 0
+                    ? "bg-red-100 text-red-700"
+                    : "bg-gray-100 text-gray-700"
+                  }`}
+              >
+                {float}d{float <= 0 ? " · critical" : ""}
+              </span>
+              <span className="text-[10px] text-gray-500">
+                Slip allowed before the project finish moves. Based on saved
+                dates and links, not unsaved edits.
+              </span>
+            </div>
           )}
 
           {linksEnabled && !milestone && !isGroup && (
