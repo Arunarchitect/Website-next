@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { type MyProject } from "./api";
+import { type MyProject, type MyProjectSchedule } from "./api";
 
-// ---------- Org → Project → Schedule picker ----------
+const scheduleLabel = (s: MyProjectSchedule) =>
+  s.scope === "MAIN"
+    ? `Main — ${s.name}`
+    : s.isMine
+      ? "My copy"
+      : `${s.ownerName ?? "Someone"}'s copy`;
+
 // ---------- Org → Project → Schedule picker ----------
 export default function SchedulePicker({
   projects,
@@ -60,6 +66,7 @@ export default function SchedulePicker({
         onChange={(e) => {
           const pid = Number(e.target.value);
           const p = projects.find((x) => x.id === pid);
+          // schedules[0] is always the main schedule (server sorts it first)
           onPick(pid, p?.schedules[0]?.id ?? null);
         }}
         className="rounded border bg-white px-2 py-1.5"
@@ -83,7 +90,7 @@ export default function SchedulePicker({
         >
           {currentProject.schedules.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.name} ({s.predefinedType})
+              {scheduleLabel(s)}
             </option>
           ))}
         </select>

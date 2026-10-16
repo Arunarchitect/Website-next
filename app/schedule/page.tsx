@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TouchEvent as ReactTouchEvent } from "react";
+
+import type { SchedulePerson } from "./data";
+import AssigneePicker, { initialsOf, namesFor } from "./AssigneePicker";
+
 import {
   demoSchedule,
   SEQUENCE_TYPES,
@@ -69,7 +73,18 @@ import { useScheduleSync } from "./useScheduleSync";
 import SyncBadge from "./SyncBadge";
 import ScheduleImport from "./ScheduleImport";
 import BaselineCompare from "./BaselineCompare";
-import { listMyProjects, type MyProject, type ScheduleDoc } from "./api";
+import {
+  ApiError,
+  addPerson,
+  forkSchedule,
+  listMyProjects,
+  listPeople,
+  promoteSchedule,
+  pullMainSchedule,
+  type MyProject,
+  type ScheduleDoc,
+} from "./api";
+import ScheduleScopeBar from "./ScheduleScopeBar";
 import TaskPicker, { type PickerMode } from "./TaskPicker";
 import SchedulePicker from "./SchedulePicker";
 import ScheduleExportODS from "./ScheduleExportODS";
@@ -222,6 +237,30 @@ export default function ScheduleView() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [useWorkdays, setUseWorkdays] = useState(false);
 
+  const [meta, setMeta] = useState<ScheduleDoc | null>(null);
+
+  const [people, setPeople] = useState<SchedulePerson[]>([]);
+  const [mePersonId, setMePersonId] = useState<number | null>(null);
+  const [myOnly, setMyOnly] = useState(false);
+
+  // Load the project's people (assignees) whenever the project changes.
+  useEffect(() => {
+    if (projectId == null) return;
+    let off = false;
+    listPeople(projectId)
+      .then((r) => {
+        if (off) return;
+        setPeople(r.people);
+        setMePersonId(r.mePersonId);
+      })
+      .catch(() => { });
+    return () => {
+      off = true;
+    };
+  }, [projectId]);
+
+  const [scopeBusy, setScopeBusy] = useState(false);
+
   const calendarSer = useMemo(() => serialize(calendar), [calendar]);
 
   const undo = useUndo({
@@ -335,6 +374,7 @@ export default function ScheduleView() {
   // never leak into the next one.
   const handleLoaded = useCallback(
     (d: ScheduleDoc) => {
+      setMeta(d);
       setTasks(d.tasks);
       setSequences(d.sequences);
       setCalendar(
@@ -361,7 +401,10 @@ export default function ScheduleView() {
   const currentProject = myProjects.find((p) => p.id === projectId) ?? null;
   const isViewOnly = currentProject ? !currentProject.canEdit : false;
   const isAdmin = currentProject?.role === "admin";
-  const readOnly = isViewOnly || !sync.canEdit;
+  const currentSched =
+    currentProject?.schedules.find((s) => s.id === scheduleId) ?? null;
+  const isMainLocked = currentSched?.scope === "MAIN" && !isViewOnly;
+  const readOnly = isViewOnly || !sync.canEdit || isMainLocked;
   const ready = !["loading", "empty", "failed"].includes(sync.status);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -439,7 +482,21 @@ export default function ScheduleView() {
 
   // ---------- derived ----------
   const rolled = useMemo(() => rollup(tasks), [tasks]);
-  const rows = useMemo(() => flatten(rolled, collapsed), [rolled, collapsed]);
+  const rows = useMemo(() => {
+    const all = flatten(rolled, collapsed);
+    if (!myOnly || mePersonId == null) return all;
+    const byId = new Map(rolled.map((t) => [t.id, t]));
+    const keep = new Set<string>();
+    for (const t of rolled) {
+      if (!t.assigneeIds?.includes(mePersonId)) continue;
+      let cur: Task | undefined = t;
+      while (cur && !keep.has(cur.id)) {
+        keep.add(cur.id);
+        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+      }
+    }
+    return all.filter((r) => keep.has(r.task.id));
+  }, [rolled, collapsed, myOnly, mePersonId]);
 
   const { minDay, maxDay } = useMemo(() => {
     if (!rolled.length) return { minDay: 0, maxDay: 0 };
@@ -1318,7 +1375,7 @@ export default function ScheduleView() {
         <p className="mb-3 text-gray-500">
           No schedule has been created for this project yet.
         </p>
-        {!isViewOnly && (
+        {isAdmin && (
           <button
             onClick={async () => {
               const id = await sync.createAndSeed();
@@ -1446,7 +1503,8 @@ export default function ScheduleView() {
         void copyTasksForAi(
           withDescendants(task.id, tasks),
           tasks,
-          sequences
+          sequences,
+          people
         ).then((r) => {
           setCopiedMsg(r.message);
           setFlashId(task.id);
@@ -1522,6 +1580,112 @@ export default function ScheduleView() {
     notify(`Baseline JSON copied (${withBaseline.length} tasks).`);
   };
 
+  const scopeError = (e: unknown) =>
+    notify(e instanceof ApiError || e instanceof Error ? e.message : "Failed");
+
+  const refreshProjects = () =>
+    listMyProjects()
+      .then(setMyProjects)
+      .catch(() => { });
+
+  const applyDoc = (doc: ScheduleDoc) => {
+    setTasks(doc.tasks);
+    setSequences(doc.sequences);
+    const cal = doc.calendar
+      ? deserialize(doc.calendar as SerializedCalendar)
+      : emptyCalendar();
+    setCalendar(cal);
+    setMeta(doc);
+    undo.clear();
+    sync.setVersion(doc.version);
+    sync.markSaved({
+      tasks: doc.tasks,
+      sequences: doc.sequences,
+      calendar: serialize(cal),
+    });
+  };
+
+  const forkMine = async () => {
+    if (!meta) return;
+    setScopeBusy(true);
+    try {
+      const doc = await forkSchedule(meta.id);
+      await refreshProjects();
+      setScheduleId(doc.id); // the sync hook loads the new schedule
+    } catch (e) {
+      scopeError(e);
+    } finally {
+      setScopeBusy(false);
+    }
+  };
+
+  const setAssignees = (id: string, ids: number[]) =>
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, assigneeIds: ids } : t))
+    );
+
+  const handleAddPerson = async (
+    name: string,
+    email: string
+  ): Promise<SchedulePerson | null> => {
+    if (projectId == null) return null;
+    try {
+      const p = await addPerson(projectId, name, email);
+      setPeople((prev) =>
+        prev.some((x) => x.id === p.id)
+          ? prev.map((x) => (x.id === p.id ? p : x))
+          : [...prev, p]
+      );
+      return p;
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Couldn't add person");
+      return null;
+    }
+  };
+
+  const pullFromMain = async () => {
+    if (!meta) return;
+    if (
+      !window.confirm(
+        "Replace your copy with the current main schedule? Your changes will be discarded (a snapshot is kept)."
+      )
+    )
+      return;
+    setScopeBusy(true);
+    try {
+      applyDoc(await pullMainSchedule(meta.id));
+      notify("Pulled the latest main schedule.");
+    } catch (e) {
+      scopeError(e);
+    } finally {
+      setScopeBusy(false);
+    }
+  };
+
+  const promoteToMain = async () => {
+    if (!meta) return;
+    if (
+      !window.confirm(
+        `Overwrite the main schedule with ${meta.ownerName ?? "this"}'s copy? The current main is snapshotted first.`
+      )
+    )
+      return;
+    setScopeBusy(true);
+    try {
+      const doc = await promoteSchedule(meta.id);
+      await refreshProjects();
+      setScheduleId(doc.id); // switch to main
+      notify("Main schedule replaced.");
+    } catch (e) {
+      scopeError(e);
+    } finally {
+      setScopeBusy(false);
+    }
+  };
+
+  const mySchedId =
+    currentProject?.schedules.find((s) => s.isMine && s.scope === "PERSONAL")?.id ?? null;
+
   const toggleChecked = (id: string) =>
     setCheckedIds((prev) => {
       const n = new Set(prev);
@@ -1560,7 +1724,7 @@ export default function ScheduleView() {
   const copySelected = () => {
     if (checkedIds.size === 0) return;
     const ids = selectionIds();
-    void copyTasksForAi(ids, tasks, sequences).then((r) => {
+    void copyTasksForAi(ids, tasks, sequences, people).then((r) => {
       setCopiedMsg(r.message);
       setTimeout(() => setCopiedMsg(null), 4000);
       if (!r.ok) window.alert(r.message);
@@ -1602,6 +1766,7 @@ export default function ScheduleView() {
             {useWorkdays && " · working-day mode"}
             {hasBaseline && ` · ${lateCount} late vs baseline`}
             {isViewOnly && " · view-only"}
+            {!isViewOnly && isMainLocked && " · main (read-only)"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-print-hide>
@@ -1645,6 +1810,19 @@ export default function ScheduleView() {
             />
             Working days
           </label>
+          {mePersonId != null && (
+            <label
+              className="flex items-center gap-1.5 rounded border bg-white px-2 py-1.5 text-xs text-gray-700"
+              title="Show only tasks assigned to me"
+            >
+              <input
+                type="checkbox"
+                checked={myOnly}
+                onChange={(e) => setMyOnly(e.target.checked)}
+              />
+              My tasks
+            </label>
+          )}
           <PrintAct
             tasks={tasks}
             rows={rows}
@@ -1653,6 +1831,7 @@ export default function ScheduleView() {
             sequences={sequences}
             title={heading}
             projectName={currentProject?.name ?? ""}
+            people={people}
           />
           {!readOnly && (
             <ScheduleImport
@@ -1726,11 +1905,13 @@ export default function ScheduleView() {
             tasks={tasks}
             sequences={sequences}
             calendar={calendarSer}
+            people={people}
           />
           <ScheduleExportODS
             rows={rows}
             criticalIds={cpm.criticalIds}
             name={heading}
+            people={people}
           />
           {!readOnly && (
             <div className="flex items-center gap-1">
@@ -1889,6 +2070,46 @@ export default function ScheduleView() {
         </div>
       </header>
 
+      <ScheduleScopeBar
+        meta={meta}
+        isAdmin={isAdmin}
+        canHaveCopy={!isViewOnly}
+        mySchedId={mySchedId}
+        mainId={currentProject?.mainId ?? null}
+        busy={scopeBusy}
+        onFork={forkMine}
+        onOpen={(id) => setScheduleId(id)}
+        onPull={pullFromMain}
+        onPromote={promoteToMain}
+      />
+      {isMainLocked && !isViewOnly && (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900"
+          data-print-hide
+        >
+          <span>
+            This is the <b>main schedule</b> and it is read-only. Edit your own copy
+            {isAdmin ? ", then promote it to replace main." : "."}
+          </span>
+          {mySchedId != null ? (
+            <button
+              onClick={() => setScheduleId(mySchedId)}
+              className="rounded border border-blue-300 bg-white px-2 py-1 hover:bg-blue-100"
+            >
+              Open my copy
+            </button>
+          ) : (
+            <button
+              onClick={forkMine}
+              disabled={scopeBusy}
+              className="rounded border border-blue-300 bg-white px-2 py-1 hover:bg-blue-100 disabled:opacity-50"
+            >
+              Make my copy
+            </button>
+          )}
+        </div>
+      )}
+
       {useWorkdays && (
         <div className="mb-3" data-print-hide>
           <CalendarChips calendar={calendar} />
@@ -1981,6 +2202,11 @@ export default function ScheduleView() {
                     <p className="mt-1 text-xs text-gray-700">
                       {describe(t, tasks)}
                     </p>
+                    {namesFor(t.assigneeIds, people) && (
+                      <p className="mt-0.5 text-xs text-gray-600">
+                        Assigned: {namesFor(t.assigneeIds, people)}
+                      </p>
+                    )}
                     <button
                       onClick={() => jumpToTask(t.id)}
                       data-print-hide
@@ -2068,6 +2294,11 @@ export default function ScheduleView() {
               <p className="mt-1 text-xs text-gray-700">
                 {describe(next, tasks)}
               </p>
+              {namesFor(next.assigneeIds, people) && (
+                <p className="mt-0.5 text-xs text-gray-600">
+                  Assigned: {namesFor(next.assigneeIds, people)}
+                </p>
+              )}
 
               <div className="mt-2 flex items-center gap-2" data-print-hide>
                 <button
@@ -2325,6 +2556,19 @@ export default function ScheduleView() {
                       >
                         {task.name}
                       </span>
+                      {!hasChildren && (task.assigneeIds?.length ?? 0) > 0 && (
+                        <span
+                          className="shrink-0 rounded bg-gray-100 px-1 text-[9px] text-gray-600"
+                          title={namesFor(task.assigneeIds, people)}
+                        >
+                          {(task.assigneeIds ?? [])
+                            .map((id) =>
+                              initialsOf(people.find((p) => p.id === id)?.name ?? "")
+                            )
+                            .filter(Boolean)
+                            .join(" ")}
+                        </span>
+                      )}
                       {!readOnly && (
                         <button
                           onClick={(e) => {
@@ -2698,7 +2942,7 @@ export default function ScheduleView() {
 
       {/* ================= TABLE ================= */}
       <section className="overflow-x-auto rounded border">
-        <table className="w-full min-w-[1750px] border-collapse text-sm">
+        <table className="w-full min-w-[1950px] border-collapse text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
               <th className="w-8 px-2 py-2">
@@ -2742,6 +2986,7 @@ export default function ScheduleView() {
               >
                 Var
               </th>
+              <th className="w-48 px-2 py-2">Assignee</th>
               <th className="w-64 px-2 py-2" title="Lag is in calendar days">Predecessors</th>
               <th className="w-64 px-2 py-2" title="Lag is in calendar days">Successors</th>
               <th className="w-10 px-2 py-2"></th>
@@ -2993,6 +3238,24 @@ export default function ScheduleView() {
                   </td>
 
                   <td
+                    className="px-2 py-1.5 align-top"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isGroup ? (
+                      <span className="text-xs text-gray-400">—</span>
+                    ) : (
+                      <AssigneePicker
+                        compact
+                        people={people}
+                        value={task.assigneeIds ?? []}
+                        disabled={readOnly}
+                        onChange={(ids) => setAssignees(task.id, ids)}
+                        onAddPerson={readOnly ? undefined : handleAddPerson}
+                      />
+                    )}
+                  </td>
+
+                  <td
                     className="relative px-2 py-1.5 align-top"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -3219,6 +3482,8 @@ export default function ScheduleView() {
           useWorkdays={useWorkdays}
           isAdmin={isAdmin}
           float={cpm.totalFloat.get(editingTask.id)}
+          people={people}
+          onAddPerson={handleAddPerson}
           onSave={(patch) => updateTask(editingTask.id, patch)}
           onDelete={() => deleteTask(editingTask.id)}
           onClose={() => setEditingId(null)}

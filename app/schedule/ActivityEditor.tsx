@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Sequence, Task } from "./data";
+import type { Sequence, Task, SchedulePerson } from "./data";
+import AssigneePicker from "./AssigneePicker";
 import { SEQUENCE_TYPES, type SequenceType } from "./data";
 import { durationDays, durationWorkdays, toDay, wouldCycle } from "./scheduling";
 import {
@@ -589,11 +590,13 @@ export function ActivityEditorModal({
   useWorkdays,
   isAdmin,
   float,
+  people = [],
   onSave,
   onDelete,
   onClose,
   onApplyLinks,
   onCreateLinked,
+  onAddPerson,
 }: {
   task: Task;
   tasks: Task[];
@@ -602,6 +605,7 @@ export function ActivityEditorModal({
   useWorkdays: boolean;
   isAdmin: boolean;
   float?: number;
+  people?: SchedulePerson[];
   onSave: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -612,6 +616,7 @@ export function ActivityEditorModal({
    * predecessor or successor, and open it for editing (like "+ New phase").
    */
   onCreateLinked?: (mode: "pred" | "succ") => void;
+  onAddPerson?: (name: string, email: string) => Promise<SchedulePerson | null>;
 }) {
   const [name, setName] = useState(task.name);
   const [code, setCode] = useState(task.workCode ?? "");
@@ -628,6 +633,7 @@ export function ActivityEditorModal({
   const [milestone, setMilestone] = useState(task.isMilestone);
   const [remarks, setRemarks] = useState(task.remarks ?? "");
   const [parentId, setParentId] = useState<string | null>(task.parentId);
+  const [assigneeIds, setAssigneeIds] = useState<number[]>(task.assigneeIds ?? []);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -807,6 +813,7 @@ export function ActivityEditorModal({
       isMilestone: milestone,
       remarks: remarks.trim() || undefined,
       parentId,
+      assigneeIds,
     });
 
     // Links: apply only if something actually changed.
@@ -905,6 +912,18 @@ export function ActivityEditorModal({
               />
             </div>
           </div>
+
+          {!isGroup && (
+            <div className="grid gap-1">
+              <span className="text-xs font-medium text-gray-600">Assigned to</span>
+              <AssigneePicker
+                people={people}
+                value={assigneeIds}
+                onChange={setAssigneeIds}
+                onAddPerson={onAddPerson}
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-3">
             <div className="grid gap-1">

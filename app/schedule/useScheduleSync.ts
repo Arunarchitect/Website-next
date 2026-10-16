@@ -11,7 +11,7 @@ import {
   type ScheduleListItem,
 } from "./api";
 import type { Sequence, Task } from "./data";
-import type { SerializedCalendar } from "./calendar";
+import { emptyCalendar, serialize, type SerializedCalendar } from "./calendar";
 
 export type SyncStatus =
   | "loading"
@@ -57,28 +57,27 @@ export interface UseScheduleSyncResult {
     calendar: SerializedCalendar;
   }) => void;
   /**
-   * Manually create a schedule for the current project and upload the seed
-   * (the basic one-phase template passed in via `seed`).
-   * Only meaningful when `status === "empty"` and the user can edit.
-   * Never called automatically — an empty project stays empty until the
-   * user explicitly asks for a new schedule.
-   *
+   * Manually create a schedule for the current project and upload the seed.
    * Resolves to the new schedule id, or null on failure / no permission.
    */
   createAndSeed: () => Promise<number | null>;
 }
 
 const debounceMs = 1500;
+const DEBUG_SYNC = true; // set false once the unsaved issue is gone
 
-// Key-sorted JSON so Postgres jsonb reordering doesn't make the page think
-// it's dirty right after a load or save.
+const DEFAULT_CAL: SerializedCalendar = serialize(emptyCalendar());
+
+// Key-sorted JSON. null / undefined object fields are dropped so that
+// "field: null" (server) and "field missing" (client) compare equal.
 function stableKey(v: unknown): string {
   return JSON.stringify(v, (_k, val) => {
     if (val && typeof val === "object" && !Array.isArray(val)) {
-      return Object.keys(val)
+      const obj = val as Record<string, unknown>;
+      return Object.keys(obj)
         .sort()
         .reduce<Record<string, unknown>>((acc, k) => {
-          acc[k] = (val as Record<string, unknown>)[k];
+          if (obj[k] !== null && obj[k] !== undefined) acc[k] = obj[k];
           return acc;
         }, {});
     }
@@ -86,34 +85,73 @@ function stableKey(v: unknown): string {
   });
 }
 
-// Cheap pre-flight: catch what the backend serializer would reject so we
-// never send a payload that gets 400. Keeps the retry loop from starting.
+// Server may return calendar = null; the page then uses the default calendar.
+// Normalise so both sides of every comparison look identical.
+function normCal(c: SerializedCalendar | null | undefined): SerializedCalendar {
+  const base = c ?? DEFAULT_CAL;
+  return {
+    ...base,
+    weekly: [...(base.weekly ?? [])].sort((a, b) => a - b),
+    dates: base.dates ?? [],
+    ranges: base.ranges ?? [],
+  };
+}
+
+function makeKey(
+  tasks: Task[],
+  sequences: Sequence[],
+  calendar: SerializedCalendar | null | undefined
+): string {
+  return stableKey({ tasks, sequences, calendar: normCal(calendar) });
+}
+
+// Pre-flight: ONLY things the backend serializer rejects (would be a 400).
 function findPayloadProblem(tasks: Task[], sequences: Sequence[]): string | null {
   const seen = new Set<string>();
+  const ids = new Set(tasks.map((t) => t.id));
   for (const t of tasks) {
+    const label = t.name || t.id;
     if (seen.has(t.id)) return `Duplicate task id "${t.id}".`;
     seen.add(t.id);
     if (!t.scheduleStart || !t.scheduleFinish) {
-      return `Task "${t.name || t.id}" is missing a start or finish date.`;
+      return `Task "${label}" is missing a start or finish date.`;
     }
     if (t.scheduleFinish < t.scheduleStart) {
-      return `Task "${t.name || t.id}" finishes before it starts.`;
+      return `Task "${label}" finishes before it starts.`;
     }
-  }
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  for (const s of sequences) {
-    const pred = byId.get(s.relatingTask);
-    const succ = byId.get(s.relatedTask);
-    if (pred && succ && succ.completion >= 100 && pred.completion < 100) {
-      return `"${succ.name}" is 100% but its predecessor "${pred.name}" is not.`;
+    if (t.actualStart && t.actualFinish && t.actualFinish < t.actualStart) {
+      return `Task "${label}": actual finish is before actual start.`;
+    }
+    if (
+      t.baselineStart &&
+      t.baselineFinish &&
+      t.baselineFinish < t.baselineStart
+    ) {
+      return `Task "${label}": baseline finish is before baseline start.`;
+    }
+    if (t.parentId && !ids.has(t.parentId)) {
+      return `Task "${label}" has an unknown parent.`;
     }
   }
   return null;
 }
 
-// Drop sequences whose endpoints don't exist. Mirrors the backend's
-// DocumentIn.validate() so an inconsistent local state never turns into a
-// 400 on save.
+// Warn only (never blocks a save): completion-rule violations in the data.
+function logCompletionWarnings(tasks: Task[], sequences: Sequence[]) {
+  if (!DEBUG_SYNC) return;
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  for (const s of sequences) {
+    const pred = byId.get(s.relatingTask);
+    const succ = byId.get(s.relatedTask);
+    if (pred && succ && succ.completion >= 100 && pred.completion < 100) {
+      console.warn(
+        `[sync] completion rule: "${succ.name}" is 100% but predecessor "${pred.name}" is ${pred.completion}% (not blocking save)`
+      );
+    }
+  }
+}
+
+// Drop sequences whose endpoints don't exist.
 function pruneOrphanSequences(
   tasks: Task[],
   sequences: Sequence[]
@@ -123,6 +161,33 @@ function pruneOrphanSequences(
     (s) => ids.has(s.relatingTask) && ids.has(s.relatedTask)
   );
   return { sequences: kept, removed: sequences.length - kept.length };
+}
+
+// Debug: say what differs between the last saved state and the current one.
+function logFirstDiff(savedKey: string, curKey: string) {
+  try {
+    const A = JSON.parse(savedKey || "{}");
+    const B = JSON.parse(curKey);
+    const ta: Task[] = A.tasks ?? [];
+    const tb: Task[] = B.tasks ?? [];
+    if (ta.length !== tb.length) {
+      console.log("[sync] dirty, task count differs", ta.length, "vs", tb.length);
+      return;
+    }
+    for (let i = 0; i < tb.length; i++) {
+      if (JSON.stringify(ta[i]) !== JSON.stringify(tb[i])) {
+        console.log("[sync] dirty, first diff: task", i, "saved:", ta[i], "now:", tb[i]);
+        return;
+      }
+    }
+    if (JSON.stringify(A.sequences) !== JSON.stringify(B.sequences)) {
+      console.log("[sync] dirty, sequences differ", A.sequences?.length, B.sequences?.length);
+      return;
+    }
+    console.log("[sync] dirty, calendar differs", A.calendar, B.calendar);
+  } catch (e) {
+    console.log("[sync] diff failed", e);
+  }
 }
 
 export function useScheduleSync({
@@ -149,6 +214,36 @@ export function useScheduleSync({
   const pausedRef = useRef(false);
   const startedFor = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const problemShownRef = useRef(false);
+  const lastLoggedRef = useRef<string>("");
+
+  // Keep the latest onLoaded in a ref so `load` / `createAndSeed` stay stable
+  // even if the parent passes a new callback identity.
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
+
+  const applyLoadedDoc = useCallback((doc: ScheduleDoc, ce: boolean) => {
+    const { sequences: cleanSeqs, removed } = pruneOrphanSequences(
+      doc.tasks,
+      doc.sequences
+    );
+    if (removed > 0) {
+      console.warn(`[schedule] Pruned ${removed} orphan sequence(s) on load.`);
+    }
+    idRef.current = doc.id;
+    verRef.current = doc.version;
+    canEditRef.current = ce;
+    setCanEdit(ce);
+    const clean: ScheduleDoc = { ...doc, sequences: cleanSeqs };
+    lastSavedRef.current = makeKey(
+      clean.tasks,
+      clean.sequences,
+      clean.calendar as SerializedCalendar | null
+    );
+    problemShownRef.current = false;
+    onLoadedRef.current(clean);
+    setStatus(ce ? "saved" : "readonly");
+  }, []);
 
   // ── LOAD ────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -157,32 +252,12 @@ export function useScheduleSync({
     pausedRef.current = false;
     lastAttemptedRef.current = "";
     try {
-      // Explicit schedule id (from the picker)
       if (scheduleId != null) {
         const doc = await getSchedule(scheduleId);
-        const { sequences: cleanSeqs, removed } = pruneOrphanSequences(
-          doc.tasks,
-          doc.sequences
-        );
-        if (removed > 0) {
-          console.warn(`[schedule] Pruned ${removed} orphan sequence(s) on load.`);
-        }
-        idRef.current = doc.id;
-        verRef.current = doc.version;
-        canEditRef.current = !!doc.canEdit;
-        setCanEdit(!!doc.canEdit);
-        const clean: ScheduleDoc = { ...doc, sequences: cleanSeqs };
-        lastSavedRef.current = stableKey({
-          tasks: clean.tasks,
-          sequences: clean.sequences,
-          calendar: clean.calendar,
-        });
-        onLoaded(clean);
-        setStatus(doc.canEdit ? "saved" : "readonly");
+        applyLoadedDoc(doc, !!doc.canEdit);
         return;
       }
 
-      // No schedule and no project → caller must show a picker
       if (projectId == null) {
         setStatus("empty");
         return;
@@ -193,9 +268,6 @@ export function useScheduleSync({
       canEditRef.current = ce;
 
       if (results.length === 0) {
-        // NO AUTOMATIC SEEDING.
-        // An empty project stays empty until the user explicitly calls
-        // `createAndSeed()`.
         idRef.current = null;
         setStatus("empty");
         return;
@@ -203,23 +275,7 @@ export function useScheduleSync({
 
       const first: ScheduleListItem = results[0];
       const doc = await getSchedule(first.id);
-      const { sequences: cleanSeqs, removed } = pruneOrphanSequences(
-        doc.tasks,
-        doc.sequences
-      );
-      if (removed > 0) {
-        console.warn(`[schedule] Pruned ${removed} orphan sequence(s) on load.`);
-      }
-      idRef.current = doc.id;
-      verRef.current = doc.version;
-      const clean: ScheduleDoc = { ...doc, sequences: cleanSeqs };
-      lastSavedRef.current = stableKey({
-        tasks: clean.tasks,
-        sequences: clean.sequences,
-        calendar: clean.calendar,
-      });
-      onLoaded(clean);
-      setStatus(ce ? "saved" : "readonly");
+      applyLoadedDoc(doc, ce);
     } catch (e) {
       const msg =
         e instanceof ApiError
@@ -230,7 +286,7 @@ export function useScheduleSync({
       setMessage(msg);
       setStatus("failed");
     }
-  }, [projectId, scheduleId, onLoaded]);
+  }, [projectId, scheduleId, applyLoadedDoc]);
 
   useEffect(() => {
     const key = `sched:${scheduleId ?? "p" + projectId}`;
@@ -245,8 +301,6 @@ export function useScheduleSync({
   }, [scheduleId, projectId, load]);
 
   // ── MANUAL "CREATE SCHEDULE" ────────────────────────────────────────────
-  // Only runs when the user explicitly asks. Creates a schedule on the
-  // current project and uploads the basic seed (one phase + default calendar).
   const createAndSeed = useCallback(async (): Promise<number | null> => {
     if (projectId == null) return null;
     if (!canEditRef.current) return null;
@@ -263,9 +317,6 @@ export function useScheduleSync({
 
       idRef.current = created.id;
       verRef.current = saved.version;
-
-      // Stop the scheduleId change (page selects the new schedule) from
-      // triggering a redundant reload.
       startedFor.current = `sched:${created.id}`;
 
       const doc: ScheduleDoc = {
@@ -276,14 +327,11 @@ export function useScheduleSync({
         version: saved.version,
         canEdit: true,
       };
-      lastSavedRef.current = stableKey({
-        tasks: doc.tasks,
-        sequences: doc.sequences,
-        calendar: doc.calendar,
-      });
+      lastSavedRef.current = makeKey(doc.tasks, doc.sequences, seed.calendar);
       lastAttemptedRef.current = "";
       pausedRef.current = false;
-      onLoaded(doc);
+      problemShownRef.current = false;
+      onLoadedRef.current(doc);
       setSavedAt(new Date().toISOString());
       setStatus("saved");
       return created.id;
@@ -295,11 +343,10 @@ export function useScheduleSync({
             ? e.message
             : "Failed to create schedule";
       setMessage(msg);
-      // Stay on the empty screen so the user can retry.
       setStatus("empty");
       return null;
     }
-  }, [projectId, seed, onLoaded]);
+  }, [projectId, seed]);
 
   // ── SAVE ────────────────────────────────────────────────────────────────
   const doSave = useCallback(async () => {
@@ -310,21 +357,18 @@ export function useScheduleSync({
       return;
     }
 
-    // Normalize before hashing — same normalization the effect uses.
     const { sequences: cleanSeqs } = pruneOrphanSequences(tasks, sequences);
-    const payload = { tasks, sequences: cleanSeqs, calendar };
-    const key = stableKey(payload);
+    const key = makeKey(tasks, cleanSeqs, calendar);
     if (key === lastSavedRef.current) return;
 
-    // Pre-flight: never send what the server will reject.
     const problem = findPayloadProblem(tasks, cleanSeqs);
     if (problem) {
+      problemShownRef.current = true;
       setMessage(problem);
       setStatus("dirty");
       return;
     }
 
-    // Paused after a 400 on this exact payload — don't retry it.
     if (pausedRef.current && key === lastAttemptedRef.current) return;
 
     lastAttemptedRef.current = key;
@@ -391,15 +435,37 @@ export function useScheduleSync({
     }
 
     const { sequences: cleanSeqs } = pruneOrphanSequences(tasks, sequences);
-    const key = stableKey({ tasks, sequences: cleanSeqs, calendar });
-    if (key === lastSavedRef.current) return;
+    const key = makeKey(tasks, cleanSeqs, calendar);
+    if (key === lastSavedRef.current) {
+      // back in sync: drop any stale pre-flight message
+      if (problemShownRef.current) {
+        problemShownRef.current = false;
+        setMessage(null);
+      }
+      return;
+    }
     if (pausedRef.current && key === lastAttemptedRef.current) return;
 
     const problem = findPayloadProblem(tasks, cleanSeqs);
     if (problem) {
+      if (DEBUG_SYNC && lastLoggedRef.current !== "p:" + problem) {
+        lastLoggedRef.current = "p:" + problem;
+        console.warn("[sync] blocked:", problem);
+      }
+      problemShownRef.current = true;
       setMessage(problem);
       setStatus("dirty");
       return;
+    }
+    if (problemShownRef.current) {
+      problemShownRef.current = false;
+      setMessage(null);
+    }
+
+    if (DEBUG_SYNC && lastLoggedRef.current !== key) {
+      lastLoggedRef.current = key;
+      logFirstDiff(lastSavedRef.current, key);
+      logCompletionWarnings(tasks, cleanSeqs);
     }
 
     setStatus((s) => (s === "saving" ? s : "dirty"));
@@ -437,13 +503,11 @@ export function useScheduleSync({
         payload.tasks,
         payload.sequences
       );
-      lastSavedRef.current = stableKey({
-        tasks: payload.tasks,
-        sequences: cleanSeqs,
-        calendar: payload.calendar,
-      });
+      lastSavedRef.current = makeKey(payload.tasks, cleanSeqs, payload.calendar);
       lastAttemptedRef.current = "";
       pausedRef.current = false;
+      problemShownRef.current = false;
+      setMessage(null);
       setSavedAt(new Date().toISOString());
       setStatus("saved");
     },

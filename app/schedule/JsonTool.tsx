@@ -8,6 +8,7 @@ import type { Sequence, Task } from "./data";
  *
  * COPY: the chosen tasks (scopeIds) + the links whose BOTH ends are in the
  * selection. "parents" is read-only context so the AI knows valid parentIds.
+ * "people" (if present) is read-only context listing valid assigneeIds.
  *
  * PASTE (matched by task id):
  *   - id exists in the schedule  → that task is updated (fields merged)
@@ -31,6 +32,7 @@ export interface SelectionJson {
   tasks: Task[];
   sequences: Sequence[];
   parents?: { id: string; name: string }[];
+  people?: { id: number; name: string }[];
   exportedAt: string;
 }
 
@@ -41,6 +43,7 @@ const AI_INSTRUCTIONS = [
   "Dates are YYYY-MM-DD, scheduleFinish must not be before scheduleStart, completion is 0-100, isMilestone is true/false.",
   "parentId must be null, the id of another task in 'tasks', or one of the ids listed in 'parents'.",
   "Each sequence is {id, relatingTask (predecessor), relatedTask (successor), sequenceType: FINISH_START | START_START | FINISH_FINISH | START_FINISH, lagDays}. No self-links, duplicates or dependency cycles.",
+  "assigneeIds is a list of person ids from 'people' (if present). Use only those ids; never invent ids.",
   "Leave 'request', 'instructions' and 'parents' unchanged or omit them.",
 ];
 
@@ -147,7 +150,8 @@ function stripTaskForAi(t: Task): Task {
 export function collectSelection(
   ids: Iterable<string>,
   tasks: Task[],
-  sequences: Sequence[]
+  sequences: Sequence[],
+  people?: { id: number; name: string }[]
 ): SelectionJson {
   const scope = new Set(ids);
   const picked = tasks.filter((t) => scope.has(t.id));
@@ -175,15 +179,17 @@ export function collectSelection(
       .filter((t) => parentIds.has(t.id))
       .map((t) => ({ id: t.id, name: t.name })),
     exportedAt: new Date().toISOString(),
+    ...(people?.length ? { people: people.map((p) => ({ id: p.id, name: p.name })) } : {}),
   };
 }
 
 export async function copyTasksForAi(
   ids: Iterable<string>,
   tasks: Task[],
-  sequences: Sequence[]
+  sequences: Sequence[],
+  people?: { id: number; name: string }[]
 ): Promise<{ ok: boolean; message: string }> {
-  const payload = collectSelection(ids, tasks, sequences);
+  const payload = collectSelection(ids, tasks, sequences, people);
   const text = JSON.stringify(payload, null, 2);
   const msg = `Copied ${payload.tasks.length} task(s), ${payload.sequences.length} link(s).`;
   try {
@@ -285,6 +291,7 @@ export function validatePasteJson(
     "tasks",
     "sequences",
     "parents",
+    "people",
     "calendar", // tolerated: some AIs echo it back
     "exportedAt",
   ]);

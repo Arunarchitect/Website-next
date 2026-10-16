@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Sequence, Task } from "./data";
+import type { Sequence, Task, SchedulePerson } from "./data";
 import type { SerializedCalendar } from "./calendar";
 
 const INSTRUCTIONS = [
@@ -11,6 +11,7 @@ const INSTRUCTIONS = [
   "scheduleStart / scheduleFinish: ISO dates YYYY-MM-DD. Finish must be >= start.",
   "completion: 0-100. isMilestone: true for single-day markers.",
   "linkedElements: leave as [] unless you have IFC global ids.",
+  "assigneeIds: list of person ids taken from people[] (id + name). Use only ids that exist in people[]; never invent ids. Only leaf tasks get assignees.",
   "sequences[]: each entry links two task ids.",
   "  sequenceType: FINISH_START | START_START | FINISH_FINISH | START_FINISH",
   "  lagDays: integer; negative = lead.",
@@ -22,9 +23,15 @@ interface Props {
   tasks: Task[];
   sequences: Sequence[];
   calendar: SerializedCalendar;
+  people?: SchedulePerson[];
 }
 
-export default function ScheduleExport({ tasks, sequences, calendar }: Props) {
+export default function ScheduleExport({
+  tasks,
+  sequences,
+  calendar,
+  people = [],
+}: Props) {
   const [flash, setFlash] = useState<string | null>(null);
 
   const flashFor = (msg: string) => {
@@ -54,10 +61,13 @@ export default function ScheduleExport({ tasks, sequences, calendar }: Props) {
     }
   };
 
+  const peopleList = people.map((p) => ({ id: p.id, name: p.name }));
+
   const copyForAI = async () => {
     const payload = {
       _instructions: INSTRUCTIONS,
       calendar,
+      people: peopleList,
       tasks,
       sequences,
     };
@@ -66,7 +76,7 @@ export default function ScheduleExport({ tasks, sequences, calendar }: Props) {
   };
 
   const copyPlain = async () => {
-    const payload = { calendar, tasks, sequences };
+    const payload = { calendar, people: peopleList, tasks, sequences };
     const ok = await copyText(JSON.stringify(payload, null, 2));
     flashFor(ok ? `Copied ${tasks.length} tasks` : "Copy failed");
   };

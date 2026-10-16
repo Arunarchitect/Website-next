@@ -2,7 +2,8 @@
 
 import { durationDays } from "./scheduling";
 import type { Row } from "./scheduling";
-import type { Task } from "./data";
+import type { SchedulePerson, Task } from "./data";
+import { namesFor } from "./AssigneePicker";
 
 /**
  * Export the schedule as an .ods spreadsheet (OpenDocument Spreadsheet).
@@ -12,7 +13,7 @@ import type { Task } from "./data";
  *   WBS · Task · Start · Finish · Days · % · Status · Critical
  * then the secondary columns on the right:
  *   Actual start · Actual finish · Baseline start · Baseline finish
- *   · Level · Group · Milestone
+ *   · Level · Group · Milestone · Assignees
  *
  * Dates are normalised to ISO (YYYY-MM-DD) before writing — task dates may
  * be stored either as ISO strings or as day-serial numbers (toDay/DAY).
@@ -177,14 +178,15 @@ function statusOf(task: Task, criticalIds: Set<string>): string {
 function buildContentXml(
   rows: Row[],
   criticalIds: Set<string>,
-  name: string
+  name: string,
+  people: SchedulePerson[]
 ): string {
   // 1) PDF-style columns first …
   const header = [
     "WBS", "Task", "Start", "Finish", "Days", "%", "Status", "Critical",
     // 2) … secondary data pushed to the right
     "Actual start", "Actual finish", "Baseline start", "Baseline finish",
-    "Level", "Group", "Milestone",
+    "Level", "Group", "Milestone", "Assignees",
   ].map(sCell).join("");
 
   const body = rows
@@ -205,6 +207,7 @@ function buildContentXml(
         nCell(depth),
         bCell(hasChildren),
         bCell(!!task.isMilestone),
+        sCell(hasChildren ? "" : namesFor(task.assigneeIds, people)),
       ];
       return `<table:table-row>${cells.join("")}</table:table-row>`;
     })
@@ -260,10 +263,12 @@ export default function ScheduleExportODS({
   rows,
   criticalIds,
   name = "schedule",
+  people = [],
 }: {
   rows: Row[];
   criticalIds: Set<string>;
   name?: string;
+  people?: SchedulePerson[];
 }) {
   const handleExport = () => {
     const te = new TextEncoder();
@@ -271,7 +276,7 @@ export default function ScheduleExportODS({
     const blob = buildZip([
       // mimetype MUST be first and uncompressed
       { name: "mimetype", data: te.encode("application/vnd.oasis.opendocument.spreadsheet") },
-      { name: "content.xml", data: te.encode(buildContentXml(rows, criticalIds, sheet)) },
+      { name: "content.xml", data: te.encode(buildContentXml(rows, criticalIds, sheet, people)) },
       { name: "styles.xml", data: te.encode(STYLES_XML) },
       { name: "meta.xml", data: te.encode(META_XML(sheet)) },
       { name: "META-INF/manifest.xml", data: te.encode(MANIFEST_XML) },

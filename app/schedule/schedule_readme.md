@@ -1,8 +1,8 @@
 # Schedule Component — Developer README (Next.js frontend)
 
-A complete reference for the Modelflick Project Work Schedule viewer/editor (`app/schedule`). Covers architecture, data model, every module, key algorithms (CPM, rollup, auto-schedule, working-day math, baseline/actual), the scheduling rules, the Django sync layer, the project picker, undo/redo, UI features, and extension points.
+A complete reference for the Modelflick Project Work Schedule viewer/editor (`app/schedule`). Covers architecture, data model, every module, key algorithms (CPM, rollup, auto-schedule, working-day math, baseline/actual), the scheduling rules, the Django sync layer, the project picker, undo/redo, assignees, UI features, and extension points.
 
-Backend counterpart: `schedule_django_readme.md`.
+Backend counterpart: `schedule_django_readme.md` (§7.6 below summarises the people/assignee backend; mirror it there).
 
 ---
 
@@ -16,7 +16,7 @@ Key capabilities:
 
 - **Org → Project → Schedule picker**; the selection is mirrored into the URL (`?project=&schedule=`)
 - Hierarchical work breakdown (phases → activities), collapsible
-- Editable table (name, dates, duration, %, actual dates, variance, predecessors, successors)
+- Editable table (name, dates, duration, %, actual dates, variance, assignees, predecessors, successors)
 - Activity editor modal with a **draft model**: nothing is applied until **Save**; Cancel / Esc / backdrop discards everything (including link edits)
 - **Group (header) rows are fully derived** from their children and locked in the table and the editor
 - **Baseline editing is admin-only** (UI); baseline of groups is derived
@@ -28,6 +28,7 @@ Key capabilities:
 - **Completion rule**: a task can only reach 100% when all its predecessors are 100%
 - **Baseline & actual** — "Set baseline" freezes the plan; the % slider auto-fills actual dates; grey/green/orange bars on the Gantt; **Var** column
 - **Compare** panel — baseline vs planned, start/finish variance, project slip
+- **Assignees** — tasks can be assigned to one or more **people** (project members, or consultants without an account). Shown in the table, the editor, the Gantt left column and the Now/Next cards. **My tasks** filter; Copy for AI and ODS export include them
 - **Now / Next** strip with a countdown chip and a queue stepper
 - **Search** — jump-to-task, expands ancestors, flashes the row
 - **Undo / Redo** (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, header buttons) over tasks, sequences and calendar
@@ -48,7 +49,7 @@ app/schedule/
 ├── calendar.ts             ← Pure working-calendar math (defines DAY)
 ├── scheduling.ts           ← Pure date/hierarchy/baseline/auto-schedule helpers (no React)
 ├── cpm.ts                  ← CPM math + Now/Next + format helpers (no React)
-├── api.ts                  ← fetch wrapper + typed Django endpoints (no React)
+├── api.ts                  ← HTTP wrapper + typed Django endpoints (no React)
 ├── useScheduleSync.ts      ← Load / seed / debounced autosave / conflict hook
 ├── useUndo.ts              ← Undo/redo history hook (snapshots of tasks/sequences/calendar)
 ├── SyncBadge.tsx           ← Save-status chip + Retry / Reload buttons
@@ -59,6 +60,7 @@ app/schedule/
 ├── PrintAct.tsx            ← Print / Save-as-PDF button + print stylesheet
 ├── CalendarUI.tsx          ← Calendar UI (button + modal + chips)
 ├── ActivityEditor.tsx      ← Edit modal (draft + Save) + row action menu
+├── AssigneePicker.tsx      ← Multi-select assignee popover (+ "Add consultant" form); initialsOf / namesFor helpers
 ├── TaskPicker.tsx          ← Predecessor / successor popover in the table
 ├── BaselineCompare.tsx     ← Baseline vs planned comparison modal
 ├── JsonTool.tsx            ← Paste JSON modal, Copy-for-AI, applySelection
@@ -77,9 +79,10 @@ calendar.ts        ← defines DAY; no imports from the app
     ├── cpm.ts           (imports from calendar + scheduling, re-exports DAY)
     ├── CalendarUI.tsx   (imports from calendar + cpm + scheduling)
     ├── BaselineCompare.tsx (imports from scheduling)
-    ├── ActivityEditor.tsx  (imports from data + scheduling + calendar)
+    ├── ActivityEditor.tsx  (imports from data + scheduling + calendar + AssigneePicker)
     ├── useUndo.ts       (imports types from data + calendar)
     │
+data.ts  ◄── AssigneePicker.tsx (types only) ◄── ActivityEditor, ScheduleExportODS, ScheduleView
 data.ts  ◄── api.ts ◄── useScheduleSync.ts ◄── ScheduleView.tsx  (imports from everything, plus UI components + SyncBadge)
 ```
 
@@ -112,8 +115,9 @@ Field names mirror **IFC4x3** so a later import/export is a 1:1 mapping. They ar
 | `remarks` | string? | — | Free text, shown on Now/Next |
 | `workCode` | string? | — | Source code, e.g. `"7-9"` |
 | `linkedElements` | string[]? | `IfcRelAssignsToProcess` | Reserved for future |
+| `assigneeIds` | number[]? | — (future: `IfcRelAssignsToResource`) | `SchedulePerson` ids. **Leaf tasks only.** Unknown ids are dropped server-side on save |
 
-The four baseline/actual fields come back as `null` from the server when unset and are optional when sending.
+The four baseline/actual fields come back as `null` from the server when unset and are optional when sending. `assigneeIds` is optional when sending (missing = none) and always returned as an array.
 
 ### `Sequence`
 
@@ -124,6 +128,24 @@ The four baseline/actual fields come back as `null` from the server when unset a
 | `relatedTask` | string | `RelatedProcess` | Successor |
 | `sequenceType` | `FINISH_START` \| `START_START` \| `FINISH_FINISH` \| `START_FINISH` | `SequenceType` | |
 | `lagDays` | number | `IfcLagTime` | Negative = lead |
+
+### `SchedulePerson`
+
+```ts
+interface SchedulePerson {
+  id: number;
+  name: string;
+  email: string;
+  userId: number | null;
+  linked: boolean; // false = consultant without an account
+}
+```
+
+- **Project-level**, not schedule-level: the main schedule and every personal copy share the same people.
+- **Members** get a person automatically (the server syncs them whenever the people list is loaded). **Consultants** are people with `userId = null` / `linked = false`.
+- A consultant is **linked** to an account when a user signs up with the same email (signal), or when they are added to the project (sync).
+- **Person ids never change on linking**, so existing assignments survive.
+- Linked people take their name and email from the account; the API refuses `name` / `email` edits on them.
 
 ### `WorkSchedule`
 
@@ -245,7 +267,7 @@ So a group is "actual" only when all its children are finished; otherwise it sho
 
 `rollup` runs before every render (`rolled`) and at the end of both auto-schedule functions, so Auto-schedule writes the derived group dates into the stored tasks. The stored group values are otherwise stale — the UI always reads `rolled`.
 
-**Group rows are not editable** (see §13): their dates, duration, %, baseline, actuals, milestone flag and links are locked in the table and in the editor. Only name, work code, remarks and parent can change.
+**Group rows are not editable** (see §13): their dates, duration, %, baseline, actuals, milestone flag, links and assignees are locked in the table and in the editor. Only name, work code, remarks and parent can change. **Assignees are not rolled up** — groups simply have none (the table shows "—").
 
 **A group that loses its last child** (delete or move) becomes a leaf. `freezeIfLeaf()` in `ScheduleView.tsx` copies the rolled dates / baseline / actuals / % into the stored task at that moment, so it does not snap back to stale stored values.
 
@@ -280,7 +302,7 @@ Both variants share the same shape. The **Auto-schedule** button always calls `a
 5. **Workday variant:** every start snaps forward to the next working day, and a task keeps its length in **working days** (a task crossing a holiday is stretched over it).
 6. Return `rollup(...)` so group rows follow.
 
-Only **planned** dates move; baseline and actual are preserved (except for the normalisations below).
+Only **planned** dates move; baseline, actual and assignees are preserved (except for the date normalisations below).
 
 #### `finalizeCompleted()` — data normalisation (runs first)
 
@@ -354,13 +376,15 @@ Snaps every leaf to the working calendar, runs `computeCpm`, converts float to w
 | `describe(task, tasks)` | One-line description for the Now/Next cards |
 | `DAY` | Re-exported from `calendar.ts` |
 
+`cpm.ts` needs no change for assignees: the Now/Next cards get their "Assigned:" line from `ScheduleView.tsx`.
+
 ---
 
 ## 7. Backend sync layer
 
 ### 7.1 `api.ts`
 
-Thin typed `fetch` wrapper around the Django endpoints. No React.
+Thin typed HTTP wrapper around the Django endpoints. No React.
 
 | Export | Endpoint |
 |---|---|
@@ -369,6 +393,9 @@ Thin typed `fetch` wrapper around the Django endpoints. No React.
 | `getSchedule(id)` | `GET /api/schedules/<id>/` → `ScheduleDoc` |
 | `createSchedule(project, name)` | `POST /api/schedules/` (always `PLANNED`) |
 | `saveSchedule(id, { version, tasks, sequences, calendar })` | `PUT /api/schedules/<id>/` → `{ version, updatedAt }` |
+| `listPeople(projectId)` | `GET /api/schedules/people/?project=<id>` → `{ people: SchedulePerson[], mePersonId }`. Also syncs project members into people |
+| `addPerson(projectId, name, email?)` | `POST /api/schedules/people/` → `SchedulePerson` (reuses an existing person with the same email) |
+| `updatePerson(id, { name?, email?, userId? })` | `PATCH /api/schedules/people/<id>/` (`userId` is admin-only; there is no UI for it yet) |
 | `ApiError` | Thrown for non-2xx; has `.status` and `.body` |
 
 ```ts
@@ -381,7 +408,7 @@ interface MyProject {
 ```
 
 - Base URL: `NEXT_PUBLIC_API_URL` (default `https://api.modelflick.com`), prefixed with `/api`.
-- **Auth is in one place — `authHeaders()`.** It reads `localStorage["access"]` and sends `Authorization: JWT <token>`. Adapt to your scheme (`Bearer`, or `{}` for httpOnly cookies — `credentials: "include"` is always set).
+- **Auth is in one place — `authHeaders()`** (or the shared `apiClient` if the people calls use it). It reads `localStorage["access"]` and sends `Authorization: JWT <token>`. Adapt to your scheme (`Bearer`, or `{}` for httpOnly cookies — credentials are always included). **Keep the three people functions on the same HTTP client and error wrapper as the rest of the file**, so auth and error handling stay in one place.
 - Error messages are extracted from DRF bodies (`detail`, `non_field_errors`, else JSON).
 - `saveSchedule` does not send `statusDate` yet; the backend leaves the stored value unchanged when it is omitted.
 
@@ -394,7 +421,7 @@ const sync = useScheduleSync({
 // → { status, canEdit, savedAt, message, saveNow, reload, setVersion, markSaved, createAndSeed }
 ```
 
-The hook does not hold the schedule data — `ScheduleView.tsx` passes the current `tasks`/`sequences`/serialized `calendar` in, and receives the loaded data through `onLoaded`. If `scheduleId` is set it wins over `projectId`.
+The hook does not hold the schedule data — `ScheduleView.tsx` passes the current `tasks`/`sequences`/serialized `calendar` in, and receives the loaded data through `onLoaded`. If `scheduleId` is set it wins over `projectId`. People are **not** part of the sync hook: `ScheduleView.tsx` loads them separately with `listPeople`, and they are saved through their own endpoints, never through the autosave `PUT`.
 
 **Load flow (once per `scheduleId` / `projectId` change):**
 
@@ -450,9 +477,34 @@ Two tabs / users editing the same schedule: the second save gets 409 → badge s
 ### 7.5 Import / export
 
 - **`ScheduleImport`** (editors only): uploads a `.json` file (same shape as `PUT`) to `POST /api/schedules/<id>/import/` as multipart `file`. The server forces the current version, so an import is always "replace what is there". On success the page replaces local state, clears undo history, and calls `sync.setVersion` + `sync.markSaved`.
-- **`ScheduleExport`**: Download/Copy JSON of the current tasks/sequences/calendar, and **Copy for AI** (a text rendering of the schedule). Available to everyone, including read-only users. Baseline and actual fields are included because they are part of `Task`.
-- **`ScheduleExportODS`**: exports the visible rows (with critical flags) as an ODS file.
-- **`JsonTool`**: `PasteJsonModal` validates a pasted task/phase JSON and applies it (`applySelection`); with `restrictTo` it only touches the ticked rows. `copyTasksForAi` copies the ticked rows (optionally with descendants) as JSON.
+- **`ScheduleExport`**: Download/Copy JSON of the current tasks/sequences/calendar, and **Copy for AI** (JSON with an inline `_instructions` block). Available to everyone, including read-only users. Baseline, actual and `assigneeIds` fields are included because they are part of `Task`. It takes an optional `people` prop and adds a top-level `people: [{ id, name }]` list so an AI can map ids to names.
+- **`ScheduleExportODS`**: exports the visible rows (with critical flags) as an ODS file. It has an **Assignees** column after Milestone (blank for groups); `buildContentXml` takes `people`.
+- **`JsonTool`**: `PasteJsonModal` validates a pasted task/phase JSON and applies it (`applySelection`); with `restrictTo` it only touches the ticked rows. `copyTasksForAi` copies the ticked rows (optionally with descendants) as JSON. `collectSelection` and `copyTasksForAi` take an optional 4th `people` argument and add `people` to the payload; `AI_INSTRUCTIONS` tells the AI to use only ids from `people` and never invent ids; `validatePasteJson` lists `"people"` in `KNOWN_KEYS` so it is not reported as an extra key.
+- **`people` is ignored on import and paste** (unknown top-level keys are dropped by the server). Unknown `assigneeIds` are dropped by `people.clean_assignees`, which runs in both `update()` and `import_json()`, so a bad id never blocks autosave or an import.
+
+### 7.6 People (assignees) — backend summary
+
+Mirror this in `schedule_django_readme.md`.
+
+| Piece | Where |
+|---|---|
+| `ScheduleTask.assignee_ids` (JSONField, list of person ids) | `models.py`; `to_dict` returns `assigneeIds`; `save_document` writes `assignee_ids=t.get("assigneeIds") or []` |
+| `SchedulePerson` (project FK, name, email, nullable `user`, `created_by`, `created_at`) | `models.py`. Unique `(project, user)` when `user` is set |
+| `link_schedule_people_on_signup` | `post_save` signal in `models.py`: a new user whose email matches an unlinked person (case-insensitive) is linked. Skips if that user already has a person in the project |
+| `TaskIn.assigneeIds`, `PersonIn`, `PersonPatchIn` | `serializers.py` |
+| `member_users`, `sync_project_people`, `person_dict`, `people_payload`, `clean_assignees` | new `schedule/people.py` |
+| `GET/POST /schedules/people/`, `PATCH /schedules/people/<id>/` | `views.py` (`people` and `person_detail` actions) |
+| `SchedulePersonAdmin` (optional) | `admin.py` — lets admins link consultants by hand until there is a UI |
+
+**Rules**
+
+- Members (non-client role on the project, at project or organisation level) get a person automatically; `sync_project_people` runs on every `GET` of the people list and on every add.
+- An unlinked person whose email matches a member is **linked instead of duplicated**.
+- Admin, manager and member can add consultants and assign (`PERSONAL_EDIT_ROLES`). **Clients are read-only** and get `mePersonId = null`.
+- Only **admin** can set `userId`; the user must be a non-client member of the project and must not already have a person there.
+- Linked people cannot have `name` / `email` edited (they come from the account).
+- Fork, pull, promote and snapshots carry assignees automatically, because they go through `to_dict`.
+- Migration: `python manage.py makemigrations schedule && python manage.py migrate`.
 
 ---
 
@@ -477,6 +529,9 @@ The only file with **schedule React state**. Everything else is derived. (`page.
 | `projectId`, `scheduleId` | `number \| null` | Current selection (initialised from the URL) |
 | `tasks` | `Task[]` | The whole task list (flat). **Starts empty; filled by `onLoaded`** |
 | `sequences` | `Sequence[]` | The whole link list. **Starts empty; filled by `onLoaded`** |
+| `people` | `SchedulePerson[]` | Project people, loaded with `listPeople(projectId)` |
+| `mePersonId` | `number \| null` | The current user's person id (null for clients) |
+| `myOnly` | `boolean` | "My tasks" filter |
 | `collapsed` | `Set<string>` | Collapsed group ids |
 | `zoom` / `autoFit` | `number` / `boolean` | Pixels per day / fit-to-width |
 | `showLinks`, `showCritical`, `showBaseline` | `boolean` | Toggle dependency arrows / critical highlight / baseline + actual bars |
@@ -504,18 +559,22 @@ The only file with **schedule React state**. Everything else is derived. (`page.
 
 ### Hooks-before-return rule
 
-`ScheduleView.tsx` returns early for picker error/loading, no projects, no project selected, and sync `loading` / `empty` / `failed`. **Every hook (`useState`, `useMemo`, `useEffect`, `useCallback`, the sync and undo hooks) must be declared above those early returns** (they sit right after the `links` memo). A hook added below them throws "rendered more hooks than during the previous render". Non-hook helpers and derived constants (`rangeFor`, `handleRowAction`, `hasBaseline`, `lateCount`, countdown classes) live below the gates.
+`ScheduleView.tsx` returns early for picker error/loading, no projects, no project selected, and sync `loading` / `empty` / `failed`. **Every hook (`useState`, `useMemo`, `useEffect`, `useCallback`, the sync and undo hooks) must be declared above those early returns** (they sit right after the `links` memo). This includes the `people` / `mePersonId` / `myOnly` state and the `listPeople` effect, which sit next to `meta`. A hook added below them throws "rendered more hooks than during the previous render". Non-hook helpers and derived constants (`rangeFor`, `handleRowAction`, `setAssignees`, `handleAddPerson`, `hasBaseline`, `lateCount`, countdown classes) live below the gates.
+
+### People loading
+
+An effect keyed on `projectId` calls `listPeople(projectId)`, then sets `people` and `mePersonId` (guarded with an `off` flag against stale responses). Failures are swallowed: the picker simply stays empty. `handleAddPerson(name, email)` calls `addPerson`, merges the result into `people` (replacing it if the id already exists), and returns the person so the picker can assign them; errors show as a toast.
 
 ### Read-only mode
 
-When `readOnly`: hidden — row `⋯` menu, ✎ quick-edit, `+ New phase`, **Set baseline**, `Auto-schedule`, Undo/Redo, Import, Calendar button/modal, `+ predecessor` / `+ successor`, link `×`, row ticks. Disabled — date inputs (planned and actual), duration input, % slider, link type/lag selects. Viewing, searching, zoom, print, **Compare**, Export and the Working-days toggle still work. This is **UI only**; the server returns 403 on writes from non-editors.
+When `readOnly`: hidden — row `⋯` menu, ✎ quick-edit, `+ New phase`, **Set baseline**, `Auto-schedule`, Undo/Redo, Import, Calendar button/modal, `+ predecessor` / `+ successor`, link `×`, row ticks, and the picker's **Add consultant** form. Disabled — date inputs (planned and actual), duration input, % slider, link type/lag selects, the Assignee picker. Viewing, searching, zoom, print, **Compare**, Export and the Working-days toggle still work. This is **UI only**; the server returns 403 on writes from non-editors.
 
 ### Derived (memoized)
 
 | Value | Derivation |
 |---|---|
 | `rolled` | `rollup(tasks)` |
-| `rows` | `flatten(rolled, collapsed)` |
+| `rows` | `flatten(rolled, collapsed)`. When **My tasks** is on and `mePersonId != null`, only tasks assigned to me **plus all their ancestor groups** are kept |
 | `minDay, maxDay` | Min/max of all task dates |
 | `cpm` | `useWorkdays ? computeCpmWorkdays(...) : computeCpm(...)` |
 | `current, next` | `findCurrentAndNext(...)` |
@@ -546,7 +605,7 @@ When `readOnly`: hidden — row `⋯` menu, ✎ quick-edit, `+ New phase`, **Set
 - **Planned bar** 12 px high, offset `+8` within the row.
 - **Actual bar** 4 px high at `+3` (above the planned bar): green when on time, orange when it finished after the baseline, 70% opacity while in progress (runs to today).
 - **Baseline bar** 4 px high, grey, at `+22` (below the planned bar). **These thin grey bars are the baseline;** when a bar sits to the right of the planned bar, the task is forecast earlier than baseline.
-- **Left column is outside the horizontal scroller** → stays fixed.
+- **Left column is outside the horizontal scroller** → stays fixed. Leaf rows with assignees show a small initials badge after the task name (tooltip = full names).
 - **Touch:** long-press (400 ms, 10 px drift tolerance) on a row or bar opens the editor; the click that follows a long press is swallowed.
 
 ### Zoom levels & detail
@@ -572,11 +631,22 @@ Each link is an orthogonal path anchored to bar edges (x1 = right edge of predec
 
 ### Table columns
 
-`☐` · `⋯` · `#` (WBS) · Task · Start · Finish · Dur · Float · % · **Act. start** · **Act. finish** · **Var** · Predecessors · Successors · ✎.
+`☐` · `⋯` · `#` (WBS) · Task · Start · Finish · Dur · Float · % · **Act. start** · **Act. finish** · **Var** · **Assignee** · Predecessors · Successors · ✎.
 
-- **Groups:** start, finish, actual dates and % are disabled; Dur shows plain text; no + predecessor/successor buttons.
+The table is `min-w-[1950px]` (it was 1750 before the Assignee column).
+
+- **Groups:** start, finish, actual dates and % are disabled; Dur shows plain text; Assignee shows `—`; no + predecessor/successor buttons.
 - **Act. start / Act. finish**: date inputs (disabled for groups and read-only users). Editing clamps `actualFinish ≥ actualStart`.
 - **Var**: `finishVariance(task)` — red `+Nd` late, green `−Nd` early, `0d` on baseline, `—` no baseline.
+- **Assignee**: `AssigneePicker` (compact). Chips are blue for linked people and amber for consultants. Disabled for read-only users; the "Add consultant" form is only offered to editors.
+
+### Header controls
+
+Besides the existing buttons and toggles, the header has a **My tasks** checkbox right after **Working days**. It only appears when `mePersonId != null` (so never for clients, and not until people have loaded).
+
+### Now / Next cards
+
+When the current or next task has assignees, an `Assigned: Name, Name` line is added under the description (`namesFor`).
 
 ### Selection & flash
 
@@ -595,13 +665,15 @@ Clicking a row or bar sets `selectedId` (blue highlight in the left column, tabl
 | `updateDuration(id, newDays)` | Uses `setDurationWithCalendar`; respects working-day mode |
 | `updateCompletion(id, pct)` | `completionBlocker` then `applyProgress` — sets % and auto-fills/clears actual dates |
 | `updateActual(id, field, value)` | Sets `actualStart` / `actualFinish` (empty → `null`), clamps finish ≥ start |
+| `setAssignees(id, ids)` | Sets `assigneeIds` on one task (table picker) |
+| `handleAddPerson(name, email)` | `addPerson` → merge into `people` → return the person (or `null` + toast on error). The one assignee action that hits the server immediately |
 | `setBaselineNow()` | **Admin only.** After `confirm()`, `setBaseline` over all tasks (overwrites any existing baseline) |
 | `runAutoSchedule()` | Turns working-day mode on and runs `autoScheduleWorkdays` |
 | `handlePick(...)` | Adds a sequence (with `wouldCycle` check) |
 | `updateSequence(id, patch)` / `removeSequence(id)` | Edit / delete one link |
 | `onApplyLinks(next)` | Replaces all links touching the edited task with the editor's draft list (called once, on Save) |
 
-All mutators use `setTasks(prev => …)` / `setSequences(prev => …)`. **They only change local state; the sync hook notices the change and autosaves.** There is no per-handler API call.
+All task/sequence mutators use `setTasks(prev => …)` / `setSequences(prev => …)`. **They only change local state; the sync hook notices the change and autosaves.** There is no per-handler API call (people creation is the exception, because a person is project data, not part of the schedule document).
 
 ### Cascade cleanup on delete
 
@@ -615,7 +687,7 @@ All descendants removed; every sequence touching a removed id removed; `selected
 
 ## 9. `useUndo.ts` — undo / redo
 
-A hook that watches the schedule state instead of wrapping every setter, so every existing action is covered (slider, delete, move, Auto-schedule, paste JSON, editor Save, calendar edits).
+A hook that watches the schedule state instead of wrapping every setter, so every existing action is covered (slider, delete, move, Auto-schedule, paste JSON, editor Save, calendar edits, assignee changes).
 
 ```ts
 const undo = useUndo({ tasks, sequences, calendar, apply });
@@ -628,7 +700,7 @@ const undo = useUndo({ tasks, sequences, calendar, apply });
 - `apply(snap)` restores the three pieces of state; the hook records the restored snapshot as "last" so the observer does not log the undo itself as a change.
 - **Autosave persists an undo** (it is an ordinary state change).
 - **`clear()`** is called when a schedule is loaded (`handleLoaded`) and after a JSON import. History is in memory only: lost on refresh, when switching schedules, and after Import.
-- Not tracked: `useWorkdays`. Undoing Auto-schedule restores the dates but leaves working-day mode on.
+- Not tracked: `useWorkdays`, and the **people list** (adding a consultant is not undone; undoing an assignment only changes `assigneeIds`). Undoing Auto-schedule restores the dates but leaves working-day mode on.
 
 **Keyboard:** `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redo. Ignored while typing in text/number/date/textarea fields (native text undo wins — sliders, checkboxes and buttons still trigger schedule undo), and while any modal (editor, paste, calendar, compare) is open. A short toast shows "Undone" / "Redone". Header **↶ Undo / ↷ Redo** buttons mirror it. Hidden in read-only mode.
 
@@ -680,7 +752,9 @@ Inline read-only chips: `Off: Sat, Sun` (gray), `N holidays` (amber), `N shutdow
 
 A button that calls `window.print()` plus a `<style jsx global>` for `@media print`: A4 landscape with 12 mm margins; hides anything with `data-print-hide` plus all `button`, `input[type=range]`, `input[type=checkbox]`; renders `input[type=date]` as plain text; tightens table padding and font; lets scroll containers expand. The user picks **Save as PDF** in the browser dialog.
 
-`data-print-hide` is set on the header button cluster, the zoom bar and the mobile action bar. The Now/Next strip prints. **The table is wide (Act. start / Act. finish / Var); check it on A4 landscape and tighten the print stylesheet if it overflows.**
+`data-print-hide` is set on the header button cluster, the zoom bar and the mobile action bar. The Now/Next strip prints (including its "Assigned:" line). **The table is wide (Act. start / Act. finish / Var / Assignee); check it on A4 landscape and tighten the print stylesheet if it overflows.**
+
+**Assignees are not specially laid out for print** (the table panels are tightly packed, and `PrintAct` was deliberately left unchanged). They can be added to the PDF layout later (see §16).
 
 ---
 
@@ -696,6 +770,8 @@ A button that calls `window.print()` plus a `<style jsx global>` for `@media pri
   calendar: WorkingCalendar;
   useWorkdays: boolean;
   isAdmin: boolean;                 // gates baseline editing
+  people?: SchedulePerson[];        // default []
+  onAddPerson?: (name: string, email: string) => Promise<SchedulePerson | null>;
   onSave: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -703,13 +779,13 @@ A button that calls `window.print()` plus a `<style jsx global>` for `@media pri
 }
 ```
 
-Scrollable dialog (`max-h-[92vh]`) with fields: Name · Work code · Parent group (hides itself and its descendants) · **Planned** start / duration / finish · Predecessors / Successors editors · **Baseline** start/finish · **Actual** start/finish · Completion slider · Milestone checkbox · Remarks · two-step Delete.
+Scrollable dialog (`max-h-[92vh]`) with fields: Name · Work code · Parent group (hides itself and its descendants) · **Assigned to** (leaf tasks only) · **Planned** start / duration / finish · Predecessors / Successors editors · **Baseline** start/finish · **Actual** start/finish · Completion slider · Milestone checkbox · Remarks · two-step Delete.
 
-**Draft model — nothing applies until Save.** All fields and the link lists are local state. **Cancel, Esc, ✕ and a backdrop click discard everything**, including added/removed/edited predecessors and successors. Only **Delete** acts immediately (after its two-step confirm). On Save, `onSave` is called with the task patch and, if the links actually changed, `onApplyLinks(draftLinks)` replaces every link touching this task in one update. The link editors check cycles against the *draft* (other links + the edited ones).
+**Draft model — nothing applies until Save.** All fields and the link lists are local state (`assigneeIds` included). **Cancel, Esc, ✕ and a backdrop click discard everything**, including added/removed/edited predecessors and successors and assignee changes. Only **Delete** acts immediately (after its two-step confirm), and **Add consultant** in the assignee picker, which creates a person on the server straight away (the new person is added to the draft assignees, but the assignment itself is only saved with the task). On Save, `onSave` is called with the task patch and, if the links actually changed, `onApplyLinks(draftLinks)` replaces every link touching this task in one update. The link editors check cycles against the *draft* (other links + the edited ones).
 
 **Group (header) tasks** (`isGroup = tasks.some(t => t.parentId === task.id)`):
 
-- Start, duration, finish, baseline, actual, completion and milestone are all disabled; link editors are hidden; an amber note explains the values are derived.
+- Start, duration, finish, baseline, actual, completion and milestone are all disabled; link editors and the assignee field are hidden; an amber note explains the values are derived.
 - `save()` sends **only** `name`, `workCode`, `remarks`, `parentId`, so stale derived values are never written back.
 
 **Baseline is admin-only:** inputs are enabled only when `isAdmin && !isGroup`; non-admins see "Only admins can edit the baseline." and `save()` never sends `baselineStart/Finish` for them. (UI only — enforce on the server too, §16.)
@@ -720,11 +796,27 @@ Scrollable dialog (`max-h-[92vh]`) with fields: Name · Work code · Parent grou
 - Empty baseline/actual dates become `null`; a finish before its start is clamped to the start.
 - For a **completed** task (`≥ 100%`): actual finish and planned finish are clamped to ≤ today, actual start ≤ actual finish, planned start ≤ planned finish.
 - `completion` is clamped to 0–100 (the completion rule is then enforced by `updateTask`).
+- `assigneeIds` is included in the leaf `onSave` patch (after `parentId`).
 
 **Input components (fixes for typing bugs):**
 
 - **`DateField`** — a native `type="date"` fires `onChange` on partial years (`0002`, `0020`, `0202`…), which used to recompute and snap on every keystroke. `DateField` keeps a local draft, commits only plausible full dates (year 1900–2200, `YYYY-MM-DD`), supports `allowEmpty` for optional dates, and does not resync from the saved value while focused.
 - **`NumberInput`** — a text input that keeps the raw typed string, so you can backspace to empty and type a new number. It ignores empty / `-` while typing, selects the content on focus, applies live via `onChange` (valid numbers only) and finalises on blur / Enter; Esc reverts the field (and does not close the modal). Used for **Duration** and the **lag** fields.
+
+### `<AssigneePicker … />` (`AssigneePicker.tsx`)
+
+```ts
+{
+  people: SchedulePerson[];
+  value: number[];                  // selected person ids
+  onChange: (ids: number[]) => void;
+  onAddPerson?: (name: string, email: string) => Promise<SchedulePerson | null>; // present = show "Add consultant"
+  disabled?: boolean;               // read-only: shows chips only (or "—" when empty)
+  compact?: boolean;                // initials when more than 2 are selected (table)
+}
+```
+
+A button showing chips (blue = linked account, amber = consultant) that opens a fixed-position popover: search box, checkbox list (consultants tagged), and an **＋ Add consultant** form (name + optional email — "links them if they sign up"). Adding calls `onAddPerson`, then assigns the new person. The popover closes on outside click, scroll outside it, and resize. It also exports two helpers: `initialsOf(name)` (first letters of the first two words) and `namesFor(ids, people)` (comma-joined names, used by the Now/Next cards, the Gantt tooltip and the ODS export).
 
 ### `<RowMenu task tasks onAction onClose />`
 
@@ -750,7 +842,7 @@ type RowMenuAction =
 
 1. `/schedule` loads the project list and picks the first project with a schedule.
 2. The URL becomes `/schedule?project=<id>&schedule=<id>`; share that link to open the same schedule.
-3. Use the three selects to switch org / project / schedule. Switching reloads the document (unsaved changes are lost; the `beforeunload` guard only covers closing the tab). Undo history is cleared.
+3. Use the three selects to switch org / project / schedule. Switching reloads the document (unsaved changes are lost; the `beforeunload` guard only covers closing the tab). Undo history is cleared, and the people list reloads for the new project.
 
 ### First load of a project with no schedule
 
@@ -768,6 +860,15 @@ type RowMenuAction =
 6. Take a **manual snapshot** of the baseline on the server (`POST /schedules/<id>/snapshots/`) as a safety copy — **Set baseline overwrites** the previous baseline and nothing locks it server-side.
 
 `predefinedType` (BASELINE / PLANNED / ACTUAL) is just a label on the schedule; the three views above are layers on **one** schedule, not three schedules.
+
+### Assigning people
+
+1. **Table:** click a leaf's **Assignee** cell and tick people. **Editor:** use **Assigned to**. A task can have several assignees; groups can't have any.
+2. **＋ Add consultant** in the picker: enter a name and an optional email. The person is created at project level (shared by the main schedule and every personal copy) and assigned straight away. Adding someone with an email that already belongs to a person reuses that person.
+3. If the consultant's email later matches a user who signs up (or is added to the project), they become **linked**: the "consultant" tag disappears and the account name is used. Their id never changes, so old assignments keep working.
+4. **My tasks** (header) shows only your tasks and their parent groups. It needs your own person, so it is hidden for clients.
+5. Roles: admin, manager and member can add consultants and assign; **clients are read-only**.
+6. Linking a consultant to an account by hand is backend-only for now: `PATCH /schedules/people/<id>/ {"userId": N}` (admin) or the Django admin (**Schedule people**).
 
 ### Adding a new activity
 
@@ -791,7 +892,7 @@ The **Dur** column is editable: start is preserved and finish shifts. Calendar m
 
 ### Auto-schedule
 
-Click **Auto-schedule**: working-day mode switches on, the data is normalised (completed tasks ≤ today, future actual starts dropped, in-progress tasks follow their actual start), unfinished unlocked tasks are placed at the earliest date their predecessors allow (today at the earliest), and group rows re-derive. It never pulls a started or finished task around. Use **Undo** if you don't like the result.
+Click **Auto-schedule**: working-day mode switches on, the data is normalised (completed tasks ≤ today, future actual starts dropped, in-progress tasks follow their actual start), unfinished unlocked tasks are placed at the earliest date their predecessors allow (today at the earliest), and group rows re-derive. It never pulls a started or finished task around, and never touches assignees. Use **Undo** if you don't like the result.
 
 ### Working-day mode
 
@@ -799,7 +900,7 @@ Open **Calendar** (editors), configure weekly off days / holidays / shutdown ran
 
 ### Import / export
 
-**Import** replaces the whole schedule from a `.json` file (editors; the server may not take a snapshot if one exists from the last 10 minutes — take a manual snapshot first). **Download / Copy JSON**, **Copy for AI**, and **ODS** export the current state. **Copy selected / Paste into selection / Paste JSON** round-trip edits through an AI.
+**Import** replaces the whole schedule from a `.json` file (editors; the server may not take a snapshot if one exists from the last 10 minutes — take a manual snapshot first). **Download / Copy JSON**, **Copy for AI**, and **ODS** export the current state (with `people` and an **Assignees** column respectively). **Copy selected / Paste into selection / Paste JSON** round-trip edits through an AI; assignee ids not in the project are dropped on save.
 
 ### Recovering from "Out of date"
 
@@ -807,7 +908,7 @@ Badge shows **Out of date** → someone else saved first. Click **Reload**. Unsa
 
 ### Print / PDF
 
-Click **Print / PDF**, choose "Save as PDF". A4 landscape, controls hidden.
+Click **Print / PDF**, choose "Save as PDF". A4 landscape, controls hidden. Assignees are not laid out for print.
 
 ---
 
@@ -823,8 +924,9 @@ Click **Print / PDF**, choose "Save as PDF". A4 landscape, controls hidden.
   - Grey (`gray-400`) — **baseline bar**
   - Pink `#fdf2f8` / `#fce7f3` — Gantt holiday shading
   - Gray `#374151` — group (summary) bars
+  - Blue chip (`bg-blue-100 text-blue-800`) — **linked assignee**; amber chip (`bg-amber-100 text-amber-800`) — **consultant** (no account)
 - Sync badge colours: green saved · amber unsaved · blue saving · red error/conflict/failed · gray loading/readonly/empty
-- Sizes: `ROW_H = 28`, `LEFT_COL_W = 256` (128 on phones), planned bar 12 px at `+8`, actual bar 4 px at `+3`, baseline bar 4 px at `+22`, indent 14 px (Gantt) / 16 px (table) per depth level
+- Sizes: `ROW_H = 28`, `LEFT_COL_W = 256` (128 on phones), planned bar 12 px at `+8`, actual bar 4 px at `+3`, baseline bar 4 px at `+22`, indent 14 px (Gantt) / 16 px (table) per depth level, assignee popover width 272 px (`z-[120]`)
 
 ---
 
@@ -841,7 +943,7 @@ Frontend:
 
 **Backend (required, or the field is silently dropped on save):**
 
-5. Field on `ScheduleTask` (+ migration), `TaskIn` serializer, `to_dict()`, and the constructor call in `save_document()`. See the Django README §11.
+5. Field on `ScheduleTask` (+ migration), `TaskIn` serializer, `to_dict()`, and the constructor call in `save_document()`. See the Django README §11. (`assigneeIds` / `assignee_ids` is a worked example of exactly this set of changes.)
 
 ### New sequence type
 
@@ -850,6 +952,14 @@ Frontend:
 3. Handle the forward case in `autoSchedule` and `autoScheduleWorkdays`.
 4. Update anchor logic in `ScheduleView.tsx` (`pIsStart`, `qIsStart`) if needed.
 5. Backend: add to `ScheduleSequence.TYPE_CHOICES` (+ migration).
+
+### Admin UI to link a consultant to an account
+
+The API already supports it (`updatePerson(id, { userId })` → `PATCH /schedules/people/<id>/`, admin only, user must be a project member without an existing person). Add a "People" panel for admins with a user select per consultant; use `isAdmin` to gate it.
+
+### Assignees in print / PDF
+
+Add an Assignee column (or initials) to the print layout in `PrintAct.tsx`. The table panels are tightly packed, so check A4 landscape.
 
 ### Status date ("as of")
 
@@ -884,6 +994,7 @@ The model and API support several schedules per project and the picker already l
 | `parentId` | `IfcRelNests` |
 | `Sequence` | `IfcRelSequence` |
 | `linkedElements` | `IfcRelAssignsToProcess` |
+| `assigneeIds` / `SchedulePerson` | `IfcRelAssignsToResource` + `IfcPerson` / `IfcActor` (not mapped yet) |
 | baseline fields | a separate `IfcWorkSchedule` with `PredefinedType = BASELINE` |
 
 Write a mapper that walks `IfcTask` instances, resolves `IfcRelNests` into `parentId`s, and reads `IfcRelSequence` into `Sequence[]`. An import is just a `PUT`.
@@ -941,7 +1052,7 @@ Pure modules (`calendar.ts`, `scheduling.ts`, `cpm.ts`) are unit-testable with V
 - **In-progress task** (actual start today, planned dates in the future) → planned start = actual start, same length, finish ≥ today; successors follow
 - Workday variant: all starts are working days; a task over a holiday is stretched
 - Group rows re-derive after Auto-schedule
-- Baseline is preserved
+- Baseline and assignees are preserved
 
 ### `wouldCycle`
 
@@ -964,16 +1075,31 @@ Pure modules (`calendar.ts`, `scheduling.ts`, `cpm.ts`) are unit-testable with V
 - Delete a phase, then Undo → phase, children and links return and autosave persists them
 - After switching schedule or Import, Undo is disabled
 
+### People / assignees
+
+- Run `makemigrations schedule` and `migrate`. Open `/schedule`: the people list loads and every non-client member appears (you appear even as a superuser)
+- Editor → **Assigned to** → **Add consultant** (name + email): the person is added and assigned; **Save** persists it after a reload
+- Table **Assignee** column edits directly; groups show `—`; the Gantt left column shows initials with a tooltip of full names
+- **My tasks**: only your tasks and their parent groups show; the checkbox is hidden for clients
+- Create a user with the consultant's email → reload → they show as linked (no "consultant" tag) with the account name; old assignments are intact
+- Add a consultant whose email already belongs to someone in the project → the existing person is reused (no duplicate)
+- Fork a copy as a member and assign there; pulling from main keeps people (project-level)
+- Save a document whose `assigneeIds` contains an unknown id → the id is dropped, the save still succeeds
+- Import / Paste JSON containing `people` → no "extra key" warning, `people` ignored; unknown `assigneeIds` dropped
+- **Copy for AI** includes `people` and the `assigneeIds` instruction; the ODS has an **Assignees** column
+- Client: no Add consultant, picker disabled, `POST /schedules/people/` → 403
+- Non-admin `PATCH /schedules/people/<id>/ {"userId": N}` → 403; admin with a non-member user → 400
+
 ### UI (manual)
 
 - At every zoom level the bars line up with their left-column rows (header heights match)
 - Set baseline (admin) → grey bars appear; push a task later → Var shows `+Nd`, header shows "N late vs baseline"; Compare matches
 - Slide a task to 100% → actual bar appears; turns orange if it finished after the baseline finish; blocked with a toast if a predecessor is below 100%
-- **Group row in the editor:** date/duration/baseline/actual/% fields are disabled, links hidden, only name/code/remarks/parent save
-- **Editor draft:** delete a successor, press Cancel → the link is still there; delete it, press Save → it is gone
+- **Group row in the editor:** date/duration/baseline/actual/% fields are disabled, links and assignees hidden, only name/code/remarks/parent save
+- **Editor draft:** delete a successor, press Cancel → the link is still there; delete it, press Save → it is gone. Change assignees, press Cancel → unchanged
 - **Editor inputs:** type a full date like `15-10-2026` without it jumping; backspace the duration to empty, type `7` → finish updates
 - **Non-admin** (member/manager): baseline fields disabled in the editor and the header has no **Set baseline**
-- Client account: Set baseline, import, inputs, menus and Undo/Redo are hidden/disabled; Compare and export still work
+- Client account: Set baseline, import, inputs, menus, assignee editing and Undo/Redo are hidden/disabled; Compare and export still work
 - Empty project as a client: message + project picker; switching to another project loads it
 - `/schedule` without params redirects (via `replaceState`) to a project that has a schedule
 
@@ -985,7 +1111,7 @@ Pure modules (`calendar.ts`, `scheduling.ts`, `cpm.ts`) are unit-testable with V
 - Two tabs: edit in A, then in B → B shows **Out of date**; Reload gets A's change
 - Stop Django, edit → **Save failed** + Retry; start Django, Retry → **Saved**
 - Set a finish before a start → blocked by the pre-flight check with a reason; fix the date → saves
-- Baseline/actual values survive a reload (confirms the backend maps the new fields)
+- Baseline/actual values and assignees survive a reload (confirms the backend maps the new fields)
 - Dev strict mode on an empty project creates exactly **one** schedule
 
 ---
@@ -997,13 +1123,16 @@ Pure modules (`calendar.ts`, `scheduling.ts`, `cpm.ts`) are unit-testable with V
 - **Forecast ignores remaining work.** Auto-schedule keeps an in-progress task's full original length from its actual start; CPM uses planned dates only.
 - **Compare is baseline vs planned only** (not vs actual) and is a live view — there is no saved/dated comparison and no per-field change log.
 - **No snapshot UI** (list / preview / restore / diff); the backend supports it.
-- **Undo history is in memory only** (lost on refresh / schedule switch / import) and does not cover the working-days toggle.
+- **Undo history is in memory only** (lost on refresh / schedule switch / import) and does not cover the working-days toggle or adding a consultant.
 - **No offline mode.** Edits made while the server is unreachable stay in memory only.
 - **No merge on conflict.** 409 → Reload (local edits lost).
 - **Whole-document autosave.** Every change re-sends the full schedule. Fine for hundreds of tasks.
 - **Read-only mode is cosmetic**; the server is the real gate.
-- **Group rows are derived and locked**, so a group cannot carry its own manual dates.
-- **No resource / cost model.** `completion` is the only tracked metric.
+- **Group rows are derived and locked**, so a group cannot carry its own manual dates, and **groups can't have assignees** (they are not rolled up either).
+- **No UI to link a consultant to an account.** Only the API (`PATCH /schedules/people/<id>/`) and the Django admin work.
+- **Assignees are not laid out for print / PDF.**
+- **A member who loses project access keeps their person and past assignments**; they are just no longer synced.
+- **No resource / cost model.** `completion` is the only tracked metric; assignees are names only (no workload, capacity or rates).
 - **Bars are not draggable.** Dates are edited via the table or the editor.
 - **No zoom with ctrl+wheel or pinch.**
 - **Print relies on the browser's save-as-PDF**, and the wider table may need print-style tuning.
@@ -1033,6 +1162,8 @@ Pure modules (`calendar.ts`, `scheduling.ts`, `cpm.ts`) are unit-testable with V
 | `LINK_ARROW_GAP` / `LINK_LANE_OFFSET` | 6 / 4 | `ScheduleView.tsx` | Link geometry |
 | `HIGHLIGHT_MS` | 2200 | `ScheduleView.tsx` | Duration of the flash highlight |
 | `LONG_PRESS_MS` / `MOVE_TOLERANCE` | 400 / 10 | `ScheduleView.tsx` | Touch long-press tuning |
+| table `min-w` | 1950px | `ScheduleView.tsx` | Minimum table width (was 1750px before the Assignee column) |
+| popover width | 272 | `AssigneePicker.tsx` | Assignee popover width in px |
 | `debounceMs` | 1500 | `useScheduleSync.ts` | Autosave debounce |
 | `coalesceMs` / `limit` | 400 / 100 | `useUndo.ts` | Undo merge window / max history |
 | `BASE` | env | `api.ts` | `NEXT_PUBLIC_API_URL` (default `https://api.modelflick.com`) + `/api` |
@@ -1056,7 +1187,8 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
   ```
 - Adapt `authHeaders()` in `api.ts` to your auth scheme.
 - Django must allow the Next origin and the `Authorization` header in CORS.
-- The user must have an **admin, manager or member** role on a project (or be a superuser) to edit it; **client** is read-only; only **admin** can set or edit the baseline (UI). A project needs at least one schedule — an editor opening an empty project can create one.
+- The user must have an **admin, manager or member** role on a project (or be a superuser) to edit it; **client** is read-only; only **admin** can set or edit the baseline (UI) and link a person to an account (API). A project needs at least one schedule — an editor opening an empty project can create one.
+- After pulling the assignees feature, run `python manage.py makemigrations schedule && python manage.py migrate`.
 
 ---
 
@@ -1090,8 +1222,14 @@ rm -rf .next
 | Badge **Out of date** | Another tab/user saved first → **Reload** |
 | Badge **Save failed** + 400 text | Validation (finish before start, unknown parent, actual/baseline finish before start). Fix and edit again |
 | Baseline / actual values vanish after reload | The backend isn't mapping the new fields — run the migration and deploy the updated `models.py` / `serializers.py` / `services.py` |
+| Assignments vanish after reload | `assigneeIds` isn't mapped — run `makemigrations schedule && migrate` and deploy `models.py` (`assignee_ids`, `to_dict`), `serializers.py` (`TaskIn.assigneeIds`) and `services.py` (`save_document`) |
+| Assignee picker is empty | `GET /schedules/people/` failed (errors are swallowed) — check auth and that the `SchedulePerson` migration ran |
+| Assignment ids silently disappear | The id isn't a person of this project (`clean_assignees` drops it) — reload the people list |
+| **My tasks** checkbox is missing | `mePersonId` is null: the user is a client, or people haven't loaded |
+| 403 on `POST /schedules/people/` | The user is a client; only admin / manager / member can add people |
+| Table looks clipped after adding the Assignee column | Make sure `min-w-[1950px]` replaced `min-w-[1750px]` and the `<th>` / `<td>` were both added before Predecessors |
 | Badge stuck on **Unsaved changes…** right after load | Compare-key issue; make sure `stableKey()` (key-sorted) is used and not plain `JSON.stringify` |
-| "Rendered more hooks than during the previous render" | A hook was added below the early `return` gates in `ScheduleView.tsx` — move it above them |
+| "Rendered more hooks than during the previous render" | A hook was added below the early `return` gates in `ScheduleView.tsx` — move it above them (this includes the people state and effect) |
 | Gantt width wrong after load | The `ResizeObserver` effect must depend on `ready` |
 | Bars drift away from their rows | Left and right header heights differ — both must use `headerH` |
 | Two schedules created for one project (dev) | Strict-mode double effect; keep the `startedFor` guard; delete the extra in Django admin |
@@ -1101,7 +1239,7 @@ rm -rf .next
 | Task with a future "actual start" never moves | Run **Auto-schedule** — the future actual start is dropped and the task is rescheduled |
 | In-progress task stuck at old future planned dates | Run **Auto-schedule** — planned start follows the actual start |
 | Group row dates look stale in the editor | Pass the **rolled** task (`rolled.find`) to `ActivityEditorModal`, not the stored one |
-| TypeScript: missing `isAdmin` prop on `ActivityEditorModal` | Pass `isAdmin={isAdmin}`; the modal also takes `onApplyLinks` and no longer takes `onAddSequence` / `onUpdateSequence` / `onRemoveSequence` |
+| TypeScript: missing `isAdmin` prop on `ActivityEditorModal` | Pass `isAdmin={isAdmin}`; the modal also takes `onApplyLinks`, optional `people` / `onAddPerson`, and no longer takes `onAddSequence` / `onUpdateSequence` / `onRemoveSequence` |
 | Editor date jumps to a random year while typing | Use `DateField` (commits only plausible full dates) instead of a raw `type="date"` `onChange` |
 | Can't backspace the duration to empty | Use `NumberInput` (text input with raw draft) instead of `type="number"` |
 | Link changes in the editor apply without Save | Links must be edited via the draft (`draftLinks`) and applied through `onApplyLinks` |
@@ -1143,7 +1281,11 @@ rm -rf .next
 | **Seed** | Initial content uploaded when an editor creates a schedule |
 | **Optimistic locking** | Saves carry the loaded `version`; the server rejects a stale one with 409 |
 | **Snapshot** | Server-side full copy of a schedule at a point in time (restorable via API) |
+| **Person** | A `SchedulePerson`: something a task can be assigned to. Project-level, shared by the main schedule and every personal copy |
+| **Consultant** | A person with no account (`userId = null`, `linked = false`); linked automatically when a user with the same email signs up or joins the project |
+| **Linked person** | A person tied to a user account; name and email come from the account |
+| **My tasks** | Header filter showing only the tasks assigned to the current user, plus their parent groups |
 
 ---
 
-*Last updated: October 2026 — group/header rows fully derived and locked (table + editor, `freezeIfLeaf` on delete/move), admin-only baseline editing in the UI, holiday-aware Auto-schedule that normalises completed / future-actual / in-progress tasks, completion rule (100% needs 100% predecessors), activity editor draft model (Save-only, `DateField` / `NumberInput`, links applied via `onApplyLinks`), undo/redo (`useUndo`), plus project picker + URL deep-linking, server-driven permissions (admin / manager / member edit, client read-only), baseline / actual tracking with a **Var** column, **Compare** panel, JSON import/export, orphan-sequence pruning and save pre-flight checks. Builds on the Django-backed persistence layer, working-day mode, editable Duration column, Now/Next stepper, and row action menu.*
+*Last updated: October 2026 — **assignees** (project-level people shared by all schedules, consultants auto-linked by email, `assigneeIds` on tasks, Assignee table column / editor field / Gantt initials / Now-Next line, My tasks filter, people in Copy for AI and ODS, backend `SchedulePerson` + people endpoints), group/header rows fully derived and locked (table + editor, `freezeIfLeaf` on delete/move), admin-only baseline editing in the UI, holiday-aware Auto-schedule that normalises completed / future-actual / in-progress tasks, completion rule (100% needs 100% predecessors), activity editor draft model (Save-only, `DateField` / `NumberInput`, links applied via `onApplyLinks`), undo/redo (`useUndo`), plus project picker + URL deep-linking, server-driven permissions (admin / manager / member edit, client read-only), baseline / actual tracking with a **Var** column, **Compare** panel, JSON import/export, orphan-sequence pruning and save pre-flight checks. Builds on the Django-backed persistence layer, working-day mode, editable Duration column, Now/Next stepper, and row action menu.*

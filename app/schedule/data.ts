@@ -46,6 +46,15 @@ export interface Task {
   linkedElements?: string[]; // IFC GlobalIds (future)
   remarks?: string;
   workCode?: string;
+  assigneeIds?: number[]; // SchedulePerson ids
+}
+
+export interface SchedulePerson {
+  id: number;
+  name: string;
+  email: string;
+  userId: number | null;
+  linked: boolean; // false = consultant without an account
 }
 
 export interface Sequence {

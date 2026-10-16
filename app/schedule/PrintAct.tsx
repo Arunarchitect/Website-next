@@ -11,7 +11,8 @@ import {
   todayISO,
 } from "./scheduling";
 import type { Row } from "./scheduling";
-import type { Sequence, Task } from "./data";
+import type { SchedulePerson, Sequence, Task } from "./data";
+import { initialsOf } from "./AssigneePicker";
 
 type Orientation = "landscape" | "portrait";
 type RowStatus = "critical" | "done" | "running" | "";
@@ -20,6 +21,7 @@ type RGB = [number, number, number];
 
 const DAY_MS = 86400000;
 const M = 10; // page margin, mm
+const UNASSIGNED = -1; // pseudo person id used by the assignee filter
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -66,6 +68,20 @@ const fillC = (doc: jsPDF, c: RGB) => doc.setFillColor(c[0], c[1], c[2]);
 const drawC = (doc: jsPDF, c: RGB) => doc.setDrawColor(c[0], c[1], c[2]);
 const textC = (doc: jsPDF, c: RGB) => doc.setTextColor(c[0], c[1], c[2]);
 
+/** Assignee text for a leaf task. `short` uses initials when there are many. */
+function assigneeText(
+  task: Task,
+  people: Map<number, SchedulePerson>,
+  short = false
+): string {
+  const names = (task.assigneeIds ?? [])
+    .map((id) => people.get(id)?.name)
+    .filter((n): n is string => !!n);
+  if (names.length === 0) return "";
+  if (short && names.length > 2) return clean(names.map(initialsOf).join(" "));
+  return clean(names.join(", "));
+}
+
 /* table status (completed > in progress > critical) */
 function tableStatus(task: Task, crit: Set<string>): RowStatus {
   if (task.completion >= 100 || task.actualFinish) return "done";
@@ -101,31 +117,72 @@ interface Ctx {
   title: string;
   subtitle: string;
   meta: string;
+  filterNote: string;
   criticalIds: Set<string>;
   floats?: Map<string, number>;
   sequences: Sequence[];
   showLinks: boolean;
+  showAssignees: boolean;
+  people: Map<number, SchedulePerson>;
 }
 
 /* ---------------- table ---------------- */
 
+type ColKey =
+  | "wbs"
+  | "task"
+  | "assignee"
+  | "start"
+  | "finish"
+  | "days"
+  | "float"
+  | "pct";
+interface Col {
+  key: ColKey;
+  head: string;
+  frac: number;
+  right?: boolean;
+}
+
+const COLS_PLAIN: Col[] = [
+  { key: "wbs", head: "#", frac: 0.09 },
+  { key: "task", head: "TASK", frac: 0.41 },
+  { key: "start", head: "START", frac: 0.135 },
+  { key: "finish", head: "FINISH", frac: 0.135 },
+  { key: "days", head: "DAYS", frac: 0.07, right: true },
+  { key: "float", head: "FLOAT", frac: 0.07, right: true },
+  { key: "pct", head: "%", frac: 0.09, right: true },
+];
+
+const COLS_ASSIGNEE: Col[] = [
+  { key: "wbs", head: "#", frac: 0.07 },
+  { key: "task", head: "TASK", frac: 0.32 },
+  { key: "assignee", head: "ASSIGNEE", frac: 0.18 },
+  { key: "start", head: "START", frac: 0.12 },
+  { key: "finish", head: "FINISH", frac: 0.12 },
+  { key: "days", head: "DAYS", frac: 0.06, right: true },
+  { key: "float", head: "FLOAT", frac: 0.06, right: true },
+  { key: "pct", head: "%", frac: 0.07, right: true },
+];
+
 function drawTable(doc: jsPDF, rows: Row[], c: Ctx) {
   const FONT = 7.5; // pt, same on every paper size
-  const ROW = 4.8;
+  const ROW = 4.8; // height of a one-line row, mm
+  const LINE = 3.1; // extra height per additional wrapped line, mm
   const HDR = 5.5;
   const GAP = 6;
   const usableW = c.pw - 2 * M;
   // As many A4-width panels side by side as the sheet allows.
   const cols = Math.max(1, Math.floor((usableW + GAP) / (180 + GAP)));
   const panelW = (usableW - GAP * (cols - 1)) / cols;
-  const frac = [0.09, 0.41, 0.135, 0.135, 0.07, 0.07, 0.09];
+  const spec = c.showAssignees ? COLS_ASSIGNEE : COLS_PLAIN;
   const xs: number[] = [];
   let acc = 0;
-  for (const f of frac) {
+  for (const col of spec) {
     xs.push(acc * panelW);
-    acc += f;
+    acc += col.frac;
   }
-  const ws = frac.map((f) => f * panelW);
+  const ws = spec.map((col) => col.frac * panelW);
 
   const pageHeader = (first: boolean) => {
     doc.setFont("helvetica", "bold");
@@ -146,22 +203,54 @@ function drawTable(doc: jsPDF, rows: Row[], c: Ctx) {
       textC(doc, [85, 85, 85]);
       y += 4.5;
       doc.text(clean(c.meta), M, y);
+      if (c.filterNote) {
+        y += 4;
+        doc.setFont("helvetica", "bold");
+        textC(doc, [30, 64, 175]);
+        doc.text(clean(c.filterNote), M, y);
+      }
       return y + 3;
     }
     doc.setFontSize(9);
-    doc.text(clean(c.title) + " (cont.)", M, M + 3.5);
+    doc.text(
+      clean(c.title) + " (cont.)" + (c.filterNote ? "  -  " + clean(c.filterNote) : ""),
+      M,
+      M + 3.5
+    );
     return M + 7;
   };
 
+  const taskIdx = spec.findIndex((col) => col.key === "task");
+  const asgIdx = spec.findIndex((col) => col.key === "assignee");
+
+  // Work out how many lines each row needs before drawing anything.
+  const measured = rows.map(({ task, depth, hasChildren }) => {
+    doc.setFont("helvetica", hasChildren ? "bold" : "normal");
+    doc.setFontSize(FONT);
+    const nameLines: string[] = doc.splitTextToSize(
+      clean(task.name),
+      ws[taskIdx] - 2.4 - depth * 2
+    );
+    let asgLines: string[] = [];
+    if (asgIdx >= 0 && !hasChildren) {
+      const t = assigneeText(task, c.people);
+      if (t) asgLines = doc.splitTextToSize(t, ws[asgIdx] - 2.4);
+    }
+    const n = Math.max(1, nameLines.length, asgLines.length);
+    return { nameLines, asgLines, h: ROW + (n - 1) * LINE };
+  });
+
+  const bottom = c.ph - M;
   let idx = 0;
   let page = 0;
   while (idx < rows.length) {
     if (page > 0) doc.addPage();
     const y0 = pageHeader(page === 0);
-    const rowsPer = Math.max(1, Math.floor((c.ph - M - y0 - HDR) / ROW));
+
     for (let p = 0; p < cols && idx < rows.length; p++) {
       const px = M + p * (panelW + GAP);
 
+      // header row
       fillC(doc, [243, 244, 246]);
       drawC(doc, [156, 163, 175]);
       doc.setLineWidth(0.15);
@@ -169,20 +258,23 @@ function drawTable(doc: jsPDF, rows: Row[], c: Ctx) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(FONT);
       textC(doc, [75, 85, 99]);
-      const heads = ["#", "TASK", "START", "FINISH", "DAYS", "FLOAT", "%"];
-      heads.forEach((h, i) => {
-        const right = i >= 4;
+      spec.forEach((col, i) => {
         doc.text(
-          h,
-          right ? px + xs[i] + ws[i] - 1.2 : px + xs[i] + 1.2,
+          col.head,
+          col.right ? px + xs[i] + ws[i] - 1.2 : px + xs[i] + 1.2,
           y0 + HDR / 2,
-          { baseline: "middle", align: right ? "right" : "left" }
+          { baseline: "middle", align: col.right ? "right" : "left" }
         );
       });
 
-      for (let k = 0; k < rowsPer && idx < rows.length; k++, idx++) {
+      // rows: keep adding until the next one would not fit in this panel
+      let y = y0 + HDR;
+      let placed = 0;
+      while (idx < rows.length) {
+        const m = measured[idx];
+        if (y + m.h > bottom && placed > 0) break;
+
         const { task, wbs, depth, hasChildren } = rows[idx];
-        const y = y0 + HDR + k * ROW;
         const st = tableStatus(task, c.criticalIds);
         const style = st ? TBL[st] : null;
         fillC(
@@ -191,36 +283,66 @@ function drawTable(doc: jsPDF, rows: Row[], c: Ctx) {
         );
         drawC(doc, [209, 213, 219]);
         doc.setLineWidth(0.1);
-        doc.rect(px, y, panelW, ROW, "FD");
+        doc.rect(px, y, panelW, m.h, "FD");
         textC(doc, style ? style.text : INK);
         doc.setFont("helvetica", hasChildren ? "bold" : "normal");
         doc.setFontSize(FONT);
-        const ym = y + ROW / 2;
-        doc.text(fitText(doc, clean(wbs), ws[0] - 2), px + xs[0] + 1.2, ym, {
-          baseline: "middle",
-        });
-        const indent = depth * 2;
-        doc.text(
-          fitText(doc, clean(task.name), ws[1] - 2.4 - indent),
-          px + xs[1] + 1.2 + indent,
-          ym,
-          { baseline: "middle" }
-        );
-        doc.text(task.scheduleStart, px + xs[2] + 1.2, ym, { baseline: "middle" });
-        doc.text(task.scheduleFinish, px + xs[3] + 1.2, ym, { baseline: "middle" });
+        const ym = y + ROW / 2; // first line sits at the top of the row
         const fl = c.floats?.get(task.id);
-        const cells = [
-          String(durationDays(task)),
-          hasChildren || fl === undefined ? "-" : String(fl),
-          String(task.completion),
-        ];
-        cells.forEach((t, i) => {
-          const col = i + 4;
-          doc.text(t, px + xs[col] + ws[col] - 1.2, ym, {
-            baseline: "middle",
-            align: "right",
-          });
+
+        spec.forEach((col, i) => {
+          const left = px + xs[i] + 1.2;
+          const right = px + xs[i] + ws[i] - 1.2;
+          switch (col.key) {
+            case "wbs":
+              doc.text(fitText(doc, clean(wbs), ws[i] - 2), left, ym, {
+                baseline: "middle",
+              });
+              break;
+            case "task":
+              m.nameLines.forEach((ln, k) =>
+                doc.text(ln, left + depth * 2, ym + k * LINE, {
+                  baseline: "middle",
+                })
+              );
+              break;
+            case "assignee":
+              m.asgLines.forEach((ln, k) =>
+                doc.text(ln, left, ym + k * LINE, { baseline: "middle" })
+              );
+              break;
+            case "start":
+              doc.text(task.scheduleStart, left, ym, { baseline: "middle" });
+              break;
+            case "finish":
+              doc.text(task.scheduleFinish, left, ym, { baseline: "middle" });
+              break;
+            case "days":
+              doc.text(String(durationDays(task)), right, ym, {
+                baseline: "middle",
+                align: "right",
+              });
+              break;
+            case "float":
+              doc.text(
+                hasChildren || fl === undefined ? "-" : String(fl),
+                right,
+                ym,
+                { baseline: "middle", align: "right" }
+              );
+              break;
+            case "pct":
+              doc.text(String(task.completion), right, ym, {
+                baseline: "middle",
+                align: "right",
+              });
+              break;
+          }
         });
+
+        y += m.h;
+        idx++;
+        placed++;
       }
     }
     page++;
@@ -374,7 +496,9 @@ function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
     doc.setFontSize(7.5);
     textC(doc, [85, 85, 85]);
     doc.text(
-      `${clean(c.meta.split(" | ").slice(0, 2).join(" | "))}${pages > 1 ? `  |  page ${pg + 1}/${pages}` : ""}`,
+      `${clean(c.meta.split(" | ").slice(0, 2).join(" | "))}${
+        c.filterNote ? `  |  ${clean(c.filterNote)}` : ""
+      }${pages > 1 ? `  |  page ${pg + 1}/${pages}` : ""}`,
       c.pw - M,
       M + 5,
       { align: "right" }
@@ -510,6 +634,10 @@ function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
       if (!isMs) parts.push(`${durationDays(task)}d`);
       const lag = lagOf.get(task.id);
       if (lag) parts.push(lag);
+      if (c.showAssignees && !hasChildren) {
+        const who = assigneeText(task, c.people, true);
+        if (who) parts.push(`(${who})`);
+      }
       const label = clean(parts.join("  \u00B7  "));
 
       doc.setFont("helvetica", hasChildren ? "bold" : "normal");
@@ -529,7 +657,7 @@ function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
       if (!isMs) doc.text(sTxt, bx - G, ym, { align: "right", baseline: "middle" });
       doc.text(isMs ? sTxt : eTxt, bx + bw + G, ym, { baseline: "middle" });
 
-      // name + duration (+ lag): inside the bar if it fits, else beside the dates
+      // name + duration (+ lag, assignees): inside the bar if it fits, else beside the dates
       doc.setFont("helvetica", hasChildren ? "bold" : "normal");
       doc.setFontSize(fontPt);
       if (!isMs && labW <= bw - 1.6) {
@@ -684,9 +812,14 @@ function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
       lx += 6.5 + doc.getTextWidth("Dependency") + 5;
     }
     textC(doc, [107, 114, 128]);
-    doc.text("Bar text: name \u00B7 days \u00B7 lag.  Bottom strip = progress.", lx, ly, {
-      baseline: "middle",
-    });
+    doc.text(
+      c.showAssignees
+        ? "Bar text: name \u00B7 days \u00B7 lag \u00B7 (assignees).  Bottom strip = progress."
+        : "Bar text: name \u00B7 days \u00B7 lag.  Bottom strip = progress.",
+      lx,
+      ly,
+      { baseline: "middle" }
+    );
     if (summarized) {
       doc.text(
         `Too many tasks for one sheet: showing levels 1-${level + 1}; detail tasks drawn as thin strips in their group.`,
@@ -707,6 +840,7 @@ export function PrintAct({
   projectName,
   floats,
   sequences,
+  people,
 }: {
   tasks: Task[];
   /** Kept for compatibility; the picker uses the full tree instead. */
@@ -716,6 +850,8 @@ export function PrintAct({
   projectName?: string;
   floats?: Map<string, number>;
   sequences?: Sequence[];
+  /** Project people, for printing assignee names and filtering by assignee. */
+  people?: SchedulePerson[];
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -723,14 +859,40 @@ export function PrintAct({
   const [includeTable, setIncludeTable] = useState(true);
   const [includeGantt, setIncludeGantt] = useState(false);
   const [showLinks, setShowLinks] = useState(true);
+  const [showAssignees, setShowAssignees] = useState(true);
+  const [assigneeFilter, setAssigneeFilter] = useState<Set<number>>(new Set());
   const [orient, setOrient] = useState<Orientation>("landscape");
   const [paper, setPaper] = useState<Paper>("A4");
   const [busy, setBusy] = useState(false);
+
+  const peopleMap = useMemo(
+    () => new Map((people ?? []).map((p) => [p.id, p])),
+    [people]
+  );
 
   const allRows = useMemo(
     () => flatten(rollup(tasks), new Set<string>()),
     [tasks]
   );
+
+  /** People who have at least one task, with their task counts. */
+  const assigneeStats = useMemo(() => {
+    const counts = new Map<number, number>();
+    let unassigned = 0;
+    for (const r of allRows) {
+      if (r.hasChildren) continue;
+      const ids = r.task.assigneeIds ?? [];
+      if (ids.length === 0) unassigned++;
+      for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    const list = [...counts.entries()]
+      .filter(([id]) => peopleMap.has(id))
+      .map(([id, n]) => ({ id, name: peopleMap.get(id)!.name, count: n }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { list, unassigned };
+  }, [allRows, peopleMap]);
+
+  const hasAssignees = assigneeStats.list.length > 0;
 
   const subtreeIds = (index: number): string[] => {
     const base = allRows[index];
@@ -763,6 +925,41 @@ export function PrintAct({
     [allRows, selected]
   );
 
+  /**
+   * Rows that will actually print: the ticked rows, narrowed by the assignee
+   * filter. A leaf stays when one of its assignees is chosen (or it has no
+   * assignee and "Unassigned" is chosen); its ticked parent groups stay too.
+   */
+  const printRows = useMemo(() => {
+    if (assigneeFilter.size === 0) return sorted;
+    const byId = new Map(allRows.map((r) => [r.task.id, r.task]));
+    const selIds = new Set(sorted.map((r) => r.task.id));
+    const keep = new Set<string>();
+    for (const r of sorted) {
+      if (r.hasChildren) continue;
+      const ids = r.task.assigneeIds ?? [];
+      const hit =
+        ids.length === 0
+          ? assigneeFilter.has(UNASSIGNED)
+          : ids.some((i) => assigneeFilter.has(i));
+      if (!hit) continue;
+      let cur: Task | undefined = r.task;
+      while (cur && !keep.has(cur.id)) {
+        if (selIds.has(cur.id)) keep.add(cur.id);
+        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+      }
+    }
+    return sorted.filter((r) => keep.has(r.task.id));
+  }, [allRows, sorted, assigneeFilter]);
+
+  const filterNote = useMemo(() => {
+    if (assigneeFilter.size === 0) return "";
+    const names = [...assigneeFilter].map((id) =>
+      id === UNASSIGNED ? "Unassigned" : peopleMap.get(id)?.name ?? "?"
+    );
+    return `Assignee: ${names.join(", ")}`;
+  }, [assigneeFilter, peopleMap]);
+
   useEffect(() => {
     if (!pickerOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -782,6 +979,7 @@ export function PrintAct({
 
   const openPicker = () => {
     setSelected(new Set(allRows.map((r) => r.task.id)));
+    setAssigneeFilter(new Set());
     setPickerOpen(true);
   };
   const selectAll = () => setSelected(new Set(allRows.map((r) => r.task.id)));
@@ -816,8 +1014,16 @@ export function PrintAct({
       return n;
     });
 
+  const toggleAssignee = (id: number) =>
+    setAssigneeFilter((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+
   const canPrint =
-    selected.size > 0 && (includeTable || includeGantt) && !busy;
+    printRows.length > 0 && (includeTable || includeGantt) && !busy;
 
   const download = async () => {
     if (!canPrint) return;
@@ -837,21 +1043,21 @@ export function PrintAct({
       let crit = 0,
         done = 0,
         running = 0;
-      for (const r of sorted) {
+      for (const r of printRows) {
         const s = tableStatus(r.task, criticalIds);
         if (s === "critical") crit++;
         else if (s === "done") done++;
         else if (s === "running") running++;
       }
-      const activities = sorted.filter((r) => !r.hasChildren).length;
+      const activities = printRows.filter((r) => !r.hasChildren).length;
       const meta = [
         `Printed ${new Date().toLocaleDateString()}`,
         `${paper} ${orient}`,
-        `${sorted.length} rows (${activities} activities)`,
+        `${printRows.length} rows (${activities} activities)`,
         `${crit} critical`,
         `${running} in progress`,
         `${done} complete`,
-        ...(sorted.length < allRows.length ? ["partial selection"] : []),
+        ...(printRows.length < allRows.length ? ["partial selection"] : []),
       ].join(" | ");
 
       const ctx: Ctx = {
@@ -860,17 +1066,21 @@ export function PrintAct({
         title: reportTitle,
         subtitle: projectName && title !== projectName ? title : "",
         meta,
+        filterNote,
         criticalIds,
         floats,
         sequences: sequences ?? [],
         showLinks,
+        showAssignees: showAssignees && hasAssignees,
+        people: peopleMap,
       };
 
-      if (includeTable) drawTable(doc, sorted, ctx);
-      if (includeGantt) drawGantt(doc, sorted, ctx, includeTable);
+      if (includeTable) drawTable(doc, printRows, ctx);
+      if (includeGantt) drawGantt(doc, printRows, ctx, includeTable);
 
       const safe = clean(reportTitle).replace(/[^\w\-]+/g, "_").slice(0, 60);
-      doc.save(`${safe || "schedule"}_${paper}_${orient}.pdf`);
+      const tag = assigneeFilter.size > 0 ? "_filtered" : "";
+      doc.save(`${safe || "schedule"}${tag}_${paper}_${orient}.pdf`);
       setPickerOpen(false);
     } catch (e) {
       console.error(e);
@@ -885,7 +1095,7 @@ export function PrintAct({
       <button
         onClick={openPicker}
         className="flex items-center gap-1.5 rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
-        title="Download PDF (choose activities, paper size)"
+        title="Download PDF (choose activities, assignees, paper size)"
         data-print-hide
       >
         <svg
@@ -906,7 +1116,7 @@ export function PrintAct({
           data-print-hide
         >
           <div
-            className="flex max-h-[92vh] w-full max-w-md flex-col rounded-lg bg-white p-4 shadow-xl"
+            className="flex max-h-[92vh] w-full max-w-md flex-col overflow-y-auto rounded-lg bg-white p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-1 text-sm font-semibold text-gray-900">
@@ -932,10 +1142,11 @@ export function PrintAct({
               </button>
               <span className="ml-auto text-xs tabular-nums text-gray-500">
                 {selected.size} of {allRows.length} selected
+                {assigneeFilter.size > 0 && ` · ${printRows.length} will print`}
               </span>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto rounded border">
+            <div className="max-h-[38vh] min-h-[120px] shrink-0 overflow-y-auto rounded border">
               {pickerRows.map(({ row, index }) => {
                 const { task, depth, hasChildren, wbs } = row;
                 let checked = selected.has(task.id);
@@ -947,6 +1158,12 @@ export function PrintAct({
                   partial = on > 0 && on < ids.length;
                 }
                 const isCollapsed = pickCollapsed.has(task.id);
+                const who = hasChildren
+                  ? ""
+                  : (task.assigneeIds ?? [])
+                      .map((id) => peopleMap.get(id)?.name)
+                      .filter(Boolean)
+                      .join(", ");
                 return (
                   <div
                     key={task.id}
@@ -984,11 +1201,79 @@ export function PrintAct({
                       >
                         {task.name}
                       </span>
+                      {who && (
+                        <span
+                          className="ml-auto max-w-[40%] shrink-0 truncate rounded bg-gray-100 px-1 text-[10px] text-gray-600"
+                          title={who}
+                        >
+                          {who}
+                        </span>
+                      )}
                     </label>
                   </div>
                 );
               })}
             </div>
+
+            {hasAssignees && (
+              <>
+                <div className="mb-1 mt-3 flex items-center gap-2">
+                  <p className="text-xs font-medium text-gray-700">
+                    Only print tasks assigned to
+                  </p>
+                  {assigneeFilter.size > 0 && (
+                    <button
+                      onClick={() => setAssigneeFilter(new Set())}
+                      className="ml-auto text-[11px] text-blue-600 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {assigneeStats.list.map((p) => {
+                    const on = assigneeFilter.has(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => toggleAssignee(p.id)}
+                        className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                          on
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
+                        title={`${p.count} task${p.count === 1 ? "" : "s"}`}
+                      >
+                        {p.name}{" "}
+                        <span className="tabular-nums text-gray-400">
+                          {p.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {assigneeStats.unassigned > 0 && (
+                    <button
+                      onClick={() => toggleAssignee(UNASSIGNED)}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                        assigneeFilter.has(UNASSIGNED)
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      Unassigned{" "}
+                      <span className="tabular-nums text-gray-400">
+                        {assigneeStats.unassigned}
+                      </span>
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Several people = tasks assigned to any of them. Their parent
+                  groups are kept for context. Works together with the ticks
+                  above.
+                </p>
+              </>
+            )}
 
             <p className="mb-1 mt-3 text-xs font-medium text-gray-700">
               Include in PDF
@@ -1023,10 +1308,34 @@ export function PrintAct({
                 />
                 Dependency arrows
               </label>
+              <label
+                className={`flex cursor-pointer items-center gap-1.5 ${
+                  hasAssignees ? "" : "opacity-40"
+                }`}
+                title={
+                  hasAssignees
+                    ? "Assignee column in the table, names on the Gantt bars"
+                    : "No tasks are assigned yet"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={showAssignees && hasAssignees}
+                  disabled={!hasAssignees}
+                  onChange={(e) => setShowAssignees(e.target.checked)}
+                />
+                Assignees
+              </label>
             </div>
             {!includeTable && !includeGantt && (
               <p className="mt-1 text-[11px] text-red-600">
                 Tick at least one: table or Gantt.
+              </p>
+            )}
+            {assigneeFilter.size > 0 && printRows.length === 0 && (
+              <p className="mt-1 text-[11px] text-red-600">
+                No ticked tasks match that assignee. Tick more rows or change
+                the filter.
               </p>
             )}
 

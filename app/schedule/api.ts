@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import axios from "axios";
-import type { Task, Sequence } from "./data";
+import type { Task, Sequence, SchedulePerson } from "./data";
 
 // ── Same base URL pattern as productApi.ts ───────────────────────────────
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || "http://localhost:8000";
@@ -90,6 +90,12 @@ export interface ScheduleDoc {
   tasks: Task[];
   sequences: Sequence[];
   canEdit?: boolean;
+  scope?: "MAIN" | "PERSONAL";
+  ownerId?: number | null;
+  ownerName?: string | null;
+  sourceId?: number | null;
+  basedOnVersion?: number | null;
+  mainVersion?: number;
 }
 
 export interface ScheduleListItem {
@@ -98,6 +104,22 @@ export interface ScheduleListItem {
   version: number;
   predefinedType?: string;
   updatedAt?: string;
+  scope?: "MAIN" | "PERSONAL";
+  ownerName?: string | null;
+  isMine?: boolean;
+}
+
+export interface MyProjectSchedule {
+  id: number;
+  name: string;
+  predefinedType: string;
+  version: number;
+  scope: "MAIN" | "PERSONAL";
+  ownerId: number | null;
+  ownerName: string | null;
+  isMine: boolean;
+  canEdit: boolean;
+  basedOnVersion: number | null;
 }
 
 export interface MyProject {
@@ -108,12 +130,8 @@ export interface MyProject {
   isCompleted: boolean;
   role: "admin" | "manager" | "member" | "client";
   canEdit: boolean;
-  schedules: {
-    id: number;
-    name: string;
-    predefinedType: string;
-    version: number;
-  }[];
+  mainId: number | null;
+  schedules: MyProjectSchedule[];
 }
 
 // ── Endpoints ────────────────────────────────────────────────────────────
@@ -193,6 +211,80 @@ export async function importSchedule(
       `/schedules/${id}/import/`,
       fd,
       { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return res.data;
+  } catch (err) {
+    throw wrapAxiosError(err);
+  }
+}
+
+
+export async function forkSchedule(mainId: number): Promise<ScheduleDoc> {
+  try {
+    const res = await apiClient.post<ScheduleDoc>(`/schedules/${mainId}/fork/`);
+    return res.data;
+  } catch (err) {
+    throw wrapAxiosError(err);
+  }
+}
+
+export async function pullMainSchedule(id: number): Promise<ScheduleDoc> {
+  try {
+    const res = await apiClient.post<ScheduleDoc>(`/schedules/${id}/pull-main/`);
+    return res.data;
+  } catch (err) {
+    throw wrapAxiosError(err);
+  }
+}
+
+export async function promoteSchedule(id: number): Promise<ScheduleDoc> {
+  try {
+    const res = await apiClient.post<ScheduleDoc>(`/schedules/${id}/promote/`);
+    return res.data;
+  } catch (err) {
+    throw wrapAxiosError(err);
+  }
+}
+
+export async function listPeople(projectId: number): Promise<{
+  people: SchedulePerson[];
+  mePersonId: number | null;
+}> {
+  try {
+    const res = await apiClient.get("/schedules/people/", {
+      params: { project: projectId },
+    });
+    return res.data;
+  } catch (err) {
+    throw wrapAxiosError(err);
+  }
+}
+
+export async function addPerson(
+  projectId: number,
+  name: string,
+  email?: string
+): Promise<SchedulePerson> {
+  try {
+    const res = await apiClient.post<SchedulePerson>("/schedules/people/", {
+      project: projectId,
+      name,
+      email: email ?? "",
+    });
+    return res.data;
+  } catch (err) {
+    throw wrapAxiosError(err);
+  }
+}
+
+export async function updatePerson(
+  id: number,
+  patch: { name?: string; email?: string; userId?: number | null }
+): Promise<SchedulePerson> {
+  try {
+    const res = await apiClient.patch<SchedulePerson>(
+      `/schedules/people/${id}/`,
+      patch
     );
     return res.data;
   } catch (err) {
