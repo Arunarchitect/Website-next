@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { jsPDF } from "jspdf";
 import {
   durationDays,
+  durationWorkdays,
   flatten,
   isoWeek,
   rollup,
@@ -13,15 +14,19 @@ import {
 import type { Row } from "./scheduling";
 import type { SchedulePerson, Sequence, Task } from "./data";
 import { initialsOf } from "./AssigneePicker";
+import { computeCpm, computeCpmWorkdays } from "./cpm";
+import type { WorkingCalendar } from "./calendar";
 
 type Orientation = "landscape" | "portrait";
 type RowStatus = "critical" | "done" | "running" | "";
 type Paper = "A4" | "A3" | "A2" | "A1" | "A0";
+type FloatMode = "working" | "calendar";
 type RGB = [number, number, number];
 
 const DAY_MS = 86400000;
 const M = 10; // page margin, mm
 const UNASSIGNED = -1; // pseudo person id used by the assignee filter
+const NOTE_LINE = 3.6; // mm per line of the custom note
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -54,7 +59,7 @@ const clean = (s: string) =>
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/\u2026/g, "...")
-    .replace(/[^\x20-\x7E\u00A0-\u00FF]/g, "?");
+    .replace(/[^\x20-\x7E\u00A0-\u00FF\n]/g, "?");
 
 const fitText = (doc: jsPDF, s: string, maxW: number) => {
   if (maxW <= 0) return "";
@@ -118,6 +123,10 @@ interface Ctx {
   subtitle: string;
   meta: string;
   filterNote: string;
+  /** Free-text description typed in the print dialog (client name, remarks...). */
+  note: string;
+  /** Set = DAYS column and bar labels count working days. */
+  workCal?: WorkingCalendar;
   criticalIds: Set<string>;
   floats?: Map<string, number>;
   sequences: Sequence[];
@@ -208,6 +217,19 @@ function drawTable(doc: jsPDF, rows: Row[], c: Ctx) {
         doc.setFont("helvetica", "bold");
         textC(doc, [30, 64, 175]);
         doc.text(clean(c.filterNote), M, y);
+      }
+      if (c.note) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        textC(doc, INK);
+        const lines: string[] = doc
+          .splitTextToSize(clean(c.note), usableW)
+          .slice(0, 8);
+        y += 1;
+        for (const ln of lines) {
+          y += NOTE_LINE;
+          doc.text(ln, M, y);
+        }
       }
       return y + 3;
     }
@@ -318,10 +340,19 @@ function drawTable(doc: jsPDF, rows: Row[], c: Ctx) {
               doc.text(task.scheduleFinish, left, ym, { baseline: "middle" });
               break;
             case "days":
-              doc.text(String(durationDays(task)), right, ym, {
-                baseline: "middle",
-                align: "right",
-              });
+              doc.text(
+                String(
+                  c.workCal
+                    ? durationWorkdays(task, c.workCal)
+                    : durationDays(task)
+                ),
+                right,
+                ym,
+                {
+                  baseline: "middle",
+                  align: "right",
+                }
+              );
               break;
             case "float":
               doc.text(
@@ -369,7 +400,16 @@ function pickRows(rows: Row[], avail: number) {
 function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
   if (!rows.length) return;
   const usableW = c.pw - 2 * M;
-  const chartTop = M + 11;
+
+  // custom note sits under the title; push the chart down to make room
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  const noteLines: string[] = c.note
+    ? doc.splitTextToSize(clean(c.note), usableW).slice(0, 4)
+    : [];
+  const noteH = noteLines.length * NOTE_LINE;
+
+  const chartTop = M + 11 + noteH;
   const HEAD = 11;
   const LEGEND = 9;
   const avail = c.ph - M - LEGEND - chartTop - HEAD;
@@ -504,6 +544,16 @@ function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
       { align: "right" }
     );
 
+    // custom note under the title
+    if (noteLines.length) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      textC(doc, INK);
+      noteLines.forEach((ln, k) => {
+        doc.text(ln, M, M + 9.2 + k * NOTE_LINE);
+      });
+    }
+
     // header: dark month band + light day/week band
     const bandH = HEAD / 2;
     fillC(doc, NAVY);
@@ -631,7 +681,10 @@ function drawGantt(doc: jsPDF, rows: Row[], c: Ctx, needNewPage: boolean) {
 
       // ---- text pieces ----
       const parts: string[] = [`${wbs} ${task.name}`];
-      if (!isMs) parts.push(`${durationDays(task)}d`);
+      if (!isMs)
+        parts.push(
+          `${c.workCal ? durationWorkdays(task, c.workCal) : durationDays(task)}d`
+        );
       const lag = lagOf.get(task.id);
       if (lag) parts.push(lag);
       if (c.showAssignees && !hasChildren) {
@@ -841,6 +894,7 @@ export function PrintAct({
   floats,
   sequences,
   people,
+  calendar,
 }: {
   tasks: Task[];
   /** Kept for compatibility; the picker uses the full tree instead. */
@@ -848,10 +902,13 @@ export function PrintAct({
   criticalIds: Set<string>;
   title: string;
   projectName?: string;
+  /** Fallback floats (used only when `calendar` is not passed). */
   floats?: Map<string, number>;
   sequences?: Sequence[];
   /** Project people, for printing assignee names and filtering by assignee. */
   people?: SchedulePerson[];
+  /** Working calendar, so the printed Float can be counted in working days. */
+  calendar?: WorkingCalendar;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -863,6 +920,8 @@ export function PrintAct({
   const [assigneeFilter, setAssigneeFilter] = useState<Set<number>>(new Set());
   const [orient, setOrient] = useState<Orientation>("landscape");
   const [paper, setPaper] = useState<Paper>("A4");
+  const [floatMode, setFloatMode] = useState<FloatMode>("working");
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
   const peopleMap = useMemo(
@@ -963,7 +1022,15 @@ export function PrintAct({
   useEffect(() => {
     if (!pickerOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPickerOpen(false);
+      // let Esc inside the note box just blur it instead of closing the dialog
+      const t = e.target as HTMLElement | null;
+      if (e.key === "Escape") {
+        if (t && t.tagName === "TEXTAREA") {
+          t.blur();
+          return;
+        }
+        setPickerOpen(false);
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -1050,6 +1117,22 @@ export function PrintAct({
         else if (s === "running") running++;
       }
       const activities = printRows.filter((r) => !r.hasChildren).length;
+
+      // Float for the printed table, independent of the on-screen toggle.
+      let printFloats = floats;
+      let floatLabel = "";
+      if (calendar) {
+        const seqs = sequences ?? [];
+        printFloats =
+          floatMode === "working"
+            ? computeCpmWorkdays(tasks, seqs, calendar).totalFloat
+            : computeCpm(tasks, seqs).totalFloat;
+        floatLabel =
+          floatMode === "working"
+            ? "days & float in working days"
+            : "days & float in calendar days";
+      }
+
       const meta = [
         `Printed ${new Date().toLocaleDateString()}`,
         `${paper} ${orient}`,
@@ -1057,6 +1140,7 @@ export function PrintAct({
         `${crit} critical`,
         `${running} in progress`,
         `${done} complete`,
+        ...(includeTable && floatLabel ? [floatLabel] : []),
         ...(printRows.length < allRows.length ? ["partial selection"] : []),
       ].join(" | ");
 
@@ -1067,8 +1151,10 @@ export function PrintAct({
         subtitle: projectName && title !== projectName ? title : "",
         meta,
         filterNote,
+        note: note.trim(),
+        workCal: calendar && floatMode === "working" ? calendar : undefined,
         criticalIds,
-        floats,
+        floats: printFloats,
         sequences: sequences ?? [],
         showLinks,
         showAssignees: showAssignees && hasAssignees,
@@ -1338,6 +1424,65 @@ export function PrintAct({
                 the filter.
               </p>
             )}
+
+            {!calendar && (
+              <p className="mt-3 text-[11px] text-red-600">
+                Working-day counting is off: pass calendar={'{calendar}'} to
+                &lt;PrintAct /&gt; in ScheduleView.tsx.
+              </p>
+            )}
+            {calendar && (
+              <>
+                <p className="mb-1 mt-3 text-xs font-medium text-gray-700">
+                  Days &amp; float counted in
+                </p>
+                <div
+                  className={`grid grid-cols-2 gap-2 ${
+                    includeTable ? "" : "opacity-40"
+                  }`}
+                >
+                  {(
+                    [
+                      ["working", "Working days"],
+                      ["calendar", "Calendar days"],
+                    ] as [FloatMode, string][]
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      disabled={!includeTable}
+                      onClick={() => setFloatMode(k)}
+                      className={`rounded border px-3 py-1.5 text-xs font-medium ${
+                        floatMode === k
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Working days skip weekly off days, holidays and shutdowns.
+                  Calendar days count every day.
+                </p>
+              </>
+            )}
+
+            <p className="mb-1 mt-3 text-xs font-medium text-gray-700">
+              Description / note (optional)
+            </p>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={4}
+              maxLength={600}
+              placeholder="e.g. Prepared for Mr. Nair - revision 2, tile work excluded"
+              className="h-24 min-h-[96px] w-full shrink-0 resize-y overflow-y-scroll rounded border px-2 py-1.5 text-xs italic text-gray-800 focus:border-blue-500 focus:outline-none"
+            />
+            <div className="mt-0.5 flex items-center text-[11px] text-gray-500">
+              <span>Printed under the title on the table and Gantt pages.</span>
+              <span className="ml-auto tabular-nums">{note.length}/600</span>
+            </div>
 
             <p className="mb-1 mt-3 text-xs font-medium text-gray-700">
               Paper size

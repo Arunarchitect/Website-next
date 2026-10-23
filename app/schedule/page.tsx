@@ -235,7 +235,7 @@ export default function ScheduleView() {
     emptyCalendar()
   );
   const [calendarOpen, setCalendarOpen] = useState(false);
-  const [useWorkdays, setUseWorkdays] = useState(false);
+  const [useWorkdays, setUseWorkdays] = useState(true);
 
   const [meta, setMeta] = useState<ScheduleDoc | null>(null);
 
@@ -1832,6 +1832,7 @@ export default function ScheduleView() {
             title={heading}
             projectName={currentProject?.name ?? ""}
             people={people}
+            calendar={calendar}
           />
           {!readOnly && (
             <ScheduleImport
