@@ -6,6 +6,8 @@ import {
   DrawingDocumentResolved,
   UserContext,
   PaginatedDocuments,
+  DrawingActivity,
+  PaginatedActivity,
 } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_HOST || 'http://127.0.0.1:8000';
@@ -90,6 +92,23 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+/**
+ * Pull the server's message out of an axios error (DRF uses `detail`,
+ * our custom 400s use `detail` or `error`), else fall back.
+ */
+const apiErrorMessage = (error: unknown, fallback: string): string => {
+  if (axios.isAxiosError(error) && error.response?.data) {
+    const data = error.response.data as unknown;
+    if (typeof data === 'string') return data.length < 300 ? data : fallback;
+    if (typeof data === 'object' && data !== null) {
+      const d = data as Record<string, unknown>;
+      if (typeof d.detail === 'string') return d.detail;
+      if (typeof d.error === 'string') return d.error;
+    }
+  }
+  return fallback;
+};
 
 export const getFullFileUrl = (fileUrl: string | undefined | null): string => {
   if (!fileUrl) {
@@ -224,6 +243,10 @@ export interface DocumentFilters {
   pageSize?: number;
   ordering?: string;
   status?: 'draft' | 'published' | 'archived';
+  /** Only meaningful with status 'draft': pending review vs rejected. */
+  reviewState?: 'pending' | 'rejected';
+  /** Only drawings I uploaded. */
+  mine?: boolean;
 }
 
 export const getDocuments = async (
@@ -253,6 +276,12 @@ export const getDocuments = async (
     if (filters.status) {
       params.append('status', filters.status);
     }
+    if (filters.reviewState) {
+      params.append('review_state', filters.reviewState);
+    }
+    if (filters.mine) {
+      params.append('mine', 'true');
+    }
 
     const page = filters.page ?? 1;
     const pageSize = filters.pageSize ?? 20;
@@ -260,10 +289,8 @@ export const getDocuments = async (
     params.append('page_size', pageSize.toString());
 
     const url = `/drawings/documents/?${params.toString()}`;
-    console.log('📡 Fetching documents from:', url);
 
     const response = await apiClient.get(url);
-    console.log('📥 API Response received');
 
     if (response.data.results) {
       return {
@@ -296,14 +323,115 @@ export const toggleFavorite = async (id: number): Promise<boolean> => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// APPROVAL WORKFLOW
+// Each returns the fresh detail-serializer document so the UI can swap it in.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Admin: draft -> published. */
+export const approveDocument = async (id: number): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.post(`/drawings/documents/${id}/approve/`);
+    return response.data;
+  } catch (error) {
+    throw new Error(apiErrorMessage(error, 'Failed to approve drawing'));
+  }
+};
+
+/** Admin: keep as draft, mark rejected (never public). Reason is optional. */
+export const rejectDocument = async (
+  id: number,
+  reason: string = ''
+): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.post(`/drawings/documents/${id}/reject/`, { reason });
+    return response.data;
+  } catch (error) {
+    throw new Error(apiErrorMessage(error, 'Failed to reject drawing'));
+  }
+};
+
+/** Admin: published -> archived (also revokes its share link). */
+export const archiveDocument = async (id: number): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.post(`/drawings/documents/${id}/archive/`);
+    return response.data;
+  } catch (error) {
+    throw new Error(apiErrorMessage(error, 'Failed to archive drawing'));
+  }
+};
+
+/** Admin: archived -> draft (needs approval again). */
+export const restoreDocument = async (id: number): Promise<DrawingDocumentResolved> => {
+  try {
+    const response = await apiClient.post(`/drawings/documents/${id}/restore/`);
+    return response.data;
+  } catch (error) {
+    throw new Error(apiErrorMessage(error, 'Failed to restore drawing'));
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// ACTIVITY LOG
+// ─────────────────────────────────────────────────────────────────────────
+
+/** History of ONE drawing (org-wide admin/manager/member). Newest first. */
+export const getDocumentActivity = async (id: number): Promise<DrawingActivity[]> => {
+  try {
+    const response = await apiClient.get(`/drawings/documents/${id}/activity/`);
+    return response.data;
+  } catch (error) {
+    throw new Error(apiErrorMessage(error, 'Failed to load activity'));
+  }
+};
+
+export interface ActivityFilters {
+  organisationId?: number;
+  action?: string;
+  actorId?: number;
+  documentId?: number;
+  search?: string;
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string; // YYYY-MM-DD
+  page?: number;
+  pageSize?: number;
+}
+
+/** Org-wide log. Org admins only (server scopes to their admin orgs). */
+export const getActivityLog = async (
+  filters: ActivityFilters = {}
+): Promise<PaginatedActivity> => {
+  try {
+    const params = new URLSearchParams();
+    if (filters.organisationId) params.append('organisation_id', String(filters.organisationId));
+    if (filters.action) params.append('action', filters.action);
+    if (filters.actorId) params.append('actor_id', String(filters.actorId));
+    if (filters.documentId) params.append('document_id', String(filters.documentId));
+    if (filters.search) params.append('search', filters.search);
+    if (filters.dateFrom) params.append('date_from', filters.dateFrom);
+    if (filters.dateTo) params.append('date_to', filters.dateTo);
+    params.append('page', String(filters.page ?? 1));
+    params.append('page_size', String(filters.pageSize ?? 25));
+
+    const response = await apiClient.get(`/drawings/activity/?${params.toString()}`);
+    return {
+      results: response.data.results ?? [],
+      count: response.data.count ?? 0,
+      next: response.data.next ?? null,
+      previous: response.data.previous ?? null,
+    };
+  } catch (error) {
+    throw new Error(apiErrorMessage(error, 'Failed to load activity log'));
+  }
+};
+
 export interface GuestLinkResult {
   guest_access_code: string | null;
 }
 
 /**
  * Create (or fetch the existing) single-drawing guest link for this
- * document. Idempotent — calling this on a document that already has a
- * code just returns that same code rather than rotating it.
+ * document. Idempotent. Server only allows this for PUBLISHED drawings.
  */
 export const createGuestLink = async (id: number): Promise<GuestLinkResult> => {
   try {
@@ -311,7 +439,7 @@ export const createGuestLink = async (id: number): Promise<GuestLinkResult> => {
     return response.data;
   } catch (error) {
     console.error('Error creating guest link:', error);
-    throw new Error('Failed to create guest link');
+    throw new Error(apiErrorMessage(error, 'Failed to create guest link'));
   }
 };
 
@@ -345,8 +473,8 @@ export interface BulkLink {
 
 /**
  * Create (or fetch existing) single-drawing guest links for many documents
- * at once. Ids the user can't access are dropped server-side and counted
- * in `skipped`. Max 300 ids per call.
+ * at once. Only PUBLISHED drawings get links; others are counted in
+ * `skipped`. Max 300 ids per call.
  */
 export const bulkCreateGuestLinks = async (
   ids: number[]
@@ -464,7 +592,6 @@ export const downloadDocument = async (doc: DrawingDocumentResolved): Promise<vo
 export const createDocument = async (formData: FormData): Promise<DrawingDocumentResolved> => {
   try {
     const response = await apiClient.post('/drawings/documents/', formData);
-    console.log('✅ Document created:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error creating document:', error);
@@ -482,7 +609,6 @@ export const createDocument = async (formData: FormData): Promise<DrawingDocumen
 export const updateDocument = async (id: number, formData: FormData): Promise<DrawingDocumentResolved> => {
   try {
     const response = await apiClient.patch(`/drawings/documents/${id}/`, formData);
-    console.log('✅ Document updated:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error updating document:', error);
@@ -500,17 +626,16 @@ export const updateDocument = async (id: number, formData: FormData): Promise<Dr
 export const deleteDocument = async (id: number): Promise<void> => {
   try {
     await apiClient.delete(`/drawings/documents/${id}/`);
-    console.log('✅ Document deleted:', id);
   } catch (error) {
     console.error('Error deleting document:', error);
-    throw new Error('Failed to delete document');
+    // Surfaces the server's reason, e.g. "Approved drawings can't be deleted. Archive it instead."
+    throw new Error(apiErrorMessage(error, 'Failed to delete document'));
   }
 };
 
 export const getDocument = async (id: number): Promise<DrawingDocumentResolved> => {
   try {
     const response = await apiClient.get(`/drawings/documents/${id}/`);
-    console.log(`📄 Document ${id} details retrieved`);
     return response.data;
   } catch (error) {
     console.error('Error fetching document:', error);

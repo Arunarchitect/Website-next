@@ -20,6 +20,10 @@ import {
   createDocument,
   updateDocument,
   deleteDocument,
+  approveDocument,
+  rejectDocument,
+  archiveDocument,
+  restoreDocument,
   getMyMemberships,
   RawMembership,
 } from "./drawingApi";
@@ -35,7 +39,9 @@ import DocumentForm from "./components/DocumentForm";
 import PdfThumbnail from "./components/PdfThumbnail";
 import GuestAccessGate from "./components/GuestAccessGate";
 import BulkShareModal from "./components/BulkShareModal";
+import ActivityLogModal from "./components/ActivityLogModal";
 import "./styles.css";
+import "./approval.css";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -49,6 +55,21 @@ const mono = IBM_Plex_Mono({
 });
 
 const UPLOAD_ROLES = ["admin", "manager", "member"];
+
+/**
+ * What the Status dropdown can hold. "pending" / "rejected" are both
+ * status=draft on the server, split by review_state.
+ */
+type StatusView = "all" | "draft" | "pending" | "rejected" | "published" | "archived";
+
+const statusViewToParams = (
+  view: StatusView | undefined
+): { status?: "draft" | "published" | "archived"; reviewState?: "pending" | "rejected" } => {
+  if (!view || view === "all") return {};
+  if (view === "pending") return { status: "draft", reviewState: "pending" };
+  if (view === "rejected") return { status: "draft", reviewState: "rejected" };
+  return { status: view };
+};
 
 type ApiError = {
   message?: string;
@@ -89,17 +110,19 @@ function DocumentsPageInner() {
   const [selectedDeliverableId, setSelectedDeliverableId] = useState<number | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [showPrivateOnly, setShowPrivateOnly] = useState<boolean>(false);
+  const [mineOnly, setMineOnly] = useState<boolean>(false);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   // Only meaningful for admin/manager/member — clients are always forced to
   // "published" and never see this control (see canFilterByStatus below).
-  const [selectedStatus, setSelectedStatus] = useState<"draft" | "published" | "archived" | undefined>(
-    undefined
-  );
+  // Default view: published drawings only.
+  const [selectedStatus, setSelectedStatus] = useState<StatusView>("published");
 
   const [selectedDoc, setSelectedDoc] = useState<DrawingDocumentResolved | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // Non-blocking message for failed actions (delete / approve / reject ...)
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserContext | null>(null);
 
   // Real org-membership rows from /my-memberships/ (OrganisationMembership),
@@ -113,6 +136,9 @@ function DocumentsPageInner() {
 
   // Bulk share (checklist + A4 print of guest links)
   const [showBulkShare, setShowBulkShare] = useState<boolean>(false);
+
+  // Org-wide activity log (admins only)
+  const [showActivityLog, setShowActivityLog] = useState<boolean>(false);
 
   const [privateCount, setPrivateCount] = useState<number>(0);
   const [publicCount, setPublicCount] = useState<number>(0);
@@ -159,8 +185,6 @@ function DocumentsPageInner() {
   const isGuest = currentUser?.id === 0;
 
   // Fetch real OrganisationMembership rows once we know who's logged in.
-  // currentUser.roles isn't reliable for org-role gating (see drawingApi.ts),
-  // so canUpload below is derived from this instead.
   useEffect(() => {
     if (!currentUser || isGuest) {
       setMembershipsLoaded(true);
@@ -183,31 +207,30 @@ function DocumentsPageInner() {
     };
   }, [currentUser, isGuest]);
 
-  // A client-only user has no org-wide admin/manager/member membership anywhere.
-  // This only gates UI (hiding buttons that would otherwise fail or
-  // shouldn't be offered) — the real access boundary is enforced
-  // server-side regardless of what this computes to. Until memberships
-  // have loaded, default to false so the upload/edit/delete controls
-  // don't flash on before we know the user actually has a qualifying role.
+  // UI gating only — the server enforces every rule regardless.
   const hasElevatedRole = useMemo(
     () => membershipsLoaded && memberships.some((m) => UPLOAD_ROLES.includes(m.role)),
     [membershipsLoaded, memberships]
   );
   const canUpload = hasElevatedRole;
 
-  // Same admin/manager/member set gates the Status filter. A client (or
-  // anyone without a qualifying membership) never sees the control and is
-  // always restricted to published documents — enforced below in
-  // loadDocuments, not just hidden in the UI.
+  // Org-wide admin somewhere → can see the org activity log.
+  const isAdmin = useMemo(
+    () =>
+      membershipsLoaded &&
+      memberships.some((m) => m.role === "admin" && (m.project === null || m.project === undefined)),
+    [membershipsLoaded, memberships]
+  );
+
   const canFilterByStatus = hasElevatedRole;
 
   // Clients (and anyone without an admin/manager/member membership) are
   // always restricted to published documents, regardless of whatever
-  // selectedStatus happens to hold. Shared by loadDocuments and the bulk
-  // share modal so both see the exact same set of drawings.
-  const effectiveStatus: "draft" | "published" | "archived" | undefined = canFilterByStatus
+  // selectedStatus happens to hold.
+  const effectiveStatusView: StatusView | undefined = canFilterByStatus
     ? selectedStatus
     : "published";
+  const statusParams = statusViewToParams(effectiveStatusView);
 
   useEffect(() => {
     if (!currentUser || isGuest) return;
@@ -263,67 +286,78 @@ function DocumentsPageInner() {
     selectedDeliverableId,
     searchTerm,
     showPrivateOnly,
+    mineOnly,
     pageSize,
     sortOrder,
     selectedStatus,
   ]);
 
-  const loadDocuments = useCallback(async () => {
-    if (!currentUser || isGuest) return;
+  const loadDocuments = useCallback(
+    async (silent: boolean = false) => {
+      if (!currentUser || isGuest) return;
 
-    try {
-      setLoading(true);
-      setError(null);
+      try {
+        if (!silent) setLoading(true);
+        setError(null);
 
-      const data = await getDocuments({
-        organisationId: selectedOrgId,
-        projectId: selectedProjectId,
-        deliverableId: selectedDeliverableId,
-        search: searchTerm,
-        showPrivate: showPrivateOnly,
-        page: currentPage,
-        pageSize,
-        ordering: sortOrder === "newest" ? "-created_at" : "created_at",
-        status: effectiveStatus,
-      });
+        const ordering = sortOrder === "newest" ? "-created_at" : "created_at";
 
-      setDocuments(data.results);
-      setTotalCount(data.count);
+        const data = await getDocuments({
+          organisationId: selectedOrgId,
+          projectId: selectedProjectId,
+          deliverableId: selectedDeliverableId,
+          search: searchTerm,
+          showPrivate: showPrivateOnly,
+          mine: mineOnly,
+          page: currentPage,
+          pageSize,
+          ordering,
+          status: statusParams.status,
+          reviewState: statusParams.reviewState,
+        });
 
-      // Optional: exact privacy counts (fetches all; remove if too heavy)
-      const all = await getDocuments({
-        organisationId: selectedOrgId,
-        projectId: selectedProjectId,
-        deliverableId: selectedDeliverableId,
-        search: searchTerm,
-        page: 1,
-        pageSize: 1000,
-        ordering: sortOrder === "newest" ? "-created_at" : "created_at",
-        status: effectiveStatus,
-      });
-      const privCount = all.results.filter((d) => d.is_private).length;
-      const pubCount = all.results.filter((d) => !d.is_private).length;
-      setPrivateCount(privCount);
-      setPublicCount(pubCount);
-    } catch (err) {
-      console.error("Error loading documents:", err);
-      setError("Failed to load documents. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    selectedOrgId,
-    selectedProjectId,
-    selectedDeliverableId,
-    searchTerm,
-    showPrivateOnly,
-    currentPage,
-    pageSize,
-    currentUser,
-    isGuest,
-    sortOrder,
-    effectiveStatus,
-  ]);
+        setDocuments(data.results);
+        setTotalCount(data.count);
+
+        // Optional: privacy counts (backend caps page_size at 100, so this
+        // only counts the first 100 matches — known limitation)
+        const all = await getDocuments({
+          organisationId: selectedOrgId,
+          projectId: selectedProjectId,
+          deliverableId: selectedDeliverableId,
+          search: searchTerm,
+          mine: mineOnly,
+          page: 1,
+          pageSize: 1000,
+          ordering,
+          status: statusParams.status,
+          reviewState: statusParams.reviewState,
+        });
+        setPrivateCount(all.results.filter((d) => d.is_private).length);
+        setPublicCount(all.results.filter((d) => !d.is_private).length);
+      } catch (err) {
+        console.error("Error loading documents:", err);
+        setError("Failed to load documents. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      selectedOrgId,
+      selectedProjectId,
+      selectedDeliverableId,
+      searchTerm,
+      showPrivateOnly,
+      mineOnly,
+      currentPage,
+      pageSize,
+      currentUser,
+      isGuest,
+      sortOrder,
+      effectiveStatusView,
+    ]
+  );
 
   useEffect(() => {
     if (currentUser && !isGuest) {
@@ -392,32 +426,104 @@ function DocumentsPageInner() {
   };
 
   const handleDeleteDocument = async (doc: DrawingDocumentResolved) => {
-    if (!confirm(`Are you sure you want to delete "${doc.title}"? This action cannot be undone.`)) {
+    if (!confirm(`Delete the draft "${doc.title}"? This action cannot be undone.`)) {
       return;
     }
     try {
-      setLoading(true);
+      setActionMessage(null);
       await deleteDocument(doc.id);
-      await loadDocuments();
       setSelectedDoc(null);
+      await loadDocuments(true);
     } catch (err: unknown) {
       console.error("Error deleting document:", err);
-      setError(getErrorMessage(err) || "Failed to delete document");
-    } finally {
-      setLoading(false);
+      // e.g. "Approved drawings can't be deleted. Archive it instead."
+      setActionMessage(getErrorMessage(err) || "Failed to delete document");
+    }
+  };
+
+  // Called by the viewer's ApprovalPanel after approve/reject/archive/restore
+  const handleDocumentChanged = (updated: DrawingDocumentResolved) => {
+    setSelectedDoc(updated);
+    loadDocuments(true);
+  };
+
+  // Quick review actions on the card (admins)
+  const handleQuickApprove = async (doc: DrawingDocumentResolved) => {
+    try {
+      setActionMessage(null);
+      const updated = await approveDocument(doc.id);
+      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
+      await loadDocuments(true);
+    } catch (err) {
+      setActionMessage(getErrorMessage(err));
+    }
+  };
+
+  const handleQuickReject = async (doc: DrawingDocumentResolved) => {
+    const reason = window.prompt(`Reason for rejecting "${doc.title}" (optional):`);
+    if (reason === null) return;
+    try {
+      setActionMessage(null);
+      const updated = await rejectDocument(doc.id, reason);
+      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
+      await loadDocuments(true);
+    } catch (err) {
+      setActionMessage(getErrorMessage(err));
+    }
+  };
+
+  const handleQuickArchive = async (doc: DrawingDocumentResolved) => {
+    if (
+      !window.confirm(
+        `Archive "${doc.title}"? It will be hidden from the public and its share link will stop working.`
+      )
+    )
+      return;
+    try {
+      setActionMessage(null);
+      const updated = await archiveDocument(doc.id);
+      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
+      await loadDocuments(true);
+    } catch (err) {
+      setActionMessage(getErrorMessage(err));
+    }
+  };
+
+  const handleQuickRestore = async (doc: DrawingDocumentResolved) => {
+    if (!window.confirm(`Restore "${doc.title}" to published? It will be public again.`)) return;
+    try {
+      setActionMessage(null);
+      const updated = await restoreDocument(doc.id);
+      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
+      await loadDocuments(true);
+    } catch (err) {
+      setActionMessage(getErrorMessage(err));
     }
   };
 
   const handleFormSave = async (formData: FormData) => {
     try {
+      let savedId: number | null = null;
       if (formMode === "create") {
-        await createDocument(formData);
+        const created = await createDocument(formData);
+        savedId = created.id;
       } else if (editingDocument) {
         await updateDocument(editingDocument.id, formData);
+        savedId = editingDocument.id;
       }
-      await loadDocuments();
+      await loadDocuments(true);
       setIsFormOpen(false);
       setEditingDocument(null);
+
+      // Refresh the selected card's flags (e.g. a rejected draft that was just
+      // fixed becomes "pending" again)
+      if (savedId !== null && selectedDoc?.id === savedId) {
+        try {
+          setSelectedDoc(await getDocument(savedId));
+        } catch {
+          setSelectedDoc(null);
+        }
+      }
     } catch (err: unknown) {
       console.error("Error saving document:", err);
       throw err;
@@ -484,16 +590,17 @@ function DocumentsPageInner() {
     }
   };
 
-  const getStatusColor = (status: string): string => {
-    switch (status) {
+  // Card chip: rejected drafts get their own colour/label
+  const getCardStatus = (doc: DrawingDocumentResolved): { label: string; color: string } => {
+    if (doc.review_state === "rejected") return { label: "rejected", color: "#A32D2D" };
+    if (doc.review_state === "pending") return { label: "pending review", color: "#E67E22" };
+    switch (doc.status) {
       case "published":
-        return "#0F6E56";
-      case "draft":
-        return "#E67E22";
+        return { label: "published", color: "#0F6E56" };
       case "archived":
-        return "#6E6B62";
+        return { label: "archived", color: "#6E6B62" };
       default:
-        return "#6E6B62";
+        return { label: doc.status, color: "#E67E22" };
     }
   };
 
@@ -503,9 +610,10 @@ function DocumentsPageInner() {
     setSelectedDeliverableId(undefined);
     setSearchTerm("");
     setShowPrivateOnly(false);
+    setMineOnly(false);
     setCurrentPage(1);
     setSortOrder("newest");
-    setSelectedStatus(undefined);
+    setSelectedStatus("published");
   };
 
   const hasActiveFilters =
@@ -513,7 +621,8 @@ function DocumentsPageInner() {
     selectedProjectId !== undefined ||
     selectedDeliverableId !== undefined ||
     searchTerm.trim() !== "" ||
-    (canFilterByStatus && selectedStatus !== undefined);
+    mineOnly ||
+    (canFilterByStatus && selectedStatus !== "published");
 
   if (!currentUser) {
     return (
@@ -565,6 +674,12 @@ function DocumentsPageInner() {
               <i className="ti ti-share" />
               Share
             </button>
+            {isAdmin && (
+              <button className="btn-secondary" onClick={() => setShowActivityLog(true)}>
+                <i className="ti ti-history" />
+                Activity
+              </button>
+            )}
             {canUpload && (
               <button
                 className="btn-primary"
@@ -578,17 +693,17 @@ function DocumentsPageInner() {
                 New Document
               </button>
             )}
-            {selectedDoc && canUpload && (
-              <>
-                <button className="btn-secondary" onClick={() => handleEditDocument(selectedDoc)}>
-                  <i className="ti ti-edit" />
-                  Edit
-                </button>
-                <button className="btn-danger" onClick={() => handleDeleteDocument(selectedDoc)}>
-                  <i className="ti ti-trash" />
-                  Delete
-                </button>
-              </>
+            {selectedDoc?.permissions?.can_edit && (
+              <button className="btn-secondary" onClick={() => handleEditDocument(selectedDoc)}>
+                <i className="ti ti-edit" />
+                Edit
+              </button>
+            )}
+            {selectedDoc?.permissions?.can_delete && (
+              <button className="btn-danger" onClick={() => handleDeleteDocument(selectedDoc)}>
+                <i className="ti ti-trash" />
+                Delete draft
+              </button>
             )}
           </div>
           <span className="documents-role-badge">
@@ -649,6 +764,26 @@ function DocumentsPageInner() {
         </div>
       </div>
 
+      {actionMessage && (
+        <div
+          className="approval-panel approval-panel-rejected"
+          style={{ marginBottom: 16, borderRadius: 4, border: "1px solid #F0C9C9" }}
+          role="alert"
+        >
+          <div className="approval-panel-row">
+            <span className="approval-panel-error" style={{ marginTop: 0 }}>
+              <i className="ti ti-alert-circle" /> {actionMessage}
+            </span>
+            <button
+              className="approval-btn approval-btn-ghost approval-btn-sm"
+              onClick={() => setActionMessage(null)}
+            >
+              <i className="ti ti-x" /> Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="documents-controls">
         <div className="documents-search">
           <i className="ti ti-search" aria-hidden="true" />
@@ -686,6 +821,15 @@ function DocumentsPageInner() {
           <i className="ti ti-lock" />
           Private Only
         </button>
+        {canFilterByStatus && (
+          <button
+            className={`documents-privacy-btn ${mineOnly ? "active" : ""}`}
+            onClick={() => setMineOnly((v) => !v)}
+          >
+            <i className="ti ti-user" />
+            My uploads
+          </button>
+        )}
       </div>
 
       <div className="documents-filters">
@@ -753,17 +897,15 @@ function DocumentsPageInner() {
             </label>
             <select
               className="documents-filter-select"
-              value={selectedStatus ?? ""}
-              onChange={(e) =>
-                setSelectedStatus(
-                  e.target.value ? (e.target.value as "draft" | "published" | "archived") : undefined
-                )
-              }
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value as StatusView)}
             >
-              <option value="">All Statuses</option>
-              <option value="draft">Draft</option>
               <option value="published">Published</option>
+              <option value="pending">Pending review</option>
+              <option value="rejected">Rejected</option>
+              <option value="draft">All drafts</option>
               <option value="archived">Archived</option>
+              <option value="all">All statuses</option>
             </select>
           </div>
         )}
@@ -799,7 +941,7 @@ function DocumentsPageInner() {
         <div className="documents-error">
           <i className="ti ti-alert-circle" aria-hidden="true" />
           <p>{error}</p>
-          <button onClick={loadDocuments} className="documents-retry-btn">
+          <button onClick={() => loadDocuments()} className="documents-retry-btn">
             Retry
           </button>
         </div>
@@ -810,6 +952,8 @@ function DocumentsPageInner() {
               <div className="documents-grid">
                 {documents.map((doc) => {
                   const displayUrl = getDisplayFileUrl(doc);
+                  const cardStatus = getCardStatus(doc);
+                  const perms = doc.permissions;
                   return (
                     <div
                       key={doc.id}
@@ -859,9 +1003,9 @@ function DocumentsPageInner() {
                         )}
                         <div
                           className="documents-card-status"
-                          style={{ background: getStatusColor(doc.status) }}
+                          style={{ background: cardStatus.color }}
                         >
-                          {doc.status}
+                          {cardStatus.label}
                         </div>
                         {doc.is_private && (
                           <div className="documents-card-privacy-badge">
@@ -897,6 +1041,15 @@ function DocumentsPageInner() {
                             </span>
                           )}
                         </h3>
+
+                        {doc.review_state === "rejected" && (
+                          <div className="documents-card-rejection">
+                            <strong>Rejected</strong>
+                            {doc.rejected_by_name ? ` by ${doc.rejected_by_name}` : ""}
+                            {doc.rejection_reason ? ` — ${doc.rejection_reason}` : ""}
+                          </div>
+                        )}
+
                         <p className="documents-card-description">{doc.description}</p>
 
                         <div className="documents-card-meta">
@@ -930,6 +1083,92 @@ function DocumentsPageInner() {
                             </span>
                           )}
                         </div>
+
+                        {perms &&
+                          (perms.can_approve ||
+                            perms.can_reject ||
+                            perms.can_edit ||
+                            perms.can_delete ||
+                            perms.can_archive ||
+                            perms.can_restore) && (
+                            <div className="documents-card-review-actions">
+                              {perms.can_approve && (
+                                <button
+                                  className="approval-btn approval-btn-approve approval-btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickApprove(doc);
+                                  }}
+                                >
+                                  <i className="ti ti-check" />
+                                  {doc.review_state === "rejected" ? "Re-approve" : "Approve"}
+                                </button>
+                              )}
+                              {perms.can_reject && (
+                                <button
+                                  className="approval-btn approval-btn-reject approval-btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickReject(doc);
+                                  }}
+                                >
+                                  <i className="ti ti-x" />
+                                  Reject
+                                </button>
+                              )}
+                              {/* Edit: authors on their own drafts; admins on anything.
+                                  (Admins reviewing a draft use the header Edit button.) */}
+                              {perms.can_edit && !(perms.can_approve && doc.status === "draft") && (
+                                <button
+                                  className="approval-btn approval-btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditDocument(doc);
+                                  }}
+                                >
+                                  <i className="ti ti-edit" />
+                                  {doc.review_state === "rejected" ? "Edit & resubmit" : "Edit"}
+                                </button>
+                              )}
+                              {perms.can_archive && (
+                                <button
+                                  className="approval-btn approval-btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickArchive(doc);
+                                  }}
+                                >
+                                  <i className="ti ti-archive" />
+                                  Archive
+                                </button>
+                              )}
+                              {perms.can_restore && (
+                                <button
+                                  className="approval-btn approval-btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleQuickRestore(doc);
+                                  }}
+                                >
+                                  <i className="ti ti-arrow-back-up" />
+                                  Restore
+                                </button>
+                              )}
+                              {/* can_delete is only ever true for drafts */}
+                              {perms.can_delete && (
+                                <button
+                                  className="approval-btn approval-btn-reject approval-btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteDocument(doc);
+                                  }}
+                                >
+                                  <i className="ti ti-trash" />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          )}
 
                         <div className="documents-card-actions">
                           <span className="documents-card-size">
@@ -1057,6 +1296,7 @@ function DocumentsPageInner() {
           onClose={() => setIsViewerOpen(false)}
           onFavoriteToggle={handleToggleFavorite}
           onDownload={handleDownload}
+          onDocumentChange={handleDocumentChanged}
         />
       )}
 
@@ -1083,9 +1323,20 @@ function DocumentsPageInner() {
           search: searchTerm,
           showPrivate: showPrivateOnly,
           ordering: sortOrder === "newest" ? "-created_at" : "created_at",
-          status: effectiveStatus,
+          // Only approved (published) drawings can be shared.
+          status: "published",
         }}
       />
+
+      {isAdmin && (
+        <ActivityLogModal
+          open={showActivityLog}
+          onClose={() => setShowActivityLog(false)}
+          organisations={organisations}
+          initialOrganisationId={selectedOrgId}
+          focusDocument={selectedDoc ? { id: selectedDoc.id, title: selectedDoc.title } : null}
+        />
+      )}
     </main>
   );
 }

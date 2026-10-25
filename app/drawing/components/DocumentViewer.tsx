@@ -9,6 +9,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { DrawingDocumentResolved } from "../types";
 import { getFullFileUrl } from "../drawingApi";
 import ShareLinkModal from "./ShareLinkModal";
+import ApprovalPanel from "./ApprovalPanel";
 
 // Point react-pdf's worker at a CDN build matching the installed version.
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -26,6 +27,8 @@ interface DocumentViewerProps {
    * page (e.g. /drawing/<code>), so there is nothing to close back to.
    */
   hideActionsOnMobile?: boolean;
+  /** Called with the fresh document after approve / reject / archive / restore. */
+  onDocumentChange?: (doc: DrawingDocumentResolved) => void;
 }
 
 const MIN_ZOOM = 0.5;
@@ -53,6 +56,7 @@ export default function DocumentViewer({
   onDownload,
   guestMode = false,
   hideActionsOnMobile = false,
+  onDocumentChange,
 }: DocumentViewerProps) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
@@ -464,7 +468,8 @@ export default function DocumentViewer({
                 <span className="document-viewer-btn-label">Favorite</span>
               </button>
             )}
-            {!guestMode && (
+            {/* Only approved (published) drawings can be shared */}
+            {!guestMode && doc.status === 'published' && (
               <button
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-share"
                 onClick={() => setIsShareOpen(true)}
@@ -560,6 +565,9 @@ export default function DocumentViewer({
             <p>{doc.description}</p>
           </div>
         )}
+
+        {/* Approval status, approve/reject/archive/restore, per-drawing history */}
+        {!guestMode && <ApprovalPanel document={doc} onChanged={onDocumentChange} />}
 
         <div className="document-viewer-content">
           {isLoading && !hasError && (
