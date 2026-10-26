@@ -246,20 +246,34 @@ function DocumentsPageInner() {
     loadOrganisations();
   }, [currentUser, isGuest]);
 
+  // Projects are only loaded once an organisation is selected.
+  // With no organisation chosen the list stays empty and nothing is fetched.
   useEffect(() => {
     if (!currentUser || isGuest) return;
+
+    setSelectedProjectId(undefined);
+    setSelectedDeliverableId(undefined);
+
+    if (selectedOrgId === undefined) {
+      setProjects([]);
+      return;
+    }
+
+    let cancelled = false;
     const loadProjects = async () => {
       try {
         const data = await getProjects(selectedOrgId);
-        setProjects(data);
+        if (!cancelled) setProjects(data);
       } catch (err) {
+        if (cancelled) return;
         console.error("Error loading projects:", err);
         setError("Failed to load projects");
       }
     };
     loadProjects();
-    setSelectedProjectId(undefined);
-    setSelectedDeliverableId(undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [selectedOrgId, currentUser, isGuest]);
 
   useEffect(() => {
@@ -859,9 +873,11 @@ function DocumentsPageInner() {
             className="documents-filter-select"
             value={selectedProjectId ?? ""}
             onChange={(e) => setSelectedProjectId(e.target.value ? Number(e.target.value) : undefined)}
-            disabled={projects.length === 0}
+            disabled={selectedOrgId === undefined || projects.length === 0}
           >
-            <option value="">All Projects</option>
+            <option value="">
+              {selectedOrgId === undefined ? "Select organisation first" : "All Projects"}
+            </option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}

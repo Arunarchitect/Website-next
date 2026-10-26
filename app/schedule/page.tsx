@@ -639,13 +639,10 @@ export default function ScheduleView() {
       return n;
     });
 
-  // ── Auto-schedule: always holiday aware, push-only ──────────────────────
-  // compress = false: a task never moves earlier than its current start.
-  // Links can only push tasks later, so a missing/deleted link can no longer
-  // pull a task up to today.
+  // ── Auto-schedule: always holiday aware ─────────────────────────────────
   const runAutoSchedule = () => {
     setUseWorkdays(true); // durations and holiday shading match the result
-    setTasks((prev) => autoScheduleWorkdays(prev, sequences, calendar, false));
+    setTasks((prev) => autoScheduleWorkdays(prev, sequences, calendar));
   };
 
   const notify = (msg: string) => {
@@ -1052,7 +1049,7 @@ export default function ScheduleView() {
     setMenuFor((cur) => (cur && toRemove.has(cur) ? null : cur));
     setEditingId((cur) => (cur && toRemove.has(cur) ? null : cur));
   };
-
+  
   const updateTask = (id: string, incoming: Partial<Task>) => {
     let patch: Partial<Task> = incoming;
     const existing = tasks.find((t) => t.id === id);
