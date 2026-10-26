@@ -639,10 +639,13 @@ export default function ScheduleView() {
       return n;
     });
 
-  // ── Auto-schedule: always holiday aware ─────────────────────────────────
+  // ── Auto-schedule: always holiday aware, push-only ──────────────────────
+  // compress = false: a task never moves earlier than its current start.
+  // Links can only push tasks later, so a missing/deleted link can no longer
+  // pull a task up to today.
   const runAutoSchedule = () => {
     setUseWorkdays(true); // durations and holiday shading match the result
-    setTasks((prev) => autoScheduleWorkdays(prev, sequences, calendar));
+    setTasks((prev) => autoScheduleWorkdays(prev, sequences, calendar, false));
   };
 
   const notify = (msg: string) => {
@@ -1010,11 +1013,39 @@ export default function ScheduleView() {
         parentOfRoot && !toRemove.has(parentOfRoot) ? parentOfRoot : null
       )
     );
-    setSequences((prev) =>
-      prev.filter(
+    setSequences((prev) => {
+      const kept = prev.filter(
         (s) => !toRemove.has(s.relatingTask) && !toRemove.has(s.relatedTask)
-      )
-    );
+      );
+
+      // Bridge predecessors to successors only when deleting a single leaf task.
+      // Deleting a group removes its whole subtree, so no bridging there.
+      if (toRemove.size !== 1) return kept;
+
+      const preds = prev.filter((s) => s.relatedTask === id);
+      const succs = prev.filter((s) => s.relatingTask === id);
+      const result: Sequence[] = [...kept];
+
+      for (const p of preds) {
+        for (const s of succs) {
+          const a = p.relatingTask;
+          const b = s.relatedTask;
+          if (a === b) continue;
+          // skip if a link a -> b already exists
+          if (result.some((x) => x.relatingTask === a && x.relatedTask === b)) continue;
+          // skip if it would create a cycle
+          if (wouldCycle(result, a, b)) continue;
+          result.push({
+            id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            relatingTask: a,
+            relatedTask: b,
+            sequenceType: "FINISH_START",
+            lagDays: 0,
+          });
+        }
+      }
+      return result;
+    });
     setSelectedId((cur) => (cur && toRemove.has(cur) ? null : cur));
     setFlashId((cur) => (cur && toRemove.has(cur) ? null : cur));
     setPicker((cur) => (cur && toRemove.has(cur.taskId) ? null : cur));
