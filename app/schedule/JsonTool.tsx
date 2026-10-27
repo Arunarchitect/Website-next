@@ -1,31 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Sequence, Task } from "./data";
+import type { Sequence, SequenceType, Task } from "./data";
+import { toDay } from "./scheduling";
 
 /**
  * Copy / paste SELECTED tasks as JSON for AI editing.
  *
  * COPY: the chosen tasks (scopeIds) + the links whose BOTH ends are in the
- * selection. "parents" is read-only context so the AI knows valid parentIds.
- * "people" (if present) is read-only context listing valid assigneeIds.
+ * selection ("sequences"). Links with only ONE end in the selection are listed
+ * read-only in "externalLinks" (+ "outsideTasks" names) so the AI knows they
+ * exist; they are kept automatically on paste.
  *
  * PASTE (matched by task id):
  *   - id exists in the schedule  → that task is updated (fields merged)
  *   - id is new                  → task is added
  *   - id in scopeIds but missing → task is removed (links to it dropped)
- * Tasks outside scopeIds are never touched. Links with one end outside the
- * selection are kept unless the inside end was removed. Pasted links may point
- * to any existing task.
+ * Tasks outside scopeIds are never touched.
  *
- * scopeIds is OPTIONAL. When missing, the paste is treated as a WHOLE-DOCUMENT
- * replace: every existing task is in scope, so anything not present in the
- * new `tasks[]` is removed. Scoped pastes (Paste into selection) still
- * require scopeIds.
+ * scopeIds is OPTIONAL. When missing, the paste is a WHOLE-DOCUMENT replace.
  */
 
 export interface SelectionJson {
-  /** Read-only on paste: tells the AI what to do. */
   request?: string;
   instructions?: string[];
   scopeIds: string[];
@@ -33,18 +29,40 @@ export interface SelectionJson {
   sequences: Sequence[];
   parents?: { id: string; name: string }[];
   people?: { id: number; name: string }[];
+  /** Read-only context. */
+  groupIds?: string[];
+  outsideTasks?: { id: string; name: string; isGroup: boolean }[];
+  externalLinks?: unknown[];
   exportedAt: string;
 }
 
+/**
+ * Shared by "Copy selected" and "Copy for AI" (ScheduleExport imports this),
+ * so both buttons always tell the AI the same thing about links.
+ */
+export const LINK_RULES = [
+  "LINKS: every item in 'sequences' is {id, relatingTask, relatedTask, sequenceType, lagDays}.",
+  "relatingTask = the PREDECESSOR (the task that comes first). relatedTask = the SUCCESSOR (the task that waits for it). Never swap them. Never use the names from/to/predecessor/successor.",
+  "Read a link as: relatingTask <sequenceType> relatedTask. Example: 'Plastering must finish before Tiling can start' = {\"id\":\"s-new-1\",\"relatingTask\":\"a-plast\",\"relatedTask\":\"a-tile\",\"sequenceType\":\"FINISH_START\",\"lagDays\":0}.",
+  "sequenceType must be EXACTLY one of: FINISH_START (successor starts after predecessor finishes; the default and most common), START_START (successor starts after predecessor starts), FINISH_FINISH (successor finishes after predecessor finishes), START_FINISH (successor finishes after predecessor starts; rare). Never write FS/SS/FF/SF.",
+  "lagDays is a whole number of CALENDAR days (not working days): 0 = no gap, 5 = wait 5 days, negative = overlap (lead).",
+  "Link LEAF tasks only (tasks that have no children). Never link a group/phase (see 'groupIds').",
+  "Both ids in a link must be real task ids: in 'tasks', in 'outsideTasks', or already in the schedule. Never invent an id in a link.",
+  "No self-links. No duplicate pair (same relatingTask + relatedTask). No cycles: if A→B exists, never add B→A, directly or through a chain (A→B→C→A).",
+  "To edit an existing link keep its 'id'. A new link needs a new unique id (e.g. 's-new-1'). To delete a link, remove it from 'sequences'. If you delete a task, its links disappear automatically.",
+  "Keep dates consistent with links: for FINISH_START the successor's scheduleStart must be after the predecessor's scheduleFinish plus lagDays. Do NOT change dates, completion or actual dates of tasks that have actualStart/actualFinish or completion above 0.",
+];
+
 const AI_INSTRUCTIONS = [
-  "You are editing part of a construction schedule (Gantt). Do what 'request' asks by editing ONLY 'tasks' and 'sequences', then reply with the full JSON object only (no commentary, no extra fields).",
+  "You are editing part of a construction schedule (Gantt). Do what 'request' asks by editing ONLY 'tasks' and 'sequences', then reply with the full JSON object only (no commentary, no markdown fences, no extra fields).",
   "KEEP 'scopeIds' EXACTLY as given — it lists which existing task ids this paste is allowed to touch. Do not rename, drop, or reorder it.",
   "Keep existing task ids. Every NEW task needs a unique new id (e.g. 'a-new-1'). To delete a task, remove it from 'tasks'.",
   "Dates are YYYY-MM-DD, scheduleFinish must not be before scheduleStart, completion is 0-100, isMilestone is true/false.",
   "parentId must be null, the id of another task in 'tasks', or one of the ids listed in 'parents'.",
-  "Each sequence is {id, relatingTask (predecessor), relatedTask (successor), sequenceType: FINISH_START | START_START | FINISH_FINISH | START_FINISH, lagDays}. No self-links, duplicates or dependency cycles.",
-  "assigneeIds is a list of person ids from 'people' (if present). Use only those ids; never invent ids.",
-  "Leave 'request', 'instructions' and 'parents' unchanged or omit them.",
+  "assigneeIds is a list of person ids from 'people' (if present). Use only those ids; never invent ids. Only leaf tasks get assignees.",
+  ...LINK_RULES,
+  "'sequences' contains ONLY links where both ends are inside the selection. 'externalLinks' are links between a selected task and a task OUTSIDE it: they are read-only, they are kept automatically, and you must NOT copy them into 'sequences'. To ADD a new link to an outside task, put it in 'sequences' using that task's id from 'outsideTasks'.",
+  "Leave 'request', 'instructions', 'parents', 'groupIds', 'outsideTasks', 'externalLinks' and 'people' unchanged or omit them.",
 ];
 
 /** Accepts raw JSON, ```json fenced JSON, or JSON surrounded by chatter. */
@@ -61,42 +79,66 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const seqKey = (s: Pick<Sequence, "relatingTask" | "relatedTask">) =>
   `${s.relatingTask}->${s.relatedTask}`;
 
+const VALID_TYPES = new Set<string>([
+  "FINISH_START",
+  "START_START",
+  "FINISH_FINISH",
+  "START_FINISH",
+]);
+const TYPE_ALIASES: Record<string, SequenceType> = {
+  FS: "FINISH_START",
+  SS: "START_START",
+  FF: "FINISH_FINISH",
+  SF: "START_FINISH",
+};
+const TYPE_LABEL: Record<string, string> = {
+  FINISH_START: "finishes → starts",
+  START_START: "starts → starts",
+  FINISH_FINISH: "finishes → finishes",
+  START_FINISH: "starts → finishes",
+};
+
+/** "fs", "Finish-Start", "FINISH START" → canonical enum; unknown stays as-is. */
+function normType(v: unknown): string | undefined {
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  const k = v.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return TYPE_ALIASES[k] ?? k;
+}
+
 // ── NORMALIZE (AI-shape tolerance) ────────────────────────────────────────
-//
-// Some AI tools emit sequences as { from, to, ... } instead of the app's
-// { relatingTask, relatedTask, ... }. Some replies also add a "_instructions"
-// array, "calendar", or other commentary keys. Normalize whatever the AI sent
-// back into the app's canonical shape and drop everything we don't recognize.
 
 type RawSequence = {
   id?: string;
-  // canonical
   relatingTask?: string;
   relatedTask?: string;
-  // AI-friendly aliases
   from?: string;
   to?: string;
   predecessor?: string;
   successor?: string;
-  // common fields
-  sequenceType?: Sequence["sequenceType"];
-  lagDays?: number;
+  sequenceType?: string;
+  type?: string;
+  lagDays?: number | string;
+  lag?: number | string;
 };
 
-/** Best-effort extraction of (predecessor, successor) from a raw sequence. */
 function pickEnds(s: RawSequence): { pred?: string; succ?: string } {
-  const pred = s.relatingTask ?? s.from ?? s.predecessor ?? undefined;
-  const succ = s.relatedTask ?? s.to ?? s.successor ?? undefined;
-  return { pred, succ };
+  return {
+    pred: s.relatingTask ?? s.from ?? s.predecessor ?? undefined,
+    succ: s.relatedTask ?? s.to ?? s.successor ?? undefined,
+  };
 }
 
-/** Turn whatever the AI sent into a canonical Sequence[]. */
+/** Turn whatever the AI sent into Sequence[] (type / lag are checked later). */
 function normalizeSequences(rawSeqs: unknown): {
   sequences: Sequence[];
   warnings: string[];
 } {
   const warnings: string[] = [];
-  if (!Array.isArray(rawSeqs)) return { sequences: [], warnings };
+  if (rawSeqs === undefined) return { sequences: [], warnings };
+  if (!Array.isArray(rawSeqs)) {
+    warnings.push('"sequences" is not an array — all links ignored.');
+    return { sequences: [], warnings };
+  }
   const out: Sequence[] = [];
   rawSeqs.forEach((raw, i) => {
     if (!raw || typeof raw !== "object") {
@@ -107,18 +149,23 @@ function normalizeSequences(rawSeqs: unknown): {
     const { pred, succ } = pickEnds(s);
     if (!pred || !succ) {
       warnings.push(
-        `sequences[${i}] is missing predecessor/successor ids — skipped.`
+        `sequences[${i}] is missing relatingTask (predecessor) or relatedTask (successor) — skipped.`
       );
       return;
     }
+    if (s.from !== undefined || s.to !== undefined) {
+      warnings.push(
+        `sequences[${i}] used from/to — read as predecessor=from, successor=to.`
+      );
+    }
+    const type = normType(s.sequenceType ?? s.type) ?? "FINISH_START";
+    const lagRaw = s.lagDays ?? s.lag ?? 0;
     out.push({
       id: typeof s.id === "string" && s.id ? s.id : `s-${pred}->${succ}`,
       relatingTask: pred,
       relatedTask: succ,
-      sequenceType: s.sequenceType ?? "FINISH_START",
-      lagDays: Number.isFinite(s.lagDays as number)
-        ? (s.lagDays as number)
-        : 0,
+      sequenceType: type as SequenceType,
+      lagDays: lagRaw === "" ? 0 : Number(lagRaw),
     });
   });
   return { sequences: out, warnings };
@@ -126,7 +173,6 @@ function normalizeSequences(rawSeqs: unknown): {
 
 // ── COPY ──────────────────────────────────────────────────────────────────
 
-/** id + all descendants of one task. */
 export function withDescendants(id: string, tasks: Task[]): string[] {
   const ids = new Set<string>([id]);
   const stack = [id];
@@ -142,7 +188,6 @@ export function withDescendants(id: string, tasks: Task[]): string[] {
   return [...ids];
 }
 
-/** Strip fields that the AI should not send back (none for now — keep whole Task). */
 function stripTaskForAi(t: Task): Task {
   return { ...t };
 }
@@ -154,32 +199,63 @@ export function collectSelection(
   people?: { id: number; name: string }[]
 ): SelectionJson {
   const scope = new Set(ids);
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const groupSet = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+  );
+  const nm = (id: string) => byId.get(id)?.name ?? id;
   const picked = tasks.filter((t) => scope.has(t.id));
   const parentIds = new Set(
     picked.map((t) => t.parentId).filter((p): p is string => !!p && !scope.has(p))
   );
+
+  const inside = sequences.filter(
+    (s) => scope.has(s.relatingTask) && scope.has(s.relatedTask)
+  );
+  const crossing = sequences.filter(
+    (s) => scope.has(s.relatingTask) !== scope.has(s.relatedTask)
+  );
+  const outsideIds = new Set<string>();
+  for (const s of crossing) {
+    if (!scope.has(s.relatingTask)) outsideIds.add(s.relatingTask);
+    if (!scope.has(s.relatedTask)) outsideIds.add(s.relatedTask);
+  }
+
   return {
-    // scopeIds FIRST — some AIs keep the first key they see but drop odd ones.
     scopeIds: picked.map((t) => t.id),
     tasks: picked.map(stripTaskForAi),
-    sequences: sequences
-      .filter((s) => scope.has(s.relatingTask) && scope.has(s.relatedTask))
-      // Emit the canonical field names. No `from`/`to`, no extras.
-      .map((s) => ({
-        id: s.id,
-        relatingTask: s.relatingTask,
-        relatedTask: s.relatedTask,
-        sequenceType: s.sequenceType,
-        lagDays: s.lagDays,
-      })),
+    sequences: inside.map((s) => ({
+      id: s.id,
+      relatingTask: s.relatingTask,
+      relatedTask: s.relatedTask,
+      sequenceType: s.sequenceType,
+      lagDays: s.lagDays,
+    })),
     request:
       "Edit ONLY the 'tasks' and 'sequences' arrays. DO NOT remove or rename 'scopeIds' — it must stay exactly as copied. Then: <<WRITE YOUR CHANGE HERE>>",
     instructions: AI_INSTRUCTIONS,
     parents: tasks
       .filter((t) => parentIds.has(t.id))
       .map((t) => ({ id: t.id, name: t.name })),
+    groupIds: picked.filter((t) => groupSet.has(t.id)).map((t) => t.id),
+    outsideTasks: [...outsideIds].map((id) => ({
+      id,
+      name: nm(id),
+      isGroup: groupSet.has(id),
+    })),
+    externalLinks: crossing.map((s) => ({
+      id: s.id,
+      relatingTask: s.relatingTask,
+      relatedTask: s.relatedTask,
+      sequenceType: s.sequenceType,
+      lagDays: s.lagDays,
+      outside: scope.has(s.relatingTask) ? "successor" : "predecessor",
+      meaning: `"${nm(s.relatingTask)}" ${TYPE_LABEL[s.sequenceType] ?? s.sequenceType} "${nm(s.relatedTask)}"`,
+    })),
     exportedAt: new Date().toISOString(),
-    ...(people?.length ? { people: people.map((p) => ({ id: p.id, name: p.name })) } : {}),
+    ...(people?.length
+      ? { people: people.map((p) => ({ id: p.id, name: p.name })) }
+      : {}),
   };
 }
 
@@ -191,12 +267,14 @@ export async function copyTasksForAi(
 ): Promise<{ ok: boolean; message: string }> {
   const payload = collectSelection(ids, tasks, sequences, people);
   const text = JSON.stringify(payload, null, 2);
-  const msg = `Copied ${payload.tasks.length} task(s), ${payload.sequences.length} link(s).`;
+  const ext = payload.externalLinks?.length ?? 0;
+  const msg =
+    `Copied ${payload.tasks.length} task(s), ${payload.sequences.length} link(s)` +
+    (ext ? ` (+${ext} external, read-only).` : ".");
   try {
     await navigator.clipboard.writeText(text);
     return { ok: true, message: msg };
   } catch {
-    // Clipboard API denied (non-HTTPS / permissions) — fallback.
     const ta = document.createElement("textarea");
     ta.value = text;
     document.body.appendChild(ta);
@@ -214,39 +292,44 @@ export async function copyTasksForAi(
 export interface PasteResult {
   ok: boolean;
   errors: string[];
-  /** Non-fatal notes (e.g. unknown top-level keys that were ignored). */
   notes?: string[];
   data?: SelectionJson;
   summary?: string;
 }
 
-/** Kahn's algorithm — true if the link graph has a cycle. */
-function graphHasCycle(allTaskIds: Set<string>, seqs: Sequence[]): boolean {
-  const succ = new Map<string, string[]>();
-  const indeg = new Map<string, number>();
-  for (const id of allTaskIds) indeg.set(id, 0);
+/** Returns a cycle as a list of ids (first == last), or null. */
+function findCycle(ids: Set<string>, seqs: Sequence[]): string[] | null {
+  const adj = new Map<string, string[]>();
   for (const s of seqs) {
-    if (!allTaskIds.has(s.relatingTask) || !allTaskIds.has(s.relatedTask))
-      continue;
-    if (!succ.has(s.relatingTask)) succ.set(s.relatingTask, []);
-    succ.get(s.relatingTask)!.push(s.relatedTask);
-    indeg.set(s.relatedTask, (indeg.get(s.relatedTask) ?? 0) + 1);
+    if (!ids.has(s.relatingTask) || !ids.has(s.relatedTask)) continue;
+    adj.set(s.relatingTask, [...(adj.get(s.relatingTask) ?? []), s.relatedTask]);
   }
-  const queue = [...indeg.entries()].filter(([, d]) => d === 0).map(([id]) => id);
-  let seen = 0;
-  while (queue.length) {
-    const id = queue.pop()!;
-    seen++;
-    for (const nxt of succ.get(id) ?? []) {
-      const d = (indeg.get(nxt) ?? 0) - 1;
-      indeg.set(nxt, d);
-      if (d === 0) queue.push(nxt);
+  const state = new Map<string, 0 | 1 | 2>();
+  const stack: string[] = [];
+  const dfs = (u: string): string[] | null => {
+    state.set(u, 1);
+    stack.push(u);
+    for (const v of adj.get(u) ?? []) {
+      const st = state.get(v) ?? 0;
+      if (st === 1) return [...stack.slice(stack.indexOf(v)), v];
+      if (st === 0) {
+        const r = dfs(v);
+        if (r) return r;
+      }
+    }
+    stack.pop();
+    state.set(u, 2);
+    return null;
+  };
+  for (const id of ids) {
+    if ((state.get(id) ?? 0) === 0) {
+      const r = dfs(id);
+      if (r) return r;
     }
   }
-  return seen < allTaskIds.size;
+  return null;
 }
 
-/** Links that survive a paste (untouched by the selection). */
 function keptSequences(
   sequences: Sequence[],
   scope: Set<string>,
@@ -254,7 +337,7 @@ function keptSequences(
 ): Sequence[] {
   return sequences.filter((s) => {
     if (removed.has(s.relatingTask) || removed.has(s.relatedTask)) return false;
-    if (scope.has(s.relatingTask) && scope.has(s.relatedTask)) return false; // replaced by paste
+    if (scope.has(s.relatingTask) && scope.has(s.relatedTask)) return false;
     return true;
   });
 }
@@ -263,7 +346,6 @@ export function validatePasteJson(
   text: string,
   tasks: Task[],
   sequences: Sequence[],
-  /** When set (scoped paste), the JSON may only touch these task ids. */
   restrictTo?: Set<string>
 ): PasteResult {
   const errors: string[] = [];
@@ -281,18 +363,20 @@ export function validatePasteJson(
     return { ok: false, errors: ["Top level must be a JSON object."] };
   }
 
-  // Note (don't reject) unknown top-level keys. AI tools frequently echo
-  // back "_instructions", "notes", "calendar", etc.
   const KNOWN_KEYS = new Set([
     "request",
     "instructions",
-    "_instructions", // tolerated: AI reply header
+    "_instructions",
+    "_linkMeanings",
     "scopeIds",
     "tasks",
     "sequences",
     "parents",
     "people",
-    "calendar", // tolerated: some AIs echo it back
+    "groupIds",
+    "outsideTasks",
+    "externalLinks",
+    "calendar",
     "exportedAt",
   ]);
   const extras = Object.keys(obj).filter((k) => !KNOWN_KEYS.has(k));
@@ -306,10 +390,6 @@ export function validatePasteJson(
     errors.push('"tasks" must be a non-empty array.');
   }
 
-  // scopeIds is OPTIONAL for a whole-document paste. When it's missing, every
-  // existing task is treated as in-scope (i.e. anything not in the new tasks[]
-  // is removed). For a SCOPED paste (Paste into selection), scopeIds must be
-  // present, otherwise the paste could touch tasks the user did not select.
   const scopeProvided =
     Array.isArray(obj.scopeIds) && (obj.scopeIds as unknown[]).length > 0;
 
@@ -329,7 +409,7 @@ export function validatePasteJson(
     : new Set(tasks.map((t) => t.id));
   const existingById = new Map(tasks.map((t) => [t.id, t]));
 
-  // 2 ── scope must exist in the current schedule (no-op for whole-doc paste)
+  // 2 ── scope must exist
   for (const id of scope) {
     if (!existingById.has(id)) {
       errors.push(`scopeIds has "${id}" which no longer exists in the schedule.`);
@@ -390,7 +470,7 @@ export function validatePasteJson(
   });
   if (errors.length) return { ok: false, errors, notes };
 
-  // 4 ── id collisions: a pasted id that exists but was NOT in the selection
+  // 4 ── id collisions
   for (const t of cleaned) {
     if (existingById.has(t.id) && !scope.has(t.id)) {
       errors.push(
@@ -399,14 +479,14 @@ export function validatePasteJson(
     }
   }
 
-  // 5 ── removed = selected but missing from paste
+  // 5 ── removed
   const removed = new Set([...scope].filter((id) => !pasteIds.has(id)));
   const finalIds = new Set<string>([
     ...tasks.filter((t) => !removed.has(t.id)).map((t) => t.id),
     ...pasteIds,
   ]);
 
-  // 6 ── parents: must exist after the paste, no parent cycles, nobody orphaned
+  // 6 ── parents
   const finalParent = new Map<string, string | null>();
   for (const t of tasks) {
     if (!removed.has(t.id)) finalParent.set(t.id, t.parentId ?? null);
@@ -440,7 +520,7 @@ export function validatePasteJson(
     }
   }
 
-  // 6b ── scoped paste: parents may only be pasted tasks or the selection's existing parents
+  // 6b ── scoped paste parents
   if (restrictTo) {
     const allowedParents = new Set<string | null>([...pasteIds]);
     for (const id of scope) allowedParents.add(existingById.get(id)?.parentId ?? null);
@@ -453,23 +533,66 @@ export function validatePasteJson(
     }
   }
 
-  // 7 ── sequences (tolerant normalization: accept `from`/`to` too)
+  // Helpers for readable link errors
+  const cleanedById = new Map(cleaned.map((t) => [t.id, t]));
+  const nameOf = (id: string) =>
+    cleanedById.get(id)?.name ?? existingById.get(id)?.name ?? id;
+  const finalGroups = new Set(
+    [...finalParent.values()].filter((p): p is string => !!p)
+  );
+  const linkLabel = (s: Sequence) =>
+    `Link "${nameOf(s.relatingTask)}" → "${nameOf(s.relatedTask)}"`;
+
+  // 7 ── sequences
   const { sequences: rawSeqs, warnings: seqWarn } = normalizeSequences(
     obj.sequences
   );
   for (const w of seqWarn) notes.push(w);
 
+  const kept = keptSequences(sequences, scope, removed);
+  const keptKeys = new Set(kept.map(seqKey));
+  const keptIds = new Set(kept.map((s) => s.id));
+
   const seenSeq = new Set<string>();
+  const seenSeqIds = new Set<string>();
   const cleanedSeqs: Sequence[] = [];
   for (const s of rawSeqs) {
-    if (!finalIds.has(s.relatingTask) || !finalIds.has(s.relatedTask)) {
+    const label = linkLabel(s);
+
+    if (!VALID_TYPES.has(s.sequenceType)) {
       errors.push(
-        `Sequence ${s.relatingTask}→${s.relatedTask} points to a task that does not exist.`
+        `${label}: sequenceType "${s.sequenceType}" is invalid. Use FINISH_START, START_START, FINISH_FINISH or START_FINISH.`
+      );
+      continue;
+    }
+    if (!Number.isFinite(s.lagDays)) {
+      errors.push(`${label}: lagDays must be a number (calendar days).`);
+      continue;
+    }
+    if (!Number.isInteger(s.lagDays)) {
+      notes.push(`${label}: lagDays ${s.lagDays} rounded to a whole number.`);
+    }
+    if (!finalIds.has(s.relatingTask)) {
+      errors.push(
+        `${label}: predecessor id "${s.relatingTask}" does not exist (or was removed).`
+      );
+      continue;
+    }
+    if (!finalIds.has(s.relatedTask)) {
+      errors.push(
+        `${label}: successor id "${s.relatedTask}" does not exist (or was removed).`
       );
       continue;
     }
     if (s.relatingTask === s.relatedTask) {
-      errors.push(`Sequence ${s.relatingTask}→itself is a self-link.`);
+      errors.push(`${label}: a task cannot be linked to itself.`);
+      continue;
+    }
+    if (finalGroups.has(s.relatingTask) || finalGroups.has(s.relatedTask)) {
+      const g = finalGroups.has(s.relatingTask) ? s.relatingTask : s.relatedTask;
+      errors.push(
+        `${label}: "${nameOf(g)}" is a group (it has sub-tasks). Link leaf tasks only.`
+      );
       continue;
     }
     if (
@@ -477,37 +600,78 @@ export function validatePasteJson(
       !pasteIds.has(s.relatingTask) &&
       !pasteIds.has(s.relatedTask)
     ) {
-      errors.push(
-        `Sequence ${s.relatingTask}→${s.relatedTask} does not involve any selected task.`
-      );
+      errors.push(`${label}: does not involve any selected task.`);
       continue;
     }
     const k = seqKey(s);
     if (seenSeq.has(k)) {
-      errors.push(`Duplicate sequence ${k}.`);
+      errors.push(`${label}: duplicate link (same predecessor and successor).`);
       continue;
     }
     seenSeq.add(k);
-    cleanedSeqs.push({
-      ...s,
-      id: typeof s.id === "string" && s.id ? s.id : `s-${k}`,
-      sequenceType: s.sequenceType ?? "FINISH_START",
-      lagDays: Number.isFinite(s.lagDays) ? s.lagDays : 0,
-    });
+
+    let id = typeof s.id === "string" && s.id ? s.id : `s-${k}`;
+    if (seenSeqIds.has(id) || keptIds.has(id)) {
+      notes.push(`${label}: link id "${id}" was already used — a new id was generated.`);
+      id = `s-${k}-${seenSeqIds.size + 1}`;
+    }
+    seenSeqIds.add(id);
+
+    cleanedSeqs.push({ ...s, id, lagDays: Math.round(s.lagDays) });
   }
 
-  const kept = keptSequences(sequences, scope, removed);
-  const keptKeys = new Set(kept.map(seqKey));
   for (const s of cleanedSeqs) {
     if (keptKeys.has(seqKey(s))) {
-      errors.push(`Sequence ${seqKey(s)} already exists outside the selection.`);
+      errors.push(
+        `${linkLabel(s)}: this link already exists outside the selection (it is kept automatically — do not repeat it).`
+      );
+    }
+    const reverse = `${s.relatedTask}->${s.relatingTask}`;
+    if (seenSeq.has(reverse) || keptKeys.has(reverse)) {
+      errors.push(
+        `${linkLabel(s)}: the opposite link already exists — that would be a loop.`
+      );
     }
   }
-  if (graphHasCycle(finalIds, [...kept, ...cleanedSeqs])) {
-    errors.push("The pasted links would create a dependency cycle.");
+
+  const cycle = findCycle(finalIds, [...kept, ...cleanedSeqs]);
+  if (cycle) {
+    errors.push(
+      `Dependency cycle: ${cycle.map(nameOf).map((n) => `"${n}"`).join(" → ")}. A task cannot (indirectly) depend on itself.`
+    );
   }
 
   if (errors.length) return { ok: false, errors, notes };
+
+  // 8 ── soft check: do the dates respect the links? (note only)
+  const dateOf = (id: string) => cleanedById.get(id) ?? existingById.get(id);
+  const conflicts: string[] = [];
+  for (const s of [...kept, ...cleanedSeqs]) {
+    if (!pasteIds.has(s.relatingTask) && !pasteIds.has(s.relatedTask)) continue;
+    const p = dateOf(s.relatingTask);
+    const q = dateOf(s.relatedTask);
+    if (!p || !q) continue;
+    const ps = toDay(p.scheduleStart);
+    const pf = toDay(p.scheduleFinish);
+    const qs = toDay(q.scheduleStart);
+    const qf = toDay(q.scheduleFinish);
+    const bad =
+      s.sequenceType === "FINISH_START"
+        ? qs < pf + 1 + s.lagDays
+        : s.sequenceType === "START_START"
+          ? qs < ps + s.lagDays
+          : s.sequenceType === "FINISH_FINISH"
+            ? qf < pf + s.lagDays
+            : qf < ps + s.lagDays;
+    if (bad) conflicts.push(linkLabel(s));
+  }
+  if (conflicts.length) {
+    notes.push(
+      `${conflicts.length} link(s) have dates that break the rule (e.g. successor starts too early): ${conflicts
+        .slice(0, 4)
+        .join("; ")}${conflicts.length > 4 ? "; …" : ""}. Run Auto-schedule after applying to fix them.`
+    );
+  }
 
   const added = cleaned.filter((t) => !existingById.has(t.id)).length;
   const updated = cleaned.length - added;
@@ -541,7 +705,6 @@ export function applySelection(
   const removed = new Set([...scope].filter((id) => !pasteById.has(id)));
   const existingIds = new Set(tasks.map((t) => t.id));
 
-  // Update in place (merge so fields the AI left out are not lost), drop removed.
   const nextTasks: Task[] = [];
   for (const t of tasks) {
     if (removed.has(t.id)) continue;
@@ -572,7 +735,6 @@ export function PasteJsonModal({
   sequences: Sequence[];
   onApply: (data: SelectionJson) => void;
   onClose: () => void;
-  /** Scoped mode: only these task ids may be changed. */
   restrictTo?: Set<string>;
 }) {
   const [text, setText] = useState("");
@@ -620,9 +782,9 @@ export function PasteJsonModal({
             updated, new ids are added, ids in <code>scopeIds</code> that are
             missing from <code>tasks</code> are removed. If{" "}
             <code>scopeIds</code> is omitted, the paste replaces the entire
-            schedule. Nothing outside the selection is touched. Fenced or
-            chatty AI replies are fine — unknown keys are ignored and{" "}
-            <code>from</code>/<code>to</code> links are accepted as aliases.
+            schedule. Links: <code>relatingTask</code> is the predecessor,{" "}
+            <code>relatedTask</code> the successor; links to groups, unknown
+            ids, wrong types and cycles are reported before anything changes.
             {restrictTo && (
               <>
                 {" "}

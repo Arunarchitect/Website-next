@@ -767,16 +767,35 @@ export function useProcessEditor(initialData: ProcessData) {
     const replacement = candidate as unknown as ProcessNode;
 
     // 4. Replace in tree.
+    // 4. Replace in tree.
     const replace = (root: ProcessNode): ProcessNode => {
       if (root.id === nodeId) return replacement;
       if (root.children) return { ...root, children: root.children.map(replace) };
       return root;
     };
 
+    // Ids that existed before but are gone now
+    const removedIds = new Set(collectIds(target));
+    collectIds(replacement).forEach((id) => removedIds.delete(id));
+
+    let nextChildren = data.children ? data.children.map(replace) : [];
+    if (removedIds.size > 0) {
+      nextChildren = nextChildren.map((c) => stripRelationsToIds(c, removedIds));
+    }
+
+    // Completion is stored per LEAF id. Drop ids that are no longer leaves.
+    const leafSet = new Set(nextChildren.flatMap(getLeafIds));
+
     pushHistory();
-    setData({
-      ...data,
-      children: data.children ? data.children.map(replace) : undefined,
+    setData({ ...data, children: nextChildren });
+    setCompleted((prev) => new Set([...prev].filter((id) => leafSet.has(id))));
+    setEdgeStyles((prev) => {
+      const next = new Map(prev);
+      Array.from(next.keys()).forEach((key) => {
+        const [from, to] = key.split("->");
+        if (removedIds.has(from) || removedIds.has(to)) next.delete(key);
+      });
+      return next;
     });
 
     return { ok: true };

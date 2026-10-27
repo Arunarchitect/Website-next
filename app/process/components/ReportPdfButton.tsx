@@ -39,6 +39,103 @@ const INK: RGB = [20, 20, 20];
 const AMBER: RGB = [180, 83, 9];
 const RULE_GRAY: RGB = [200, 200, 200];
 
+/* ─── PDF-safe text ──────────────────────────────────────────────
+   jsPDF's built-in Helvetica only has Latin-1 + a few WinAnsi
+   extras. Anything else (arrows, ≥, emoji, ₹ ...) is drawn as a
+   broken glyph AND corrupts the measured width, which is what made
+   "Production → QC → storage" print as "Production ! QC ! storage"
+   and run off the page. Every string goes through this first.     */
+
+const REPLACEMENTS: Record<string, string> = {
+  "→": "->",
+  "⟶": "->",
+  "➜": "->",
+  "➔": "->",
+  "⇒": "=>",
+  "←": "<-",
+  "⇐": "<=",
+  "↔": "<->",
+  "⇔": "<=>",
+  "↑": "^",
+  "↓": "v",
+  "≥": ">=",
+  "≤": "<=",
+  "≈": "~",
+  "≠": "!=",
+  "∼": "~",
+  "−": "-",
+  "‐": "-",
+  "‑": "-",
+  "‒": "-",
+  "∕": "/",
+  "√": "sqrt",
+  "∞": "inf",
+  "✓": "",
+  "✔": "",
+  "✗": "x",
+  "✘": "x",
+  "★": "*",
+  "☆": "*",
+  "▸": ">",
+  "▶": ">",
+  "◂": "<",
+  "◀": "<",
+  "●": "-",
+  "○": "-",
+  "■": "-",
+  "□": "-",
+  "▪": "-",
+  "◦": "-",
+  "⁃": "-",
+  "₹": "Rs.",
+  "′": "'",
+  "″": '"',
+  "\u00A0": " ",
+  "\u2002": " ",
+  "\u2003": " ",
+  "\u2009": " ",
+  "\u202F": " ",
+  "\u200B": "",
+  "\u200C": "",
+  "\u200D": "",
+  "\uFEFF": "",
+  "\u00AD": "",
+};
+
+// Code points above 0xFF that WinAnsi (and therefore jsPDF Helvetica) can draw.
+const WIN_ANSI_EXTRA = new Set([
+  "€", "‚", "ƒ", "„", "…", "†", "‡", "ˆ", "‰", "Š", "‹", "Œ", "Ž",
+  "‘", "’", "“", "”", "•", "–", "—", "˜", "™", "š", "›", "œ", "ž", "Ÿ",
+]);
+
+function sanitizePdfText(input: string): string {
+  if (!input) return "";
+  let out = "";
+  for (const ch of input.replace(/\r\n?/g, "\n")) {
+    const mapped = REPLACEMENTS[ch];
+    if (mapped !== undefined) {
+      out += mapped;
+      continue;
+    }
+    const code = ch.codePointAt(0) ?? 0;
+    if (ch === "\n" || ch === "\t") {
+      out += ch === "\t" ? " " : ch;
+    } else if (code < 0x20 || code === 0x7f) {
+      // control characters: drop
+    } else if (code <= 0xff || WIN_ANSI_EXTRA.has(ch)) {
+      out += ch;
+    } else {
+      // Try to strip accents (ā -> a); drop whatever is still unsupported (emoji etc.)
+      const base = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      for (const b of base) {
+        const bc = b.codePointAt(0) ?? 0;
+        if (bc >= 0x20 && bc <= 0xff) out += b;
+      }
+    }
+  }
+  return out;
+}
+
 /* ─── Formatting helpers ─────────────────────────────────────── */
 
 function roundTo(n: number, p: number): number {
@@ -679,7 +776,7 @@ export function ReportPdfButton({
                     onChange={(e) => setIncludeNotesColumn(e.target.checked)}
                     className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                   />
-                  Show notes column
+                  Show notes column (full text, nothing cut off)
                 </label>
               </>
             )}
@@ -1082,7 +1179,7 @@ function renderProcessReport(
   ) => {
     doc.setFont("helvetica", weight);
     doc.setFontSize(fontSize);
-    return doc.splitTextToSize(text, width) as string[];
+    return doc.splitTextToSize(sanitizePdfText(text), width) as string[];
   };
 
   const drawLines = (
@@ -1102,7 +1199,8 @@ function renderProcessReport(
     doc.setFontSize(fontSize);
     const [r, g, b] = opts2.color ?? INK;
     doc.setTextColor(r, g, b);
-    lines.forEach((line) => {
+    lines.forEach((rawLine) => {
+      const line = sanitizePdfText(rawLine);
       const drawX = opts2.align === "center" ? pageWidth / 2 : x;
       doc.text(line, drawX, y, opts2.align === "center" ? { align: "center" } : undefined);
       if (opts2.underline) {
@@ -1556,32 +1654,33 @@ function renderSpaceReport(
   ) => {
     setFont(o.weight ?? "normal", o.size ?? 10);
     doc.setTextColor(...(o.color ?? INK));
-    doc.text(str, x, yy, o.align && o.align !== "left" ? { align: o.align } : undefined);
+    doc.text(
+      sanitizePdfText(str),
+      x,
+      yy,
+      o.align && o.align !== "left" ? { align: o.align } : undefined
+    );
     doc.setTextColor(...INK);
   };
 
-  /** Wrap text to a width. Sets the font FIRST so measuring is accurate. */
+  /**
+   * Wrap text to a width. Sanitises FIRST (so unsupported glyphs can't
+   * corrupt the width) and sets the font before measuring.
+   */
   const wrap = (str: string, size: number, weight: Weight, width: number): string[] => {
     setFont(weight, size);
-    return doc.splitTextToSize(str, Math.max(width, 5)) as string[];
+    return doc.splitTextToSize(sanitizePdfText(str), Math.max(width, 5)) as string[];
   };
 
-  /** Clamp wrapped lines to `max` lines, ending the last with "...". */
-  const clampLines = (
-    lines: string[],
-    max: number,
-    width: number,
-    size: number,
-    weight: Weight
-  ): string[] => {
-    if (lines.length <= max) return lines;
-    const out = lines.slice(0, max);
-    setFont(weight, size);
-    let last = out[max - 1];
-    while (last.length > 1 && doc.getTextWidth(last + "...") > width) {
-      last = last.slice(0, -1).trimEnd();
-    }
-    out[max - 1] = last + "...";
+  /** Wrap multi-paragraph text, keeping blank lines between paragraphs. */
+  const wrapParagraphs = (str: string, size: number, weight: Weight, width: number): string[] => {
+    const out: string[] = [];
+    sanitizePdfText(str)
+      .split("\n")
+      .forEach((para) => {
+        if (para.trim() === "") out.push("");
+        else out.push(...wrap(para, size, weight, width));
+      });
     return out;
   };
 
@@ -1604,7 +1703,7 @@ function renderSpaceReport(
   let onNewPage: (() => void) | null = null;
 
   const drawRunningHeader = () => {
-    const title = rootNode.label || "Space Requirement";
+    const title = sanitizePdfText(rootNode.label || "Space Requirement");
     setFont("normal", 7.5);
     let shown = title;
     while (shown.length > 4 && doc.getTextWidth(shown) > contentWidth * 0.65) {
@@ -1716,8 +1815,9 @@ function renderSpaceReport(
   y += 1;
 
   if (rootNode.description) {
-    const dLines = wrap(rootNode.description, 8.8, "normal", contentWidth);
+    const dLines = wrapParagraphs(rootNode.description, 8.8, "normal", contentWidth);
     for (const line of dLines) {
+      ensureSpace(lh(8.8, 1.25));
       txt(line, marginX, y + ascent(8.8), { size: 8.8, color: GRAY });
       y += lh(8.8, 1.25);
     }
@@ -1732,11 +1832,12 @@ function renderSpaceReport(
     showCostCol ? `Rate ${currency} ${fmtRate(ratePerSqft as number)} / sqft` : "",
     blockMode === "one-block" ? "Single block" : "",
   ].filter(Boolean);
-  txt(assumptions.join("   |   "), marginX, y + ascent(7.5), {
-    size: 7.5,
-    color: GRAY,
+  const assumptionLines = wrap(assumptions.join("   |   "), 7.5, "normal", contentWidth);
+  assumptionLines.forEach((line) => {
+    txt(line, marginX, y + ascent(7.5), { size: 7.5, color: GRAY });
+    y += lh(7.5);
   });
-  y += lh(7.5) + 2.5;
+  y += 2.5;
 
   rule(y, marginX, pageWidth - marginX, 0.3, RULE_GRAY);
   y += 5;
@@ -1746,11 +1847,7 @@ function renderSpaceReport(
   const noteText = customNote.trim();
   if (noteText) {
     const noteSize = 8.6;
-    const noteLines: string[] = [];
-    noteText.split(/\r?\n/).forEach((para) => {
-      if (para.trim() === "") noteLines.push("");
-      else noteLines.push(...wrap(para, noteSize, "normal", contentWidth - 12));
-    });
+    const noteLines = wrapParagraphs(noteText, noteSize, "normal", contentWidth - 12);
     const boxH = noteLines.length * lh(noteSize, 1.25) + 11;
     ensureSpace(boxH + 4);
     fillRect(marginX, y, contentWidth, boxH, [255, 250, 235], 1.8);
@@ -1939,13 +2036,13 @@ function renderSpaceReport(
       "Gross = Net + Wall + Circulation",
     ].filter(Boolean);
     y += 2;
-    ensureSpace(5);
-    txt(hintParts.join("   |   "), marginX, y + ascent(7), {
-      size: 7,
-      weight: "italic",
-      color: GRAY,
+    const hintLines = wrap(hintParts.join("   |   "), 7, "italic", contentWidth);
+    ensureSpace(hintLines.length * lh(7) + 2);
+    hintLines.forEach((line) => {
+      txt(line, marginX, y + ascent(7), { size: 7, weight: "italic", color: GRAY });
+      y += lh(7);
     });
-    y += lh(7) + 5;
+    y += 5;
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -2025,6 +2122,8 @@ function renderSpaceReport(
 
   /* ════════════════════════════════════════════════════════════
      DETAILED SPACE TABLE
+     Notes are printed IN FULL (no truncation). Each row grows to
+     fit its wrapped text and is never split across pages.
      ════════════════════════════════════════════════════════════ */
 
   const rows = allRows(rootNode).filter(({ node }) => getNodeValue(node).value !== null);
@@ -2037,7 +2136,8 @@ function renderSpaceReport(
     const dimsW = showDims ? 22 : 0;
     const a1W = 21;
     const a2W = 19;
-    const notesW = showNotes ? 62 : 0;
+    // Wider notes column so long descriptions wrap into fewer lines.
+    const notesW = showNotes ? (showDims ? 66 : 74) : 0;
     const spaceW = contentWidth - numW - dimsW - a1W - a2W - notesW;
 
     let cx = marginX;
@@ -2073,7 +2173,9 @@ function renderSpaceReport(
     drawDetailHeader();
     onNewPage = drawDetailHeader;
 
-    const PAD_Y = 1.7;
+    const PAD_Y = 2;
+    const NOTES_SIZE = 7;
+    const NOTES_LH = 1.28;
 
     rows.forEach(({ node, path, depth, isLeaf }, idx) => {
       const v = getNodeValue(node).value ?? 0;
@@ -2083,7 +2185,6 @@ function renderSpaceReport(
 
       const nameSize = isTop ? 9 : 8.5;
       const nameWeight: Weight = isGroup ? "bold" : "normal";
-      const notesSize = 6.8;
       const indent = Math.min(Math.max(depth - 1, 0), 3) * 3;
 
       const nameLines = wrap(node.label, nameSize, nameWeight, spaceW - indent - CELL_PAD * 2);
@@ -2094,19 +2195,17 @@ function renderSpaceReport(
         return f1 !== null && f2 !== null ? `${fmtNum(f1, 1)} x ${fmtNum(f2, 1)}` : "";
       })();
 
+      // Full notes — every line, including leaf AND group rows.
       let notesLines: string[] = [];
       if (showNotes) {
         const notesText = (node.description ?? "").trim();
         if (notesText) {
-          notesLines = wrap(notesText, notesSize, "normal", notesW - CELL_PAD * 2);
-          if (isGroup) {
-            notesLines = clampLines(notesLines, 2, notesW - CELL_PAD * 2, notesSize, "normal");
-          }
+          notesLines = wrapParagraphs(notesText, NOTES_SIZE, "normal", notesW - CELL_PAD * 2);
         }
       }
 
       const nameH = nameLines.length * lh(nameSize, 1.15);
-      const notesH = notesLines.length * lh(notesSize, 1.2);
+      const notesH = notesLines.length * lh(NOTES_SIZE, NOTES_LH);
       const rowH = Math.max(nameH, notesH, lh(nameSize, 1.15)) + PAD_Y * 2;
 
       // Keep a group heading together with at least its first child row.
@@ -2159,11 +2258,12 @@ function renderSpaceReport(
         align: "right",
       });
 
-      // Notes
+      // Notes (full text)
       if (showNotes) {
+        const notesBase = y + PAD_Y + ascent(NOTES_SIZE) + 0.4;
         notesLines.forEach((line, i) => {
-          txt(line, notesCol.x + CELL_PAD, base + i * lh(notesSize, 1.2), {
-            size: notesSize,
+          txt(line, notesCol.x + CELL_PAD, notesBase + i * lh(NOTES_SIZE, NOTES_LH), {
+            size: NOTES_SIZE,
             color: important ? RED : isTop ? [70, 75, 90] : GRAY,
           });
         });
@@ -2171,7 +2271,7 @@ function renderSpaceReport(
 
       y += rowH;
 
-      if (!isTop) rule(y, marginX, pageWidth - marginX, 0.12, HAIRLINE);
+      rule(y, marginX, pageWidth - marginX, isTop ? 0.2 : 0.12, isTop ? RULE_GRAY : HAIRLINE);
     });
 
     // Grand total bar

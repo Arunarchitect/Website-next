@@ -9,6 +9,13 @@ import { UploadButton, ExportButtons } from "@/app/process/components/transfer";
 import { useProcessEditor, findNodeById } from "@/app/process/hooks/useProcessEditor";
 import { useCloudSync } from "@/app/process/hooks/useCloudSync";
 import { useAutosave } from "@/app/process/hooks/useAutoSave";
+
+import {
+  validateSubtreeJson,
+  buildAiGuide,
+  type ValidationReport,
+} from "@/app/process/lib/subtree-json-tools";
+
 import {
   getNodeValue,
   formatValue,
@@ -675,6 +682,9 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
   const [jsonEditorError, setJsonEditorError] = useState("");
   const [jsonEditorInfo, setJsonEditorInfo] = useState("");
 
+  const [jsonEditorReport, setJsonEditorReport] = useState<ValidationReport | null>(null);
+  const [jsonEditorCopied, setJsonEditorCopied] = useState<"" | "json" | "ai">("");
+
   const getPersonTasks = (personId: string): ProcessNode[] => {
     if (!rootNode) return [];
     const tasks: ProcessNode[] = [];
@@ -1211,6 +1221,8 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                       setJsonEditorText(JSON.stringify(selectedNode, null, 2));
                       setJsonEditorError("");
                       setJsonEditorInfo("");
+                      setJsonEditorReport(null);
+                      setJsonEditorCopied("");
                       setJsonEditorOpen(true);
                     }}
                     className={`${btnGhost} h-7 px-2 text-xs`}
@@ -1871,27 +1883,71 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
 
       {/* EDIT JSON MODAL */}
       {jsonEditorOpen && editor.selectedNodeId && rootNode && (() => {
-        const targetNode = findNodeById(rootNode, editor.selectedNodeId);
+        const nodeId = editor.selectedNodeId;
+        const targetNode = findNodeById(rootNode, nodeId);
         if (!targetNode) return null;
+
+        const runValidate = () => {
+          const report = validateSubtreeJson(
+            jsonEditorText,
+            nodeId,
+            rootNode,
+            editor.persons.map((p) => p.id),
+            editor.defaultValueDef.id ?? "area",
+          );
+          setJsonEditorReport(report);
+          return report;
+        };
 
         const apply = () => {
           setJsonEditorError("");
           setJsonEditorInfo("");
-
-          const result = editor.setSubtreeFromJson(
-            editor.selectedNodeId!,
-            jsonEditorText,
-          );
-
+          const report = runValidate();
+          if (!report.ok) return; // errors block Apply; warnings don't
+          const result = editor.setSubtreeFromJson(nodeId, report.cleaned);
           if (!result.ok) {
             setJsonEditorError(result.error);
             return;
           }
-
-          // Success — close the modal. The tree has already been updated
-          // and history pushed by the hook, so nothing more to do here.
           setJsonEditorOpen(false);
         };
+
+        const copyText = async (text: string, kind: "json" | "ai") => {
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+          }
+          setJsonEditorCopied(kind);
+          setTimeout(() => setJsonEditorCopied(""), 1800);
+        };
+
+        const copyForAi = () => {
+          const parentInfo = getNodeParentAndIndex(nodeId);
+          const siblings = (parentInfo?.parent.children ?? [])
+            .filter((c) => c.id !== nodeId)
+            .map((c) => ({ id: c.id, label: c.label }));
+          void copyText(
+            buildAiGuide({
+              nodeId,
+              nodeLabel: targetNode.label,
+              currentJson: jsonEditorText,
+              defaultTypeId: editor.defaultValueDef.id ?? "area",
+              siblings,
+              persons: editor.persons,
+            }),
+            "ai",
+          );
+        };
+
+        const report = jsonEditorReport;
 
         return (
           <div
@@ -1903,19 +1959,15 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-baseline justify-between gap-3 mb-1">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">
-                  Edit JSON
-                </h3>
-                <span className="text-[11px] font-mono text-gray-400 truncate">
-                  {targetNode.label}
-                </span>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Edit JSON</h3>
+                <span className="text-[11px] font-mono text-gray-400 truncate">{targetNode.label}</span>
               </div>
               <p className="text-xs text-gray-500 mb-3">
                 Edit the raw JSON for this process and everything under it. The
                 <span className="font-mono"> id</span> must stay as
-                <span className="font-mono"> &quot;{editor.selectedNodeId}&quot;</span>.
-                Apply is rejected if the schema is invalid — nothing changes
-                until the JSON is correct.
+                <span className="font-mono"> &quot;{nodeId}&quot;</span>. Use{" "}
+                <strong>Copy for AI</strong> to get a prompt with the rules, then paste the AI&apos;s reply
+                here and press <strong>Validate</strong> before Apply.
               </p>
 
               <textarea
@@ -1924,6 +1976,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   setJsonEditorText(e.target.value);
                   setJsonEditorError("");
                   setJsonEditorInfo("");
+                  setJsonEditorReport(null);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -1934,27 +1987,52 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                   }
                 }}
                 spellCheck={false}
-                className="flex-1 min-h-[300px] w-full border border-gray-200 rounded-lg px-3 py-2 text-[12px] font-mono text-gray-800 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 resize-vertical"
+                className="flex-1 min-h-[260px] w-full border border-gray-200 rounded-lg px-3 py-2 text-[12px] font-mono text-gray-800 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 resize-vertical"
               />
 
-              {jsonEditorError && (
-                <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg whitespace-pre-wrap">
-                  {jsonEditorError}
+              {report && report.errors.length > 0 && (
+                <div className="mt-3 max-h-40 overflow-y-auto text-sm text-red-700 bg-red-50 border border-red-100 p-2.5 rounded-lg">
+                  <div className="text-xs font-semibold mb-1">
+                    {report.errors.length} error{report.errors.length === 1 ? "" : "s"}: nothing was changed
+                  </div>
+                  <ul className="list-disc list-inside text-xs space-y-0.5">
+                    {report.errors.map((e, i) => (
+                      <li key={i}><span className="font-mono">{e.path}</span>: {e.message}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
-              {jsonEditorInfo && (
-                <div className="mt-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
-                  {jsonEditorInfo}
+              {report && report.warnings.length > 0 && (
+                <div className="mt-2 max-h-32 overflow-y-auto text-sm text-amber-800 bg-amber-50 border border-amber-100 p-2.5 rounded-lg">
+                  <div className="text-xs font-semibold mb-1">
+                    {report.warnings.length} warning{report.warnings.length === 1 ? "" : "s"} (Apply is still allowed)
+                  </div>
+                  <ul className="list-disc list-inside text-xs space-y-0.5">
+                    {report.warnings.map((w, i) => (
+                      <li key={i}><span className="font-mono">{w.path}</span>: {w.message}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {report && report.ok && (
+                <div className="mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
+                  ✓ Valid{report.warnings.length ? ` (with ${report.warnings.length} warning${report.warnings.length === 1 ? "" : "s"})` : ""}. Safe to apply.
+                </div>
+              )}
+              {jsonEditorError && (
+                <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg whitespace-pre-wrap">
+                  {jsonEditorError}
                 </div>
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 mt-4">
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => {
                       setJsonEditorText(JSON.stringify(targetNode, null, 2));
                       setJsonEditorError("");
                       setJsonEditorInfo("");
+                      setJsonEditorReport(null);
                     }}
                     className={`${btnGhost} h-9 px-3 text-xs`}
                     title="Reset to the current saved JSON"
@@ -1962,26 +2040,33 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
                     Reset
                   </button>
                   <button
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(jsonEditorText);
-                    }}
+                    onClick={() => void copyText(jsonEditorText, "json")}
                     className={`${btnGhost} h-9 px-3 text-xs`}
                     title="Copy this JSON to the clipboard"
                   >
-                    Copy
+                    {jsonEditorCopied === "json" ? "Copied ✓" : "Copy"}
+                  </button>
+                  <button
+                    onClick={copyForAi}
+                    className={`${btnOutline} h-9 px-3 text-xs`}
+                    title="Copy a ready-made prompt (rules + this JSON) to paste into an AI"
+                  >
+                    {jsonEditorCopied === "ai" ? "Copied for AI ✓" : "Copy for AI"}
                   </button>
                 </div>
 
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setJsonEditorOpen(false)}
-                    className={`${btnOutline} h-9 px-4 text-sm`}
-                  >
+                  <button onClick={() => setJsonEditorOpen(false)} className={`${btnOutline} h-9 px-4 text-sm`}>
                     Cancel
+                  </button>
+                  <button onClick={runValidate} className={`${btnOutline} h-9 px-4 text-sm`}>
+                    Validate
                   </button>
                   <button
                     onClick={apply}
+                    disabled={!!report && !report.ok}
                     className={`${btnPrimary} h-9 px-4 text-sm`}
+                    title={report && !report.ok ? "Fix the errors first" : "Validate and apply"}
                   >
                     Apply
                   </button>
@@ -1989,7 +2074,7 @@ export default function ProcessWorkflowEditor({ masterword }: { masterword?: str
               </div>
 
               <p className="text-[10px] text-gray-400 mt-2">
-                Ctrl/Cmd+Enter to apply · Esc to cancel · Empty label is not allowed
+                Ctrl/Cmd+Enter to apply · Esc to cancel · Apply always re-validates
               </p>
             </div>
           </div>
