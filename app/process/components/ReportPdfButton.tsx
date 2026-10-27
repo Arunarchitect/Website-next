@@ -24,22 +24,20 @@ type ReportMode = "process" | "space";
 type ReportUnit = "sqft" | "sqm";
 type BlockMode = "blocks" | "one-block";
 
+type RGB = [number, number, number];
+
 const SQFT_PER_SQM = 10.7639104;
 const MM_PER_PT = 0.3528;
 const LINE_MULT = 1.15;
-/** Tighter line spacing used inside the detailed space table, where rows
- * often wrap onto 2-4 lines (long descriptions) and the default LINE_MULT
- * makes the report needlessly long. */
-const TABLE_LINE_MULT = 1.05;
 
-const RED: [number, number, number] = [190, 30, 30];
-const GRAY: [number, number, number] = [110, 110, 110];
-const LIGHT_GRAY: [number, number, number] = [160, 160, 160];
-const GREEN: [number, number, number] = [30, 130, 60];
-const TEAL: [number, number, number] = [15, 118, 110];
-const INK: [number, number, number] = [20, 20, 20];
-const AMBER: [number, number, number] = [180, 83, 9];
-const RULE_GRAY: [number, number, number] = [200, 200, 200];
+const RED: RGB = [190, 30, 30];
+const GRAY: RGB = [110, 110, 110];
+const LIGHT_GRAY: RGB = [160, 160, 160];
+const GREEN: RGB = [30, 130, 60];
+const TEAL: RGB = [15, 118, 110];
+const INK: RGB = [20, 20, 20];
+const AMBER: RGB = [180, 83, 9];
+const RULE_GRAY: RGB = [200, 200, 200];
 
 /* ─── Formatting helpers ─────────────────────────────────────── */
 
@@ -51,13 +49,6 @@ function roundTo(n: number, p: number): number {
 function fmtNum(n: number, p = 1): string {
   const r = roundTo(n, p);
   return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(p);
-}
-
-function fmtAreaPair(sqm: number, unit: ReportUnit, p = 1): string {
-  if (unit === "sqft") {
-    return `${fmtNum(sqm * SQFT_PER_SQM, p)} sqft (${fmtNum(sqm, p)} m²)`;
-  }
-  return `${fmtNum(sqm, p)} m² (${fmtNum(sqm * SQFT_PER_SQM, p)} sqft)`;
 }
 
 function fmtRate(n: number): string {
@@ -106,9 +97,7 @@ function factorSymbolForLeaf(leaf: ProcessNode, reportUnit: ReportUnit): string 
 /**
  * Convert a leaf's stored factor1/factor2 (always in the value type's
  * BASE unit, e.g. metres) into the unit this report is displaying —
- * e.g. feet when the report unit is sqft. This is what was missing
- * before: the column header said "(ft)" but the numbers underneath
- * were never actually converted from metres.
+ * e.g. feet when the report unit is sqft.
  */
 function displayFactorsForLeaf(
   leaf: ProcessNode,
@@ -207,6 +196,7 @@ export function ReportPdfButton({
   const [includeBreakdown, setIncludeBreakdown] = useState(true);
   const [includeDimensions, setIncludeDimensions] = useState(true);
   const [includeNotesColumn, setIncludeNotesColumn] = useState(true);
+  const [customNote, setCustomNote] = useState("");
 
   // Cost toggle + inputs
   const [showCost, setShowCost] = useState(false);
@@ -331,6 +321,7 @@ export function ReportPdfButton({
             rate !== null && Number.isFinite(rate) && rate > 0 ? rate : null,
           currency: currencySymbol.trim() || "Rs.",
           blockMode,
+          customNote,
         });
       } else {
         // The Process report ignores scope; it always reports the whole
@@ -545,7 +536,7 @@ export function ReportPdfButton({
                           : "text-gray-500"
                       }`}
                     >
-                      sqft (m² in brackets)
+                      sqft (m² alongside)
                     </button>
                     <button
                       onClick={() => setSpaceUnit("sqm")}
@@ -555,7 +546,7 @@ export function ReportPdfButton({
                           : "text-gray-500"
                       }`}
                     >
-                      m² (sqft in brackets)
+                      m² (sqft alongside)
                     </button>
                   </div>
                 </div>
@@ -637,6 +628,22 @@ export function ReportPdfButton({
                     </div>
                   </div>
                 )}
+
+                <div className="mb-3">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Custom note (optional)
+                  </label>
+                  <textarea
+                    value={customNote}
+                    onChange={(e) => setCustomNote(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Revision 2 — areas updated after client meeting. Prepared for ..."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    Shown as a highlighted note on the first page. Line breaks are kept.
+                  </p>
+                </div>
 
                 <label className="flex items-center gap-2 mb-2 text-sm text-gray-700">
                   <input
@@ -1085,7 +1092,7 @@ function renderProcessReport(
     fontSize: number,
     weight: "normal" | "bold" | "italic",
     opts2: {
-      color?: [number, number, number];
+      color?: RGB;
       underline?: boolean;
       align?: "left" | "center";
     } = {}
@@ -1205,7 +1212,7 @@ function renderProcessReport(
         const fontSize = e.level === 1 ? 10 : 9;
         const weight: "normal" | "bold" = e.level === 1 ? "bold" : "normal";
         const indent = (e.level - 1) * 5;
-        const color: [number, number, number] = important
+        const color: RGB = important
           ? RED
           : e.level === 1
             ? INK
@@ -1267,7 +1274,7 @@ function renderProcessReport(
       const { node, level } = entry;
       const style = headingStyle(level);
       const important = !!node.important;
-      const titleColor: [number, number, number] = important ? RED : INK;
+      const titleColor: RGB = important ? RED : INK;
       const nodeTitleText = `${entry.numberPath.join(".")}  ${node.label}`;
       const nodeTitleLines = wrap(nodeTitleText, style.size, style.weight, contentWidth);
       const nodeTitleHeight = nodeTitleLines.length * lineHeightFor(style.size);
@@ -1365,7 +1372,7 @@ function renderProcessReport(
           ? `Assigned: ${assignedNames.join(", ")}`
           : "Assigned: None";
         const assignedWeight: "normal" | "italic" = hasAssignees ? "normal" : "italic";
-        const assignedColor: [number, number, number] = hasAssignees ? TEAL : LIGHT_GRAY;
+        const assignedColor: RGB = hasAssignees ? TEAL : LIGHT_GRAY;
         const aLines = wrap(assignedText, 8.5, assignedWeight, contentWidth);
         const aHeight = aLines.length * lineHeightFor(8.5);
         ensureSpace(aHeight + 0.4);
@@ -1412,6 +1419,7 @@ type SpaceReportOpts = {
   ratePerSqft: number | null;
   currency: string;
   blockMode: BlockMode;
+  customNote: string;
 };
 
 type BlockStats = {
@@ -1427,8 +1435,7 @@ type BlockStats = {
 /**
  * Compute one BlockStats per top-level child of the scope root.
  * A "block" is whatever sits directly under the node the report
- * is scoped to. For a compound → House / House 2, that's two blocks.
- * Each block gets its own wall / circulation / gross / cost.
+ * is scoped to. Each block gets its own wall / circulation / gross / cost.
  */
 function computeBlocks(
   scopeRoot: ProcessNode,
@@ -1454,9 +1461,7 @@ function computeBlocks(
 
 /**
  * "one-block" mode: the whole scope is a single block. Wall and
- * circulation are applied once to the grand total rather than per
- * top-level branch. Returns a single-element array so the summary
- * table and totals keep the same shape.
+ * circulation are applied once to the grand total.
  */
 function computeOneBlock(
   scopeRoot: ProcessNode,
@@ -1477,6 +1482,16 @@ function computeOneBlock(
   ];
 }
 
+/* Palette + layout constants for the space report */
+const NAVY: RGB = [30, 41, 59];
+const ACCENT: RGB = [67, 56, 202];
+const BAND_FILL: RGB = [233, 236, 245];
+const CARD_FILL: RGB = [244, 245, 250];
+const HAIRLINE: RGB = [228, 230, 236];
+const WHITE: RGB = [255, 255, 255];
+
+type Col = { x: number; w: number; label: string; align: "left" | "right" };
+
 function renderSpaceReport(
   doc: import("jspdf").jsPDF,
   rootNode: ProcessNode,
@@ -1494,92 +1509,162 @@ function renderSpaceReport(
     ratePerSqft,
     currency,
     blockMode,
+    customNote,
   } = opts;
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  // Tighter margins than before — more content per page.
   const marginX = 14;
-  const marginTop = 14;
-  const marginBottom = 14;
+  const marginTop = 16;
+  const marginBottom = 18;
   const contentWidth = pageWidth - marginX * 2;
   const contentBottom = pageHeight - marginBottom;
+  const runningHeaderH = 9;
 
-  const lineHeightFor = (fontSize: number) => fontSize * MM_PER_PT * LINE_MULT;
-  const lineHeightCompact = (fontSize: number) => fontSize * MM_PER_PT * TABLE_LINE_MULT;
+  /* ── Small helpers ────────────────────────────────────────── */
 
-  let page = 1;
-  let y = marginTop;
+  /** Line height in mm for a font size in pt. */
+  const lh = (size: number, mult = 1.18) => size * MM_PER_PT * mult;
+  /** Distance from the top of a line box to its baseline. */
+  const ascent = (size: number) => size * MM_PER_PT * 0.78;
 
-  const drawFooter = () => {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(150);
-    doc.text(
-      `www.modelflick.com   ·   Page ${page} of ${doc.getNumberOfPages()}`,
-      pageWidth / 2,
-      pageHeight - 8,
-      { align: "center" }
-    );
-    doc.setTextColor(...INK);
-  };
+  const unitLabel = unit === "sqft" ? "sqft" : "m²";
+  const altLabel = unit === "sqft" ? "m²" : "sqft";
+  const toUnit = (sqm: number) => (unit === "sqft" ? sqm * SQFT_PER_SQM : sqm);
+  const toAlt = (sqm: number) => (unit === "sqft" ? sqm : sqm * SQFT_PER_SQM);
 
-  const ensureSpace = (needed: number) => {
-    if (y + needed > contentBottom) {
-      drawFooter();
-      doc.addPage();
-      page += 1;
-      y = marginTop;
-    }
-  };
+  const nf = new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  });
+  const nf0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
+  const fmtArea = (n: number) => nf.format(roundTo(n, 1));
+  const fmtArea0 = (n: number) => nf0.format(Math.round(n));
 
-  const setFont = (weight: "normal" | "bold" | "italic", size: number) => {
+  type Weight = "normal" | "bold" | "italic";
+
+  const setFont = (weight: Weight, size: number) => {
     doc.setFont("helvetica", weight);
     doc.setFontSize(size);
   };
 
-  const text = (
+  const txt = (
     str: string,
     x: number,
     yy: number,
-    opts2: {
-      weight?: "normal" | "bold" | "italic";
-      size?: number;
-      color?: [number, number, number];
-      align?: "left" | "center" | "right";
-    } = {}
+    o: { weight?: Weight; size?: number; color?: RGB; align?: "left" | "center" | "right" } = {}
   ) => {
-    setFont(opts2.weight ?? "normal", opts2.size ?? 10);
-    doc.setTextColor(...(opts2.color ?? INK));
-    doc.text(
-      str,
-      x,
-      yy,
-      opts2.align === "center"
-        ? { align: "center" }
-        : opts2.align === "right"
-          ? { align: "right" }
-          : undefined
-    );
+    setFont(o.weight ?? "normal", o.size ?? 10);
+    doc.setTextColor(...(o.color ?? INK));
+    doc.text(str, x, yy, o.align && o.align !== "left" ? { align: o.align } : undefined);
     doc.setTextColor(...INK);
   };
 
-  const rule = (
-    yy: number,
-    thickness = 0.2,
-    color: [number, number, number] = RULE_GRAY
-  ) => {
+  /** Wrap text to a width. Sets the font FIRST so measuring is accurate. */
+  const wrap = (str: string, size: number, weight: Weight, width: number): string[] => {
+    setFont(weight, size);
+    return doc.splitTextToSize(str, Math.max(width, 5)) as string[];
+  };
+
+  /** Clamp wrapped lines to `max` lines, ending the last with "...". */
+  const clampLines = (
+    lines: string[],
+    max: number,
+    width: number,
+    size: number,
+    weight: Weight
+  ): string[] => {
+    if (lines.length <= max) return lines;
+    const out = lines.slice(0, max);
+    setFont(weight, size);
+    let last = out[max - 1];
+    while (last.length > 1 && doc.getTextWidth(last + "...") > width) {
+      last = last.slice(0, -1).trimEnd();
+    }
+    out[max - 1] = last + "...";
+    return out;
+  };
+
+  const rule = (yy: number, x1 = marginX, x2 = pageWidth - marginX, thickness = 0.2, color: RGB = RULE_GRAY) => {
     doc.setDrawColor(...color);
     doc.setLineWidth(thickness);
-    doc.line(marginX, yy, pageWidth - marginX, yy);
+    doc.line(x1, yy, x2, yy);
     doc.setDrawColor(0);
   };
 
-  /** Plain bold section heading — no decoration, minimal ink. */
-  const sectionHeading = (label: string) => {
-    ensureSpace(lineHeightFor(10.5) + 1);
-    text(label, marginX, y, { size: 10.5, weight: "bold", color: INK });
-    y += lineHeightFor(10.5) + 1;
+  const fillRect = (x: number, yy: number, w: number, h: number, color: RGB, radius = 0) => {
+    doc.setFillColor(...color);
+    if (radius > 0) doc.roundedRect(x, yy, w, h, radius, radius, "F");
+    else doc.rect(x, yy, w, h, "F");
+  };
+
+  /* ── Page handling ────────────────────────────────────────── */
+
+  let y = marginTop;
+  let onNewPage: (() => void) | null = null;
+
+  const drawRunningHeader = () => {
+    const title = rootNode.label || "Space Requirement";
+    setFont("normal", 7.5);
+    let shown = title;
+    while (shown.length > 4 && doc.getTextWidth(shown) > contentWidth * 0.65) {
+      shown = shown.slice(0, -1);
+    }
+    if (shown !== title) shown = shown.trimEnd() + "...";
+    txt(shown, marginX, marginTop - 2, { size: 7.5, color: GRAY });
+    txt("SPACE REQUIREMENT", pageWidth - marginX, marginTop - 2, {
+      size: 7.5,
+      weight: "bold",
+      color: GRAY,
+      align: "right",
+    });
+    rule(marginTop, marginX, pageWidth - marginX, 0.25, RULE_GRAY);
+  };
+
+  const newPage = () => {
+    doc.addPage();
+    y = marginTop + runningHeaderH - 2;
+    drawRunningHeader();
+    if (onNewPage) onNewPage();
+  };
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > contentBottom) newPage();
+  };
+
+  /* ── Table helpers ────────────────────────────────────────── */
+
+  const CELL_PAD = 1.8;
+  const HEADER_H = 7;
+
+  const cellX = (c: Col) => (c.align === "right" ? c.x + c.w - CELL_PAD : c.x + CELL_PAD);
+
+  const bandHeader = (cols: Col[]) => {
+    fillRect(marginX, y, contentWidth, HEADER_H, NAVY);
+    for (const c of cols) {
+      txt(c.label, cellX(c), y + HEADER_H / 2 + 1.05, {
+        size: 6.8,
+        weight: "bold",
+        color: WHITE,
+        align: c.align,
+      });
+    }
+    y += HEADER_H;
+  };
+
+  const sectionTitle = (label: string, sub?: string) => {
+    ensureSpace(14);
+    fillRect(marginX, y - 0.2, 1.2, 4.6, ACCENT);
+    txt(label, marginX + 3.2, y + 3.4, { size: 10, weight: "bold", color: NAVY });
+    if (sub) {
+      txt(sub, pageWidth - marginX, y + 3.4, {
+        size: 7.5,
+        weight: "italic",
+        color: GRAY,
+        align: "right",
+      });
+    }
+    y += 7.5;
   };
 
   /* ── Compute all numbers up front ─────────────────────────── */
@@ -1589,434 +1674,570 @@ function renderSpaceReport(
       ? computeOneBlock(rootNode, wallPct, circPct, showCost, ratePerSqft)
       : computeBlocks(rootNode, wallPct, circPct, showCost, ratePerSqft);
 
+  const displayBlocks = blocks.filter((b) => b.netSqm > 0).length > 0
+    ? blocks.filter((b) => b.netSqm > 0)
+    : blocks;
+
   const totalNetSqm = blocks.reduce((a, b) => a + b.netSqm, 0);
   const totalWallSqm = blocks.reduce((a, b) => a + b.wallSqm, 0);
   const totalCircSqm = blocks.reduce((a, b) => a + b.circSqm, 0);
   const totalGrossSqm = blocks.reduce((a, b) => a + b.grossSqm, 0);
   const totalGrossSqft = totalGrossSqm * SQFT_PER_SQM;
-  const totalCost =
-    showCost && ratePerSqft !== null ? totalGrossSqft * ratePerSqft : null;
+  const showCostCol = showCost && ratePerSqft !== null;
+  const totalCost = showCostCol ? totalGrossSqft * (ratePerSqft as number) : null;
 
-  /* ── Cover page ───────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     COVER BLOCK
+     ════════════════════════════════════════════════════════════ */
 
-  y += 2;
-  const titleBaseline = y;
-  text("SPACE REQUIREMENT", marginX, titleBaseline, { weight: "bold", size: 18, color: INK });
-  text(
+  fillRect(marginX, y - 6, 22, 1.4, ACCENT);
+  txt("SPACE REQUIREMENT STATEMENT", marginX, y + 0.4, {
+    size: 8,
+    weight: "bold",
+    color: ACCENT,
+  });
+  txt(
     `Generated ${new Date().toLocaleDateString("en-GB", {
       day: "numeric",
       month: "short",
       year: "numeric",
     })}`,
     pageWidth - marginX,
-    titleBaseline,
-    { weight: "italic", size: 8, color: GRAY, align: "right" }
+    y + 0.4,
+    { size: 7.5, weight: "italic", color: GRAY, align: "right" }
   );
-  y += lineHeightFor(18);
+  y += 6.5;
 
-  text(rootNode.label || "Untitled", marginX, y, {
-    weight: "bold",
-    size: 13,
-    color: INK,
-  });
-  y += lineHeightFor(13) + 0.5;
+  const titleLines = wrap(rootNode.label || "Untitled", 18, "bold", contentWidth);
+  for (const line of titleLines) {
+    txt(line, marginX, y + ascent(18) - 1.5, { size: 18, weight: "bold", color: NAVY });
+    y += lh(18, 1.12);
+  }
+  y += 1;
 
   if (rootNode.description) {
-    const descLines = doc.splitTextToSize(
-      rootNode.description,
-      contentWidth
-    ) as string[];
-    setFont("normal", 9);
-    doc.setTextColor(...GRAY);
-    descLines.forEach((line) => {
-      doc.text(line, marginX, y);
-      y += lineHeightCompact(9);
-    });
-    doc.setTextColor(...INK);
-    y += 0.5;
+    const dLines = wrap(rootNode.description, 8.8, "normal", contentWidth);
+    for (const line of dLines) {
+      txt(line, marginX, y + ascent(8.8), { size: 8.8, color: GRAY });
+      y += lh(8.8, 1.25);
+    }
+    y += 1.5;
   }
 
-  rule(y);
-  y += 2.2;
+  // Assumptions strip
+  const assumptions: string[] = [
+    `Unit: ${unitLabel} (${altLabel} alongside)`,
+    wallPct !== null ? `Wall allowance ${wallPct}%` : "",
+    circPct !== null ? `Circulation ${circPct}%` : "",
+    showCostCol ? `Rate ${currency} ${fmtRate(ratePerSqft as number)} / sqft` : "",
+    blockMode === "one-block" ? "Single block" : "",
+  ].filter(Boolean);
+  txt(assumptions.join("   |   "), marginX, y + ascent(7.5), {
+    size: 7.5,
+    color: GRAY,
+  });
+  y += lh(7.5) + 2.5;
 
-  /* ── Cover: summary table ─────────────────────────────────── */
+  rule(y, marginX, pageWidth - marginX, 0.3, RULE_GRAY);
+  y += 5;
+
+  /* ── Custom note (user-entered at export time) ─────────────── */
+
+  const noteText = customNote.trim();
+  if (noteText) {
+    const noteSize = 8.6;
+    const noteLines: string[] = [];
+    noteText.split(/\r?\n/).forEach((para) => {
+      if (para.trim() === "") noteLines.push("");
+      else noteLines.push(...wrap(para, noteSize, "normal", contentWidth - 12));
+    });
+    const boxH = noteLines.length * lh(noteSize, 1.25) + 11;
+    ensureSpace(boxH + 4);
+    fillRect(marginX, y, contentWidth, boxH, [255, 250, 235], 1.8);
+    fillRect(marginX, y + 2.5, 0.9, boxH - 5, AMBER);
+    txt("NOTE", marginX + 5, y + 5.2, { size: 7, weight: "bold", color: AMBER });
+    noteLines.forEach((line, i) => {
+      txt(line, marginX + 5, y + 10 + i * lh(noteSize, 1.25), { size: noteSize, color: INK });
+    });
+    y += boxH + 5;
+  }
+
+  /* ── KPI cards ─────────────────────────────────────────────── */
 
   if (includeCoverTotals) {
-    sectionHeading(blockMode === "one-block" ? "SUMMARY" : "SUMMARY BY BLOCK");
+    type Kpi = { label: string; value: string; sub: string; color: RGB };
+    const kpis: Kpi[] = [
+      {
+        label: "NET CARPET AREA",
+        value: `${fmtArea0(toUnit(totalNetSqm))} ${unitLabel}`,
+        sub: `${fmtArea0(toAlt(totalNetSqm))} ${altLabel}`,
+        color: NAVY,
+      },
+      {
+        label: wallPct !== null || circPct !== null ? "GROSS BUILT-UP AREA" : "TOTAL AREA",
+        value: `${fmtArea0(toUnit(totalGrossSqm))} ${unitLabel}`,
+        sub: `${fmtArea0(toAlt(totalGrossSqm))} ${altLabel}`,
+        color: ACCENT,
+      },
+    ];
+    if (showCostCol && totalCost !== null) {
+      kpis.push({
+        label: "ESTIMATED COST",
+        value: fmtCost(totalCost, currency),
+        sub: `@ ${currency} ${fmtRate(ratePerSqft as number)} per sqft`,
+        color: AMBER,
+      });
+    }
 
-    const colBlockX = marginX;
-    const colNetX = marginX + contentWidth * 0.34;
-    const colWallX = marginX + contentWidth * 0.5;
-    const colCircX = marginX + contentWidth * 0.62;
-    const colGrossX = marginX + contentWidth * 0.74;
-    const colCostX = pageWidth - marginX;
+    const gap = 4;
+    const cardW = (contentWidth - gap * (kpis.length - 1)) / kpis.length;
+    const cardH = 21;
+    ensureSpace(cardH + 6);
+    kpis.forEach((k, i) => {
+      const cx = marginX + i * (cardW + gap);
+      fillRect(cx, y, cardW, cardH, CARD_FILL, 1.8);
+      fillRect(cx, y + 3, 0.9, cardH - 6, k.color);
+      txt(k.label, cx + 5, y + 6, { size: 6.8, weight: "bold", color: GRAY });
+      txt(k.value, cx + 5, y + 13.2, { size: 14, weight: "bold", color: k.color });
+      txt(k.sub, cx + 5, y + 18, { size: 7.5, color: GRAY });
+    });
+    y += cardH + 7;
 
-    const showCostCol = showCost && ratePerSqft !== null;
-    const showTotalRow = blocks.length > 1;
+    /* ── Summary by block ─────────────────────────────────────── */
 
-    text("BLOCK", colBlockX, y, { size: 7.5, weight: "bold", color: GRAY });
-    text("NET", colNetX, y, { size: 7.5, weight: "bold", color: GRAY });
-    if (wallPct !== null)
-      text("WALL", colWallX, y, { size: 7.5, weight: "bold", color: GRAY });
-    if (circPct !== null)
-      text("CIRC", colCircX, y, { size: 7.5, weight: "bold", color: GRAY });
-    text("GROSS", colGrossX, y, { size: 7.5, weight: "bold", color: GRAY });
-    if (showCostCol)
-      text("COST", colCostX, y, {
-        size: 7.5,
+    sectionTitle(blockMode === "one-block" ? "SUMMARY" : "SUMMARY BY BLOCK", `Areas in ${unitLabel}`);
+
+    const numW = 24;
+    const costW = showCostCol ? 30 : 0;
+    const nNumeric =
+      1 + (wallPct !== null ? 1 : 0) + (circPct !== null ? 1 : 0) + 1; // net, wall?, circ?, gross
+    const blockW = contentWidth - numW * nNumeric - costW;
+
+    const cols: Col[] = [];
+    let cx = marginX;
+    cols.push({ x: cx, w: blockW, label: "BLOCK", align: "left" });
+    cx += blockW;
+    const netCol: Col = { x: cx, w: numW, label: "NET", align: "right" };
+    cols.push(netCol);
+    cx += numW;
+    let wallCol: Col | null = null;
+    if (wallPct !== null) {
+      wallCol = { x: cx, w: numW, label: "WALL", align: "right" };
+      cols.push(wallCol);
+      cx += numW;
+    }
+    let circCol: Col | null = null;
+    if (circPct !== null) {
+      circCol = { x: cx, w: numW, label: "CIRC.", align: "right" };
+      cols.push(circCol);
+      cx += numW;
+    }
+    const grossCol: Col = { x: cx, w: numW, label: "GROSS", align: "right" };
+    cols.push(grossCol);
+    cx += numW;
+    let costCol: Col | null = null;
+    if (showCostCol) {
+      costCol = { x: cx, w: costW, label: "EST. COST", align: "right" };
+      cols.push(costCol);
+    }
+
+    const drawSummaryHeader = () => bandHeader(cols);
+    ensureSpace(HEADER_H + 10);
+    drawSummaryHeader();
+    onNewPage = drawSummaryHeader;
+
+    for (const b of displayBlocks) {
+      const nameLines = wrap(b.node.label, 9, "normal", blockW - CELL_PAD * 2);
+      const rowH = nameLines.length * lh(9, 1.15) + 4;
+      ensureSpace(rowH);
+      const base = y + 2 + ascent(9);
+      nameLines.forEach((line, i) => {
+        txt(line, cellX(cols[0]), base + i * lh(9, 1.15), {
+          size: 9,
+          weight: b.node.important ? "bold" : "normal",
+          color: b.node.important ? RED : INK,
+        });
+      });
+      txt(fmtArea0(toUnit(b.netSqm)), cellX(netCol), base, { size: 9, align: "right" });
+      if (wallCol)
+        txt(fmtArea0(toUnit(b.wallSqm)), cellX(wallCol), base, {
+          size: 9,
+          color: GRAY,
+          align: "right",
+        });
+      if (circCol)
+        txt(fmtArea0(toUnit(b.circSqm)), cellX(circCol), base, {
+          size: 9,
+          color: GRAY,
+          align: "right",
+        });
+      txt(fmtArea0(toUnit(b.grossSqm)), cellX(grossCol), base, {
+        size: 9,
         weight: "bold",
-        color: GRAY,
         align: "right",
       });
-    y += lineHeightFor(7.5) + 0.6;
-    rule(y);
+      if (costCol && b.cost !== null)
+        txt(fmtCost(b.cost, currency), cellX(costCol), base, {
+          size: 9,
+          color: AMBER,
+          align: "right",
+        });
+      y += rowH;
+      rule(y, marginX, pageWidth - marginX, 0.15, HAIRLINE);
+    }
+
+    if (displayBlocks.length > 1) {
+      const rowH = 7.5;
+      ensureSpace(rowH);
+      fillRect(marginX, y, contentWidth, rowH, BAND_FILL);
+      const base = y + rowH / 2 + 1.1;
+      txt("Total", cellX(cols[0]), base, { size: 9, weight: "bold", color: NAVY });
+      txt(fmtArea0(toUnit(totalNetSqm)), cellX(netCol), base, {
+        size: 9,
+        weight: "bold",
+        color: NAVY,
+        align: "right",
+      });
+      if (wallCol)
+        txt(fmtArea0(toUnit(totalWallSqm)), cellX(wallCol), base, {
+          size: 9,
+          weight: "bold",
+          color: NAVY,
+          align: "right",
+        });
+      if (circCol)
+        txt(fmtArea0(toUnit(totalCircSqm)), cellX(circCol), base, {
+          size: 9,
+          weight: "bold",
+          color: NAVY,
+          align: "right",
+        });
+      txt(fmtArea0(toUnit(totalGrossSqm)), cellX(grossCol), base, {
+        size: 9,
+        weight: "bold",
+        color: ACCENT,
+        align: "right",
+      });
+      if (costCol && totalCost !== null)
+        txt(fmtCost(totalCost, currency), cellX(costCol), base, {
+          size: 9,
+          weight: "bold",
+          color: AMBER,
+          align: "right",
+        });
+      y += rowH;
+    }
+    onNewPage = null;
+
+    const hintParts = [
+      wallPct !== null
+        ? `Wall = ${wallPct}% of ${blockMode === "one-block" ? "net area" : "each block's net"}`
+        : "",
+      circPct !== null
+        ? `Circulation = ${circPct}% of ${blockMode === "one-block" ? "net area" : "each block's net"}`
+        : "",
+      "Gross = Net + Wall + Circulation",
+    ].filter(Boolean);
     y += 2;
-
-    for (const b of blocks) {
-      ensureSpace(5.5);
-      const rowTop = y;
-
-      text(b.node.label, colBlockX, rowTop, {
-        size: 9,
-        weight: "normal",
-        color: INK,
-      });
-      text(fmtNum(b.netSqm * SQFT_PER_SQM, 0), colNetX, rowTop, {
-        size: 9,
-        weight: "normal",
-        color: INK,
-      });
-      if (wallPct !== null) {
-        text(fmtNum(b.wallSqm * SQFT_PER_SQM, 0), colWallX, rowTop, {
-          size: 9,
-          weight: "normal",
-          color: GRAY,
-        });
-      }
-      if (circPct !== null) {
-        text(fmtNum(b.circSqm * SQFT_PER_SQM, 0), colCircX, rowTop, {
-          size: 9,
-          weight: "normal",
-          color: GRAY,
-        });
-      }
-      text(fmtNum(b.grossSqm * SQFT_PER_SQM, 0), colGrossX, rowTop, {
-        size: 9,
-        weight: "bold",
-        color: INK,
-      });
-      if (showCostCol && b.cost !== null) {
-        text(fmtCost(b.cost, currency), colCostX, rowTop, {
-          size: 9,
-          weight: "normal",
-          color: AMBER,
-          align: "right",
-        });
-      }
-      y = rowTop + lineHeightFor(9) + 0.7;
-    }
-
-    if (showTotalRow) {
-      y += 0.3;
-      rule(y);
-      y += 1.6;
-      ensureSpace(5.5);
-      const totalTop = y;
-
-      text("Total (all blocks)", colBlockX, totalTop, {
-        size: 9,
-        weight: "bold",
-        color: INK,
-      });
-      text(fmtNum(totalNetSqm * SQFT_PER_SQM, 0), colNetX, totalTop, {
-        size: 9,
-        weight: "bold",
-        color: INK,
-      });
-      if (wallPct !== null) {
-        text(fmtNum(totalWallSqm * SQFT_PER_SQM, 0), colWallX, totalTop, {
-          size: 9,
-          weight: "bold",
-          color: GRAY,
-        });
-      }
-      if (circPct !== null) {
-        text(fmtNum(totalCircSqm * SQFT_PER_SQM, 0), colCircX, totalTop, {
-          size: 9,
-          weight: "bold",
-          color: GRAY,
-        });
-      }
-      text(fmtNum(totalGrossSqm * SQFT_PER_SQM, 0), colGrossX, totalTop, {
-        size: 9,
-        weight: "bold",
-        color: GREEN,
-      });
-      if (showCostCol && totalCost !== null) {
-        text(fmtCost(totalCost, currency), colCostX, totalTop, {
-          size: 9,
-          weight: "bold",
-          color: AMBER,
-          align: "right",
-        });
-      }
-      y = totalTop + lineHeightFor(9) + 1.2;
-    }
-
-    const hint =
-      blocks.length > 1
-        ? [
-            wallPct !== null ? `Wall = ${wallPct}% of each block's net` : "",
-            circPct !== null
-              ? `Circulation = ${circPct}% of each block's net`
-              : "",
-          ]
-            .filter(Boolean)
-            .join("  ·  ")
-        : [
-            wallPct !== null ? `Wall = ${wallPct}% of net` : "",
-            circPct !== null ? `Circulation = ${circPct}% of net` : "",
-          ]
-            .filter(Boolean)
-            .join("  ·  ");
-
-    if (hint) {
-      ensureSpace(3.5);
-      text(hint, marginX, y, { size: 7, weight: "italic", color: GRAY });
-      y += lineHeightFor(7) + 1.5;
-    }
-
-    y += 0.5;
-    rule(y);
-    y += 3;
+    ensureSpace(5);
+    txt(hintParts.join("   |   "), marginX, y + ascent(7), {
+      size: 7,
+      weight: "italic",
+      color: GRAY,
+    });
+    y += lh(7) + 5;
   }
 
-  /* ── Area breakdown by type ───────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     AREA BREAKDOWN BY TYPE
+     ════════════════════════════════════════════════════════════ */
 
   if (includeBreakdown) {
     const groups = groupLeavesByType(rootNode, "area");
     if (groups.size > 0) {
-      ensureSpace(10);
+      ensureSpace(30);
+      sectionTitle("AREA BREAKDOWN BY TYPE");
 
-      sectionHeading("AREA BREAKDOWN BY TYPE");
+      const typeTotal = Array.from(groups.values()).reduce((a, b) => a + b.total, 0);
 
-      const colLabelX = marginX;
-      const colAreaX = marginX + contentWidth * 0.5;
-      const colPctX = marginX + contentWidth * 0.8;
+      const shareW = 58;
+      const aW = 28;
+      const bW = 26;
+      const typeW = contentWidth - shareW - aW - bW;
+      const cols: Col[] = [
+        { x: marginX, w: typeW, label: "TYPE", align: "left" },
+        { x: marginX + typeW, w: aW, label: `AREA (${unitLabel})`, align: "right" },
+        { x: marginX + typeW + aW, w: bW, label: `AREA (${altLabel})`, align: "right" },
+        { x: marginX + typeW + aW + bW, w: shareW, label: "SHARE OF NET", align: "left" },
+      ];
+      bandHeader(cols);
 
-      text("TYPE", colLabelX, y, { size: 7.5, weight: "bold", color: GRAY });
-      text(`AREA (${unit})`, colAreaX, y, { size: 7.5, weight: "bold", color: GRAY });
-      text("% OF NET", colPctX, y, { size: 7.5, weight: "bold", color: GRAY });
-      y += lineHeightFor(7.5) + 0.6;
-      rule(y);
-      y += 2;
-
-      const typeTotal = Array.from(groups.values()).reduce(
-        (a, b) => a + b.total,
-        0
-      );
       for (const [typeId, { total }] of groups.entries()) {
         const preset = VALUE_PRESETS[typeId];
         const label = preset?.label ?? typeId;
+        const rowH = 7;
+        ensureSpace(rowH);
+        const base = y + rowH / 2 + 1.1;
+        txt(label, cellX(cols[0]), base, { size: 9 });
+        txt(fmtArea(toUnit(total)), cellX(cols[1]), base, { size: 9, align: "right" });
+        txt(fmtArea(toAlt(total)), cellX(cols[2]), base, {
+          size: 8.5,
+          color: GRAY,
+          align: "right",
+        });
 
-        ensureSpace(5);
-        text(label, colLabelX, y, { size: 9.5, weight: "normal", color: INK });
-        text(fmtAreaPair(total, unit, 1), colAreaX, y, {
-          size: 9.5,
-          weight: "normal",
-          color: INK,
-        });
         const pct = typeTotal > 0 ? (total / typeTotal) * 100 : 0;
-        text(`${pct.toFixed(1)}%`, colPctX, y, {
-          size: 9.5,
-          weight: "normal",
+        const barX = cols[3].x + CELL_PAD + 1;
+        const barW = shareW - 22;
+        fillRect(barX, y + rowH / 2 - 1.1, barW, 2.2, [225, 228, 238], 1.1);
+        if (pct > 0) fillRect(barX, y + rowH / 2 - 1.1, Math.max(barW * (pct / 100), 1.4), 2.2, ACCENT, 1.1);
+        txt(`${pct.toFixed(1)}%`, cols[3].x + shareW - CELL_PAD, base, {
+          size: 8.5,
           color: INK,
+          align: "right",
         });
-        y += lineHeightFor(9.5) + 0.6;
+
+        y += rowH;
+        rule(y, marginX, pageWidth - marginX, 0.15, HAIRLINE);
       }
 
-      y += 0.5;
-      rule(y);
-      y += 2;
-
-      text("Net Carpet Total", colLabelX, y, {
-        size: 9.5,
+      // Total
+      const rowH = 7.5;
+      ensureSpace(rowH);
+      fillRect(marginX, y, contentWidth, rowH, BAND_FILL);
+      const base = y + rowH / 2 + 1.1;
+      txt("Net Carpet Total", cellX(cols[0]), base, { size: 9, weight: "bold", color: NAVY });
+      txt(fmtArea(toUnit(typeTotal)), cellX(cols[1]), base, {
+        size: 9,
         weight: "bold",
-        color: INK,
+        color: NAVY,
+        align: "right",
       });
-      text(fmtAreaPair(typeTotal, unit, 1), colAreaX, y, {
-        size: 9.5,
+      txt(fmtArea(toAlt(typeTotal)), cellX(cols[2]), base, {
+        size: 8.5,
         weight: "bold",
-        color: INK,
+        color: GRAY,
+        align: "right",
       });
-      y += lineHeightFor(9.5) + 2.5;
+      y += rowH + 7;
     }
   }
 
-  /* ── Detailed space table ─────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     DETAILED SPACE TABLE
+     ════════════════════════════════════════════════════════════ */
 
-  const rows = allRows(rootNode).filter(({ node }) => {
-    const v = getNodeValue(node).value;
-    return v !== null;
-  });
+  const rows = allRows(rootNode).filter(({ node }) => getNodeValue(node).value !== null);
 
   if (rows.length > 0) {
     const showDims = includeDimensions;
     const showNotes = includeNotesColumn;
 
-    // Compact name/dims/area so the notes column — where long
-    // descriptions actually live — gets most of the row's width.
-    const colSpaceX = marginX;
-    const colSpaceW = showDims
-      ? contentWidth * (showNotes ? 0.26 : 0.34)
-      : contentWidth * (showNotes ? 0.32 : 0.4);
-    const colDimsX = colSpaceX + colSpaceW;
-    const colDimsW = showDims ? contentWidth * 0.13 : 0;
-    const colAreaX = colDimsX + colDimsW;
-    const colAreaW = contentWidth * (showNotes ? 0.15 : 0.6 - (showDims ? 0.13 : 0));
-    const colNotesX = colAreaX + colAreaW;
-    const colNotesW = contentWidth - (colNotesX - marginX);
+    const numW = 13;
+    const dimsW = showDims ? 22 : 0;
+    const a1W = 21;
+    const a2W = 19;
+    const notesW = showNotes ? 62 : 0;
+    const spaceW = contentWidth - numW - dimsW - a1W - a2W - notesW;
 
-    // DIMENSIONS heading with unit. Grab the first leaf's factor symbol
-    // for the current report unit — e.g. "(ft)" when the report is in
-    // sqft for an Area preset, "(m)" when in sqm.
+    let cx = marginX;
+    const numCol: Col = { x: cx, w: numW, label: "NO.", align: "left" };
+    cx += numW;
+    const spaceCol: Col = { x: cx, w: spaceW, label: "SPACE / ROOM", align: "left" };
+    cx += spaceW;
+    const dimsCol: Col = { x: cx, w: dimsW, label: "", align: "right" };
+    cx += dimsW;
+    const a1Col: Col = { x: cx, w: a1W, label: `AREA (${unitLabel})`, align: "right" };
+    cx += a1W;
+    const a2Col: Col = { x: cx, w: a2W, label: `AREA (${altLabel})`, align: "right" };
+    cx += a2W;
+    const notesCol: Col = { x: cx, w: notesW, label: "NOTES", align: "left" };
+
     const firstLeaf = rows.find((r) => r.isLeaf)?.node;
     const dimUnit = firstLeaf ? factorSymbolForLeaf(firstLeaf, unit) : "";
-    const dimsHeader = dimUnit ? `DIMENSIONS (${dimUnit})` : "DIMENSIONS";
+    dimsCol.label = dimUnit ? `L x B (${dimUnit})` : "L x B";
 
-    ensureSpace(12);
-    sectionHeading("DETAILED SPACE REQUIREMENT");
+    const headerCols: Col[] = [numCol, spaceCol];
+    if (showDims) headerCols.push(dimsCol);
+    headerCols.push(a1Col, a2Col);
+    if (showNotes) headerCols.push(notesCol);
 
-    text("SPACE / ROOM", colSpaceX, y, { size: 7, weight: "bold", color: GRAY });
-    if (showDims)
-      text(dimsHeader, colDimsX, y, { size: 7, weight: "bold", color: GRAY });
-    text(`AREA (${unit})`, colAreaX, y, { size: 7, weight: "bold", color: GRAY });
-    if (showNotes)
-      text("NOTES", colNotesX, y, { size: 7, weight: "bold", color: GRAY });
-    y += lineHeightFor(7) + 0.6;
-    rule(y);
-    y += 2;
+    // Make sure the section title, the column header and a couple of
+    // rows land together rather than orphaning the title.
+    ensureSpace(30);
+    sectionTitle(
+      "DETAILED SPACE REQUIREMENT",
+      rows.some((r) => r.node.important) ? "Red = marked important" : undefined
+    );
+    const drawDetailHeader = () => bandHeader(headerCols);
+    drawDetailHeader();
+    onNewPage = drawDetailHeader;
 
-    const nameFontSize = 8.5;
-    const dimsFontSize = 7.5;
-    const areaFontSize = 8.5;
-    const notesFontSize = 7;
+    const PAD_Y = 1.7;
 
-    for (const { node, path, depth, isLeaf } of rows) {
+    rows.forEach(({ node, path, depth, isLeaf }, idx) => {
       const v = getNodeValue(node).value ?? 0;
-      const indent = Math.min(depth - 1, 3) * 3;
+      const isTop = depth === 1;
+      const isGroup = !isLeaf;
+      const important = !!node.important;
 
-      const displayName = `${path.join(".")}  ${node.label}`;
+      const nameSize = isTop ? 9 : 8.5;
+      const nameWeight: Weight = isGroup ? "bold" : "normal";
+      const notesSize = 6.8;
+      const indent = Math.min(Math.max(depth - 1, 0), 3) * 3;
 
-      // Convert the leaf's stored (base-unit) factors into the unit
-      // this report is displaying, so "DIMENSIONS (ft)" actually
-      // shows feet rather than the raw metre values.
-      const { f1, f2 } = showDims && isLeaf ? displayFactorsForLeaf(node, unit) : { f1: null, f2: null };
-      const dimsText = f1 !== null && f2 !== null ? `${fmtNum(f1, 1)} × ${fmtNum(f2, 1)}` : "";
+      const nameLines = wrap(node.label, nameSize, nameWeight, spaceW - indent - CELL_PAD * 2);
 
-      const notesText = (node.description ?? "").trim();
+      const dimsText = (() => {
+        if (!showDims || !isLeaf) return "";
+        const { f1, f2 } = displayFactorsForLeaf(node, unit);
+        return f1 !== null && f2 !== null ? `${fmtNum(f1, 1)} x ${fmtNum(f2, 1)}` : "";
+      })();
 
-      const nameLines = doc.splitTextToSize(
-        displayName,
-        colSpaceW - indent - 2
-      ) as string[];
-      const dimsLines =
-        showDims && dimsText
-          ? (doc.splitTextToSize(dimsText, colDimsW - 2) as string[])
-          : [];
-      const areaLines = doc.splitTextToSize(
-        fmtAreaPair(v, unit, 1),
-        colAreaW - 2
-      ) as string[];
-      const notesLines =
-        showNotes && notesText
-          ? (doc.splitTextToSize(notesText, colNotesW - 2) as string[])
-          : [];
-
-      const rowLines = Math.max(
-        nameLines.length,
-        dimsLines.length || 1,
-        areaLines.length || 1,
-        notesLines.length || 1
-      );
-      const rowHeight = rowLines * lineHeightCompact(nameFontSize) + 0.8;
-
-      ensureSpace(rowHeight);
-      const rowTop = y;
-
-      setFont(isLeaf ? "normal" : "bold", nameFontSize);
-      doc.setTextColor(...INK);
-      nameLines.forEach((line, i) => {
-        doc.text(line, colSpaceX + indent, rowTop + i * lineHeightCompact(nameFontSize));
-      });
-
-      if (showDims) {
-        setFont("normal", dimsFontSize);
-        doc.setTextColor(...GRAY);
-        dimsLines.forEach((line, i) => {
-          doc.text(line, colDimsX, rowTop + i * lineHeightCompact(nameFontSize));
-        });
-      }
-
-      setFont(isLeaf ? "normal" : "bold", areaFontSize);
-      doc.setTextColor(...INK);
-      areaLines.forEach((line, i) => {
-        doc.text(line, colAreaX, rowTop + i * lineHeightCompact(nameFontSize));
-      });
-
+      let notesLines: string[] = [];
       if (showNotes) {
-        setFont("normal", notesFontSize);
-        doc.setTextColor(...GRAY);
+        const notesText = (node.description ?? "").trim();
+        if (notesText) {
+          notesLines = wrap(notesText, notesSize, "normal", notesW - CELL_PAD * 2);
+          if (isGroup) {
+            notesLines = clampLines(notesLines, 2, notesW - CELL_PAD * 2, notesSize, "normal");
+          }
+        }
+      }
+
+      const nameH = nameLines.length * lh(nameSize, 1.15);
+      const notesH = notesLines.length * lh(notesSize, 1.2);
+      const rowH = Math.max(nameH, notesH, lh(nameSize, 1.15)) + PAD_Y * 2;
+
+      // Keep a group heading together with at least its first child row.
+      ensureSpace(isGroup ? rowH + 12 : rowH);
+
+      if (isTop && idx > 0) y += 1.5;
+
+      if (isTop) {
+        fillRect(marginX, y, contentWidth, rowH, BAND_FILL);
+      }
+      if (important) {
+        fillRect(marginX, y, 0.9, rowH, RED);
+      }
+
+      const base = y + PAD_Y + ascent(nameSize);
+      const textColor: RGB = important ? RED : isTop ? NAVY : INK;
+
+      // No.
+      txt(path.join("."), cellX(numCol), base, {
+        size: 7.8,
+        weight: isGroup ? "bold" : "normal",
+        color: important ? RED : isTop ? NAVY : GRAY,
+      });
+
+      // Name
+      nameLines.forEach((line, i) => {
+        txt(line, spaceCol.x + CELL_PAD + indent, base + i * lh(nameSize, 1.15), {
+          size: nameSize,
+          weight: nameWeight,
+          color: textColor,
+        });
+      });
+
+      // Dimensions
+      if (showDims && dimsText) {
+        txt(dimsText, cellX(dimsCol), base, { size: 7.8, color: GRAY, align: "right" });
+      }
+
+      // Areas
+      txt(fmtArea(toUnit(v)), cellX(a1Col), base, {
+        size: nameSize,
+        weight: isGroup ? "bold" : "normal",
+        color: textColor,
+        align: "right",
+      });
+      txt(fmtArea(toAlt(v)), cellX(a2Col), base, {
+        size: 7.8,
+        weight: isGroup ? "bold" : "normal",
+        color: important ? RED : GRAY,
+        align: "right",
+      });
+
+      // Notes
+      if (showNotes) {
         notesLines.forEach((line, i) => {
-          doc.text(line, colNotesX, rowTop + i * lineHeightCompact(nameFontSize));
+          txt(line, notesCol.x + CELL_PAD, base + i * lh(notesSize, 1.2), {
+            size: notesSize,
+            color: important ? RED : isTop ? [70, 75, 90] : GRAY,
+          });
         });
       }
 
-      doc.setTextColor(...INK);
-      y = rowTop + rowHeight;
+      y += rowH;
 
-      if (y < contentBottom - 3) {
-        doc.setDrawColor(242, 242, 242);
-        doc.setLineWidth(0.12);
-        doc.line(marginX, y - 0.5, pageWidth - marginX, y - 0.5);
-        doc.setDrawColor(0);
-      }
-    }
+      if (!isTop) rule(y, marginX, pageWidth - marginX, 0.12, HAIRLINE);
+    });
 
-    y += 1.5;
-    rule(y);
-    y += 1.8;
-
-    ensureSpace(5.5);
-    setFont("bold", 9.5);
-    doc.setTextColor(...INK);
-    doc.text("Total Net Carpet Area", colSpaceX, y);
-    doc.text(fmtAreaPair(totalNetSqm, unit, 1), colAreaX, y);
-    y += lineHeightFor(9.5) + 2.5;
+    // Grand total bar
+    const totH = 8.5;
+    ensureSpace(totH + 2);
+    y += 1;
+    fillRect(marginX, y, contentWidth, totH, NAVY);
+    const tb = y + totH / 2 + 1.2;
+    txt("TOTAL NET CARPET AREA", spaceCol.x - numW + CELL_PAD, tb, {
+      size: 8.5,
+      weight: "bold",
+      color: WHITE,
+    });
+    txt(fmtArea(toUnit(totalNetSqm)), cellX(a1Col), tb, {
+      size: 9,
+      weight: "bold",
+      color: WHITE,
+      align: "right",
+    });
+    txt(fmtArea(toAlt(totalNetSqm)), cellX(a2Col), tb, {
+      size: 8,
+      weight: "bold",
+      color: [200, 205, 225],
+      align: "right",
+    });
+    y += totH + 6;
+    onNewPage = null;
   }
 
-  /* ── Footnote ─────────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     FOOTNOTE
+     ════════════════════════════════════════════════════════════ */
 
-  ensureSpace(16);
-  rule(y, 0.2, [225, 225, 225]);
-  y += 2.5;
-  text("NOTE", marginX, y, { size: 7.5, weight: "bold", color: GRAY });
-  y += lineHeightFor(7.5) + 0.4;
   const footnote =
     "This is a preliminary space requirement and area estimate prepared for " +
     "architectural discussion and future reference. All dimensions and areas " +
     "are indicative. Final areas may vary after design development, structural " +
     "planning, services coordination, statutory approvals, and site-specific " +
     "conditions.";
-  setFont("italic", 7.5);
-  doc.setTextColor(...GRAY);
-  const fnLines = doc.splitTextToSize(footnote, contentWidth) as string[];
-  fnLines.forEach((line) => {
-    ensureSpace(lineHeightCompact(7.5));
-    doc.text(line, marginX, y);
-    y += lineHeightCompact(7.5);
+  const fnLines = wrap(footnote, 7.5, "italic", contentWidth - 8);
+  const fnH = fnLines.length * lh(7.5, 1.25) + 11;
+  ensureSpace(fnH + 2);
+  fillRect(marginX, y, contentWidth, fnH, CARD_FILL, 1.8);
+  txt("NOTE", marginX + 4, y + 5, { size: 7, weight: "bold", color: GRAY });
+  fnLines.forEach((line, i) => {
+    txt(line, marginX + 4, y + 9.4 + i * lh(7.5, 1.25), {
+      size: 7.5,
+      weight: "italic",
+      color: GRAY,
+    });
   });
-  doc.setTextColor(...INK);
+  y += fnH;
 
-  drawFooter();
+  /* ════════════════════════════════════════════════════════════
+     FOOTERS (drawn last so "Page x of N" is correct)
+     ════════════════════════════════════════════════════════════ */
+
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    rule(pageHeight - 12, marginX, pageWidth - marginX, 0.2, RULE_GRAY);
+    txt("www.modelflick.com", marginX, pageHeight - 8, { size: 7.5, color: GRAY });
+    txt(`Page ${p} of ${totalPages}`, pageWidth - marginX, pageHeight - 8, {
+      size: 7.5,
+      color: GRAY,
+      align: "right",
+    });
+  }
 }

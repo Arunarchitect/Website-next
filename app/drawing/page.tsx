@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense, useMemo } from "react";
+import { useEffect, useState, useCallback, Suspense, useMemo, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -55,6 +55,8 @@ const mono = IBM_Plex_Mono({
 });
 
 const UPLOAD_ROLES = ["admin", "manager", "member"];
+
+const Spinner = () => <span className="btn-spinner" aria-hidden="true" />;
 
 /**
  * What the Status dropdown can hold. "pending" / "rejected" are both
@@ -123,6 +125,15 @@ function DocumentsPageInner() {
   const [error, setError] = useState<string | null>(null);
   // Non-blocking message for failed actions (delete / approve / reject ...)
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // One review action at a time across ALL cards
+  const [busyAction, setBusyAction] = useState<{ id: number; action: string } | null>(null);
+  const busyRef = useRef(false);
+  const isBusy = busyAction !== null;
+  const isBtnBusy = (doc: DrawingDocumentResolved, action: string) =>
+    busyAction?.id === doc.id && busyAction.action === action;
+
+
   const [currentUser, setCurrentUser] = useState<UserContext | null>(null);
 
   // Real org-membership rows from /my-memberships/ (OrganisationMembership),
@@ -439,20 +450,34 @@ function DocumentsPageInner() {
     }
   };
 
-  const handleDeleteDocument = async (doc: DrawingDocumentResolved) => {
-    if (!confirm(`Delete the draft "${doc.title}"? This action cannot be undone.`)) {
-      return;
-    }
+  const runAction = async (
+    doc: DrawingDocumentResolved,
+    action: string,
+    fn: () => Promise<DrawingDocumentResolved | void>
+  ) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusyAction({ id: doc.id, action });
+    setActionMessage(null);
     try {
-      setActionMessage(null);
-      await deleteDocument(doc.id);
-      setSelectedDoc(null);
+      const updated = await fn();
+      if (action === "delete") {
+        setSelectedDoc(null);
+      } else if (updated && selectedDoc?.id === doc.id) {
+        setSelectedDoc(updated);
+      }
       await loadDocuments(true);
-    } catch (err: unknown) {
-      console.error("Error deleting document:", err);
-      // e.g. "Approved drawings can't be deleted. Archive it instead."
-      setActionMessage(getErrorMessage(err) || "Failed to delete document");
+    } catch (err) {
+      setActionMessage(getErrorMessage(err) || "Action failed");
+    } finally {
+      busyRef.current = false;
+      setBusyAction(null);
     }
+  };
+
+  const handleDeleteDocument = (doc: DrawingDocumentResolved) => {
+    if (!confirm(`Delete the draft "${doc.title}"? This action cannot be undone.`)) return;
+    runAction(doc, "delete", () => deleteDocument(doc.id));
   };
 
   // Called by the viewer's ApprovalPanel after approve/reject/archive/restore
@@ -461,60 +486,32 @@ function DocumentsPageInner() {
     loadDocuments(true);
   };
 
-  // Quick review actions on the card (admins)
-  const handleQuickApprove = async (doc: DrawingDocumentResolved) => {
-    try {
-      setActionMessage(null);
-      const updated = await approveDocument(doc.id);
-      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
-      await loadDocuments(true);
-    } catch (err) {
-      setActionMessage(getErrorMessage(err));
-    }
-  };
+  const handleQuickApprove = (doc: DrawingDocumentResolved) =>
+    runAction(doc, "approve", () => approveDocument(doc.id));
 
-  const handleQuickReject = async (doc: DrawingDocumentResolved) => {
+  const handleQuickReject = (doc: DrawingDocumentResolved) => {
+    if (busyRef.current) return;
     const reason = window.prompt(`Reason for rejecting "${doc.title}" (optional):`);
     if (reason === null) return;
-    try {
-      setActionMessage(null);
-      const updated = await rejectDocument(doc.id, reason);
-      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
-      await loadDocuments(true);
-    } catch (err) {
-      setActionMessage(getErrorMessage(err));
-    }
+    runAction(doc, "reject", () => rejectDocument(doc.id, reason));
   };
 
-  const handleQuickArchive = async (doc: DrawingDocumentResolved) => {
+  const handleQuickArchive = (doc: DrawingDocumentResolved) => {
+    if (busyRef.current) return;
     if (
       !window.confirm(
         `Archive "${doc.title}"? It will be hidden from the public and its share link will stop working.`
       )
     )
       return;
-    try {
-      setActionMessage(null);
-      const updated = await archiveDocument(doc.id);
-      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
-      await loadDocuments(true);
-    } catch (err) {
-      setActionMessage(getErrorMessage(err));
-    }
+    runAction(doc, "archive", () => archiveDocument(doc.id));
   };
 
-  const handleQuickRestore = async (doc: DrawingDocumentResolved) => {
+  const handleQuickRestore = (doc: DrawingDocumentResolved) => {
+    if (busyRef.current) return;
     if (!window.confirm(`Restore "${doc.title}" to published? It will be public again.`)) return;
-    try {
-      setActionMessage(null);
-      const updated = await restoreDocument(doc.id);
-      if (selectedDoc?.id === doc.id) setSelectedDoc(updated);
-      await loadDocuments(true);
-    } catch (err) {
-      setActionMessage(getErrorMessage(err));
-    }
+    runAction(doc, "restore", () => restoreDocument(doc.id));
   };
-
   const handleFormSave = async (formData: FormData) => {
     try {
       let savedId: number | null = null;
@@ -708,13 +705,13 @@ function DocumentsPageInner() {
               </button>
             )}
             {selectedDoc?.permissions?.can_edit && (
-              <button className="btn-secondary" onClick={() => handleEditDocument(selectedDoc)}>
+              <button className="btn-secondary" disabled={isBusy} onClick={() => handleEditDocument(selectedDoc)}>
                 <i className="ti ti-edit" />
                 Edit
               </button>
             )}
             {selectedDoc?.permissions?.can_delete && (
-              <button className="btn-danger" onClick={() => handleDeleteDocument(selectedDoc)}>
+              <button className="btn-danger" disabled={isBusy} onClick={() => handleDeleteDocument(selectedDoc)}>
                 <i className="ti ti-trash" />
                 Delete draft
               </button>
@@ -973,9 +970,8 @@ function DocumentsPageInner() {
                   return (
                     <div
                       key={doc.id}
-                      className={`documents-card ${doc.is_private ? "documents-card-private" : ""} ${
-                        selectedDoc?.id === doc.id ? "documents-card-selected" : ""
-                      }`}
+                      className={`documents-card ${doc.is_private ? "documents-card-private" : ""} ${selectedDoc?.id === doc.id ? "documents-card-selected" : ""
+                        }`}
                       onClick={() => setSelectedDoc(doc)}
                     >
                       <div className="documents-card-thumbnail">
@@ -1107,40 +1103,34 @@ function DocumentsPageInner() {
                             perms.can_delete ||
                             perms.can_archive ||
                             perms.can_restore) && (
-                            <div className="documents-card-review-actions">
+                            <div className="documents-card-review-actions" aria-busy={isBusy}>
                               {perms.can_approve && (
                                 <button
                                   className="approval-btn approval-btn-approve approval-btn-sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleQuickApprove(doc);
-                                  }}
+                                  disabled={isBusy}
+                                  onClick={(e) => { e.stopPropagation(); handleQuickApprove(doc); }}
                                 >
-                                  <i className="ti ti-check" />
-                                  {doc.review_state === "rejected" ? "Re-approve" : "Approve"}
+                                  {isBtnBusy(doc, "approve") ? <Spinner /> : <i className="ti ti-check" />}
+                                  {isBtnBusy(doc, "approve")
+                                    ? "Approving…"
+                                    : doc.review_state === "rejected" ? "Re-approve" : "Approve"}
                                 </button>
                               )}
                               {perms.can_reject && (
                                 <button
                                   className="approval-btn approval-btn-reject approval-btn-sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleQuickReject(doc);
-                                  }}
+                                  disabled={isBusy}
+                                  onClick={(e) => { e.stopPropagation(); handleQuickReject(doc); }}
                                 >
-                                  <i className="ti ti-x" />
-                                  Reject
+                                  {isBtnBusy(doc, "reject") ? <Spinner /> : <i className="ti ti-x" />}
+                                  {isBtnBusy(doc, "reject") ? "Rejecting…" : "Reject"}
                                 </button>
                               )}
-                              {/* Edit: authors on their own drafts; admins on anything.
-                                  (Admins reviewing a draft use the header Edit button.) */}
                               {perms.can_edit && !(perms.can_approve && doc.status === "draft") && (
                                 <button
                                   className="approval-btn approval-btn-sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleEditDocument(doc);
-                                  }}
+                                  disabled={isBusy}
+                                  onClick={(e) => { e.stopPropagation(); handleEditDocument(doc); }}
                                 >
                                   <i className="ti ti-edit" />
                                   {doc.review_state === "rejected" ? "Edit & resubmit" : "Edit"}
@@ -1149,38 +1139,31 @@ function DocumentsPageInner() {
                               {perms.can_archive && (
                                 <button
                                   className="approval-btn approval-btn-sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleQuickArchive(doc);
-                                  }}
+                                  disabled={isBusy}
+                                  onClick={(e) => { e.stopPropagation(); handleQuickArchive(doc); }}
                                 >
-                                  <i className="ti ti-archive" />
-                                  Archive
+                                  {isBtnBusy(doc, "archive") ? <Spinner /> : <i className="ti ti-archive" />}
+                                  {isBtnBusy(doc, "archive") ? "Archiving…" : "Archive"}
                                 </button>
                               )}
                               {perms.can_restore && (
                                 <button
                                   className="approval-btn approval-btn-sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleQuickRestore(doc);
-                                  }}
+                                  disabled={isBusy}
+                                  onClick={(e) => { e.stopPropagation(); handleQuickRestore(doc); }}
                                 >
-                                  <i className="ti ti-arrow-back-up" />
-                                  Restore
+                                  {isBtnBusy(doc, "restore") ? <Spinner /> : <i className="ti ti-arrow-back-up" />}
+                                  {isBtnBusy(doc, "restore") ? "Restoring…" : "Restore"}
                                 </button>
                               )}
-                              {/* can_delete is only ever true for drafts */}
                               {perms.can_delete && (
                                 <button
                                   className="approval-btn approval-btn-reject approval-btn-sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteDocument(doc);
-                                  }}
+                                  disabled={isBusy}
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc); }}
                                 >
-                                  <i className="ti ti-trash" />
-                                  Delete
+                                  {isBtnBusy(doc, "delete") ? <Spinner /> : <i className="ti ti-trash" />}
+                                  {isBtnBusy(doc, "delete") ? "Deleting…" : "Delete"}
                                 </button>
                               )}
                             </div>
@@ -1198,7 +1181,7 @@ function DocumentsPageInner() {
                                 e.stopPropagation();
                                 handleViewDocument(doc);
                               }}
-                              disabled={!canAccessDocument(doc, currentUser)}
+                              disabled={isBusy || !canAccessDocument(doc, currentUser)}
                             >
                               <i className="ti ti-eye" />
                               View
@@ -1209,7 +1192,7 @@ function DocumentsPageInner() {
                                 e.stopPropagation();
                                 handleDownload(doc);
                               }}
-                              disabled={!canAccessDocument(doc, currentUser)}
+                              disabled={isBusy || !canAccessDocument(doc, currentUser)}
                             >
                               <i className="ti ti-download" />
                               Download
@@ -1242,9 +1225,8 @@ function DocumentsPageInner() {
                     {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
                       <button
                         key={page}
-                        className={`documents-pagination-btn ${
-                          page === currentPage ? "active" : ""
-                        }`}
+                        className={`documents-pagination-btn ${page === currentPage ? "active" : ""
+                          }`}
                         onClick={() => setCurrentPage(page)}
                       >
                         {page}
@@ -1283,8 +1265,8 @@ function DocumentsPageInner() {
                 {searchTerm
                   ? `No documents match your search "${searchTerm}"`
                   : showPrivateOnly
-                  ? "No private documents match the selected filters"
-                  : "No documents match the selected filters"}
+                    ? "No private documents match the selected filters"
+                    : "No documents match the selected filters"}
               </p>
               {canUpload && (
                 <button

@@ -1,7 +1,7 @@
 // app/drawing/components/ApprovalPanel.tsx
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   approveDocument,
   rejectDocument,
@@ -10,6 +10,8 @@ import {
   getDocumentActivity,
 } from "../drawingApi";
 import { ActivityAction, DrawingActivity, DrawingDocumentResolved } from "../types";
+
+const Spinner = () => <span className="btn-spinner" aria-hidden="true" />;
 
 /** Full phrase after the person's name, e.g. "Arun" + "approved this drawing". */
 export const ACTIVITY_VERB: Record<ActivityAction, string> = {
@@ -49,6 +51,7 @@ interface ApprovalPanelProps {
 
 export default function ApprovalPanel({ document: doc, onChanged }: ApprovalPanelProps) {
   const [busy, setBusy] = useState<string | null>(null);
+  const busyRef = useRef(false); // blocks double-clicks before React re-renders
   const [error, setError] = useState<string | null>(null);
   const [showActivity, setShowActivity] = useState<boolean>(false);
   const [activity, setActivity] = useState<DrawingActivity[] | null>(null);
@@ -87,7 +90,9 @@ export default function ApprovalPanel({ document: doc, onChanged }: ApprovalPane
     fn: () => Promise<DrawingDocumentResolved>,
     confirmText?: string
   ) => {
+    if (busyRef.current) return; // something is already running
     if (confirmText && !window.confirm(confirmText)) return;
+    busyRef.current = true;
     setBusy(key);
     setError(null);
     try {
@@ -98,15 +103,19 @@ export default function ApprovalPanel({ document: doc, onChanged }: ApprovalPane
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed");
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
 
   const handleReject = () => {
+    if (busyRef.current) return;
     const reason = window.prompt("Reason for rejecting this drawing (optional):");
     if (reason === null) return; // cancelled
     run("reject", () => rejectDocument(doc.id, reason));
   };
+
+  const isBusy = busy !== null;
 
   const hasActions =
     !!perms &&
@@ -161,31 +170,31 @@ export default function ApprovalPanel({ document: doc, onChanged }: ApprovalPane
           )}
         </div>
 
-        <div className="approval-panel-actions">
+        <div className="approval-panel-actions" aria-busy={isBusy}>
           {perms?.can_approve && (
             <button
               className="approval-btn approval-btn-approve"
-              disabled={busy !== null}
+              disabled={isBusy}
               onClick={() => run("approve", () => approveDocument(doc.id))}
             >
-              <i className="ti ti-check" />
+              {busy === "approve" ? <Spinner /> : <i className="ti ti-check" />}
               {busy === "approve" ? "Approving…" : state === "rejected" ? "Re-approve" : "Approve"}
             </button>
           )}
           {perms?.can_reject && (
             <button
               className="approval-btn approval-btn-reject"
-              disabled={busy !== null}
+              disabled={isBusy}
               onClick={handleReject}
             >
-              <i className="ti ti-x" />
+              {busy === "reject" ? <Spinner /> : <i className="ti ti-x" />}
               {busy === "reject" ? "Rejecting…" : "Reject"}
             </button>
           )}
           {perms?.can_archive && (
             <button
               className="approval-btn"
-              disabled={busy !== null}
+              disabled={isBusy}
               onClick={() =>
                 run(
                   "archive",
@@ -194,14 +203,14 @@ export default function ApprovalPanel({ document: doc, onChanged }: ApprovalPane
                 )
               }
             >
-              <i className="ti ti-archive" />
+              {busy === "archive" ? <Spinner /> : <i className="ti ti-archive" />}
               {busy === "archive" ? "Archiving…" : "Archive"}
             </button>
           )}
           {perms?.can_restore && (
             <button
               className="approval-btn"
-              disabled={busy !== null}
+              disabled={isBusy}
               onClick={() =>
                 run(
                   "restore",
@@ -210,13 +219,14 @@ export default function ApprovalPanel({ document: doc, onChanged }: ApprovalPane
                 )
               }
             >
-              <i className="ti ti-arrow-back-up" />
+              {busy === "restore" ? <Spinner /> : <i className="ti ti-arrow-back-up" />}
               {busy === "restore" ? "Restoring…" : "Restore"}
             </button>
           )}
           {perms?.can_view_activity && (
             <button
               className="approval-btn approval-btn-ghost"
+              disabled={isBusy}
               onClick={() => setShowActivity((v) => !v)}
               aria-expanded={showActivity}
             >
