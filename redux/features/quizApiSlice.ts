@@ -1,19 +1,19 @@
 // redux/features/quizApiSlice.ts
 import { apiSlice } from "@/redux/services/apiSlice";
-import { 
-  Exam, 
-  Category, 
-  Question, 
-  QuizParams, 
-  EvaluationRequest, 
+import {
+  Exam,
+  Category,
+  Question,
+  QuizParams,
+  EvaluationRequest,
   EvaluationResponse,
   ScoreStats,
   ExamScoreBreakdown,
   CategoryScoreBreakdown,
-  QuizResponse
+  QuizResponse,
+  QuizMetadata,
 } from "@/app/tools/quiz/types/quiztypes";
 
-// Add these interfaces for the new endpoints
 export interface UserStatsResponse {
   has_attempts: boolean;
   average_score: number;
@@ -56,9 +56,34 @@ export interface ProgressData {
   period: string;
 }
 
+// Unfinished quiz stored on the server
+export interface AttemptPayload {
+  question_ids: number[];
+  answers: Record<string, string>;
+  metadata: QuizMetadata | null;
+  exam: number | null;
+  category: number | null;
+  total_seconds: number | null;
+  remaining_seconds: number | null;
+  paused: boolean;
+}
+
+export interface AttemptResponse {
+  attempt: null | {
+    questions: Question[];
+    answers: Record<string, string>;
+    metadata: QuizMetadata | null;
+    exam: number | null;
+    category: number | null;
+    total_seconds: number | null;
+    remaining_seconds: number | null;
+    paused: boolean;
+    updated_at: string;
+  };
+}
+
 export const quizApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    // Existing endpoints
     getExams: builder.query<Exam[], void>({
       query: () => "/exams/",
       providesTags: ["Exams"],
@@ -74,7 +99,6 @@ export const quizApiSlice = apiSlice.injectEndpoints({
       providesTags: ["Categories"],
     }),
 
-    // FIXED: Updated to return QuizResponse instead of Question[]
     getQuizQuestions: builder.query<QuizResponse, QuizParams>({
       query: (params) => ({
         url: "/get-quiz/",
@@ -93,7 +117,27 @@ export const quizApiSlice = apiSlice.injectEndpoints({
       invalidatesTags: ["Quiz", "Scores"],
     }),
 
-    // New CSV endpoints
+    // ---- unfinished quiz (cross-device resume) ----
+    getAttempt: builder.query<AttemptResponse, void>({
+      query: () => "/attempt/",
+      keepUnusedDataFor: 0,
+    }),
+
+    saveAttempt: builder.mutation<{ updated_at: string }, AttemptPayload>({
+      query: (body) => ({
+        url: "/attempt/",
+        method: "PUT",
+        body,
+      }),
+    }),
+
+    deleteAttempt: builder.mutation<void, void>({
+      query: () => ({
+        url: "/attempt/",
+        method: "DELETE",
+      }),
+    }),
+
     downloadQuestionsTemplate: builder.mutation<Blob, void>({
       query: () => ({
         url: "/download-template/",
@@ -110,14 +154,11 @@ export const quizApiSlice = apiSlice.injectEndpoints({
         url: "/upload-csv/",
         method: "POST",
         body: formData,
-        headers: {
-          // Let the browser set Content-Type with boundary
-        },
+        headers: {},
       }),
       invalidatesTags: ["Quiz", "Exams", "Categories"],
     }),
 
-    // Score statistics endpoints
     getScoreStats: builder.query<ScoreStats, void>({
       query: () => "/scores/stats/",
       providesTags: ["Scores"],
@@ -133,19 +174,16 @@ export const quizApiSlice = apiSlice.injectEndpoints({
       providesTags: ["Scores"],
     }),
 
-    // NEW: Comprehensive user stats endpoint
     getUserStats: builder.query<UserStatsResponse, void>({
       query: () => "/scores/user_stats/",
       providesTags: ["Scores"],
     }),
 
-    // NEW: Progress over time for charts
     getProgressOverTime: builder.query<ProgressData[], void>({
       query: () => "/scores/progress_over_time/",
       providesTags: ["Scores"],
     }),
 
-    // Optional: Get scores with filters
     getFilteredScores: builder.query<{
       results: Array<{
         id: number;
@@ -182,9 +220,11 @@ export const {
   useGetQuizQuestionsQuery,
   useLazyGetQuizQuestionsQuery,
   useEvaluateQuizMutation,
+  useLazyGetAttemptQuery,
+  useSaveAttemptMutation,
+  useDeleteAttemptMutation,
   useDownloadQuestionsTemplateMutation,
   useUploadQuestionsCSVMutation,
-  // Score statistics hooks
   useGetScoreStatsQuery,
   useGetScoresByExamQuery,
   useGetScoresByCategoryQuery,

@@ -1,0 +1,71 @@
+/* Shared layout safety net for everything under app/tools/quiz.
+   Everything lives in @layer base so Tailwind utilities (grid-cols-*, lg:*, etc.)
+   always win. Unlayered CSS would beat them in Tailwind v4, even with :where(). */
+
+@layer theme, base, components, utilities;
+
+@layer base {
+  .quiz-root {
+    width: 100%;
+    max-width: 100%;
+    /* clip (not hidden) so position: sticky keeps working */
+    overflow-x: clip;
+  }
+
+  /* Border-box everywhere */
+  :where(.quiz-root, .quiz-root *, .quiz-root *::before, .quiz-root *::after) {
+    box-sizing: border-box;
+  }
+
+  /* Let flex/grid children shrink below their content width
+     (stops long names from pushing the page wider than the screen) */
+  :where(.quiz-root) :where(div, section, aside, form, ul, li, p, h1, h2, h3, span, label, details) {
+    min-width: 0;
+  }
+
+  /* Any grid without an explicit column count gets one shrinkable column.
+     grid-cols-2, sm:grid-cols-2, lg:grid-cols-[...] etc. still win. */
+  :where(.quiz-root .grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Media never exceeds its container */
+  :where(.quiz-root) :where(img, svg, canvas, video, table) {
+    max-width: 100%;
+  }
+  :where(.quiz-root) :where(img, svg) {
+    height: auto;
+  }
+
+  /* Form controls */
+  :where(.quiz-root) input[type="range"] {
+    width: 100%;
+    max-width: 100%;
+  }
+  :where(.quiz-root) :where(input, select, textarea, button) {
+    max-width: 100%;
+    font-family: inherit;
+  }
+
+  /* Long unbroken strings (emails, names) wrap instead of overflowing */
+  :where(.quiz-root) :where(h2, h3, p, li) {
+    overflow-wrap: anywhere;
+  }
+
+  /* Hide the default <details> marker (used by the session info bar) */
+  :where(.quiz-root) summary {
+    list-style: none;
+  }
+  :where(.quiz-root) summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* Horizontal chip rows: no scrollbar flash on mobile */
+  :where(.quiz-root) .overflow-x-auto {
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  :where(.quiz-root) .overflow-x-auto::-webkit-scrollbar {
+    display: none;
+  }
+}

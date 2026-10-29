@@ -150,8 +150,9 @@ export interface ScoreRecord {
   date: string;
   exam?: Exam;
   category?: Category;
+  quiz_session?: string;
+  is_primary?: boolean;
 }
-
 // UPDATED: Added set_info to QuizResponse metadata
 export interface QuizResponse {
   questions: Question[];

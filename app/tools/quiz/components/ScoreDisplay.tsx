@@ -1,107 +1,160 @@
 // components/ScoreDisplay.tsx
-import { QuizEvaluation, ExamBreakdown, OverallScoreData } from '../types/quiztypes';
+import { useMemo, useState } from "react";
+import { QuizEvaluation, ExamBreakdown, OverallScoreData } from "../types/quiztypes";
 
 interface ScoreDisplayProps {
   results: QuizEvaluation & {
-    category_breakdown?: Record<string, {
-      raw_score: number;
-      display_score: number;
-      percentage: number;
-      display_percentage: number;
-      question_count: number;
-      category_name: string;
-    }>;
+    category_breakdown?: Record<
+      string,
+      {
+        raw_score: number;
+        display_score: number;
+        percentage: number;
+        display_percentage: number;
+        question_count: number;
+        category_name: string;
+      }
+    >;
     exam_breakdown?: ExamBreakdown;
     overall_score?: OverallScoreData;
   };
   onRetry: () => void;
   averageScore?: number;
   onViewDetails: () => void;
+  /** Starts the next quiz with the same settings (hidden when not provided) */
+  onNext?: () => void;
+  nextLabel?: string;
+  nextLoading?: boolean;
 }
 
-export default function ScoreDisplay({ 
-  results, 
+const num = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const tone = (v: number) =>
+  v >= 70
+    ? { text: "text-green-600 dark:text-green-400", bar: "bg-green-500" }
+    : v >= 40
+    ? { text: "text-amber-600 dark:text-amber-400", bar: "bg-amber-500" }
+    : { text: "text-red-600 dark:text-red-400", bar: "bg-red-500" };
+
+const card = "rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800";
+
+type Filter = "all" | "wrong" | "skipped";
+
+export default function ScoreDisplay({
+  results,
   onRetry,
   averageScore,
-  onViewDetails 
+  onViewDetails,
+  onNext,
+  nextLabel,
+  nextLoading,
 }: ScoreDisplayProps) {
-  const actualScore = results.rawScore ?? results.score;
-  const actualPercentage = results.percentage ?? results.percentage;
-  const displayScore = results.displayScore ?? Math.max(0, actualScore);
-  const displayPercentage = results.displayPercentage ?? Math.max(0, actualPercentage);
+  const [filter, setFilter] = useState<Filter>("all");
 
-  const scoreColor = actualPercentage >= 70 ? 'text-green-600 dark:text-green-400' : 
-                   actualPercentage >= 50 ? 'text-yellow-600 dark:text-yellow-400' : 
-                   actualPercentage >= 0 ? 'text-red-600 dark:text-red-400' : 'text-red-800 dark:text-red-500';
+  const rawScore = num(results.rawScore ?? results.score);
+  const pct = num(results.percentage);
+  const shownPct = Math.max(0, pct);
+  const total = num(results.total) || results.explanations.length;
+  const avg = averageScore !== undefined ? num(averageScore) : undefined;
+  const t = tone(pct);
+
+  const stats = useMemo(() => {
+    let correct = 0;
+    let skipped = 0;
+    results.explanations.forEach((e) => {
+      if (e.is_correct) correct++;
+      else if (!e.selected || e.selected === "Not answered") skipped++;
+    });
+    const wrong = results.explanations.length - correct - skipped;
+    return { correct, wrong, skipped };
+  }, [results.explanations]);
+
+  const categories = useMemo(
+    () =>
+      Object.entries(results.category_breakdown || {})
+        .map(([id, c]) => ({ id, ...c, percentage: num(c.percentage), raw_score: num(c.raw_score) }))
+        .sort((a, b) => a.percentage - b.percentage),
+    [results.category_breakdown]
+  );
+
+  const review = results.explanations
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => {
+      const skipped = !item.selected || item.selected === "Not answered";
+      if (filter === "wrong") return !item.is_correct && !skipped;
+      if (filter === "skipped") return skipped;
+      return true;
+    });
+
+  const delta = avg !== undefined ? pct - avg : null;
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-      <div className="text-center mb-8">
-        <h2 className="text-2xl font-bold mb-2 dark:text-white">Quiz Results</h2>
-        
-        {actualPercentage < 0 ? (
-          <div className="text-red-800 dark:text-red-500 text-4xl font-bold mb-1">
-            0% (Negative Score: {actualPercentage.toFixed(2)}%)
-          </div>
-        ) : (
-          <div className={`text-5xl font-bold mb-1 ${scoreColor}`}>
-            {displayPercentage.toFixed(2)}%
-          </div>
-        )}
-
-        {averageScore !== undefined && (
-          <p className="text-gray-600 dark:text-gray-300 mb-2">
-            Your Current Score: {displayPercentage.toFixed(2)}% | Average Performance: {averageScore.toFixed(2)}%
+    <div className="space-y-4">
+      {/* Hero */}
+      <div className={`${card} p-5 text-center`}>
+        <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Quiz results</div>
+        <div className={`mt-1 text-5xl font-bold tabular-nums ${t.text}`}>{shownPct.toFixed(1)}%</div>
+        {pct < 0 && (
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+            Actual score {pct.toFixed(1)}% (wrong answers cost more than correct ones earned)
           </p>
         )}
-
-        <p className="text-gray-600 dark:text-gray-300">
-          {displayScore.toFixed(2)} / {results.total} points
-          {actualScore < 0 && (
-            <span className="block text-red-800 dark:text-red-500 text-sm mt-1">
-              (Actual Score: {actualScore.toFixed(2)})
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          {rawScore.toFixed(2)} / {total} points
+        </p>
+        {avg !== undefined && delta !== null && (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Your average {avg.toFixed(1)}% ·{" "}
+            <span className={delta >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+              {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(1)} vs average
             </span>
-          )}
-        </p>
-        
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-          Scoring: +1 for correct, -0.33 for wrong answers
-        </p>
+          </p>
+        )}
+        <p className="mt-2 text-[11px] text-gray-400">+1 correct · -0.33 wrong · 0 skipped</p>
       </div>
 
-      {/* Category Breakdown in Results - FIXED SECTION */}
-      {results.category_breakdown && Object.keys(results.category_breakdown).length > 0 && (
-        <div className="mb-6">
-          <h3 className="text-xl font-semibold mb-4 dark:text-white">Performance by Category</h3>
+      {/* Tiles */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className={`${card} p-3 text-center`}>
+          <div className="text-xl font-bold text-green-600 dark:text-green-400">{stats.correct}</div>
+          <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Correct</div>
+        </div>
+        <div className={`${card} p-3 text-center`}>
+          <div className="text-xl font-bold text-red-600 dark:text-red-400">{stats.wrong}</div>
+          <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Wrong</div>
+        </div>
+        <div className={`${card} p-3 text-center`}>
+          <div className="text-xl font-bold text-gray-700 dark:text-gray-200">{stats.skipped}</div>
+          <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Skipped</div>
+        </div>
+      </div>
+
+      {/* Categories */}
+      {categories.length > 0 && (
+        <div className={`${card} p-3 sm:p-4`}>
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-3">By category · weakest first</h3>
           <div className="space-y-3">
-            {Object.entries(results.category_breakdown).map(([categoryId, categoryData]) => {
-              // FIX: Use actual percentage (can be negative) instead of clamped display_percentage
-              const actualCategoryPercentage = categoryData.percentage;
-              const categoryScoreColor = actualCategoryPercentage >= 70 ? 'text-green-600 dark:text-green-400' :
-                                      actualCategoryPercentage >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
-                                      actualCategoryPercentage >= 0 ? 'text-red-600 dark:text-red-400' : 
-                                      'text-red-800 dark:text-red-500';
-              
+            {categories.map((c) => {
+              const ct = tone(c.percentage);
               return (
-                <div key={categoryId} className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {/* FIX: Use category_name instead of category ID */}
-                      {categoryData.category_name}
+                <div key={c.id}>
+                  <div className="flex items-baseline justify-between gap-2 text-xs mb-1">
+                    <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-200" title={c.category_name}>
+                      {c.category_name}
                     </span>
-                    <span className={`font-bold ${categoryScoreColor}`}>
-                      {/* FIX: Show actual percentage that can be negative */}
-                      {actualCategoryPercentage.toFixed(1)}%
+                    <span className="shrink-0 text-gray-500 dark:text-gray-400">
+                      <span className={`font-semibold ${ct.text}`}>{c.percentage.toFixed(0)}%</span> ·{" "}
+                      {c.raw_score.toFixed(2)}/{c.question_count}
                     </span>
                   </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {categoryData.question_count} question{categoryData.question_count !== 1 ? 's' : ''} • 
-                    Score: {categoryData.raw_score.toFixed(2)}
-                    {categoryData.raw_score < 0 && (
-                      <span className="text-red-600 dark:text-red-400 ml-1">
-                        (Penalty: -0.33 per wrong answer)
-                      </span>
-                    )}
+                  <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${ct.bar}`}
+                      style={{ width: `${Math.max(2, Math.min(100, c.percentage))}%` }}
+                    />
                   </div>
                 </div>
               );
@@ -110,63 +163,122 @@ export default function ScoreDisplay({
         </div>
       )}
 
-      <div className="mb-8">
-        <h3 className="text-xl font-semibold mb-4 dark:text-white">Question Review</h3>
-        <div className="space-y-4">
-          {results.explanations.map((item, index) => (
-            <div key={item.id} className="p-4 border rounded-lg dark:border-gray-700 dark:bg-gray-700">
-              <div className="flex justify-between items-start mb-2">
-                <span className="font-medium dark:text-gray-200">Q{index + 1}: {item.question}</span>
-                {item.is_correct ? (
-                  <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs px-2 py-1 rounded">
-                    Correct
-                  </span>
-                ) : (
-                  <span className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-xs px-2 py-1 rounded">
-                    Incorrect
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">Your answer:</p>
-                  <p className={`font-medium ${
-                    !item.is_correct ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-                  }`}>
-                    {item.selected}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">Correct answer:</p>
-                  <p className="font-medium text-green-600 dark:text-green-400">{item.correct}</p>
-                </div>
-              </div>
-
-              {item.explanation && (
-                <div className="mt-3 pt-3 border-t dark:border-gray-600 text-sm">
-                  <p className="text-gray-500 dark:text-gray-400">Explanation:</p>
-                  <p className="dark:text-gray-300">{item.explanation}</p>
-                </div>
-              )}
-            </div>
-          ))}
+      {/* Review */}
+      <div className={`${card} p-3 sm:p-4`}>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Question review</h3>
+          <div className="flex gap-1.5">
+            {(
+              [
+                ["all", `All ${results.explanations.length}`],
+                ["wrong", `Wrong ${stats.wrong}`],
+                ["skipped", `Skipped ${stats.skipped}`],
+              ] as [Filter, string][]
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setFilter(k)}
+                className={`shrink-0 px-2.5 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
+                  filter === k
+                    ? "bg-blue-600 border-blue-600 text-white"
+                    : "bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {review.length === 0 ? (
+          <p className="py-6 text-center text-xs text-gray-400">Nothing here.</p>
+        ) : (
+          <div className="space-y-3">
+            {review.map(({ item, index }) => {
+              const skipped = !item.selected || item.selected === "Not answered";
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-lg border p-3 ${
+                    item.is_correct
+                      ? "border-green-200 dark:border-green-900 bg-green-50/50 dark:bg-green-900/10"
+                      : skipped
+                      ? "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40"
+                      : "border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-900/10"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 text-xs font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
+                      Q{index + 1}
+                    </span>
+                    <p className="min-w-0 flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">{item.question}</p>
+                    <span
+                      className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        item.is_correct
+                          ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                          : skipped
+                          ? "bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200"
+                          : "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                      }`}
+                    >
+                      {item.is_correct ? "Correct" : skipped ? "Skipped" : "Wrong"}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 space-y-1 text-xs">
+                    {!item.is_correct && (
+                      <p className="text-gray-500 dark:text-gray-400">
+                        Your answer:{" "}
+                        <span className={skipped ? "italic" : "font-medium text-red-600 dark:text-red-400"}>
+                          {skipped ? "Not answered" : item.selected}
+                        </span>
+                      </p>
+                    )}
+                    <p className="text-gray-500 dark:text-gray-400">
+                      Correct answer:{" "}
+                      <span className="font-medium text-green-600 dark:text-green-400">{item.correct}</span>
+                    </p>
+                  </div>
+
+                  {item.explanation && (
+                    <p className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600 text-xs text-gray-600 dark:text-gray-300">
+                      {item.explanation}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      <div className="flex justify-between mt-6">
-        <button
-          onClick={onRetry}
-          className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded-lg dark:bg-blue-700 dark:hover:bg-blue-800"
-        >
-          Try Again
-        </button>
-        <button
-          onClick={onViewDetails}
-          className="bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-6 rounded-lg dark:bg-gray-600 dark:hover:bg-gray-700 dark:text-white"
-        >
-          View Details & History
-        </button>
+      {/* Actions: sticky on mobile */}
+      <div className="sticky bottom-0 z-10 -mx-3 sm:mx-0 px-3 sm:px-0 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-t border-gray-200 dark:border-gray-700 sm:border-0 sm:bg-transparent sm:backdrop-blur-none sm:static space-y-2">
+        {onNext && (
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={nextLoading}
+            className="w-full min-h-[48px] rounded-lg bg-green-600 hover:bg-green-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 text-white text-sm font-semibold transition-colors"
+          >
+            {nextLoading ? "Loading..." : `${nextLabel ?? "Next quiz"} →`}
+          </button>
+        )}
+        <div className="flex gap-2">
+          <button
+            onClick={onRetry}
+            className="flex-1 min-h-[44px] rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
+          >
+            New quiz
+          </button>
+          <button
+            onClick={onViewDetails}
+            className="flex-1 min-h-[44px] rounded-lg border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            History
+          </button>
+        </div>
       </div>
     </div>
   );
