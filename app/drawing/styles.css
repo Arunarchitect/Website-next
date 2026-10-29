@@ -2331,3 +2331,72 @@
     flex-wrap: wrap;
   }
 }
+
+
+
+/* ============================================
+   VIEWER: mobile tap fixes + Download button
+   ============================================ */
+
+/* Header and buttons always sit above the PDF area and respond to taps */
+.document-viewer-header {
+  position: relative;
+  z-index: 5;
+  background: #ffffff;
+}
+
+.document-viewer-controls {
+  position: relative;
+  z-index: 6;
+}
+
+.document-viewer-btn,
+.document-viewer-btn-labeled {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Download button (own colour, like Print / Fast View / Close) */
+.document-viewer-btn-download {
+  color: var(--doc-red);
+  border-color: rgba(113, 43, 19, 0.35);
+}
+
+.document-viewer-btn-download:hover {
+  color: var(--doc-red);
+  border-color: var(--doc-red);
+  background: rgba(113, 43, 19, 0.08);
+}
+
+@media (max-width: 780px) {
+  /* Full-screen sheet; dvh avoids the phone browser bars hiding the header */
+  .document-viewer-overlay {
+    padding: 0;
+  }
+
+  .document-viewer-modal {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100vh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .document-viewer-btn-download {
+    background: rgba(113, 43, 19, 0.06);
+  }
+
+  /* Bigger tap targets, readable labels */
+  .document-viewer-btn-labeled {
+    min-width: 64px;
+    min-height: 48px;
+  }
+
+  .document-viewer-btn-labeled .document-viewer-btn-label {
+    font-size: 10px;
+  }
+}

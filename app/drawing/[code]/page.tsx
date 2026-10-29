@@ -1,7 +1,7 @@
-// app/drawing/[code]/page.tsx  (coexists fine with app/drawing/page.tsx)
+// app/drawing/[code]/page.tsx
 "use client";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getGuestDrawing, guestDownload } from "../guestApi";
 import { DrawingDocumentResolved } from "../types";
 import DocumentViewer from "../components/DocumentViewer";
@@ -9,6 +9,7 @@ import "../styles.css";
 
 export default function GuestDrawingPage() {
   const { code } = useParams<{ code: string }>();
+  const router = useRouter();
   const [doc, setDoc] = useState<DrawingDocumentResolved | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,20 +19,25 @@ export default function GuestDrawingPage() {
     getGuestDrawing(code)
       .then((resolvedDoc) => {
         setDoc(resolvedDoc);
-        // DXF has no in-browser preview — trigger the download immediately,
-        // same behavior as clicking a DXF card in GuestDocumentGrid.
-        if (resolvedDoc.file_type === 'dxf') {
+        // DXF has no in-browser preview, so start the download immediately.
+        if (resolvedDoc.file_type === "dxf") {
           guestDownload(resolvedDoc);
         }
       })
-      .catch(() => setError('This link is invalid or has expired.'))
+      .catch(() => setError("This link is invalid or has expired."))
       .finally(() => setLoading(false));
   }, [code]);
 
-  if (loading) return <main className="documents-page"><p>Loading...</p></main>;
-  if (error || !doc) return <main className="documents-page"><p>{error || 'Drawing not found.'}</p></main>;
+  // Go back if there is a page to go back to, otherwise to the drawings home
+  const handleClose = () => {
+    if (window.history.length > 1) router.back();
+    else router.push("/drawing");
+  };
 
-  if (doc.file_type === 'dxf') {
+  if (loading) return <main className="documents-page"><p>Loading...</p></main>;
+  if (error || !doc) return <main className="documents-page"><p>{error || "Drawing not found."}</p></main>;
+
+  if (doc.file_type === "dxf") {
     return (
       <main className="documents-page">
         <div className="documents-empty">
@@ -41,7 +47,7 @@ export default function GuestDrawingPage() {
           <button
             className="documents-retry-btn"
             onClick={() => guestDownload(doc)}
-            style={{ marginTop: '12px' }}
+            style={{ marginTop: "12px" }}
           >
             <i className="ti ti-download" /> Download {doc.title}
           </button>
@@ -55,7 +61,7 @@ export default function GuestDrawingPage() {
       <DocumentViewer
         document={doc}
         isOpen={true}
-        onClose={() => {}}
+        onClose={handleClose}
         onFavoriteToggle={() => {}}
         onDownload={guestDownload}
         guestMode

@@ -287,19 +287,33 @@ function DocumentsPageInner() {
     };
   }, [selectedOrgId, currentUser, isGuest]);
 
+  // Deliverables are only loaded once a project is selected.
+  // With no project chosen the list stays empty and nothing is fetched.
   useEffect(() => {
     if (!currentUser || isGuest) return;
+
+    setSelectedDeliverableId(undefined);
+
+    if (selectedProjectId === undefined) {
+      setDeliverables([]);
+      return;
+    }
+
+    let cancelled = false;
     const loadDeliverables = async () => {
       try {
         const data = await getDeliverables(selectedProjectId);
-        setDeliverables(data);
+        if (!cancelled) setDeliverables(data);
       } catch (err) {
+        if (cancelled) return;
         console.error("Error loading deliverables:", err);
         setError("Failed to load deliverables");
       }
     };
     loadDeliverables();
-    setSelectedDeliverableId(undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [selectedProjectId, currentUser, isGuest]);
 
   // Reset to page 1 whenever filters change

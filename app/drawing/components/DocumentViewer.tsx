@@ -22,9 +22,8 @@ interface DocumentViewerProps {
   onDownload: (doc: DrawingDocumentResolved) => void;
   guestMode?: boolean;
   /**
-   * On small screens, hide Print and Close and show a single
-   * "Fast View / Download" button. Use only where the viewer is the whole
-   * page (e.g. /drawing/<code>), so there is nothing to close back to.
+   * @deprecated No longer used. Print is hidden automatically on phones and
+   * Close is always shown. Kept so existing callers don't break.
    */
   hideActionsOnMobile?: boolean;
   /** Called with the fresh document after approve / reject / archive / restore. */
@@ -48,6 +47,20 @@ interface TouchGestureState {
   startZoom: number;
 }
 
+// true on phones / small tablets. Starts false so the server render and the
+// first client render match, then updates after mount.
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 export default function DocumentViewer({
   document: doc,
   isOpen,
@@ -55,13 +68,14 @@ export default function DocumentViewer({
   onFavoriteToggle,
   onDownload,
   guestMode = false,
-  hideActionsOnMobile = false,
   onDocumentChange,
 }: DocumentViewerProps) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasError, setHasError] = useState<boolean>(false);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  const isMobile = useIsMobile();
 
   // PDF rendering state — all pages render in a continuous scroll,
   // matching the scroll behavior of the native <object> viewer.
@@ -79,7 +93,7 @@ export default function DocumentViewer({
 
   // Editable zoom percentage input — kept as a local string buffer so
   // typing doesn't fight the displayed zoom on every keystroke.
-  const [zoomInputValue, setZoomInputValue] = useState<string>('100');
+  const [zoomInputValue, setZoomInputValue] = useState<string>("100");
 
   // Share-link state — mirrors doc.guest_access_code locally so the modal
   // can update it without needing the parent list/grid to re-fetch.
@@ -90,9 +104,9 @@ export default function DocumentViewer({
     setGuestCode(doc.guest_access_code ?? null);
   }, [doc.id, doc.guest_access_code]);
 
-  const isPDF = doc.file_type === 'pdf';
-  const isImage = doc.file_type === 'image';
-  const isDXF = doc.file_type === 'dxf';
+  const isPDF = doc.file_type === "pdf";
+  const isImage = doc.file_type === "image";
+  const isDXF = doc.file_type === "dxf";
 
   // Memoized so these can safely be listed as effect dependencies without
   // causing the wheel/keydown effect to re-subscribe on every render.
@@ -129,7 +143,7 @@ export default function DocumentViewer({
   };
 
   const handleZoomInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       commitZoomInput();
       (e.target as HTMLInputElement).blur();
@@ -141,13 +155,13 @@ export default function DocumentViewer({
 
     // Print via a hidden iframe so we get the browser's native print dialog
     // scoped to just this document, instead of printing the whole page.
-    const iframe = window.document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
+    const iframe = window.document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
     iframe.src = blobUrl;
 
     iframe.onload = () => {
@@ -155,7 +169,7 @@ export default function DocumentViewer({
         iframe.contentWindow?.focus();
         iframe.contentWindow?.print();
       } catch (err) {
-        console.error('Print failed:', err);
+        console.error("Print failed:", err);
       }
     };
 
@@ -166,6 +180,27 @@ export default function DocumentViewer({
     setTimeout(() => {
       iframe.remove();
     }, 60000);
+  };
+
+  // Download the file the viewer already fetched (works for guests and public
+  // links too). Falls back to the parent's onDownload when there is no blob
+  // (e.g. DXF files, which have no in-browser preview).
+  const handleDownloadClick = () => {
+    if (blobUrl) {
+      const rawName = doc.file_url.split("?")[0].split("/").pop() || "";
+      const ext = rawName.includes(".") ? rawName.split(".").pop() || "" : "";
+      const base = doc.title.replace(/[\\/:*?"<>|]+/g, "_").trim() || "drawing";
+      const hasExt = ext && base.toLowerCase().endsWith(`.${ext.toLowerCase()}`);
+
+      const a = window.document.createElement("a");
+      a.href = blobUrl;
+      a.download = ext && !hasExt ? `${base}.${ext}` : base;
+      window.document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } else {
+      onDownload(doc);
+    }
   };
 
   const handleFavoriteClick = () => {
@@ -191,7 +226,7 @@ export default function DocumentViewer({
     let objectUrl: string | null = null;
     const sourceUrl = getFullFileUrl(doc.file_url);
 
-    fetch(sourceUrl, { credentials: 'include' })
+    fetch(sourceUrl, { credentials: "include" })
       .then((res) => {
         if (!res.ok) {
           throw new Error(`Server responded ${res.status} ${res.statusText}`);
@@ -206,8 +241,8 @@ export default function DocumentViewer({
       })
       .catch((err) => {
         if (cancelled) return;
-        console.error('Error fetching document for preview:', err);
-        setErrorDetail(err?.message || 'Unknown error');
+        console.error("Error fetching document for preview:", err);
+        setErrorDetail(err?.message || "Unknown error");
         setHasError(true);
         setIsLoading(false);
       });
@@ -221,7 +256,7 @@ export default function DocumentViewer({
   // Track available width for the PDF page so it scales to fit on mobile
   useEffect(() => {
     if (!isPDF || !isOpen) return;
-    const el = document.querySelector('.document-viewer-pdf-wrapper');
+    const el = document.querySelector(".document-viewer-pdf-wrapper");
     if (!el) return;
 
     const update = () => setContainerWidth(el.clientWidth);
@@ -247,28 +282,31 @@ export default function DocumentViewer({
     };
 
     const handleKeydown = (e: KeyboardEvent) => {
-      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
-      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
-      else if (e.key === '0') { e.preventDefault(); zoomReset(); }
+      // Don't hijack typing in inputs (e.g. the zoom % box)
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); zoomIn(); }
+      else if (e.key === "-" || e.key === "_") { e.preventDefault(); zoomOut(); }
+      else if (e.key === "0") { e.preventDefault(); zoomReset(); }
     };
 
-    el?.addEventListener('wheel', handleWheel, { passive: false });
-    window.addEventListener('keydown', handleKeydown);
+    el?.addEventListener("wheel", handleWheel, { passive: false });
+    window.addEventListener("keydown", handleKeydown);
     return () => {
-      el?.removeEventListener('wheel', handleWheel);
-      window.removeEventListener('keydown', handleKeydown);
+      el?.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("keydown", handleKeydown);
     };
   }, [isPDF, isOpen, blobUrl, zoomIn, zoomOut, zoomReset]);
 
-  // Drag-to-pan when zoomed in past 100% (only meaningful once content
-  // overflows the wrapper, but harmless to wire up regardless of zoom level)
-  // — MOUSE input only. See handleTouchStart/Move/End below for touch.
+  // Drag-to-pan when zoomed in past 100% — MOUSE input only.
+  // See handleTouchStart/Move/End below for touch.
   const handlePanMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = pdfWrapperRef.current;
     if (!el || zoom <= 1) return;
     // Ignore drags starting on interactive elements (links, buttons, text selection in the PDF)
     const target = e.target as HTMLElement;
-    if (target.closest('a, button')) return;
+    if (target.closest("a, button")) return;
 
     panStateRef.current = {
       startX: e.clientX,
@@ -296,21 +334,17 @@ export default function DocumentViewer({
       setIsPanning(false);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isPanning]);
 
   // ---- Touch input: single-finger pan + two-finger pinch-to-zoom ----
-  // Mouse events (mousedown/mousemove/mouseup) never fire during a finger
-  // drag on Android/iOS, so pan and zoom need their own touch-event path.
-  // These are registered with { passive: false } (via React's synthetic
-  // touch handlers below, which are non-passive by default in this setup)
-  // so preventDefault() can stop the browser's native scroll/page-zoom
-  // from fighting with our own scrollLeft/scrollTop-driven panning.
+  // Mouse events never fire during a finger drag on Android/iOS, so pan and
+  // zoom need their own touch-event path.
 
   const getTouchDistance = (touches: React.TouchList) => {
     const t1 = touches[0];
@@ -324,12 +358,12 @@ export default function DocumentViewer({
 
     // Ignore gestures starting on interactive elements (links, buttons).
     const target = e.target as HTMLElement;
-    if (target.closest('a, button')) return;
+    if (target.closest("a, button")) return;
 
     if (e.touches.length === 2) {
       // Two fingers down — start a pinch-zoom gesture.
       touchStateRef.current = {
-        mode: 'pinch',
+        mode: "pinch",
         startX: 0,
         startY: 0,
         scrollLeft: el.scrollLeft,
@@ -341,7 +375,7 @@ export default function DocumentViewer({
       // Single finger — only pan once zoomed in (matches mouse behavior,
       // and avoids hijacking normal single-finger scroll at 100% zoom).
       touchStateRef.current = {
-        mode: 'pan',
+        mode: "pan",
         startX: e.touches[0].clientX,
         startY: e.touches[0].clientY,
         scrollLeft: el.scrollLeft,
@@ -358,17 +392,13 @@ export default function DocumentViewer({
     const state = touchStateRef.current;
     if (!el || !state) return;
 
-    if (state.mode === 'pinch' && e.touches.length === 2) {
-      // Prevent the browser's native pinch-to-zoom-the-whole-page from
-      // fighting with our own zoom state.
-      e.preventDefault();
+    if (state.mode === "pinch" && e.touches.length === 2) {
       const newDistance = getTouchDistance(e.touches);
       if (state.startDistance > 0) {
         const ratio = newDistance / state.startDistance;
         setZoom(clampZoom(+(state.startZoom * ratio).toFixed(2)));
       }
-    } else if (state.mode === 'pan' && e.touches.length === 1) {
-      e.preventDefault();
+    } else if (state.mode === "pan" && e.touches.length === 1) {
       const dx = e.touches[0].clientX - state.startX;
       const dy = e.touches[0].clientY - state.startY;
       el.scrollLeft = state.scrollLeft - dx;
@@ -382,7 +412,7 @@ export default function DocumentViewer({
     const el = pdfWrapperRef.current;
     if (el && e.touches.length === 1 && zoom > 1) {
       touchStateRef.current = {
-        mode: 'pan',
+        mode: "pan",
         startX: e.touches[0].clientX,
         startY: e.touches[0].clientY,
         scrollLeft: el.scrollLeft,
@@ -402,15 +432,15 @@ export default function DocumentViewer({
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === "Escape" && isOpen) onClose();
     };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    document.body.style.overflow = isOpen ? 'hidden' : 'unset';
-    return () => { document.body.style.overflow = 'unset'; };
+    document.body.style.overflow = isOpen ? "hidden" : "unset";
+    return () => { document.body.style.overflow = "unset"; };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -427,7 +457,7 @@ export default function DocumentViewer({
         <button
           className="documents-card-btn documents-card-btn-view"
           onClick={() => onDownload(doc)}
-          style={{ marginTop: '12px' }}
+          style={{ marginTop: "12px" }}
         >
           <i className="ti ti-download" />
           Download DXF File
@@ -437,7 +467,9 @@ export default function DocumentViewer({
   );
 
   return (
-    <div className="document-viewer-overlay" onClick={onClose}>
+    // Backdrop click closes the viewer, except in guest mode where "close"
+    // navigates away from the page (a stray tap outside should not do that).
+    <div className="document-viewer-overlay" onClick={guestMode ? undefined : onClose}>
       <div className="document-viewer-modal" onClick={(e) => e.stopPropagation()}>
         <div className="document-viewer-header">
           <div className="document-viewer-title-section">
@@ -452,13 +484,10 @@ export default function DocumentViewer({
               {doc.file_type.toUpperCase()}
             </span>
           </div>
-          <div
-            className={`document-viewer-controls${
-              hideActionsOnMobile ? ' document-viewer-mobile-minimal' : ''
-            }`}
-          >
+          <div className="document-viewer-controls">
             {!guestMode && (
               <button
+                type="button"
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-favorite"
                 onClick={handleFavoriteClick}
                 title="Toggle favorite"
@@ -469,20 +498,22 @@ export default function DocumentViewer({
               </button>
             )}
             {/* Only approved (published) drawings can be shared */}
-            {!guestMode && doc.status === 'published' && (
+            {!guestMode && doc.status === "published" && (
               <button
+                type="button"
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-share"
                 onClick={() => setIsShareOpen(true)}
                 title="Get a shareable link for this drawing"
                 aria-label="Share"
               >
-                <i className={`ti ${guestCode ? 'ti-link' : 'ti-share'}`} />
+                <i className={`ti ${guestCode ? "ti-link" : "ti-share"}`} />
                 <span className="document-viewer-btn-label">Share</span>
               </button>
             )}
             {isPDF && !hasError && !isLoading && blobUrl && (
               <div className="document-viewer-zoom-controls">
                 <button
+                  type="button"
                   className="document-viewer-btn document-viewer-zoom-glyph"
                   onClick={zoomOut}
                   disabled={zoom <= MIN_ZOOM}
@@ -507,6 +538,7 @@ export default function DocumentViewer({
                   <span className="document-viewer-zoom-suffix">%</span>
                 </div>
                 <button
+                  type="button"
                   className="document-viewer-btn document-viewer-zoom-glyph"
                   onClick={zoomIn}
                   disabled={zoom >= MAX_ZOOM}
@@ -517,11 +549,12 @@ export default function DocumentViewer({
                 </button>
               </div>
             )}
-            {(isPDF || isImage) && !hasError && !isLoading && blobUrl && (
+
+            {/* Print only on desktop: it never worked on phones */}
+            {(isPDF || isImage) && !hasError && !isLoading && blobUrl && !isMobile && (
               <button
-                className={`document-viewer-btn document-viewer-btn-labeled document-viewer-btn-print${
-                  hideActionsOnMobile ? ' document-viewer-hide-on-mobile' : ''
-                }`}
+                type="button"
+                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-print"
                 onClick={handlePrint}
                 title="Print document"
               >
@@ -529,30 +562,44 @@ export default function DocumentViewer({
                 <span className="document-viewer-btn-label">Print</span>
               </button>
             )}
+
+            {/* Opens in a new tab. On phones it doubles as the print route. */}
             {(isPDF || isImage) && (
               <a
                 className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-open"
                 href={getFullFileUrl(doc.file_url)}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={hideActionsOnMobile ? 'Fast View / Download' : 'Fast View'}
+                title={isMobile ? "Open in a new tab to view or print" : "Open in a new tab"}
               >
                 <i className="ti ti-external-link" />
-                <span className="document-viewer-btn-label document-viewer-label-desktop">
-                  Fast View
+                <span className="document-viewer-btn-label">
+                  {isMobile ? "Fast View / Print" : "Fast View"}
                 </span>
-                {hideActionsOnMobile && (
-                  <span className="document-viewer-btn-label document-viewer-label-mobile">
-                    Fast View / Download
-                  </span>
-                )}
               </a>
             )}
+
+            {/* Download on click, desktop and mobile */}
+            {!isLoading && (blobUrl || isDXF) && (
+              <button
+                type="button"
+                className="document-viewer-btn document-viewer-btn-labeled document-viewer-btn-download"
+                onClick={handleDownloadClick}
+                title="Download file"
+              >
+                <i className="ti ti-download" />
+                <span className="document-viewer-btn-label">Download</span>
+              </button>
+            )}
+
             <button
-              className={`document-viewer-btn document-viewer-btn-labeled document-viewer-close${
-                hideActionsOnMobile ? ' document-viewer-hide-on-mobile' : ''
-              }`}
-              onClick={onClose}
+              type="button"
+              className="document-viewer-btn document-viewer-btn-labeled document-viewer-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              style={{ position: "relative", zIndex: 5, touchAction: "manipulation" }}
             >
               <i className="ti ti-x" />
               <span className="document-viewer-btn-label">Close</span>
@@ -603,10 +650,10 @@ export default function DocumentViewer({
                 className="document-viewer-image"
                 fill
                 unoptimized
-                style={{ objectFit: 'contain' }}
+                style={{ objectFit: "contain" }}
                 onError={() => {
                   setHasError(true);
-                  setErrorDetail('Fetched the file but the browser could not render it as an image.');
+                  setErrorDetail("Fetched the file but the browser could not render it as an image.");
                 }}
               />
             </div>
@@ -622,30 +669,29 @@ export default function DocumentViewer({
               onTouchEnd={handleTouchEnd}
               onTouchCancel={handleTouchEnd}
               style={{
-                width: '100%',
-                height: '100%',
-                overflow: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: zoom > 1 ? 'flex-start' : 'center',
-                gap: '12px',
-                cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default',
-                userSelect: isPanning ? 'none' : 'auto',
+                width: "100%",
+                height: "100%",
+                overflow: "auto",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: zoom > 1 ? "flex-start" : "center",
+                gap: "12px",
+                cursor: zoom > 1 ? (isPanning ? "grabbing" : "grab") : "default",
+                userSelect: isPanning ? "none" : "auto",
                 // At 100% zoom, let the browser handle native vertical
                 // touch-scrolling (pan-y). Once zoomed in, we take over
                 // panning/pinching ourselves via JS, so native touch
-                // gestures need to be disabled here or they'll fight our
-                // preventDefault() calls in handleTouchMove.
-                touchAction: zoom > 1 ? 'none' : 'pan-y',
+                // gestures need to be disabled here.
+                touchAction: zoom > 1 ? "none" : "pan-y",
               }}
             >
               <Document
                 file={blobUrl}
                 onLoadSuccess={({ numPages }) => setNumPages(numPages)}
                 onLoadError={(err) => {
-                  console.error('react-pdf load error:', err);
+                  console.error("react-pdf load error:", err);
                   setHasError(true);
-                  setErrorDetail('This PDF could not be rendered.');
+                  setErrorDetail("This PDF could not be rendered.");
                 }}
                 loading={
                   <div className="document-viewer-loading">
@@ -660,7 +706,7 @@ export default function DocumentViewer({
                   <div
                     key={pageNum}
                     className="document-viewer-pdf-page"
-                    style={{ marginBottom: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }}
+                    style={{ marginBottom: "8px", boxShadow: "0 1px 4px rgba(0,0,0,0.15)" }}
                   >
                     <Page
                       pageNumber={pageNum}
