@@ -35,6 +35,12 @@ export interface RestoreSnapshot {
   category: number | null;
 }
 
+// All option texts of a question, in display order
+const getOptions = (q: Question): string[] =>
+  [q.option_1, q.option_2, q.option_3].filter(
+    (o): o is string => typeof o === "string" && o.trim() !== ""
+  );
+
 export const useQuiz = () => {
   const { data: exams = [] } = useGetExamsQuery();
   const [getExamCategories, { isLoading: isCategoriesLoading }] = useLazyGetExamCategoriesQuery();
@@ -230,6 +236,7 @@ export const useQuiz = () => {
           correct: question.correct_option,
           explanation: question.explanation || "",
           is_correct: isCorrect,
+          options: getOptions(question),
         });
       });
 

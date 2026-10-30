@@ -39,6 +39,7 @@ export interface QuestionExplanation {
   correct: string;
   explanation: string;
   is_correct: boolean;
+  options?: string[];
 }
 
 export interface CategoryBreakdown {
