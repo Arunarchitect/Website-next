@@ -6,6 +6,7 @@ import ChapterContent from "../../components/ChapterContent";
 import {
   getCourseBySlug,
   getChapterBySlug,
+  getChapterContent,
   getAdjacentChapters,
   getAllChapters,
 } from "../../api/courseApi";
@@ -19,7 +20,12 @@ interface Props {
 
 export default async function ChapterPage({ params }: Props) {
   const { courseSlug, chapterSlug } = await params;
-  const course = await getCourseBySlug(courseSlug);
+
+  // outline (nav/progress) + full chapter (video/content/references) in parallel
+  const [course, detail] = await Promise.all([
+    getCourseBySlug(courseSlug),
+    getChapterContent(courseSlug, chapterSlug),
+  ]);
 
   if (!course) {
     notFound();
@@ -31,8 +37,14 @@ export default async function ChapterPage({ params }: Props) {
     notFound();
   }
 
-  const { chapter, courseModule } = result;
-  const { prev, next } = getAdjacentChapters(course, chapter);
+  const { courseModule } = result;
+  // full data wins; keep `completed` from the outline if the detail endpoint lacks it
+  const chapter = {
+    ...result.chapter,
+    ...(detail ?? {}),
+    completed: detail?.completed ?? result.chapter.completed,
+  };
+  const { prev, next } = getAdjacentChapters(course, result.chapter);
 
   const allChapters = getAllChapters(course);
   const completedCount = allChapters.filter((ch) => ch.completed).length;
