@@ -1,6 +1,6 @@
 import type { Course, Chapter, Module } from "../types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_HOST;
 const BASE = `${API_BASE}/api/opencourse`;
 
 export type ChapterDetail = Chapter & {
@@ -10,7 +10,10 @@ export type ChapterDetail = Chapter & {
 async function get<T>(path: string): Promise<T | undefined> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (res.status === 404) return undefined;
-  if (!res.ok) throw new Error(`opencourse API ${res.status} on ${path}`);
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).slice(0, 400);
+    throw new Error(`opencourse API ${res.status} on ${path}\n${body}`);
+  }
   return res.json();
 }
 

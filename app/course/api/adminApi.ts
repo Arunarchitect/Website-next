@@ -1,6 +1,6 @@
 import type { ContentBlock, CoursePreface, Reference, Subtitle } from "../types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_HOST;
 const BASE = `${API_BASE}/api/opencourse/admin`;
 
 /* ⚠ ADAPT: copy how your RTK Query baseQuery reads + sends the Djoser token */
