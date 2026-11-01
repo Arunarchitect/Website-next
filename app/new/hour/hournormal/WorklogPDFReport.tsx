@@ -9,12 +9,16 @@
  *  - Compact summary cards
  *  - Daily Breakdown with color-coded hours
  *  - Project Summary
- *  - Expense Summary (NEW) — pulls from the same period, pending
+ *  - Expense Summary — pulls from the same period, pending
  *    (unreimbursed) expenses are added to the payable total
  *  - Signature box
  *  - Toggle for excluding percentage-fee projects
  *  - Toggle for including expenses
  *  - Optimized spacing for ink/paper savings
+ *
+ * RATE: comes from `hourly_rate` on /api/v2/salary-report/ (read straight
+ * from the HourlyRate table). It no longer depends on the user having
+ * hourly-project logs in the period.
  * ─────────────────────────────────────────────────────────────
  */
 
@@ -82,6 +86,19 @@ function fmtINR(n: number): string {
 function fmtRate(n: number): string {
   if (n <= 0) return "Rs.0/hr";
   return "Rs." + Math.round(n).toLocaleString("en-IN") + "/hr";
+}
+
+const LONG_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// "2026-10-01" -> "01 October 2026"
+function fmtLongDate(iso?: string): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return `${String(d).padStart(2, "0")} ${LONG_MONTHS[m - 1]} ${y}`;
 }
 
 function groupByDay(logs: WorkLogEntry[]): DaySummary[] {
@@ -214,11 +231,11 @@ async function generateWorklogPDF(opts: {
   setText(C.textGray[0], C.textGray[1], C.textGray[2]);
   const periodTxt =
     opts.dateFrom && opts.dateTo
-      ? `${opts.dateFrom} - ${opts.dateTo}`
+      ? `${fmtLongDate(opts.dateFrom)} to ${fmtLongDate(opts.dateTo)}`
       : opts.dateFrom
-      ? `From: ${opts.dateFrom}`
+      ? `From: ${fmtLongDate(opts.dateFrom)}`
       : opts.dateTo
-      ? `Until: ${opts.dateTo}`
+      ? `Until: ${fmtLongDate(opts.dateTo)}`
       : "All time";
   doc.text(`Employee: ${opts.employeeName}  |  ${periodTxt}`, ML + 6, Y + 16);
 
@@ -454,7 +471,7 @@ async function generateWorklogPDF(opts: {
 
   Y = (doc as any).lastAutoTable.finalY + 6;
 
-  // ── EXPENSE SUMMARY TABLE (NEW) ─────────────────────────────
+  // ── EXPENSE SUMMARY TABLE ───────────────────────────────────
   if (opts.includeExpenses && expensesSorted.length > 0) {
     if (Y > PH - 45) {
       doc.addPage();
@@ -719,7 +736,7 @@ async function fetchAllExpensesForPeriod(
 async function fetchProjectBillingTypes(projectIds: number[]): Promise<Map<number, string>> {
   const billingMap = new Map<number, string>();
   const uniqueIds = [...new Set(projectIds)];
-  
+
   for (const id of uniqueIds) {
     try {
       const res = await fetch(`${BASE}/api/v2/projects/${id}/`, {
@@ -733,10 +750,16 @@ async function fetchProjectBillingTypes(projectIds: number[]): Promise<Map<numbe
       billingMap.set(id, "hourly");
     }
   }
-  
+
   return billingMap;
 }
 
+/**
+ * Hourly rate comes from `hourly_rate` on the salary-report employee row
+ * (read directly from the HourlyRate table by the backend), so it works
+ * even when the period has no hourly-project logs. Falls back to the old
+ * hourly_amount / total_hours ratio only if the backend doesn't send it.
+ */
 async function fetchMyHourlyRate(
   dateFrom?: string,
   dateTo?: string
@@ -761,8 +784,12 @@ async function fetchMyHourlyRate(
   const emp = emps[0];
   const totalHours = emp.total_hours ?? 0;
   const hourlyAmt = emp.hourly_amount ?? 0;
-  const rate = totalHours > 0 ? hourlyAmt / totalHours : 0;
-  return { rate, name: emp.user?.name ?? "Employee" };
+  const explicit = Number(emp.hourly_rate ?? 0);
+  const derived = totalHours > 0 ? hourlyAmt / totalHours : 0;
+  return {
+    rate: explicit > 0 ? explicit : derived,
+    name: emp.user?.name ?? "Employee",
+  };
 }
 
 // ── Props ─────────────────────────────────────────────────────
@@ -840,6 +867,16 @@ export default function WorklogPDFButton({
             rate = 0;
           }
         }
+      }
+
+      // Never produce a Rs.0 salary report silently
+      if (rate <= 0) {
+        setError(
+          "Hourly rate is 0. Set a Rate override in Options, or check the HourlyRate config for this period."
+        );
+        setLoading(false);
+        setStatus("");
+        return;
       }
 
       let projectBillingMap: Map<number, string> | undefined;
