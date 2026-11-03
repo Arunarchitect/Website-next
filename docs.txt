@@ -7,7 +7,7 @@ sudo apt install -y tmux
 
 # Start a named session
 tmux new -s deploy
-
+ ;;
 # Inside the tmux session, run your script as normal
 ~/scripts/deploy-next.sh
 ~/scripts/deploy-django.sh
