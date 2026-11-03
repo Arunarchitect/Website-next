@@ -27,6 +27,7 @@ export const EMPTY_FORM: ProductFormValues = {
   base_price: "",
   currency: "INR",
   cost_price: "",
+  unit: "",
   product_link: "",
   product_image: null,
 };
@@ -202,9 +203,8 @@ export function FileChooser({
 
   return (
     <div
-      className={`pm-file-chooser${focused ? " pm-file-chooser-focused" : ""}${
-        disabled ? " pm-file-chooser-disabled" : ""
-      }`}
+      className={`pm-file-chooser${focused ? " pm-file-chooser-focused" : ""}${disabled ? " pm-file-chooser-disabled" : ""
+        }`}
     >
       {showImagePreview && (
         <div className="pm-file-thumb-wrap">
@@ -365,9 +365,8 @@ export default function ProductEditPanel({
   const saveKey = isNew ? "save-product-new" : `save-product-${editingId}`;
   const saving = isBusy(saveKey);
 
-  const noteSaveKey = `org-note-${editingProduct?.id ?? "none"}-${
-    orgNoteOrgId || "none"
-  }`;
+  const noteSaveKey = `org-note-${editingProduct?.id ?? "none"}-${orgNoteOrgId || "none"
+    }`;
   const savingNote = isBusy(noteSaveKey);
 
   const predefinedTypeOptions = IFC_PREDEFINED_TYPES[form.category] ?? [];
@@ -389,11 +388,10 @@ export default function ProductEditPanel({
       <div className="flex gap-2 border-b border-[#EDEFEA] overflow-x-auto">
         <button
           onClick={() => setActiveTab("details")}
-          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${
-            activeTab === "details"
-              ? "border-[#2F6E62] text-[#2F6E62] font-medium"
-              : "border-transparent text-[#6B7570]"
-          }`}
+          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${activeTab === "details"
+            ? "border-[#2F6E62] text-[#2F6E62] font-medium"
+            : "border-transparent text-[#6B7570]"
+            }`}
         >
           Details
         </button>
@@ -401,11 +399,10 @@ export default function ProductEditPanel({
           onClick={() => setActiveTab("variants")}
           disabled={isNew}
           title={isNew ? "Save the product first" : undefined}
-          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
-            activeTab === "variants"
-              ? "border-[#2F6E62] text-[#2F6E62] font-medium"
-              : "border-transparent text-[#6B7570]"
-          }`}
+          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${activeTab === "variants"
+            ? "border-[#2F6E62] text-[#2F6E62] font-medium"
+            : "border-transparent text-[#6B7570]"
+            }`}
         >
           Variants
           {editingProduct && editingProduct.variants.length > 0 && (
@@ -418,11 +415,10 @@ export default function ProductEditPanel({
           onClick={() => setActiveTab("pricing")}
           disabled={isNew}
           title={isNew ? "Save the product first" : undefined}
-          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
-            activeTab === "pricing"
-              ? "border-[#2F6E62] text-[#2F6E62] font-medium"
-              : "border-transparent text-[#6B7570]"
-          }`}
+          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${activeTab === "pricing"
+            ? "border-[#2F6E62] text-[#2F6E62] font-medium"
+            : "border-transparent text-[#6B7570]"
+            }`}
         >
           Project / Org pricing
         </button>
@@ -430,11 +426,10 @@ export default function ProductEditPanel({
           onClick={() => setActiveTab("org_note")}
           disabled={isNew}
           title={isNew ? "Save the product first" : undefined}
-          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
-            activeTab === "org_note"
-              ? "border-[#2F6E62] text-[#2F6E62] font-medium"
-              : "border-transparent text-[#6B7570]"
-          }`}
+          className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${activeTab === "org_note"
+            ? "border-[#2F6E62] text-[#2F6E62] font-medium"
+            : "border-transparent text-[#6B7570]"
+            }`}
         >
           Organisation note
         </button>
@@ -489,8 +484,32 @@ export default function ProductEditPanel({
               <input
                 value={form.item}
                 onChange={(e) => setForm({ ...form, item: e.target.value })}
+
                 className="border border-[#DCE0D8] rounded-lg px-3 py-2"
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Unit (schedule of rates)
+              <input
+                list="sor-units"
+                value={form.unit ?? ""}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                placeholder="e.g. count, m2, m3, m, lumpsum"
+                className="border border-[#DCE0D8] rounded-lg px-3 py-2"
+              />
+              <datalist id="sor-units">
+                <option value="count" />
+                <option value="m" />
+                <option value="m2" />
+                <option value="m3" />
+                <option value="kg" />
+                <option value="lumpsum" />
+              </datalist>
+              {editingProduct?.rate_id && (
+                <span className="text-[11px] text-[#8A938E]">
+                  Rate ID: {editingProduct.rate_id} (auto-generated, can&apos;t be edited)
+                </span>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               Manufacturer
@@ -796,7 +815,7 @@ function VariantsTab({
                     {v.ifc_model ? (
                       <div className="text-xs flex items-center gap-3 flex-wrap">
                         <a
-                        
+
                           href={getImageSource(v.ifc_model.file)}
                           target="_blank"
                           className="text-[#2F6E62] underline"
@@ -933,9 +952,9 @@ function VariantsTab({
                 existingPreviewUrl={
                   typeof formOpenFor === "number"
                     ? getImageSource(
-                        product.variants.find((v) => v.id === formOpenFor)
-                          ?.thumbnail_url ?? null
-                      )
+                      product.variants.find((v) => v.id === formOpenFor)
+                        ?.thumbnail_url ?? null
+                    )
                     : null
                 }
                 onFileSelected={(file) =>
@@ -1292,8 +1311,8 @@ function OrgNoteTab({
             {savingNote
               ? "Saving…"
               : orgNoteText.trim()
-              ? "Save note"
-              : "Clear note"}
+                ? "Save note"
+                : "Clear note"}
           </button>
         </div>
         <p className="text-[11px] text-[#8A938E]">

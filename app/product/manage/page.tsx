@@ -258,6 +258,7 @@ export default function ProductManagePage() {
       cost_price: p.cost_price ?? "",
       product_link: p.product_link ?? "",
       predefined_type: p.predefined_type ?? "",
+      unit: p.unit ?? "",
       product_image: null,
     });
   }
@@ -703,7 +704,7 @@ export default function ProductManagePage() {
           {p.ifc_model ? (
             <div className="text-xs mt-1 flex items-center gap-3 flex-wrap">
               <a
-              
+
                 href={getImageSource(p.ifc_model.file)}
                 target="_blank"
                 className="text-[#2F6E62] underline"
@@ -751,17 +752,15 @@ export default function ProductManagePage() {
             <div className="flex bg-white border border-[#DCE0D8] rounded-full p-1">
               <button
                 onClick={() => setView("catalog")}
-                className={`text-sm px-4 py-1.5 rounded-full transition-colors ${
-                  view === "catalog" ? "bg-[#1C2521] text-white" : "text-[#6B7570]"
-                }`}
+                className={`text-sm px-4 py-1.5 rounded-full transition-colors ${view === "catalog" ? "bg-[#1C2521] text-white" : "text-[#6B7570]"
+                  }`}
               >
                 Catalog
               </button>
               <button
                 onClick={() => setView("pending")}
-                className={`text-sm px-4 py-1.5 rounded-full transition-colors relative ${
-                  view === "pending" ? "bg-[#1C2521] text-white" : "text-[#6B7570]"
-                }`}
+                className={`text-sm px-4 py-1.5 rounded-full transition-colors relative ${view === "pending" ? "bg-[#1C2521] text-white" : "text-[#6B7570]"
+                  }`}
               >
                 Pending suggestions
                 {pending.length > 0 && (
@@ -954,47 +953,47 @@ export default function ProductManagePage() {
                         {visibleProducts.map((p) => {
                           const typeLabel = predefinedTypeLabel(p.category, p.predefined_type);
                           return (
-                          <Fragment key={p.id}>
-                            <tr className="border-t border-[#EDEFEA]">
-                              <td className="px-4 py-3">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={getImageSource(p.product_image)}
-                                  alt={p.item}
-                                  className="w-10 h-10 rounded-lg object-cover"
-                                />
-                              </td>
-                              <td className="px-4 py-3">
-                                {p.item}
-                                {p.variants.length > 0 && (
-                                  <span className="ml-2 text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
-                                    {p.variants.length} variants
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                {p.manufacturer} — {p.model_label}
-                              </td>
-                              <td className="px-4 py-3 text-xs">{p.category}</td>
-                              <td className="px-4 py-3 text-xs">{typeLabel || "—"}</td>
-                              <td className="px-4 py-3">
-                                <span className={statusBadgeClass(p.status)}>{p.status}</span>
-                              </td>
-                              <td className="px-4 py-3">
-                                {p.base_price ? `${p.currency} ${p.base_price}` : "—"}
-                              </td>
-                              <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
-                                <ProductRowActions p={p} />
-                              </td>
-                            </tr>
-                            {expandedId === p.id && (
-                              <tr className="bg-[#F9FAF8] border-t border-[#EDEFEA]">
-                                <td colSpan={8} className="px-6 py-4 space-y-4">
-                                  <ProductDetailsPanel p={p} />
+                            <Fragment key={p.id}>
+                              <tr className="border-t border-[#EDEFEA]">
+                                <td className="px-4 py-3">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={getImageSource(p.product_image)}
+                                    alt={p.item}
+                                    className="w-10 h-10 rounded-lg object-cover"
+                                  />
+                                </td>
+                                <td className="px-4 py-3">
+                                  {p.item}
+                                  {p.variants.length > 0 && (
+                                    <span className="ml-2 text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                                      {p.variants.length} variants
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {p.manufacturer} — {p.model_label}
+                                </td>
+                                <td className="px-4 py-3 text-xs">{p.category}</td>
+                                <td className="px-4 py-3 text-xs">{typeLabel || "—"}</td>
+                                <td className="px-4 py-3">
+                                  <span className={statusBadgeClass(p.status)}>{p.status}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {p.base_price ? `${p.currency} ${p.base_price}` : "—"}
+                                </td>
+                                <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
+                                  <ProductRowActions p={p} />
                                 </td>
                               </tr>
-                            )}
-                          </Fragment>
+                              {expandedId === p.id && (
+                                <tr className="bg-[#F9FAF8] border-t border-[#EDEFEA]">
+                                  <td colSpan={8} className="px-6 py-4 space-y-4">
+                                    <ProductDetailsPanel p={p} />
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           );
                         })}
                       </tbody>
@@ -1005,44 +1004,44 @@ export default function ProductManagePage() {
                     {visibleProducts.map((p) => {
                       const typeLabel = predefinedTypeLabel(p.category, p.predefined_type);
                       return (
-                      <div key={p.id} className="pm-card">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={getImageSource(p.product_image)}
-                          alt={p.item}
-                          className="pm-card-thumb"
-                        />
-                        <div className="pm-card-body">
-                          <div className="pm-card-title-row">
-                            <span className="font-medium">{p.item}</span>
-                            <span className={statusBadgeClass(p.status)}>{p.status}</span>
-                            {p.variants.length > 0 && (
-                              <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
-                                {p.variants.length} variants
-                              </span>
-                            )}
-                            {typeLabel && (
-                              <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
-                                {typeLabel}
-                              </span>
-                            )}
-                          </div>
-                          <p className="pm-card-meta">
-                            {p.manufacturer} — {p.model_label} · {p.category}
-                          </p>
-                          <p className="pm-card-meta">
-                            {p.base_price ? `${p.currency} ${p.base_price}` : "No price set"}
-                          </p>
-                          <div className="pm-card-actions">
-                            <ProductRowActions p={p} />
-                          </div>
-                          {expandedId === p.id && (
-                            <div className="pm-card-details">
-                              <ProductDetailsPanel p={p} />
+                        <div key={p.id} className="pm-card">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={getImageSource(p.product_image)}
+                            alt={p.item}
+                            className="pm-card-thumb"
+                          />
+                          <div className="pm-card-body">
+                            <div className="pm-card-title-row">
+                              <span className="font-medium">{p.item}</span>
+                              <span className={statusBadgeClass(p.status)}>{p.status}</span>
+                              {p.variants.length > 0 && (
+                                <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                                  {p.variants.length} variants
+                                </span>
+                              )}
+                              {typeLabel && (
+                                <span className="text-[10px] bg-[#EDEFEA] text-[#4B5650] rounded-full px-1.5 py-0.5">
+                                  {typeLabel}
+                                </span>
+                              )}
                             </div>
-                          )}
+                            <p className="pm-card-meta">
+                              {p.manufacturer} — {p.model_label} · {p.category}
+                            </p>
+                            <p className="pm-card-meta">
+                              {p.base_price ? `${p.currency} ${p.base_price}` : "No price set"}
+                            </p>
+                            <div className="pm-card-actions">
+                              <ProductRowActions p={p} />
+                            </div>
+                            {expandedId === p.id && (
+                              <div className="pm-card-details">
+                                <ProductDetailsPanel p={p} />
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
                       );
                     })}
                   </div>

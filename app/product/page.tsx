@@ -34,6 +34,8 @@ import {
   deleteSpace,
 } from "./productApi";
 
+import SorExportButton from "./SorExport";
+
 const display = Fraunces({ subsets: ["latin"], weight: ["500", "600"], variable: "--font-display" });
 const body = Inter({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
 
@@ -664,9 +666,8 @@ export default function ProductPage() {
                     <button
                       key={p.id}
                       onClick={() => handleSelectProject(p.id, roleToUiRole(p.role), p.role)}
-                      className={`touch-manipulation relative text-left flex-shrink-0 min-w-[190px] sm:min-w-[220px] rounded-2xl border px-4 sm:px-5 py-3.5 sm:py-4 ${
-                        active ? "pf-project-card-active" : "pf-project-card-inactive"
-                      }`}
+                      className={`touch-manipulation relative text-left flex-shrink-0 min-w-[190px] sm:min-w-[220px] rounded-2xl border px-4 sm:px-5 py-3.5 sm:py-4 ${active ? "pf-project-card-active" : "pf-project-card-inactive"
+                        }`}
                     >
                       {p.has_assignments && (
                         <span className="pf-badge-count absolute -top-2 -right-2 text-[10px] px-2 py-0.5 rounded-full shadow-sm">
@@ -689,11 +690,10 @@ export default function ProductPage() {
               <p className="pf-muted text-sm">
                 {loadingProjectData
                   ? "Loading spaces…"
-                  : `Spaces · ${fullySpecifiedCount} of ${spaces.length} fully specified${
-                      spaceId && currentSpaceItemCount > 0
-                        ? ` · ${currentSpaceItemCount} item${currentSpaceItemCount === 1 ? "" : "s"} in ${currentSpaceName}`
-                        : ""
-                    }`}
+                  : `Spaces · ${fullySpecifiedCount} of ${spaces.length} fully specified${spaceId && currentSpaceItemCount > 0
+                    ? ` · ${currentSpaceItemCount} item${currentSpaceItemCount === 1 ? "" : "s"} in ${currentSpaceName}`
+                    : ""
+                  }`}
               </p>
               {!isViewOnly && (
                 <div className="flex gap-2">
@@ -730,9 +730,8 @@ export default function ProductPage() {
                     <button
                       key={s.id}
                       onClick={() => setSpaceId(s.id)}
-                      className={`touch-manipulation flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${
-                        active ? "pf-space-pill-active" : "pf-space-pill"
-                      }`}
+                      className={`touch-manipulation flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${active ? "pf-space-pill-active" : "pf-space-pill"
+                        }`}
                     >
                       {s.name}
                       {prog.total > 0 && (
@@ -776,6 +775,17 @@ export default function ProductPage() {
               <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Assigned products</h2>
               <div className="flex items-center gap-3">
                 <span className="pf-muted text-sm">{filteredAssignments.length} item{filteredAssignments.length === 1 ? "" : "s"}</span>
+                {rawRole !== "client" && assignments.length > 0 && (
+                  <SorExportButton
+                    orgName={currentOrg?.name ?? ""}
+                    projectName={currentProjectName}
+                    projectId={projectId}
+                    assignments={assignments}
+                    resolveProduct={pricedProduct}
+                    className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
+                    label="SOR CSV"
+                  />
+                )}
                 {filteredAssignments.length > 0 && (
                   <ProductListPrintButton
                     orgName={currentOrg?.name ?? ""}
@@ -837,9 +847,8 @@ export default function ProductPage() {
                     return (
                       <label
                         key={s.id}
-                        className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer flex-shrink-0 whitespace-nowrap ${
-                          checked ? "pf-checkbox-label-active" : "pf-checkbox-label"
-                        }`}
+                        className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer flex-shrink-0 whitespace-nowrap ${checked ? "pf-checkbox-label-active" : "pf-checkbox-label"
+                          }`}
                       >
                         <input
                           type="checkbox"
@@ -946,9 +955,8 @@ export default function ProductPage() {
                           </div>
                         </div>
                         <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 flex-shrink-0">
-                          <span className={`text-xs px-3 py-1 rounded-full whitespace-nowrap ${
-                            a.declined ? "pf-btn-danger-outline" : bothConfirmed ? "pf-status-confirmed" : "pf-status-pending"
-                          }`}>
+                          <span className={`text-xs px-3 py-1 rounded-full whitespace-nowrap ${a.declined ? "pf-btn-danger-outline" : bothConfirmed ? "pf-status-confirmed" : "pf-status-pending"
+                            }`}>
                             {statusLabel(a)}
                           </span>
                           {showActionRow && (

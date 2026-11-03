@@ -104,6 +104,8 @@ export interface AdminProduct {
   base_price: string | null;
   currency: string | null;
   cost_price: string | null;
+  rate_id?: string | null;
+  unit?: string;
   product_link: string | null;
   product_image: string | null;
   variants: ProductVariant[];
@@ -134,6 +136,7 @@ export interface ProductFormValues {
   base_price?: string;
   currency?: string;
   cost_price?: string;
+  unit?: string;
   product_link?: string;
   product_image?: File | null;
 }
@@ -201,6 +204,7 @@ function buildFormData(values: ProductFormValues): FormData {
   if (values.base_price) fd.append('base_price', values.base_price);
   if (values.currency) fd.append('currency', values.currency);
   if (values.cost_price) fd.append('cost_price', values.cost_price);
+  if (values.unit !== undefined) fd.append('unit', values.unit);
   if (values.product_link) fd.append('product_link', values.product_link);
   if (values.product_image) fd.append('product_image', values.product_image);
   return fd;

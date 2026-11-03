@@ -178,6 +178,8 @@ export interface ProductItem {
   thumbnail_url?: string | null;
   base_price?: string | null;
   cost_price?: string | null; 
+  rate_id?: string | null;
+  unit?: string;
   currency?: string | null;
   effective_price?: string | null;
   status?: "pending" | "approved" | "rejected";
