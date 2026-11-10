@@ -179,6 +179,16 @@ export const getImageSource = (path?: string | null): string => {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 };
 
+/** Adds https:// when a link was typed/pasted without a scheme, so Django's
+ * URLField doesn't reject it with "Enter a valid URL.". Returns undefined
+ * for empty input. (Local copy so this file has no import-path dependency
+ * on productApi.ts.) */
+function normalizeUrl(raw?: string | null): string | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
+}
+
 const apiClient = axios.create({ baseURL: API_URL, withCredentials: true });
 
 apiClient.interceptors.request.use((config) => {
@@ -205,7 +215,8 @@ function buildFormData(values: ProductFormValues): FormData {
   if (values.currency) fd.append('currency', values.currency);
   if (values.cost_price) fd.append('cost_price', values.cost_price);
   if (values.unit !== undefined) fd.append('unit', values.unit);
-  if (values.product_link) fd.append('product_link', values.product_link);
+  const link = normalizeUrl(values.product_link);
+  if (link) fd.append('product_link', link);
   if (values.product_image) fd.append('product_image', values.product_image);
   return fd;
 }
@@ -234,6 +245,9 @@ export async function updateProduct(id: string, values: Partial<ProductFormValue
     if (val === undefined || val === null) return;
     if (key === 'product_image' && val instanceof File) {
       fd.append('product_image', val);
+    } else if (key === 'product_link') {
+      // Empty string is sent on purpose so an admin can clear the link.
+      fd.append('product_link', normalizeUrl(String(val)) ?? '');
     } else if (key !== 'product_image') {
       fd.append(key, String(val));
     }
@@ -418,10 +432,19 @@ export interface SetOrganisationNoteResponse {
   organisation_note: OrganisationProductNote | null;
 }
 
+/** Turns an axios/DRF error into a readable string. Shows `detail` when
+ * present, otherwise every field error ("product_link: Enter a valid URL."). */
 export function getApiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { detail?: string } | undefined;
-    if (data && typeof data.detail === 'string') return data.detail;
+    const data = err.response?.data as unknown;
+    if (data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
+      if (typeof d.detail === 'string') return d.detail;
+      const parts = Object.entries(d).map(
+        ([field, msg]) => `${field}: ${Array.isArray(msg) ? msg.join(' ') : String(msg)}`
+      );
+      if (parts.length) return parts.join(' | ');
+    }
     if (typeof err.message === 'string' && err.message) return err.message;
   }
   if (err instanceof Error && err.message) return err.message;

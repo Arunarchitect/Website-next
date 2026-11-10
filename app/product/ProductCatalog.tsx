@@ -36,25 +36,20 @@ const EMPTY_SUGGESTION = {
   product_image: null as File | null,
 };
 
-type ApiError = {
-  response?: {
-    data?: {
-      organisation?: string[];
-      name?: string[];
-      detail?: string;
-    };
-  };
-};
-
-function isApiError(err: unknown): err is ApiError {
-  return typeof err === "object" && err !== null && "response" in err;
-}
-
+/** Turns an axios/DRF error into a readable string. Shows `detail` when
+ * present, otherwise every field error ("product_link: Enter a valid URL."). */
 function getErrorMessage(err: unknown, field: "organisation" | "name", fallback: string): string {
-  if (isApiError(err)) {
-    const data = err.response?.data;
-    const fieldMessage = field === "organisation" ? data?.organisation?.[0] : data?.name?.[0];
-    return fieldMessage || data?.detail || fallback;
+  void field; // kept so existing call sites don't change
+  if (typeof err === "object" && err !== null && "response" in err) {
+    const data = (err as { response?: { data?: unknown } }).response?.data;
+    if (data && typeof data === "object") {
+      const d = data as Record<string, unknown>;
+      if (typeof d.detail === "string") return d.detail;
+      const parts = Object.entries(d).map(
+        ([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`
+      );
+      if (parts.length) return parts.join(" | ");
+    }
   }
   return fallback;
 }
@@ -76,8 +71,6 @@ export function ProductLink({ href, className }: { href?: string | null; classNa
   if (!href) return null;
   return (
     <a
-
-
       href={href}
       target="_blank"
       rel="noopener noreferrer"
@@ -754,7 +747,9 @@ export default function ProductCatalog({
         </div>
 
         {!spaceId && (
-          <p className="pf-muted text-sm mb-4">Select or add a space above to enable choosing items.</p>
+          <p className="pf-muted text-sm mb-4">
+            Select exactly one space above to enable choosing items.
+          </p>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
@@ -946,11 +941,17 @@ export default function ProductCatalog({
                       <button
                         onClick={() => openProposeNote(item.id)}
                         disabled={!spaceId || sizeRequired}
-                        title={sizeRequired ? "Pick a size first" : undefined}
+                        title={
+                          !spaceId
+                            ? "Select exactly one space first"
+                            : sizeRequired
+                              ? "Pick a size first"
+                              : undefined
+                        }
                         className="touch-manipulation pf-btn-primary mt-3 w-full text-sm rounded-full py-2.5 sm:py-2 disabled:opacity-40"
                       >
                         {!spaceId
-                          ? "Add a space first"
+                          ? "Select one space first"
                           : sizeRequired
                             ? "Pick a size first"
                             : count > 0
@@ -1168,6 +1169,8 @@ export default function ProductCatalog({
                     <input
                       value={suggestForm.product_link}
                       onChange={(e) => setSuggestForm({ ...suggestForm, product_link: e.target.value })}
+                      maxLength={1000}
+                      placeholder="https://…"
                       className="pf-input rounded-lg px-3 py-2.5 sm:py-2"
                     />
                   </label>

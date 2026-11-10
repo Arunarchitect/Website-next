@@ -100,6 +100,15 @@ export function getDisplayName(category: string, predefinedType?: string | null)
   return typeLabel ? `${typeLabel} (${catLabel})` : catLabel;
 }
 
+/** Adds https:// when a link was typed/pasted without a scheme, so Django's
+ * URLField doesn't reject it with "Enter a valid URL.". Returns undefined
+ * for empty input. */
+export function normalizeUrl(raw?: string | null): string | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
+}
+
 export interface MyContextEntry {
   organisation: { id: number; name: string };
   project: { id: number; name: string };
@@ -177,7 +186,7 @@ export interface ProductItem {
   product_image?: string | null;
   thumbnail_url?: string | null;
   base_price?: string | null;
-  cost_price?: string | null; 
+  cost_price?: string | null;
   rate_id?: string | null;
   unit?: string;
   currency?: string | null;
@@ -227,7 +236,7 @@ export interface ProductSuggestionInput {
   manufacturer: string;
   model_label: string;
   base_price?: string;
-  cost_price?: string; 
+  cost_price?: string;
   currency?: string;
   product_link?: string;
   product_image?: File | null;
@@ -491,9 +500,10 @@ export async function suggestProduct(input: ProductSuggestionInput): Promise<Pro
   fd.append('model_label', input.model_label);
   if (input.base_price) fd.append('base_price', input.base_price);
   if (input.currency) fd.append('currency', input.currency);
-  if (input.product_link) fd.append('product_link', input.product_link);
+  const link = normalizeUrl(input.product_link);
+  if (link) fd.append('product_link', link);
   if (input.product_image) fd.append('product_image', input.product_image);
-  if (input.cost_price) fd.append('cost_price', input.cost_price);   // NEW
+  if (input.cost_price) fd.append('cost_price', input.cost_price);
   fd.append('organisation', String(input.organisation));
 
   const res = await apiClient.post('/product/products/suggest/', fd, {
@@ -513,9 +523,11 @@ export async function updateProductSuggestion(
   if (input.manufacturer !== undefined) fd.append('manufacturer', input.manufacturer);
   if (input.model_label !== undefined) fd.append('model_label', input.model_label);
   if (input.base_price !== undefined) fd.append('base_price', input.base_price);
-  if (input.cost_price !== undefined) fd.append('cost_price', input.cost_price); 
+  if (input.cost_price !== undefined) fd.append('cost_price', input.cost_price);
   if (input.currency !== undefined) fd.append('currency', input.currency);
-  if (input.product_link !== undefined) fd.append('product_link', input.product_link);
+  if (input.product_link !== undefined) {
+    fd.append('product_link', normalizeUrl(input.product_link) ?? '');
+  }
   if (input.product_image) fd.append('product_image', input.product_image);
 
   const res = await apiClient.patch(`/product/products/${id}/`, fd, {
@@ -558,10 +570,19 @@ export interface SetOrganisationNoteResponse {
   organisation_note: OrganisationProductNote | null;
 }
 
+/** Turns an axios/DRF error into a readable string. Shows `detail` when
+ * present, otherwise every field error ("product_link: Enter a valid URL."). */
 export function getApiErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { detail?: string } | undefined;
-    if (data && typeof data.detail === 'string') return data.detail;
+    const data = err.response?.data as unknown;
+    if (data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
+      if (typeof d.detail === 'string') return d.detail;
+      const parts = Object.entries(d).map(
+        ([field, msg]) => `${field}: ${Array.isArray(msg) ? msg.join(' ') : String(msg)}`
+      );
+      if (parts.length) return parts.join(' | ');
+    }
     if (typeof err.message === 'string' && err.message) return err.message;
   }
   if (err instanceof Error && err.message) return err.message;
