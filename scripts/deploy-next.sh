@@ -6,18 +6,41 @@ set -euo pipefail
 # ============================================================
 SESSION_NAME="next"
 if [ -z "${TMUX:-}" ]; then
-  tmux new-session -d -A -s "$SESSION_NAME" "bash '$0'"
+  SELF="$(readlink -f "$0")"
+  tmux new-session -d -A -s "$SESSION_NAME" "bash '$SELF'"
   echo "Started tmux session '$SESSION_NAME'. Attaching..."
   tmux attach -t "$SESSION_NAME"
   exit 0
 fi
 
+# ============================================================
+# LOGGING — saved in ~/scripts
+# ============================================================
+LOG_DIR="$HOME/scripts"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
+
+# keep only the 20 most recent deploy logs (safe when none exist)
+find "$LOG_DIR" -maxdepth 1 -name 'deploy-*.log' -printf '%T@ %p\n' 2>/dev/null \
+  | sort -rn | tail -n +21 | cut -d' ' -f2- | xargs -r rm -f -- || true
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "Logging to $LOG_FILE"
+
+# ============================================================
+# CLEANUP — always kills tmux; records failures in the log
+# ============================================================
 cleanup() {
-  kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  local code=$?
+  kill "${SUDO_KEEPALIVE_PID:-}" 2>/dev/null || true
+  if [ "$code" -ne 0 ]; then
+    echo "[deploy] FAILED with exit code $code (line ${ERR_LINE:-unknown})"
+  fi
+  sleep 2   # let tee flush the last lines to the log file
   tmux kill-session -t "$(tmux display-message -p '#S')" 2>/dev/null || true
 }
+trap 'ERR_LINE=$LINENO' ERR
 trap cleanup EXIT
-# ============================================================
 
 # ============================================================
 # CONFIG — adjust these to match your server layout
@@ -43,7 +66,7 @@ err()  { echo -e "${RED_C}[deploy]${NC} $1" >&2; }
 # ============================================================
 log "Requesting sudo access (you'll only be asked once)..."
 sudo -v
-( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done ) &
+( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done ) >/dev/null 2>&1 &
 SUDO_KEEPALIVE_PID=$!
 
 # ============================================================
@@ -64,7 +87,7 @@ log "New changes detected ($BEFORE_HASH -> $AFTER_HASH). Proceeding with deploy.
 # ============================================================
 # 3. DETERMINE CURRENT ACTIVE COLOR FROM NGINX CONFIG
 # ============================================================
-CURRENT_PORT=$(grep -oP 'proxy_pass\s+http://127\.0\.0\.1:\K[0-9]+' "$NGINX_CONF" | head -1)
+CURRENT_PORT=$(grep -oP 'proxy_pass\s+http://127\.0\.0\.1:\K[0-9]+' "$NGINX_CONF" | head -1 || true)
 
 if [ -z "$CURRENT_PORT" ]; then
   err "Could not detect current active port from $NGINX_CONF."
@@ -98,7 +121,7 @@ if [ ! -f "$COMPOSE_FILE" ]; then
 fi
 
 log "Building and starting $TARGET_COLOR container..."
-docker compose -f "$COMPOSE_FILE" up -d --build
+docker compose --progress=plain -f "$COMPOSE_FILE" up -d --build
 
 # ============================================================
 # 5. HEALTH CHECK THE NEW CONTAINER BEFORE SWITCHING TRAFFIC
@@ -117,7 +140,8 @@ done
 if [ "$HEALTHY" != true ]; then
   err "$TARGET_COLOR container did not become healthy after $HEALTHCHECK_RETRIES attempts."
   err "Leaving nginx pointed at $CURRENT_COLOR (old container untouched). Aborting."
-  err "Check logs with: docker logs next-${TARGET_COLOR}"
+  err "Container logs (last 100 lines):"
+  docker logs --tail 100 "next-${TARGET_COLOR}" 2>&1 || true
   exit 1
 fi
 log "$TARGET_COLOR is healthy."
