@@ -45,6 +45,15 @@ const EMPTY_SPACE_FORM = {
   required_categories: [] as string[],
 };
 
+type PrintDeclineFilter = "all" | "non_declined" | "except_client" | "except_architect";
+
+const PRINT_DECLINE_OPTIONS: { value: PrintDeclineFilter; label: string; scope: string | null }[] = [
+  { value: "all", label: "Print all", scope: null },
+  { value: "non_declined", label: "Only non-declined", scope: "Excluding all declined" },
+  { value: "except_client", label: "Except client-declined", scope: "Excluding client-declined" },
+  { value: "except_architect", label: "Except architect-declined", scope: "Excluding architect-declined" },
+];
+
 type ApiError = {
   response?: {
     data?: {
@@ -184,6 +193,10 @@ export default function ProductPage() {
   const [filterPredefinedType, setFilterPredefinedType] = useState<string>("");
   const [filterSearch, setFilterSearch] = useState("");
   const debouncedFilterSearch = useDebounced(filterSearch, 250);
+
+  // Print-only: which declined items to leave out of the PDF. Does not
+  // affect the on-screen list, totals pills or SOR export.
+  const [printDeclineFilter, setPrintDeclineFilter] = useState<PrintDeclineFilter>("all");
 
   // The predefined-type option list depends on filterCategory — clear the
   // selection whenever the category filter changes so it can't point at a
@@ -396,9 +409,38 @@ export default function ProductPage() {
     [filteredAssignments, pricedProduct]
   );
 
+  // Print-only subset: the decline filter applied on top of the on-screen filters.
+  const printAssignments = useMemo(
+    () =>
+      filteredAssignments.filter((a) => {
+        switch (printDeclineFilter) {
+          case "non_declined":
+            return !a.declined;
+          case "except_client":
+            return !(a.declined && a.declined_by === "client");
+          case "except_architect":
+            return !(a.declined && a.declined_by === "architect");
+          default:
+            return true;
+        }
+      }),
+    [filteredAssignments, printDeclineFilter]
+  );
+
+  const printGroups = useMemo(() => groupAssignments(printAssignments), [printAssignments]);
+
+  // Ungrouped, so every unit is counted (same rule as filteredTotals).
+  const printTotals = useMemo(
+    () =>
+      sumByCurrency(
+        printAssignments.map((a) => assignmentPriceSource(a, pricedProduct(a.product_detail)))
+      ),
+    [printAssignments, pricedProduct]
+  );
+
   const filteredPrintRows = useMemo(
     () =>
-      groupedAssignments.map((g) => {
+      printGroups.map((g) => {
         const a = g.rep;
         const item = pricedProduct(a.product_detail);
         const priceSource = assignmentPriceSource(a, item);
@@ -419,7 +461,7 @@ export default function ProductPage() {
           declinedNote: a.declined ? a.declined_note || null : null,
         };
       }),
-    [groupedAssignments, pricedProduct, spaceNameById]
+    [printGroups, pricedProduct, spaceNameById]
   );
 
   const filterScopeLabel = useMemo(() => {
@@ -438,8 +480,10 @@ export default function ProductPage() {
     if (catLabel) parts.push(catLabel);
     if (typeLabel) parts.push(typeLabel);
     if (searchLabel) parts.push(searchLabel);
+    const declineScope = PRINT_DECLINE_OPTIONS.find((o) => o.value === printDeclineFilter)?.scope;
+    if (declineScope) parts.push(declineScope);
     return parts.join(" · ");
-  }, [spaces, selectedSpaceIds, filterCategory, filterPredefinedType, filterSearch]);
+  }, [spaces, selectedSpaceIds, filterCategory, filterPredefinedType, filterSearch, printDeclineFilter]);
 
   function toggleSpace(id: number) {
     setSelectedSpaceIds((prev) => {
@@ -844,7 +888,7 @@ export default function ProductPage() {
           <section>
             <div className="flex items-baseline justify-between mb-1 flex-wrap gap-2">
               <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Assigned products</h2>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span className="pf-muted text-sm">
                   {totalRows} item{totalRows === 1 ? "" : "s"}
                   {totalUnits !== totalRows ? ` · ${totalUnits} units` : ""}
@@ -861,15 +905,31 @@ export default function ProductPage() {
                   />
                 )}
                 {filteredAssignments.length > 0 && (
-                  <ProductListPrintButton
-                    orgName={currentOrg?.name ?? ""}
-                    projectName={currentProjectName}
-                    scopeLabel={filterScopeLabel}
-                    rows={filteredPrintRows}
-                    totals={filteredTotals}
-                    className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
-                    label="Print"
-                  />
+                  <>
+                    <select
+                      value={printDeclineFilter}
+                      onChange={(e) => setPrintDeclineFilter(e.target.value as PrintDeclineFilter)}
+                      aria-label="Which items to print"
+                      className="pf-input text-xs rounded-full px-3 py-1.5"
+                    >
+                      {PRINT_DECLINE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    {printAssignments.length > 0 ? (
+                      <ProductListPrintButton
+                        orgName={currentOrg?.name ?? ""}
+                        projectName={currentProjectName}
+                        scopeLabel={filterScopeLabel}
+                        rows={filteredPrintRows}
+                        totals={printTotals}
+                        className="pf-btn-outline text-xs rounded-full px-3 py-1.5"
+                        label="Print"
+                      />
+                    ) : (
+                      <span className="pf-faint text-xs">Nothing to print with this option</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
