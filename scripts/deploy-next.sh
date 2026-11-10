@@ -14,16 +14,15 @@ if [ -z "${TMUX:-}" ]; then
 fi
 
 # ============================================================
-# LOGGING — saved in ~/scripts
+# LOGGING — saved in ~/scripts, previous logs cleared each run
 # ============================================================
 LOG_DIR="$HOME/scripts"
 mkdir -p "$LOG_DIR"
+
+# delete ALL previous deploy logs before starting a new one
+find "$LOG_DIR" -maxdepth 1 -name 'deploy-*.log' -type f -delete 2>/dev/null || true
+
 LOG_FILE="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
-
-# keep only the 20 most recent deploy logs (safe when none exist)
-find "$LOG_DIR" -maxdepth 1 -name 'deploy-*.log' -printf '%T@ %p\n' 2>/dev/null \
-  | sort -rn | tail -n +21 | cut -d' ' -f2- | xargs -r rm -f -- || true
-
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "Logging to $LOG_FILE"
 
@@ -47,11 +46,14 @@ trap cleanup EXIT
 # ============================================================
 APP_DIR="$HOME/apps/Website-next"
 NGINX_CONF="/etc/nginx/sites-available/modelflick.com"
+STATE_FILE="$HOME/scripts/.last_deployed_hash"
 BLUE_PORT=3001
 GREEN_PORT=3002
 HEALTHCHECK_PATH="/"          # change if you have a dedicated /health route
 HEALTHCHECK_RETRIES=15
 HEALTHCHECK_DELAY=2           # seconds between retries
+BUILD_ATTEMPTS=4              # how many times to try the docker build
+BUILD_RETRY_DELAY=15          # seconds to wait between build attempts
 
 # ============================================================
 # COLORS FOR OUTPUT
@@ -70,19 +72,19 @@ sudo -v
 SUDO_KEEPALIVE_PID=$!
 
 # ============================================================
-# 2. GIT PULL — bail out early if nothing changed
+# 2. GIT PULL — skip only if this commit was already deployed OK
 # ============================================================
 cd "$APP_DIR"
 log "Fetching latest changes in $APP_DIR ..."
-BEFORE_HASH=$(git rev-parse HEAD)
 git pull
 AFTER_HASH=$(git rev-parse HEAD)
+LAST_DEPLOYED=$(cat "$STATE_FILE" 2>/dev/null || true)
 
-if [ "$BEFORE_HASH" == "$AFTER_HASH" ]; then
-  log "No new changes pulled. Nothing to deploy. Exiting."
+if [ "$AFTER_HASH" == "$LAST_DEPLOYED" ]; then
+  log "Commit $AFTER_HASH is already deployed. Nothing to do. Exiting."
   exit 0
 fi
-log "New changes detected ($BEFORE_HASH -> $AFTER_HASH). Proceeding with deploy."
+log "Deploying $AFTER_HASH (last successful deploy: ${LAST_DEPLOYED:-none})."
 
 # ============================================================
 # 3. DETERMINE CURRENT ACTIVE COLOR FROM NGINX CONFIG
@@ -112,7 +114,7 @@ log "Currently active: $CURRENT_COLOR (port $CURRENT_PORT)"
 log "Deploying to:      $TARGET_COLOR (port $TARGET_PORT)"
 
 # ============================================================
-# 4. BUILD AND START THE TARGET (INACTIVE) COLOR
+# 4. BUILD (WITH RETRIES) AND START THE TARGET COLOR
 # ============================================================
 COMPOSE_FILE="docker-compose.${TARGET_COLOR}.yml"
 if [ ! -f "$COMPOSE_FILE" ]; then
@@ -120,8 +122,26 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
-log "Building and starting $TARGET_COLOR container..."
-docker compose --progress=plain -f "$COMPOSE_FILE" up -d --build
+BUILD_OK=false
+for attempt in $(seq 1 "$BUILD_ATTEMPTS"); do
+  log "Building $TARGET_COLOR image (attempt $attempt/$BUILD_ATTEMPTS)..."
+  if docker compose --progress=plain -f "$COMPOSE_FILE" build; then
+    BUILD_OK=true
+    break
+  fi
+  if [ "$attempt" -lt "$BUILD_ATTEMPTS" ]; then
+    warn "Build failed. Retrying in ${BUILD_RETRY_DELAY}s (cached layers make retries fast)..."
+    sleep "$BUILD_RETRY_DELAY"
+  fi
+done
+
+if [ "$BUILD_OK" != true ]; then
+  err "Build failed after $BUILD_ATTEMPTS attempts. Old $CURRENT_COLOR container untouched. Aborting."
+  exit 1
+fi
+
+log "Starting $TARGET_COLOR container..."
+docker compose --progress=plain -f "$COMPOSE_FILE" up -d
 
 # ============================================================
 # 5. HEALTH CHECK THE NEW CONTAINER BEFORE SWITCHING TRAFFIC
@@ -171,4 +191,8 @@ log "Stopping and removing old $CURRENT_COLOR container..."
 docker stop "next-${CURRENT_COLOR}" 2>/dev/null || warn "next-${CURRENT_COLOR} was not running."
 docker rm "next-${CURRENT_COLOR}" 2>/dev/null || warn "next-${CURRENT_COLOR} was not present."
 
+# ============================================================
+# 8. RECORD SUCCESSFUL DEPLOY (only reached if everything above passed)
+# ============================================================
+echo "$AFTER_HASH" > "$STATE_FILE"
 log "Deploy complete. Active color is now: $TARGET_COLOR (port $TARGET_PORT)"
