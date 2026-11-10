@@ -131,6 +131,16 @@ function assignmentImageSource(a: Assignment, product: ProductItem): string {
   return a.variant_detail ? getVariantImageSource(a.variant_detail) : getImageSource(product);
 }
 
+/** "architect (you)" / "architect (other user)" so two rows for the same
+ * product from different people are distinguishable. Falls back to just the
+ * role for older rows with no proposed_by_user. */
+function proposerLabel(a: Assignment, currentUserId: number | null): string {
+  if (a.proposed_by_user == null || currentUserId === null) return a.proposed_by;
+  return a.proposed_by_user === currentUserId
+    ? `${a.proposed_by} (you)`
+    : `${a.proposed_by} (other user)`;
+}
+
 interface ScrollableSectionProps {
   children: React.ReactNode;
   itemCount?: number;
@@ -1056,7 +1066,9 @@ export default function ProductPage() {
                             {a.variant_detail?.label && (
                               <div className="pf-faint text-xs mt-0.5">Size: {a.variant_detail.label}</div>
                             )}
-                            <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
+                            <div className="pf-faint text-xs capitalize mt-0.5">
+                              Proposed by {proposerLabel(a, currentUserId)}
+                            </div>
                             <PriceBlock item={priceSource} />
                             {qty > 1 && (
                               <div className="pf-muted text-xs mt-0.5">
