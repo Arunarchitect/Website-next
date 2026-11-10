@@ -11,7 +11,12 @@ export interface PrintableRow {
   model_label: string;
   /** Picked size/option label, if the product has variants. */
   variantLabel?: string | null;
+  /** Unit price. */
   priceLabel: string | null;
+  /** How many identical assignments this row represents (default 1). */
+  quantity?: number;
+  /** Unit price x quantity, formatted. */
+  amountLabel?: string | null;
   status: string;
   proposed_by: string;
   imageSrc?: string | null;
@@ -211,12 +216,16 @@ export async function generateProductListPdf(
   const showVariantColumn = rows.some((row) => Boolean(row.variantLabel));
   const showLinkColumn = rows.some((row) => Boolean(row.product_link));
   const showNotesColumn = rows.some((row) => Boolean(row.proposerNote) || Boolean(row.declinedNote));
+  // Amount (unit price x qty) is only useful when some row has more than 1.
+  const showAmountColumn = rows.some((row) => (row.quantity ?? 1) > 1);
 
   const headers: string[] = ["#"];
   if (showSpaceColumn) headers.push("Space");
   headers.push("Image", "Item", "Manufacturer / Model");
   if (showVariantColumn) headers.push("Variant");
-  headers.push("Price", "Status", "Proposed By");
+  headers.push(showAmountColumn ? "Unit Price" : "Price", "Qty");
+  if (showAmountColumn) headers.push("Amount");
+  headers.push("Status", "Proposed By");
   if (showNotesColumn) headers.push("Notes");
   if (showLinkColumn) headers.push("Product Link");
 
@@ -225,6 +234,7 @@ export async function generateProductListPdf(
   console.log(`Loaded ${images.filter((img) => img !== null).length} of ${images.length} images`);
 
   const tableData = rows.map((row, index) => {
+    const qty = row.quantity ?? 1;
     const values: string[] = [String(index + 1)];
     if (showSpaceColumn) values.push(row.space || "");
     values.push(""); // Image placeholder
@@ -232,6 +242,8 @@ export async function generateProductListPdf(
     values.push(`${row.manufacturer} - ${row.model_label}`);
     if (showVariantColumn) values.push(row.variantLabel || "—");
     values.push(row.priceLabel || "-");
+    values.push(String(qty));
+    if (showAmountColumn) values.push(row.amountLabel || "-");
     values.push(row.status);
     values.push(row.proposed_by);
     if (showNotesColumn) values.push(buildNotesText(row));
@@ -240,6 +252,7 @@ export async function generateProductListPdf(
   });
 
   const imageColumnIndex = showSpaceColumn ? 2 : 1;
+  const qtyColumnIndex = headers.indexOf("Qty");
 
   autoTable(doc, {
     head: [headers],
@@ -273,6 +286,10 @@ export async function generateProductListPdf(
         cellWidth: 30,
         halign: "center",
         valign: "middle",
+      },
+      [qtyColumnIndex]: {
+        cellWidth: 14,
+        halign: "center",
       },
       ...(showVariantColumn
         ? {
@@ -366,6 +383,8 @@ export async function generateProductListPdf(
 
   const finalY = doc.lastAutoTable?.finalY || pageHeight / 2;
 
+  // `totals` already counts every unit (page.tsx computes it on the
+  // ungrouped assignments), so nothing is multiplied by quantity here.
   if (totals.length > 0) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);

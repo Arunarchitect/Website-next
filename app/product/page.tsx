@@ -33,6 +33,7 @@ import {
   updateSpace,
   deleteSpace,
 } from "./productApi";
+import { groupAssignments, AssignmentGroup } from "./groupAssignments";
 
 import SorExportButton from "./SorExport";
 
@@ -94,6 +95,21 @@ function formatTotal(t: { currency: string; total: number }): string {
   return `${t.currency} ${t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+/** Numeric unit price for a priced thing, or null if it has none. */
+function unitPriceOf(src: PricedFields): number | null {
+  const value = src.effective_price ?? src.base_price;
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isNaN(num) ? null : num;
+}
+
+/** "INR 32,340" = unit price x quantity, or null if there's no price. */
+function lineTotalLabel(src: PricedFields, quantity: number): string | null {
+  const unit = unitPriceOf(src);
+  if (unit === null) return null;
+  return formatTotal({ currency: src.currency || "INR", total: unit * quantity });
+}
+
 /** The price/image source for an assignment row — the picked variant's own
  * numbers when one was chosen, else the product's. Both shapes already
  * carry resolved (server-side) price/image fields, so no extra fallback
@@ -151,11 +167,19 @@ export default function ProductPage() {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const [spaces, setSpaces] = useState<Space[]>([]);
-  const [spaceId, setSpaceId] = useState<number | null>(null);
+  // ONE space selection for the whole page. It drives the assigned-products
+  // list, the print/PDF scope AND the catalog's "propose into" target.
+  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<number>>(new Set());
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [categoryId, setCategoryId] = useState("");
 
-  const [filterSpaceIds, setFilterSpaceIds] = useState<Set<number>>(new Set());
+  // Proposing needs exactly one target space. With 0 or 2+ selected there is
+  // no valid target, so spaceId is null and the catalog shows a warning.
+  const spaceId: number | null = useMemo(
+    () => (selectedSpaceIds.size === 1 ? Array.from(selectedSpaceIds)[0] : null),
+    [selectedSpaceIds]
+  );
+
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterPredefinedType, setFilterPredefinedType] = useState<string>("");
   const [filterSearch, setFilterSearch] = useState("");
@@ -179,6 +203,7 @@ export default function ProductPage() {
   const [spaceForm, setSpaceForm] = useState(EMPTY_SPACE_FORM);
   const [spaceError, setSpaceError] = useState<string | null>(null);
 
+  // These hold the *representative* assignment id of a group.
   const [decliningNoteId, setDecliningNoteId] = useState<number | null>(null);
   const [declineNoteText, setDeclineNoteText] = useState("");
 
@@ -190,7 +215,6 @@ export default function ProductPage() {
   const orgScrollRef = useRef<HTMLDivElement>(null);
   const projectScrollRef = useRef<HTMLDivElement>(null);
   const spaceScrollRef = useRef<HTMLDivElement>(null);
-  const filterSpaceScrollRef = useRef<HTMLDivElement>(null);
 
   function isBusy(key: string) {
     return busyKeys.has(key);
@@ -277,12 +301,11 @@ export default function ProductPage() {
     const [s, a] = await Promise.all([getSpaces(pid), getAssignments(pid)]);
     setSpaces(s);
     setAssignments(a);
-    setFilterSpaceIds(new Set(s.map((sp) => sp.id)));
-    if (keepSpaceId && s.some((sp) => sp.id === keepSpaceId)) {
-      setSpaceId(keepSpaceId);
-    } else {
-      setSpaceId(s[0]?.id ?? null);
-    }
+    // Start with exactly one space selected (the kept one, else the first),
+    // so proposing from the catalog works straight away.
+    const target =
+      keepSpaceId && s.some((sp) => sp.id === keepSpaceId) ? keepSpaceId : s[0]?.id ?? null;
+    setSelectedSpaceIds(new Set(target !== null ? [target] : []));
     setLoadingProjectData(false);
   }
 
@@ -329,8 +352,7 @@ export default function ProductPage() {
     () => assignments.filter((a) => a.project === projectId && a.space === spaceId),
     [assignments, projectId, spaceId]
   );
-  // ✅ Used in the spaces section header — shows how many assignments the
-  // currently-selected space has, independent of the filter chips below.
+  // Shown in the spaces header when exactly one space is selected.
   const currentSpaceItemCount = assignmentsForSpace.length;
 
   const currentSpaceName = spaces.find((s) => s.id === spaceId)?.name ?? "";
@@ -346,7 +368,7 @@ export default function ProductPage() {
     const term = debouncedFilterSearch.trim().toLowerCase();
     return assignments.filter((a) => {
       if (a.project !== projectId) return false;
-      if (!filterSpaceIds.has(a.space)) return false;
+      if (!selectedSpaceIds.has(a.space)) return false;
       const item = pricedProduct(a.product_detail);
       if (filterCategory && item.category !== filterCategory) return false;
       if (filterPredefinedType && item.predefined_type !== filterPredefinedType) return false;
@@ -356,8 +378,16 @@ export default function ProductPage() {
       }
       return true;
     });
-  }, [assignments, projectId, filterSpaceIds, filterCategory, filterPredefinedType, debouncedFilterSearch, pricedProduct]);
+  }, [assignments, projectId, selectedSpaceIds, filterCategory, filterPredefinedType, debouncedFilterSearch, pricedProduct]);
 
+  // Identical assignments (same space/product/variant/proposer/note/status)
+  // collapse into one row with a quantity. Backend rows stay separate.
+  const groupedAssignments = useMemo(
+    () => groupAssignments(filteredAssignments),
+    [filteredAssignments]
+  );
+
+  // Totals stay on the UNGROUPED rows, so every unit is counted.
   const filteredTotals = useMemo(
     () =>
       sumByCurrency(
@@ -368,7 +398,8 @@ export default function ProductPage() {
 
   const filteredPrintRows = useMemo(
     () =>
-      filteredAssignments.map((a) => {
+      groupedAssignments.map((g) => {
+        const a = g.rep;
         const item = pricedProduct(a.product_detail);
         const priceSource = assignmentPriceSource(a, item);
         return {
@@ -378,6 +409,8 @@ export default function ProductPage() {
           model_label: item.model_label,
           variantLabel: a.variant_detail?.label || null,
           priceLabel: formatPrice(priceSource),
+          quantity: g.quantity,
+          amountLabel: lineTotalLabel(priceSource, g.quantity),
           status: statusLabel(a),
           proposed_by: a.proposed_by,
           imageSrc: assignmentImageSource(a, item),
@@ -386,15 +419,15 @@ export default function ProductPage() {
           declinedNote: a.declined ? a.declined_note || null : null,
         };
       }),
-    [filteredAssignments, pricedProduct, spaceNameById]
+    [groupedAssignments, pricedProduct, spaceNameById]
   );
 
   const filterScopeLabel = useMemo(() => {
     const spaceLabel = (() => {
       if (spaces.length === 0) return "All spaces";
-      if (filterSpaceIds.size === spaces.length) return "All spaces";
-      if (filterSpaceIds.size === 0) return "No spaces selected";
-      return spaces.filter((s) => filterSpaceIds.has(s.id)).map((s) => s.name).join(", ");
+      if (selectedSpaceIds.size === spaces.length) return "All spaces";
+      if (selectedSpaceIds.size === 0) return "No spaces selected";
+      return spaces.filter((s) => selectedSpaceIds.has(s.id)).map((s) => s.name).join(", ");
     })();
     const catLabel = filterCategory ? CATEGORIES.find((c) => c.id === filterCategory)?.label : null;
     const typeLabel = filterPredefinedType
@@ -406,10 +439,10 @@ export default function ProductPage() {
     if (typeLabel) parts.push(typeLabel);
     if (searchLabel) parts.push(searchLabel);
     return parts.join(" · ");
-  }, [spaces, filterSpaceIds, filterCategory, filterPredefinedType, filterSearch]);
+  }, [spaces, selectedSpaceIds, filterCategory, filterPredefinedType, filterSearch]);
 
-  function toggleFilterSpace(id: number) {
-    setFilterSpaceIds((prev) => {
+  function toggleSpace(id: number) {
+    setSelectedSpaceIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -417,12 +450,12 @@ export default function ProductPage() {
     });
   }
 
-  function selectAllFilterSpaces() {
-    setFilterSpaceIds(new Set(spaces.map((s) => s.id)));
+  function selectAllSpaces() {
+    setSelectedSpaceIds(new Set(spaces.map((s) => s.id)));
   }
 
-  function clearFilterSpaces() {
-    setFilterSpaceIds(new Set());
+  function clearSpaces() {
+    setSelectedSpaceIds(new Set());
   }
 
   function spaceProgress(space: Space) {
@@ -460,17 +493,35 @@ export default function ProductPage() {
     setAssignments((prev) => [...prev, created]);
   }
 
-  async function handleConfirm(id: number) {
-    await runExclusive(`confirm-${id}`, async () => {
-      const updated = await confirmAssignment(id, role);
-      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  function replaceAssignment(updated: Assignment) {
+    setAssignments((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+  }
+
+  // ── Group-aware handlers: act on every assignment in the group ─────────
+  async function handleConfirmGroup(g: AssignmentGroup) {
+    await runExclusive(`confirm-${g.rep.id}`, async () => {
+      for (const id of g.ids) {
+        replaceAssignment(await confirmAssignment(id, role));
+      }
     });
   }
 
-  async function handleRemove(id: number) {
-    await runExclusive(`remove-${id}`, async () => {
+  /** Removes ONE copy (the last one) of the group. */
+  async function handleRemoveOne(g: AssignmentGroup) {
+    const id = g.ids[g.ids.length - 1];
+    await runExclusive(`remove-${g.rep.id}`, async () => {
       await removeAssignment(id);
       setAssignments((prev) => prev.filter((a) => a.id !== id));
+    });
+  }
+
+  /** Removes EVERY copy in the group. */
+  async function handleRemoveAll(g: AssignmentGroup) {
+    await runExclusive(`remove-${g.rep.id}`, async () => {
+      for (const id of g.ids) {
+        await removeAssignment(id);
+        setAssignments((prev) => prev.filter((a) => a.id !== id));
+      }
     });
   }
 
@@ -484,19 +535,21 @@ export default function ProductPage() {
     setDeclineNoteText("");
   }
 
-  async function handleDecline(id: number, note: string) {
-    await runExclusive(`decline-${id}`, async () => {
-      const updated = await declineAssignment(id, note);
-      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  async function handleDeclineGroup(g: AssignmentGroup, note: string) {
+    await runExclusive(`decline-${g.rep.id}`, async () => {
+      for (const id of g.ids) {
+        replaceAssignment(await declineAssignment(id, note));
+      }
       setDecliningNoteId(null);
       setDeclineNoteText("");
     });
   }
 
-  async function handleUndoDecline(id: number) {
-    await runExclusive(`undecline-${id}`, async () => {
-      const updated = await undeclineAssignment(id);
-      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  async function handleUndoDeclineGroup(g: AssignmentGroup) {
+    await runExclusive(`undecline-${g.rep.id}`, async () => {
+      for (const id of g.ids) {
+        replaceAssignment(await undeclineAssignment(id));
+      }
     });
   }
 
@@ -510,10 +563,11 @@ export default function ProductPage() {
     setEditNoteText("");
   }
 
-  async function handleSaveNote(id: number, note: string) {
-    await runExclusive(`edit-note-${id}`, async () => {
-      const updated = await editAssignmentNote(id, note);
-      setAssignments((prev) => prev.map((a) => (a.id === id ? updated : a)));
+  async function handleSaveNoteGroup(g: AssignmentGroup, note: string) {
+    await runExclusive(`edit-note-${g.rep.id}`, async () => {
+      for (const id of g.ids) {
+        replaceAssignment(await editAssignmentNote(id, note));
+      }
       setEditingNoteId(null);
       setEditNoteText("");
     });
@@ -601,6 +655,9 @@ export default function ProductPage() {
   const savingSpaceKey = editingSpaceId ? `save-space-${editingSpaceId}` : "save-space-new";
   const savingSpace = isBusy(savingSpaceKey);
   const deletingSpace = editingSpaceId ? isBusy(`delete-space-${editingSpaceId}`) : false;
+
+  const totalUnits = filteredAssignments.length;
+  const totalRows = groupedAssignments.length;
 
   return (
     <div className={`${display.variable} ${body.variable} pf-page min-h-screen font-[var(--font-body)]`}>
@@ -695,24 +752,32 @@ export default function ProductPage() {
                     : ""
                   }`}
               </p>
-              {!isViewOnly && (
-                <div className="flex gap-2">
-                  {spaceId && spaces.length > 0 && (
+              <div className="flex gap-2 items-center flex-wrap">
+                {spaces.length > 1 && (
+                  <div className="flex gap-3 text-sm mr-1">
+                    <button onClick={selectAllSpaces} className="touch-manipulation pf-link">Select all</button>
+                    <button onClick={clearSpaces} className="touch-manipulation pf-link">Clear</button>
+                  </div>
+                )}
+                {!isViewOnly && (
+                  <>
+                    {spaceId && spaces.length > 0 && (
+                      <button
+                        onClick={openEditSelectedSpace}
+                        className="touch-manipulation pf-btn-outline rounded-full px-4 py-1.5 text-sm flex-shrink-0"
+                      >
+                        Edit selected
+                      </button>
+                    )}
                     <button
-                      onClick={openEditSelectedSpace}
-                      className="touch-manipulation pf-btn-outline rounded-full px-4 py-1.5 text-sm flex-shrink-0"
+                      onClick={openAddSpace}
+                      className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-1.5 text-sm flex-shrink-0"
                     >
-                      Edit selected
+                      Add space
                     </button>
-                  )}
-                  <button
-                    onClick={openAddSpace}
-                    className="touch-manipulation pf-btn-outline-accent rounded-full px-4 py-1.5 text-sm flex-shrink-0"
-                  >
-                    Add space
-                  </button>
-                </div>
-              )}
+                  </>
+                )}
+              </div>
             </div>
 
             <ScrollableSection scrollRef={spaceScrollRef} itemCount={spaces.length}>
@@ -724,12 +789,13 @@ export default function ProductPage() {
                 </div>
               ) : (
                 spaces.map((s) => {
-                  const active = s.id === spaceId;
+                  const active = selectedSpaceIds.has(s.id);
                   const prog = spaceProgress(s);
                   return (
                     <button
                       key={s.id}
-                      onClick={() => setSpaceId(s.id)}
+                      onClick={() => toggleSpace(s.id)}
+                      aria-pressed={active}
                       className={`touch-manipulation flex items-center gap-2 rounded-full px-4 sm:px-5 py-2 sm:py-2.5 text-sm border whitespace-nowrap ${active ? "pf-space-pill-active" : "pf-space-pill"
                         }`}
                     >
@@ -744,6 +810,11 @@ export default function ProductPage() {
                 })
               )}
             </ScrollableSection>
+            {!loadingProjectData && spaces.length > 1 && (
+              <p className="pf-faint text-xs mt-2">
+                Tap spaces to view them together. To suggest a product, select just one space.
+              </p>
+            )}
           </section>
         )}
 
@@ -774,7 +845,10 @@ export default function ProductPage() {
             <div className="flex items-baseline justify-between mb-1 flex-wrap gap-2">
               <h2 className="font-[var(--font-display)] text-lg sm:text-xl">Assigned products</h2>
               <div className="flex items-center gap-3">
-                <span className="pf-muted text-sm">{filteredAssignments.length} item{filteredAssignments.length === 1 ? "" : "s"}</span>
+                <span className="pf-muted text-sm">
+                  {totalRows} item{totalRows === 1 ? "" : "s"}
+                  {totalUnits !== totalRows ? ` · ${totalUnits} units` : ""}
+                </span>
                 {rawRole !== "client" && assignments.length > 0 && (
                   <SorExportButton
                     orgName={currentOrg?.name ?? ""}
@@ -832,38 +906,6 @@ export default function ProductPage() {
               )}
             </div>
 
-            {spaces.length > 0 && (
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <span className="pf-muted text-sm">Spaces</span>
-                  <div className="flex gap-3 text-sm">
-                    <button onClick={selectAllFilterSpaces} className="touch-manipulation pf-link">Select all</button>
-                    <button onClick={clearFilterSpaces} className="touch-manipulation pf-link">Clear</button>
-                  </div>
-                </div>
-                <ScrollableSection scrollRef={filterSpaceScrollRef} itemCount={spaces.length}>
-                  {spaces.map((s) => {
-                    const checked = filterSpaceIds.has(s.id);
-                    return (
-                      <label
-                        key={s.id}
-                        className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border cursor-pointer flex-shrink-0 whitespace-nowrap ${checked ? "pf-checkbox-label-active" : "pf-checkbox-label"
-                          }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleFilterSpace(s.id)}
-                          className="pf-checkbox-input"
-                        />
-                        {s.name}
-                      </label>
-                    );
-                  })}
-                </ScrollableSection>
-              </div>
-            )}
-
             {filteredTotals.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
                 {filteredTotals.map((t) => (
@@ -880,18 +922,21 @@ export default function ProductPage() {
               <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
                 Add a space above, then assign products to it.
               </div>
-            ) : filteredAssignments.length === 0 ? (
+            ) : groupedAssignments.length === 0 ? (
               <div className="pf-empty-dashed rounded-2xl px-5 sm:px-6 py-10 text-center text-sm">
-                {filterSpaceIds.size === 0
+                {selectedSpaceIds.size === 0
                   ? "No spaces selected above."
                   : "Nothing matches this filter yet."}
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredAssignments.map((a) => {
+                {groupedAssignments.map((g) => {
+                  const a = g.rep;
+                  const qty = g.quantity;
                   const item = pricedProduct(a.product_detail);
                   const priceSource = assignmentPriceSource(a, item);
                   const imageSrc = assignmentImageSource(a, item);
+                  const lineTotal = qty > 1 ? lineTotalLabel(priceSource, qty) : null;
                   const bothConfirmed = a.client_confirmed && a.architect_confirmed;
                   const canConfirm = !isViewOnly && !a.declined && ((role === "client" && !a.client_confirmed) || (role === "architect" && !a.architect_confirmed));
 
@@ -926,7 +971,7 @@ export default function ProductPage() {
                   const showActionRow = !isViewOnly || canHardDelete;
 
                   return (
-                    <div key={a.id} className="pf-row flex flex-col gap-3 rounded-2xl px-4 sm:px-5 py-4">
+                    <div key={g.key} className="pf-row flex flex-col gap-3 rounded-2xl px-4 sm:px-5 py-4">
                       <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
                         <div className="flex items-center gap-4 min-w-0">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -939,13 +984,25 @@ export default function ProductPage() {
                             <span className="pf-badge-soft text-[11px] px-2 py-0.5 rounded-full inline-block mb-1">
                               {spaceNameById.get(a.space) ?? "—"}
                             </span>
-                            <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight truncate">{item.item}</div>
+                            <div className="font-[var(--font-display)] text-base sm:text-lg leading-tight flex items-center gap-2 min-w-0">
+                              <span className="truncate">{item.item}</span>
+                              {qty > 1 && (
+                                <span className="pf-badge-soft text-xs px-2 py-0.5 rounded-full flex-shrink-0">
+                                  ×{qty}
+                                </span>
+                              )}
+                            </div>
                             <div className="pf-muted text-sm truncate">{item.manufacturer} — {item.model_label}</div>
                             {a.variant_detail?.label && (
                               <div className="pf-faint text-xs mt-0.5">Size: {a.variant_detail.label}</div>
                             )}
                             <div className="pf-faint text-xs capitalize mt-0.5">Proposed by {a.proposed_by}</div>
                             <PriceBlock item={priceSource} />
+                            {qty > 1 && (
+                              <div className="pf-muted text-xs mt-0.5">
+                                Qty {qty}{lineTotal ? ` · Total ${lineTotal}` : ""}
+                              </div>
+                            )}
                             {item.product_link && (
                               <ProductLink
                                 href={item.product_link}
@@ -963,20 +1020,29 @@ export default function ProductPage() {
                             <div className="flex gap-2 flex-wrap justify-end">
                               {!isViewOnly && canConfirm && (
                                 <button
-                                  onClick={() => handleConfirm(a.id)}
+                                  onClick={() => handleConfirmGroup(g)}
                                   disabled={isConfirming}
                                   className="touch-manipulation pf-btn-accent text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
                                 >
-                                  {isConfirming ? "Confirming…" : "Confirm"}
+                                  {isConfirming ? "Confirming…" : qty > 1 ? "Confirm all" : "Confirm"}
                                 </button>
                               )}
                               {canHardDelete && (
                                 <button
-                                  onClick={() => handleRemove(a.id)}
+                                  onClick={() => handleRemoveOne(g)}
                                   disabled={isRemoving}
                                   className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
                                 >
-                                  {isRemoving ? "Removing…" : "Remove"}
+                                  {isRemoving ? "Removing…" : qty > 1 ? "Remove one" : "Remove"}
+                                </button>
+                              )}
+                              {canHardDelete && qty > 1 && (
+                                <button
+                                  onClick={() => handleRemoveAll(g)}
+                                  disabled={isRemoving}
+                                  className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
+                                >
+                                  Remove all
                                 </button>
                               )}
                               {!isViewOnly && isProposer && !editNoteBoxOpen && (
@@ -992,12 +1058,12 @@ export default function ProductPage() {
                                   onClick={() => openDeclineNote(a.id)}
                                   className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5"
                                 >
-                                  Decline
+                                  {qty > 1 ? "Decline all" : "Decline"}
                                 </button>
                               )}
                               {!isViewOnly && canUndoDecline && (
                                 <button
-                                  onClick={() => handleUndoDecline(a.id)}
+                                  onClick={() => handleUndoDeclineGroup(g)}
                                   disabled={isUndeclining}
                                   className="touch-manipulation pf-btn-outline text-xs rounded-full px-3 py-1.5 disabled:opacity-50"
                                 >
@@ -1025,6 +1091,7 @@ export default function ProductPage() {
                         <div className="pf-empty-dashed rounded-xl px-4 py-3 space-y-2">
                           <label className="text-xs pf-muted block">
                             Your note — visible to {a.proposed_by === "client" ? "the architect" : "the client"} too
+                            {qty > 1 ? ` (applies to all ${qty} units)` : ""}
                           </label>
                           <textarea
                             value={editNoteText}
@@ -1036,7 +1103,7 @@ export default function ProductPage() {
                           />
                           <div className="flex gap-2">
                             <button
-                              onClick={() => handleSaveNote(a.id, editNoteText)}
+                              onClick={() => handleSaveNoteGroup(g, editNoteText)}
                               disabled={isSavingNote}
                               className="touch-manipulation pf-btn-accent text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
                             >
@@ -1075,7 +1142,7 @@ export default function ProductPage() {
                           />
                           <div className="flex gap-2">
                             <button
-                              onClick={() => handleDecline(a.id, declineNoteText)}
+                              onClick={() => handleDeclineGroup(g, declineNoteText)}
                               disabled={isDeclining}
                               className="touch-manipulation pf-btn-accent text-xs rounded-full px-4 py-1.5 disabled:opacity-50"
                             >
@@ -1097,6 +1164,14 @@ export default function ProductPage() {
               </div>
             )}
           </section>
+        )}
+
+        {projectId && spaces.length > 0 && selectedSpaceIds.size !== 1 && (
+          <div className="pf-error-box text-sm rounded-xl px-4 py-3">
+            {selectedSpaceIds.size === 0
+              ? "Select a space above to suggest a product."
+              : "Only one space should be selected to suggest a product. Select a single space above."}
+          </div>
         )}
 
         {projectId && (

@@ -70,7 +70,7 @@ export function generateSorCsv(rows: SorRow[]): string {
   const lines = [header.map(csvCell).join(",")];
   for (const r of rows) {
     lines.push(
-      [1, r.id, r.description, r.name, "", r.unit, r.value].map(csvCell).join(",")
+      [1, r.id, r.description, r.name, 1, r.unit, r.value].map(csvCell).join(",")
     );
   }
   return lines.join("\r\n");
