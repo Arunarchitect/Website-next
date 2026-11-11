@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import VideoPlayer from "../../components/VideoPlayer";
 import ChapterContent from "../../components/ChapterContent";
 import {
@@ -11,8 +11,6 @@ import {
   getAllChapters,
 } from "../../api/courseApi";
 
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 interface Props {
   params: Promise<{ courseSlug: string; chapterSlug: string }>;

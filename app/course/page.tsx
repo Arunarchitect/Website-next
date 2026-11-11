@@ -3,8 +3,6 @@ import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import { getCourses, totalChapterCount } from "./api/courseApi";
 import CertificateVerifier from "./components/CertificateVerifier";
 
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 export default async function CoursesPage() {
   const courses = await getCourses();

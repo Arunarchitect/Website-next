@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import {
   getAuthToken,
   getOrganisations,
@@ -28,8 +28,6 @@ import EstimateTree, { formatINR } from "./components/EstimateTree";
 import EstimateForm from "./components/EstimateForm";
 import "./styles.css";
 
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 // Keep in sync with MANAGE_ROLES in estimate/access.py (UI gating only).
 const MANAGE_ROLES = ["admin", "manager"];

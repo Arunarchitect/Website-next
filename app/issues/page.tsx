@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import "./issues.css";
 import {
   createIssue,
@@ -30,8 +30,6 @@ import { isUserMatch } from '@/components/utils/userMatching';
 import { useAppDispatch } from '@/redux/hooks';
 import { setUser } from '@/redux/features/authSlice';
 
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 const PRIORITY_OPTIONS: IssuePriority[] = ["High", "Medium", "Low"];
 const TOPIC_TYPE_OPTIONS: BcfTopicType[] = ["Clash", "Coordinate", "Quality", "Safety", "General", "Request", "Fault"];

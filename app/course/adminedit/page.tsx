@@ -3,7 +3,7 @@
 import "./adminedit.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import {
   ApiError,
   blankChapter,
@@ -28,8 +28,6 @@ import {
 import AiJsonTools from "./AiJsonTools";
 import type { PrefaceSection } from "../types";
 
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 type Edit = (fn: (c: AdminCourse) => void) => void;
 type Sel =
