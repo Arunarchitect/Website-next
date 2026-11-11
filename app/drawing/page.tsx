@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, Suspense, useMemo, useRef } from "rea
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import {
   getOrganisations,
   getProjects,
@@ -42,17 +42,6 @@ import BulkShareModal from "./components/BulkShareModal";
 import ActivityLogModal from "./components/ActivityLogModal";
 import "./styles.css";
 import "./approval.css";
-
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
 
 const UPLOAD_ROLES = ["admin", "manager", "member"];
 

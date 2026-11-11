@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import "./styles.css";
 
 import {
@@ -19,17 +19,6 @@ import {
 } from "./userApi";
 import { userTiles, areacalcDisplayConfig } from "./constants";
 import { User, OrganisationMembership } from "./types";
-
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
 
 export default function MainUserPage() {
   const router = useRouter();

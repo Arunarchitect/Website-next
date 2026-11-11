@@ -37,8 +37,6 @@ import { groupAssignments, AssignmentGroup } from "./groupAssignments";
 
 import SorExportButton from "./SorExport";
 
-const display = Fraunces({ subsets: ["latin"], weight: ["500", "600"], variable: "--font-display" });
-const body = Inter({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
 
 const EMPTY_SPACE_FORM = {
   name: "",

@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import "./styles.css";
 
 import {
@@ -23,17 +23,6 @@ import { DashboardIssue, Organisation, User, DashboardStats } from "./types";
 // NOTE: adjust this import path to wherever meetingApi.ts actually lives.
 import { getUpcomingMeetings } from "@/app/meeting/meetingApi";
 import type { Meeting } from "@/app/meeting/meetingTypes";
-
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-display",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
 
 const normalizeStatus = (status: string): string => {
   const statusMap: { [key: string]: string } = {
