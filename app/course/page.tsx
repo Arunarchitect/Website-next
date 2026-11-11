@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { spaceGrotesk as display, ibmPlexMono as mono } from "@/lib/fonts";
 import { getCourses, totalChapterCount } from "./api/courseApi";
 import CertificateVerifier from "./components/CertificateVerifier";
 

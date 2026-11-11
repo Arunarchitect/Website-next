@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Fraunces, Inter } from "next/font/google";
+import { fraunces as display, inter as body } from "@/lib/fonts";
 import "./product.css";
 import ProductListPrintButton from "./ProductListPrint";
 import ProductCatalog, { PriceBlock, ProductLink, useDebounced } from "./ProductCatalog";

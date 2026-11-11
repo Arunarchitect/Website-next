@@ -1,6 +1,6 @@
 // app/layout.tsx
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { geistSans, geistMono } from "@/lib/fonts";
 import "./globals.css";
 import { Navbar, Footer } from "@/components/common";
 import Provider from "@/redux/provider";
