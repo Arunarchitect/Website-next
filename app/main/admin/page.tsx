@@ -248,6 +248,10 @@ export default function MainAdminPage() {
             <i className="ti ti-pencil" aria-hidden="true" />
             <span>Drawing</span>
           </Link>
+          <Link href="/estimate" className="admin-nav-link">
+            <i className="ti ti-calculator" aria-hidden="true" />
+            <span>Estimate</span>
+          </Link>
         </nav>
       </header>
 

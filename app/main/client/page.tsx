@@ -192,6 +192,23 @@ export default function DashClientPage() {
                 <i className="ti ti-arrow-right" aria-hidden="true" />
               </span>
             </Link>
+
+            {/* Estimate */}
+            <Link href="/estimate" className="client-product-card">
+              <div className="client-section-icon-wrapper">
+                <i className="ti ti-calculator" aria-hidden="true" />
+              </div>
+              <div className="client-section-info">
+                <p className="client-section-label">Estimate</p>
+                <p className="client-section-description">
+                  View cost estimates for your projects and download them as PDF.
+                </p>
+              </div>
+              <span className="client-product-btn-go">
+                Go
+                <i className="ti ti-arrow-right" aria-hidden="true" />
+              </span>
+            </Link>
           </div>
         </>
       )}

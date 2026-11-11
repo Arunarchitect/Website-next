@@ -223,6 +223,10 @@ export default function MemberDashboardPage() {
             <i className="ti ti-ruler-measure" aria-hidden="true" />
             <span>Drawings</span>
           </Link>
+          <Link href="/estimate" className="member-nav-link">
+            <i className="ti ti-calculator" aria-hidden="true" />
+            <span>Estimate</span>
+          </Link>
           <Link href="/issues" className="member-nav-link">
             <i className="ti ti-bug" aria-hidden="true" />
             <span>Issues</span>
@@ -456,6 +460,7 @@ export default function MemberDashboardPage() {
           <div className="quick-links-grid">
             {quickLinks.map((link) => (
               <Link key={link.label} href={link.href} className="quick-link">
+                <i className="ti ti-pencil" aria-hidden="true" style={{ display: "none" }} />
                 <i className={`ti ${link.icon}`} aria-hidden="true" />
                 {link.label}
               </Link>
