@@ -316,3 +316,13 @@
   vertical-align: middle;
   cursor: pointer;
 }
+.est-q-mvcol { width: 1%; white-space: nowrap; text-align: center; padding: 0 4px; }
+.est-q-mv {
+  border: 1px solid #cbd5e1; background: #fff; border-radius: 4px;
+  font-size: 10px; line-height: 1; padding: 3px 5px; margin: 0 1px; cursor: pointer;
+}
+.est-q-mv:hover:not(:disabled) { background: #eef2ff; }
+.est-q-mv:disabled { opacity: 0.3; cursor: default; }
+.est-q-bmv { display: block; margin-top: 4px; }
+.est-q-sortlvl { align-items: center; }
+.est-q-sortno { min-width: 52px; font-size: 12px; opacity: 0.7; }

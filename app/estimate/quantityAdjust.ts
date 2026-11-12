@@ -1,6 +1,8 @@
 import { QuantityAdjust, QuantityCell, QuantityData, QuantityMerge } from "./types";
 
 export type SortDir = "none" | "asc" | "desc";
+/** One sort level. The order of levels is the priority: first = main sort, next = tie-breaker. */
+export type SortKey = { key: string; dir: "asc" | "desc" };
 
 export const normAdjust = (a?: QuantityAdjust | null): QuantityAdjust => ({
   wastage: {
@@ -12,7 +14,13 @@ export const normAdjust = (a?: QuantityAdjust | null): QuantityAdjust => ({
   waste_label: a?.waste_label ?? "",
   combined_label: a?.combined_label ?? "",
   combined_waste_label: a?.combined_waste_label ?? "",
-  sort: a?.sort === "asc" || a?.sort === "desc" ? a.sort : "none",
+  sort: a?.sort === "asc" || a?.sort === "desc" ? a.sort : "none", // legacy single sort
+  sort_by: Array.isArray(a?.sort_by)
+    ? a!.sort_by!
+        .filter((s) => s && typeof s.key === "string" && (s.dir === "asc" || s.dir === "desc"))
+        .slice(0, 5)
+    : [],
+  order: Array.isArray(a?.order) ? a!.order!.filter((k) => typeof k === "string") : [],
   show_total: a?.show_total !== false,
 });
 
@@ -28,48 +36,89 @@ export function adjustHeaders(data: QuantityData, adjust: QuantityAdjust | null 
   };
 }
 
-/** The column the table is sorted by: the first "group" column, else the first "text" column. */
+/** The first "group" column, else the first "text" column (used to read an old single-sort setting). */
 export const sortColumn = (data: QuantityData) =>
   data.columns.find((c) => c.role === "group") ?? data.columns.find((c) => c.role === "text");
+
+/** Active sort levels, main sort first. Falls back to the old single sort on the first group/text column. */
+export function sortSpec(data: QuantityData, adjust?: QuantityAdjust | null): SortKey[] {
+  const a = normAdjust(adjust);
+  const have = new Set(data.columns.map((c) => c.key));
+  const seen = new Set<string>();
+  const by = (a.sort_by ?? []).filter((s) => {
+    if (!have.has(s.key) || seen.has(s.key)) return false;
+    seen.add(s.key);
+    return true;
+  });
+  if (by.length) return by;
+  if (a.sort === "asc" || a.sort === "desc") {
+    const c = sortColumn(data);
+    if (c) return [{ key: c.key, dir: a.sort }];
+  }
+  return [];
+}
 
 /** Original row positions, so row keys stay stable for tables with no group column even after sorting. */
 const origIndex = new WeakMap<object, number>();
 
 /**
- * Alphabetical sort. Detail rows travel with their row.
- * Merged blocks are sorted inside first, then the whole block is treated as one object and placed
- * among the other rows by its first row. So a merged block always stays together and adjacent.
+ * Display order of the rows. Steps:
+ *  1. start from the manual order (`adjust.order`), or the original order;
+ *  2. sort by the chosen columns in priority order (stable, so ties keep the manual order);
+ *  3. every merged block is gathered into one unit: sorted inside, then placed among the other
+ *     rows by its first row, so a block is always together and adjacent.
+ * Detail rows travel with their row.
  */
-export function sortData(data: QuantityData, sort?: SortDir | null, merges?: QuantityMerge[] | null): QuantityData {
+export function sortData(data: QuantityData, adjust?: QuantityAdjust | null): QuantityData {
   data.rows.forEach((r, i) => {
     if (!origIndex.has(r)) origIndex.set(r, i);
   });
-  if (sort !== "asc" && sort !== "desc") return data;
-  const col = sortColumn(data);
-  if (!col) return data;
-  type Row = QuantityData["rows"][number];
-  const dir = sort === "asc" ? 1 : -1;
-  const val = (r: Row) => String(r.cells[col.key] ?? "");
-  const cmp = (a: Row, b: Row) =>
-    dir * val(a).localeCompare(val(b), undefined, { numeric: true, sensitivity: "base" });
+  const adj = normAdjust(adjust);
+  const spec = sortSpec(data, adj);
+  const merges = adj.merges;
+  const order = adj.order ?? [];
+  if (!spec.length && !merges.length && !order.length) return data;
 
+  type Row = QuantityData["rows"][number];
   const keys = rowKeys(data);
   const idx = new Map<string, number>(keys.map((k, i) => [k, i] as [string, number]));
+
+  // position of every row in the base (manual or original) order
+  const rank = new Map<string, number>(order.map((k, i) => [k, i] as [string, number]));
+  const baseOrder = data.rows
+    .map((_, i) => i)
+    .sort((a, b) => (rank.get(keys[a]) ?? 1e9 + a) - (rank.get(keys[b]) ?? 1e9 + b));
+  const basePos: number[] = [];
+  baseOrder.forEach((rowIdx, p) => (basePos[rowIdx] = p));
+
+  const colRole = new Map(data.columns.map((c) => [c.key, c.role] as [string, string]));
+  const cmp = (a: Row, b: Row): number => {
+    for (const s of spec) {
+      const av = a.cells[s.key];
+      const bv = b.cells[s.key];
+      let c: number;
+      if (typeof av === "number" && typeof bv === "number" && colRole.get(s.key) !== "text") c = av - bv;
+      else c = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
+      if (c) return s.dir === "asc" ? c : -c;
+    }
+    return 0;
+  };
+
   const used = new Set<number>();
   const units: { rows: Row[]; pos: number }[] = [];
 
-  (merges ?? []).forEach((m) => {
+  merges.forEach((m) => {
     const ids = Array.from(new Set(m.keys.map((k) => idx.get(k)).filter((x): x is number => x !== undefined)));
     if (ids.length < 2 || ids.some((i) => used.has(i))) return;
     ids.forEach((i) => used.add(i));
     const inner = ids
-      .map((i) => ({ r: data.rows[i], i }))
-      .sort((a, b) => cmp(a.r, b.r) || a.i - b.i)
+      .map((i) => ({ r: data.rows[i], p: basePos[i] }))
+      .sort((a, b) => cmp(a.r, b.r) || a.p - b.p)
       .map((x) => x.r);
-    units.push({ rows: inner, pos: Math.min(...ids) });
+    units.push({ rows: inner, pos: Math.min(...ids.map((i) => basePos[i])) });
   });
   data.rows.forEach((r, i) => {
-    if (!used.has(i)) units.push({ rows: [r], pos: i });
+    if (!used.has(i)) units.push({ rows: [r], pos: basePos[i] });
   });
 
   units.sort((a, b) => cmp(a.rows[0], b.rows[0]) || a.pos - b.pos);
@@ -161,4 +210,49 @@ export function compute(data: QuantityData, adjust?: QuantityAdjust | null): Com
     blocks,
     blockAt,
   };
+}
+
+
+
+/* ── manual row moves ─────────────────────────────────────────────────
+ * All helpers work on the CURRENT display order (calc.keys / calc.blockAt)
+ * and return the new full key order, or null if the move is not allowed.
+ */
+
+/** Movable units in display order: a merged block is one unit, any other row is its own unit. */
+function unitList(n: number, blockAt: (Block | undefined)[]): { start: number; end: number }[] {
+  const us: { start: number; end: number }[] = [];
+  for (let i = 0; i < n; ) {
+    const b = blockAt[i];
+    if (b) {
+      us.push({ start: b.start, end: b.end });
+      i = b.end + 1;
+    } else {
+      us.push({ start: i, end: i });
+      i++;
+    }
+  }
+  return us;
+}
+
+/** Move the unit (single row or whole merged block) that contains row i, one step up (-1) or down (+1). */
+export function moveUnit(keys: string[], blockAt: (Block | undefined)[], i: number, dir: -1 | 1): string[] | null {
+  const us = unitList(keys.length, blockAt);
+  const ui = us.findIndex((u) => i >= u.start && i <= u.end);
+  const nj = ui + dir;
+  if (ui < 0 || nj < 0 || nj >= us.length) return null;
+  const parts = us.map((u) => keys.slice(u.start, u.end + 1));
+  [parts[ui], parts[nj]] = [parts[nj], parts[ui]];
+  return parts.reduce<string[]>((acc, p) => acc.concat(p), []);
+}
+
+/** Move row i inside its merged block only. Returns null at the block edge (cannot leave the group). */
+export function moveWithin(keys: string[], blockAt: (Block | undefined)[], i: number, dir: -1 | 1): string[] | null {
+  const b = blockAt[i];
+  if (!b) return null;
+  const j = i + dir;
+  if (j < b.start || j > b.end) return null;
+  const out = keys.slice();
+  [out[i], out[j]] = [out[j], out[i]];
+  return out;
 }

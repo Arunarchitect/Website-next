@@ -10,9 +10,21 @@ import {
   QuantityPdfMeta,
   generateQuantityPdf,
 } from "../quantityPdf";
-import { adjustHeaders, compute, normAdjust, num, sortColumn, sortData } from "../quantityAdjust";
+import {
+  Block,
+  SortKey,
+  adjustHeaders,
+  compute,
+  moveUnit,
+  moveWithin,
+  normAdjust,
+  num,
+  sortData,
+  sortSpec,
+} from "../quantityAdjust";
 
 const NUMERIC = ["sum", "avg", "min", "max"];
+const MAX_SORT = 5;
 
 export const fmtNum = (v: QuantityCell | undefined, d = 2): string => {
   if (v === null || v === undefined || v === "") return "";
@@ -27,7 +39,7 @@ interface Props {
   title: string;
   meta: QuantityPdfMeta;
   adjust?: QuantityAdjust | null;
-  /** Provided only when the user may edit; persists merges, wastage and headings. */
+  /** Provided only when the user may edit; persists merges, wastage, sort, order and headings. */
   onSave?: (a: QuantityAdjust) => Promise<void>;
 }
 
@@ -35,8 +47,9 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
   const initial = useRef(JSON.stringify(normAdjust(adjust)));
   const [adj, setAdj] = useState<QuantityAdjust>(() => normAdjust(adjust));
 
-  // rows in the chosen alphabetical order (merges, wastage and PDF all work on this order)
-  const data = useMemo(() => sortData(rawData, adj.sort, adj.merges), [rawData, adj.sort, adj.merges]);
+  // rows in display order: manual order -> multi-level sort -> merged rows gathered
+  // (merges, wastage and PDF all work on this order)
+  const data = useMemo(() => sortData(rawData, adj), [rawData, adj]);
   const { columns, rows, totals, final, decimals, show_count, grouped } = data;
 
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -77,13 +90,71 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
     `${isNum(c.role) ? "est-q-num" : ""} ${c.key === final ? "est-q-final" : ""}`;
 
   const showTotal = adj.show_total !== false;
-  const sortKey = sortColumn(data)?.key;
-  const setSort = (s: "none" | "asc" | "desc") => {
+
+  // ── multi-level sort ─────────────────────────────────────────────────
+  const levels: SortKey[] = useMemo(() => sortSpec(data, adj), [data, adj]);
+
+  const setLevels = (lv: SortKey[]) => {
     setOpen(new Set()); // row positions change, so collapse
-    setAdj((a) => ({ ...a, sort: s }));
+    setAdj((a) => ({ ...a, sort_by: lv.slice(0, MAX_SORT), sort: "none" }));
   };
-  const cycleSort = () => setSort(adj.sort === "asc" ? "desc" : adj.sort === "desc" ? "none" : "asc");
-  const sortArrow = adj.sort === "asc" ? " ▲" : adj.sort === "desc" ? " ▼" : "";
+  const addLevel = () => {
+    const used = new Set(levels.map((l) => l.key));
+    const c = columns.find((x) => !used.has(x.key));
+    if (c && levels.length < MAX_SORT) setLevels([...levels, { key: c.key, dir: "asc" }]);
+  };
+  const changeLevelKey = (i: number, key: string) =>
+    setLevels(levels.map((l, j) => (j === i ? { ...l, key } : l)));
+  const changeLevelDir = (i: number, dir: "asc" | "desc") =>
+    setLevels(levels.map((l, j) => (j === i ? { ...l, dir } : l)));
+  const moveLevel = (i: number, d: -1 | 1) => {
+    const j = i + d;
+    if (j < 0 || j >= levels.length) return;
+    const n = levels.slice();
+    [n[i], n[j]] = [n[j], n[i]];
+    setLevels(n);
+  };
+  const removeLevel = (i: number) => setLevels(levels.filter((_, j) => j !== i));
+
+  /** Header click: make this column the main sort; clicking the main column cycles asc -> desc -> off. */
+  const headerSort = (key: string) => {
+    const cur = levels[0];
+    if (cur && cur.key === key) {
+      if (cur.dir === "asc") setLevels([{ key, dir: "desc" }, ...levels.slice(1)]);
+      else setLevels(levels.slice(1));
+    } else {
+      setLevels([{ key, dir: "asc" }, ...levels.filter((l) => l.key !== key)]);
+    }
+  };
+  const levelMark = (key: string) => {
+    const i = levels.findIndex((l) => l.key === key);
+    if (i < 0) return "";
+    return ` ${levels[i].dir === "asc" ? "▲" : "▼"}${levels.length > 1 ? i + 1 : ""}`;
+  };
+
+  // ── manual row moves ─────────────────────────────────────────────────
+  // Saves the current display order and drops the sort levels (a manual order and a sort cannot both rule).
+  const applyOrder = (newKeys: string[] | null) => {
+    if (!newKeys) return;
+    const openKeys = Array.from(open, (i) => calc.keys[i]);
+    setAdj((a) => ({ ...a, sort_by: [], sort: "none", order: newKeys }));
+    setOpen(new Set(openKeys.map((k) => newKeys.indexOf(k)).filter((i) => i >= 0)));
+  };
+  const mvRow = (i: number, dir: -1 | 1) =>
+    applyOrder(
+      calc.blockAt[i]
+        ? moveWithin(calc.keys, calc.blockAt, i, dir)
+        : moveUnit(calc.keys, calc.blockAt, i, dir)
+    );
+  const mvBlock = (b: Block, dir: -1 | 1) => applyOrder(moveUnit(calc.keys, calc.blockAt, b.start, dir));
+  const canUp = (i: number) => {
+    const b = calc.blockAt[i];
+    return b ? i > b.start : i > 0;
+  };
+  const canDown = (i: number) => {
+    const b = calc.blockAt[i];
+    return b ? i < b.end : i < rows.length - 1;
+  };
 
   const toggleHide = (id: string) =>
     setHidden((p) => {
@@ -144,9 +215,10 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
   const addMerge = () => {
     const ids = calc.keys.map((k, i) => (selected.has(k) ? i : -1)).filter((i) => i >= 0);
     if (ids.length < 2) return setNote("Tick at least two rows to merge.");
-    if (!ids.every((v, j) => j === 0 || v === ids[j - 1] + 1)) return setNote("Rows must be next to each other.");
+    // rows do not need to be adjacent: sortData gathers them next to the first selected row
     if (ids.some((i) => calc.blockAt[i])) return setNote("Some of these rows are already in a merge.");
     setNote(null);
+    setOpen(new Set()); // row positions change, so collapse
     setAdj((a) => ({
       ...a,
       merges: [
@@ -162,7 +234,10 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
     setMergeLabel("");
   };
 
-  const removeMerge = (id: string) => setAdj((a) => ({ ...a, merges: a.merges.filter((m) => m.id !== id) }));
+  const removeMerge = (id: string) => {
+    setOpen(new Set());
+    setAdj((a) => ({ ...a, merges: a.merges.filter((m) => m.id !== id) }));
+  };
 
   const resetAdj = () => {
     setAdj(JSON.parse(initial.current) as QuantityAdjust);
@@ -197,9 +272,15 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
       if (showCountCol) cells.push(String(r.count));
       if (hasMerge) {
         const b = calc.blockAt[i];
-        const start = !!b && b.start === i;
-        cells.push(start ? String(b!.raw) : "");
-        if (withWaste) cells.push(start ? String(b!.value) : "");
+        if (!b) {
+          // unmerged row: its own value
+          cells.push(String(calc.base[i]));
+          if (withWaste) cells.push(String(calc.eff[i]));
+        } else {
+          const start = b.start === i;
+          cells.push(start ? String(b.raw) : "");
+          if (withWaste) cells.push(start ? String(b.value) : "");
+        }
       }
       lines.push(cells.map(csvEsc).join(","));
     });
@@ -235,6 +316,8 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
     for (let j = start; j <= end; j++) span += 1 + (open.has(j) ? rows[j].details?.length ?? 0 : 0);
     return span;
   };
+
+  const usedKeys = new Set(levels.map((l) => l.key));
 
   return (
     <div className="est-tree">
@@ -289,6 +372,10 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                 {selected.size} of {calc.keys.length} selected
               </span>
             </div>
+            <span className="est-hint">
+              Use the ▲ ▼ arrows on each row to move it. Rows in a merged group move only inside the group;
+              the group has its own arrows. Moving a row switches the sort off.
+            </span>
           </div>
 
           <div className="est-q-panel-sec">
@@ -323,7 +410,7 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
           </div>
 
           <div className="est-q-panel-sec">
-            <strong>Merge adjacent rows</strong>
+            <strong>Merge rows</strong>
             <div className="est-q-panel-row">
               <input
                 className="est-q-merge-label"
@@ -336,6 +423,7 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                 Merge selected
               </button>
             </div>
+            <span className="est-hint">Rows that are far apart are moved next to the first selected row.</span>
             {adj.merges.length > 0 && (
               <div className="est-q-chips">
                 {adj.merges.map((m) => (
@@ -351,20 +439,83 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
           </div>
 
           <div className="est-q-panel-sec">
+            <strong>Sort</strong>
+            {levels.length === 0 && (
+              <span className="est-hint">
+                {adj.order && adj.order.length ? "Manual order." : "Original order."} Click a column heading or add a
+                level.
+              </span>
+            )}
+            {levels.map((l, i) => (
+              <div key={l.key} className="est-q-panel-row est-q-sortlvl">
+                <span className="est-q-sortno">{i === 0 ? "Sort by" : "Then by"}</span>
+                <select value={l.key} onChange={(e) => changeLevelKey(i, e.target.value)}>
+                  {columns
+                    .filter((c) => c.key === l.key || !usedKeys.has(c.key))
+                    .map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                </select>
+                <select value={l.dir} onChange={(e) => changeLevelDir(i, e.target.value as "asc" | "desc")}>
+                  <option value="asc">A to Z / low to high</option>
+                  <option value="desc">Z to A / high to low</option>
+                </select>
+                <button
+                  type="button"
+                  className="est-q-mv"
+                  disabled={i === 0}
+                  onClick={() => moveLevel(i, -1)}
+                  title="Higher priority"
+                  aria-label="Higher priority"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  className="est-q-mv"
+                  disabled={i === levels.length - 1}
+                  onClick={() => moveLevel(i, 1)}
+                  title="Lower priority"
+                  aria-label="Lower priority"
+                >
+                  ▼
+                </button>
+                <button
+                  type="button"
+                  className="est-q-mv"
+                  onClick={() => removeLevel(i)}
+                  title="Remove this level"
+                  aria-label="Remove sort level"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <div className="est-q-panel-row">
+              <button
+                type="button"
+                className="est-btn est-btn-sm"
+                onClick={addLevel}
+                disabled={levels.length >= MAX_SORT || levels.length >= columns.length}
+              >
+                + Add sort level
+              </button>
+              {levels.length > 0 && (
+                <button type="button" className="est-btn est-btn-sm" onClick={() => setLevels([])}>
+                  Clear sort
+                </button>
+              )}
+            </div>
+            {levels.length > 0 && adj.merges.length > 0 && (
+              <span className="est-hint">Merged rows are sorted inside their block, and the block is placed by its first row.</span>
+            )}
+          </div>
+
+          <div className="est-q-panel-sec">
             <strong>Display</strong>
             <div className="est-q-panel-row">
-              <label>
-                Sort{" "}
-                <select
-                  value={adj.sort ?? "none"}
-                  disabled={!sortKey}
-                  onChange={(e) => setSort(e.target.value as "none" | "asc" | "desc")}
-                >
-                  <option value="none">Original order</option>
-                  <option value="asc">A to Z</option>
-                  <option value="desc">Z to A</option>
-                </select>
-              </label>
               <label>
                 <input
                   type="checkbox"
@@ -374,9 +525,6 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                 Show total
               </label>
             </div>
-            {adj.sort !== "none" && adj.merges.length > 0 && (
-              <span className="est-hint">Merged rows are sorted inside their block, and the block is placed by its first row.</span>
-            )}
           </div>
 
           <div className="est-q-panel-sec">
@@ -442,19 +590,17 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                   />
                 </th>
               )}
+              {selecting && <th className="est-q-mvcol" />}
               {columns.map((c) => (
                 <th
                   key={c.key}
                   className={cls(c)}
-                  onClick={c.key === sortKey ? cycleSort : undefined}
-                  style={{
-                    ...(c.key === sortKey ? { cursor: "pointer", userSelect: "none" } : {}),
-                    ...(dim(c.key) ?? {}),
-                  }}
-                  title={c.key === sortKey ? "Click to sort A to Z / Z to A" : undefined}
+                  onClick={() => headerSort(c.key)}
+                  style={{ cursor: "pointer", userSelect: "none", ...(dim(c.key) ?? {}) }}
+                  title="Click: make this the main sort column (A to Z, Z to A, off). Other sort levels are kept as tie-breakers."
                 >
                   {hchk(c.key)} {label(c)}
-                  {c.key === sortKey ? sortArrow : ""}
+                  {levelMark(c.key)}
                 </th>
               ))}
               {withWaste && (
@@ -504,6 +650,30 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                         />
                       </td>
                     )}
+                    {selecting && (
+                      <td className="est-q-mvcol" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="est-q-mv"
+                          disabled={!canUp(i)}
+                          onClick={() => mvRow(i, -1)}
+                          title={b ? "Move up inside the merged group" : "Move up"}
+                          aria-label={`Move row ${i + 1} up`}
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          className="est-q-mv"
+                          disabled={!canDown(i)}
+                          onClick={() => mvRow(i, 1)}
+                          title={b ? "Move down inside the merged group" : "Move down"}
+                          aria-label={`Move row ${i + 1} down`}
+                        >
+                          ▼
+                        </button>
+                      </td>
+                    )}
                     {columns.map((c, ci) => (
                       <td key={c.key} className={cls(c)}>
                         {ci === 0 && expandable && (
@@ -517,21 +687,60 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                     {hasMerge &&
                       (!b ? (
                         <>
-                          {Array.from({ length: mergeCols }).map((_, k) => (
-                            <td key={k} />
-                          ))}
+                          <td className="est-q-num">
+                            {fmtNum(calc.base[i], decimals)}
+                            {unit}
+                          </td>
+                          {withWaste && (
+                            <td className="est-q-num">
+                              {fmtNum(calc.eff[i], decimals)}
+                              {unit}
+                            </td>
+                          )}
                         </>
                       ) : isStart ? (
                         <>
-                          <td className="est-q-num est-q-merge" rowSpan={blockSpan(b.start, b.end)}>
+                          <td
+                            className="est-q-num est-q-merge"
+                            rowSpan={blockSpan(b.start, b.end)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <strong>
                               {fmtNum(b.raw, decimals)}
                               {unit}
                             </strong>
                             {b.label && <small>{b.label}</small>}
+                            {selecting && (
+                              <span className="est-q-bmv">
+                                <button
+                                  type="button"
+                                  className="est-q-mv"
+                                  disabled={b.start === 0}
+                                  onClick={() => mvBlock(b, -1)}
+                                  title="Move the whole merged group up"
+                                  aria-label="Move merged group up"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  className="est-q-mv"
+                                  disabled={b.end >= rows.length - 1}
+                                  onClick={() => mvBlock(b, 1)}
+                                  title="Move the whole merged group down"
+                                  aria-label="Move merged group down"
+                                >
+                                  ▼
+                                </button>
+                              </span>
+                            )}
                           </td>
                           {withWaste && (
-                            <td className="est-q-num est-q-merge" rowSpan={blockSpan(b.start, b.end)}>
+                            <td
+                              className="est-q-num est-q-merge"
+                              rowSpan={blockSpan(b.start, b.end)}
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <strong>
                                 {fmtNum(b.value, decimals)}
                                 {unit}
@@ -546,6 +755,7 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
                     r.details!.map((d, di) => (
                       <tr key={`${i}-${di}`} className="est-q-detail">
                         {selecting && <td className="est-q-selcol" />}
+                        {selecting && <td className="est-q-mvcol" />}
                         {columns.map((c, ci) => (
                           <td key={c.key} className={cls(c)}>
                             {ci === 0 && expandable && <span className="est-q-chev-gap" />}
@@ -566,19 +776,20 @@ export default function QuantityTable({ data: rawData, title, meta, adjust, onSa
             })}
           </tbody>
           {showTotal && (
-          <tfoot>
-            <tr>
-              {selecting && <td className="est-q-selcol" />}
-              {columns.map((c, i) => (
-                <td key={c.key} className={cls(c)}>
-                  {i === 0 && !isNum(c.role) ? "Total" : isNum(c.role) ? fmtNum(totals[c.key], decimals) : ""}
-                </td>
-              ))}
-              {withWaste && <td className="est-q-num est-q-final">{fmtNum(calc.effTotal, decimals)}</td>}
-              {showCountCol && <td className="est-q-num">{rows.reduce((s, r) => s + r.count, 0)}</td>}
-              {hasMerge && Array.from({ length: mergeCols }).map((_, k) => <td key={k} />)}
-            </tr>
-          </tfoot>
+            <tfoot>
+              <tr>
+                {selecting && <td className="est-q-selcol" />}
+                {selecting && <td className="est-q-mvcol" />}
+                {columns.map((c, i) => (
+                  <td key={c.key} className={cls(c)}>
+                    {i === 0 && !isNum(c.role) ? "Total" : isNum(c.role) ? fmtNum(totals[c.key], decimals) : ""}
+                  </td>
+                ))}
+                {withWaste && <td className="est-q-num est-q-final">{fmtNum(calc.effTotal, decimals)}</td>}
+                {showCountCol && <td className="est-q-num">{rows.reduce((s, r) => s + r.count, 0)}</td>}
+                {hasMerge && Array.from({ length: mergeCols }).map((_, k) => <td key={k} />)}
+              </tr>
+            </tfoot>
           )}
         </table>
       </div>

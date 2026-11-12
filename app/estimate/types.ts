@@ -33,14 +33,6 @@ export interface QuantityColumnConfig {
   unit: string;
 }
 
-export interface QuantityConfig {
-  columns: QuantityColumnConfig[];
-  final: string | null;
-  show_count: boolean;
-  show_details: boolean;
-  decimals: number;
-}
-
 export type QuantityCell = string | number | null;
 
 export interface QuantityRow {
@@ -114,13 +106,23 @@ export interface QuantityMerge {
   keys: string[];
 }
 
+export interface QuantitySortKey {
+  key: string;
+  dir: "asc" | "desc";
+}
+
 export interface QuantityAdjust {
   wastage: QuantityWastage;
   merges: QuantityMerge[];
   waste_label?: string;
   combined_label?: string;
   combined_waste_label?: string;
+  /** legacy single sort, still read if sort_by is empty */
   sort?: "none" | "asc" | "desc";
+  /** multi-level sort, first = main sort */
+  sort_by?: QuantitySortKey[];
+  /** manual row order (row keys) */
+  order?: string[];
   show_total?: boolean;
 }
 
