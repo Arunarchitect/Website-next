@@ -1,8 +1,10 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { EstimateItem } from "../types";
+import { Estimate, EstimateItem } from "../types";
 import { EstimatePdfMeta, generateEstimatePdf } from "../estimatePdf";
+import { AddonAssignment, AddonState, EMPTY_ADDON, addonLines, addonTotal } from "../estimateAddon";
+import EstimateAddonPanel from "./EstimateAddonPanel";
 
 interface TreeNode {
   item: EstimateItem;
@@ -77,9 +79,16 @@ interface Props {
   items: EstimateItem[];
   total: number;
   meta: EstimatePdfMeta;
+  /** Needed for the Add button. Without projectId/currentId the add-on is hidden. */
+  projectId?: number;
+  currentId?: number;
+  /** Estimates already loaded on the page (any project; filtered inside). */
+  candidates?: Estimate[];
+  /** e.g. getAssignments from the product service. */
+  loadAssignments?: (projectId: number) => Promise<AddonAssignment[]>;
 }
 
-export default function EstimateTree({ items, total, meta }: Props) {
+export default function EstimateTree({ items, total, meta, projectId, currentId, candidates, loadAssignments }: Props) {
   const roots = useMemo(() => buildTree(items), [items]);
 
   const parentKeys = useMemo(
@@ -91,6 +100,12 @@ export default function EstimateTree({ items, total, meta }: Props) {
     () => new Set(roots.filter((r) => r.children.length > 0).map((r) => r.item.hierarchy))
   );
   const [printing, setPrinting] = useState(false);
+  const [addon, setAddon] = useState<AddonState>(EMPTY_ADDON);
+
+  const lines = useMemo(() => addonLines(addon), [addon]);
+  const hasAddon = lines.length > 0;
+  const combined = Math.round((total + addonTotal(addon)) * 100) / 100;
+  const canAdd = projectId !== undefined && currentId !== undefined;
 
   const toggle = (key: string) =>
     setExpanded((prev) => {
@@ -110,7 +125,7 @@ export default function EstimateTree({ items, total, meta }: Props) {
       const rows: EstimateItem[] = [];
       collectVisible(roots, expanded, rows);
       const detailed = Array.from(parentKeys).every((k) => expanded.has(k));
-      await generateEstimatePdf(meta, rows, total, detailed);
+      await generateEstimatePdf(meta, rows, total, detailed, addon);
     } catch (e) {
       console.error("PDF export failed:", e);
       window.alert("Could not generate the PDF.");
@@ -189,6 +204,16 @@ export default function EstimateTree({ items, total, meta }: Props) {
         <button type="button" className="est-btn est-btn-sm" onClick={collapseAll}>
           Collapse
         </button>
+        {canAdd && (
+          <EstimateAddonPanel
+            projectId={projectId!}
+            currentId={currentId!}
+            candidates={candidates ?? []}
+            addon={addon}
+            onChange={setAddon}
+            loadAssignments={loadAssignments}
+          />
+        )}
         <button
           type="button"
           className="est-btn est-btn-sm est-print-btn"
@@ -216,13 +241,53 @@ export default function EstimateTree({ items, total, meta }: Props) {
             <div className="est-cell est-id" />
             <div className="est-cell est-name">
               <span className="est-toggle-spacer" />
-              <span className="est-name-text">Grand total</span>
+              <span className="est-name-text">{hasAddon ? "Estimate total" : "Grand total"}</span>
             </div>
             <div className="est-cell est-qty est-empty" />
             <div className="est-cell est-unit est-empty" />
             <div className="est-cell est-rate est-empty" />
             <div className="est-cell est-total">₹ {formatINR(total)}</div>
           </div>
+
+          {hasAddon && (
+            <>
+              <div className="est-row est-row-sum est-lvl-0" role="row">
+                <div className="est-cell est-id" />
+                <div className="est-cell est-name">
+                  <span className="est-toggle-spacer" />
+                  <span className="est-name-text">Add-ons</span>
+                </div>
+                <div className="est-cell est-qty est-empty" />
+                <div className="est-cell est-unit est-empty" />
+                <div className="est-cell est-rate est-empty" />
+                <div className="est-cell est-total" />
+              </div>
+              {lines.map((l) => (
+                <div key={l.key} className="est-row est-row-leaf est-lvl-0" role="row">
+                  <div className="est-cell est-id" />
+                  <div className="est-cell est-name">
+                    <span className="est-toggle-spacer" />
+                    <span className="est-name-text">{l.title}</span>
+                  </div>
+                  <div className="est-cell est-qty est-empty" />
+                  <div className="est-cell est-unit est-empty" />
+                  <div className="est-cell est-rate est-empty" />
+                  <div className="est-cell est-total">{l.amountLabel}</div>
+                </div>
+              ))}
+              <div className="est-row est-foot" role="row">
+                <div className="est-cell est-id" />
+                <div className="est-cell est-name">
+                  <span className="est-toggle-spacer" />
+                  <span className="est-name-text">Combined total</span>
+                </div>
+                <div className="est-cell est-qty est-empty" />
+                <div className="est-cell est-unit est-empty" />
+                <div className="est-cell est-rate est-empty" />
+                <div className="est-cell est-total">₹ {formatINR(combined)}</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

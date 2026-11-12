@@ -1,4 +1,5 @@
 import { EstimateItem } from "./types";
+import { AddonState, addonLines, addonTotal } from "./estimateAddon";
 
 export interface EstimatePdfMeta {
   title: string;
@@ -20,18 +21,25 @@ type RowMeta = { sum: boolean; level: number; footer?: boolean };
 
 /**
  * rows = the rows currently visible in the UI (respects expanded/collapsed state).
+ * addon = optional product list / other estimates shown after the estimate total.
  * Monochrome, hairline rules, A4 portrait, compact.
  */
 export async function generateEstimatePdf(
   meta: EstimatePdfMeta,
   rows: EstimateItem[],
   total: number,
-  detailed: boolean
+  detailed: boolean,
+  addon?: AddonState | null
 ): Promise<void> {
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
   ]);
+
+  const lines = addon ? addonLines(addon) : [];
+  const hasAddon = lines.length > 0;
+  const combined = Math.round((total + (addon ? addonTotal(addon) : 0)) * 100) / 100;
+  const shownTotal = hasAddon ? combined : total;
 
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
   const M = 12;
@@ -60,13 +68,16 @@ export async function generateEstimatePdf(
   doc.text(new Date(meta.updatedAt).toLocaleDateString("en-IN"), pageW - M, 15, { align: "right" });
 
   doc.setFontSize(7.5);
-  doc.text("Total estimate", pageW - M, 20.5, { align: "right" });
+  doc.text(hasAddon ? "Combined total (with add-ons)" : "Total estimate", pageW - M, 20.5, { align: "right" });
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(25, 25, 25);
-  doc.text(`INR ${total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, pageW - M, 26, {
-    align: "right",
-  });
+  doc.text(
+    `INR ${shownTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    pageW - M,
+    26,
+    { align: "right" }
+  );
 
   doc.setDrawColor(25, 25, 25);
   doc.setLineWidth(0.4);
@@ -83,8 +94,19 @@ export async function generateEstimatePdf(
     money(r.total),
   ]);
 
-  body.push(["", "Grand total", "", "", "", money(total)]);
+  body.push(["", hasAddon ? "Estimate total" : "Grand total", "", "", "", money(total)]);
   rowMeta.push({ sum: true, level: 0, footer: true });
+
+  if (hasAddon) {
+    body.push(["", "Add-ons", "", "", "", ""]);
+    rowMeta.push({ sum: true, level: 0 });
+    lines.forEach((l) => {
+      body.push(["", l.title, "", "", "", l.amountLabel]);
+      rowMeta.push({ sum: false, level: 0 });
+    });
+    body.push(["", "Combined total", "", "", "", money(combined)]);
+    rowMeta.push({ sum: true, level: 0, footer: true });
+  }
 
   autoTable(doc, {
     startY: 32,

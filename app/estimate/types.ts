@@ -1,4 +1,5 @@
 export type EstimateStatus = "draft" | "published" | "archived";
+export type EstimateKind = "estimate" | "quantity";
 
 export interface EstimatePermissions {
   can_edit: boolean;
@@ -22,8 +23,45 @@ export interface EstimateItem {
   total: number;
 }
 
+export type QuantityRole = "group" | "sum" | "avg" | "min" | "max" | "text";
+
+export interface QuantityColumnConfig {
+  key: string;
+  label: string;
+  show: boolean;
+  role: QuantityRole;
+  unit: string;
+}
+
+export interface QuantityConfig {
+  columns: QuantityColumnConfig[];
+  final: string | null;
+  show_count: boolean;
+  show_details: boolean;
+  decimals: number;
+}
+
+export type QuantityCell = string | number | null;
+
+export interface QuantityRow {
+  cells: Record<string, QuantityCell>;
+  count: number;
+  details?: Record<string, QuantityCell>[];
+}
+
+export interface QuantityData {
+  columns: QuantityColumnConfig[];
+  grouped: boolean;
+  show_count: boolean;
+  decimals: number;
+  final: string | null;
+  rows: QuantityRow[];
+  totals: Record<string, QuantityCell>;
+}
+
 export interface Estimate {
   id: number;
+  kind: EstimateKind;
   title: string;
   description: string;
   status: EstimateStatus;
@@ -35,6 +73,7 @@ export interface Estimate {
   file_size: number;
   total_amount: number;
   item_count: number;
+  config: QuantityConfig | null;
   uploaded_by_name: string;
   created_at: string;
   updated_at: string;
@@ -43,6 +82,7 @@ export interface Estimate {
 
 export interface EstimateDetail extends Estimate {
   items: EstimateItem[];
+  quantity_data: QuantityData | null;
 }
 
 export interface Organisation {
@@ -60,4 +100,35 @@ export interface RawMembership {
   organisation: number;
   role: string;
   project: number | null;
+}
+
+export interface QuantityWastage {
+  percent: number;
+  all: boolean;
+  keys: string[];
+}
+
+export interface QuantityMerge {
+  id: string;
+  label: string;
+  keys: string[];
+}
+
+export interface QuantityAdjust {
+  wastage: QuantityWastage;
+  merges: QuantityMerge[];
+  waste_label?: string;
+  combined_label?: string;
+  combined_waste_label?: string;
+  sort?: "none" | "asc" | "desc";
+  show_total?: boolean;
+}
+
+export interface QuantityConfig {
+  columns: QuantityColumnConfig[];
+  final: string | null;
+  show_count: boolean;
+  show_details: boolean;
+  decimals: number;
+  adjust?: QuantityAdjust;
 }
