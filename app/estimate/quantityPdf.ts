@@ -57,7 +57,7 @@ export async function generateQuantityPdf(
     import("jspdf-autotable"),
   ]);
 
-  const data = sortData(rawData, adjust?.sort, adjust?.merges); // `open` indexes refer to this order
+  const data = sortData(rawData, adjust); // `open` indexes refer to this order
   const showTotal = adjust?.show_total !== false;
   const { columns, rows, totals, final, decimals, show_count, grouped } = data;
   const calc = compute(data, adjust);
