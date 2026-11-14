@@ -95,7 +95,7 @@ export interface Member {
 export interface Project {
   id: number;
   name: string;
-  organisation_id: number; // NEW
+  organisation_id: number;
   organisation_name: string;
   can_edit: boolean;
   members: Member[];
@@ -143,6 +143,8 @@ export interface Item {
   qty_have: number;
   qty_needed: number;
   gap: number;
+  rate: string | null; // per unit; DRF sends decimals as strings
+  cost: string | null; // rate × qty_have, read-only
   action: ActionValue;
   essential: boolean;
   is_consumable: boolean;
@@ -154,7 +156,7 @@ export interface Item {
 
 export type ItemInput = Omit<
   Item,
-  | "id" | "seq" | "code" | "gap"
+  | "id" | "seq" | "code" | "gap" | "cost"
   | "category_name" | "subcategory_name" | "location_name" | "custodian_details"
 >;
 
@@ -237,6 +239,12 @@ export async function importRows(
 // ── Helpers ─────────────────────────────────────────────────────────────
 export const labelOf = (list: readonly { value: string; label: string }[], value: string) =>
   list.find((o) => o.value === value)?.label ?? value;
+
+/** Formats an amount in rupees, e.g. "20000.00" -> "₹20,000". Blank -> "—". */
+export const money = (v: string | number | null | undefined) =>
+  v === null || v === undefined || v === ""
+    ? "—"
+    : `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 /** Turns an axios/DRF error into a readable string. Shows `detail` when
  * present, otherwise every field error ("name: This field is required."). */

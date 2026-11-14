@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   ACTIONS, CONDITIONS, STATUSES,
-  getApiErrorMessage,
+  getApiErrorMessage, money,
   type Category, type Item, type ItemInput, type Location, type Member,
 } from "./inventoryApi";
 
@@ -37,6 +37,7 @@ const blank = (project: number): ItemInput => ({
   condition: "",
   qty_have: 1,
   qty_needed: 0,
+  rate: null,
   action: "NONE",
   essential: false,
   is_consumable: false,
@@ -58,6 +59,7 @@ const fromItem = (i: Item): ItemInput => ({
   condition: i.condition,
   qty_have: i.qty_have,
   qty_needed: i.qty_needed,
+  rate: i.rate,
   action: i.action,
   essential: i.essential,
   is_consumable: i.is_consumable,
@@ -122,6 +124,7 @@ export default function ItemForm({ item, projectId, members, locations, categori
   }
 
   const gap = Math.max(f.qty_needed - f.qty_have, 0);
+  const cost = f.rate !== null && f.rate !== "" ? Number(f.rate) * f.qty_have : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
@@ -226,6 +229,23 @@ export default function ItemForm({ item, projectId, members, locations, categori
             <input type="number" min={0} className={input} value={f.qty_needed} onChange={(e) => set("qty_needed", Math.max(Number(e.target.value) || 0, 0))} />
             {gap > 0 && <span className="mt-1 block text-xs text-amber-700">Short by {gap}</span>}
           </Field>
+
+          <Field label="Rate (₹ per unit)">
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              className={input}
+              value={f.rate ?? ""}
+              onChange={(e) => set("rate", e.target.value === "" ? null : e.target.value)}
+            />
+          </Field>
+          <div className="text-sm text-slate-700">
+            <span className="mb-1 block">Cost (rate × quantity we have)</span>
+            <div className="rounded border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-slate-900">
+              {money(cost)}
+            </div>
+          </div>
 
           <Field label="Action">
             <select className={input} value={f.action} onChange={(e) => set("action", e.target.value as ItemInput["action"])}>
