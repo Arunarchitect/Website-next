@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import {
-  ACTIONS, CONDITIONS, STATUSES,
-  getApiErrorMessage, money,
+  ACTIONS, CONDITIONS, STATUSES, UNITS,
+  fmtQty, getApiErrorMessage, money, unitShort,
   type Category, type Item, type ItemInput, type Location, type Member,
 } from "./inventoryApi";
+import ColorField from "./ColorField";
 
 /** Free-text names typed in the form. The page finds or creates the matching
  * location / category / subcategory when saving. */
@@ -29,18 +30,18 @@ const blank = (project: number): ItemInput => ({
   project,
   name: "",
   variant: "",
+  color: "",
   category: null,
   subcategory: null,
   location: null,
   custodians: [],
   status: "IN_USE",
   condition: "",
-  qty_have: 1,
-  qty_needed: 0,
+  unit: "COUNT",
+  qty_have: "1",
+  qty_needed: "0",
   rate: null,
   action: "NONE",
-  essential: false,
-  is_consumable: false,
   brand: "",
   purchase_date: null,
   warranty_until: null,
@@ -51,18 +52,18 @@ const fromItem = (i: Item): ItemInput => ({
   project: i.project,
   name: i.name,
   variant: i.variant,
+  color: i.color,
   category: i.category,
   subcategory: i.subcategory,
   location: i.location,
   custodians: i.custodians,
   status: i.status,
   condition: i.condition,
+  unit: i.unit,
   qty_have: i.qty_have,
   qty_needed: i.qty_needed,
   rate: i.rate,
   action: i.action,
-  essential: i.essential,
-  is_consumable: i.is_consumable,
   brand: i.brand,
   purchase_date: i.purchase_date,
   warranty_until: i.warranty_until,
@@ -78,6 +79,36 @@ function Field({ label, children, wide }: { label: string; children: React.React
       <span className="mb-1 block">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** Number input with the unit printed inside the right edge. */
+function QtyInput({
+  value,
+  unit,
+  onChange,
+}: {
+  value: number | string;
+  unit: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        step="any"
+        className={`${input} ${unit ? "pr-10" : ""}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {unit && (
+        <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-slate-500">
+          {unit}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -105,26 +136,38 @@ export default function ItemForm({ item, projectId, members, locations, categori
     subcategoryName.trim() !== "" &&
     !typedCategory?.subcategories.some((s) => s.name.toLowerCase() === subcategoryName.trim().toLowerCase());
 
+  const have = Number(f.qty_have) || 0;
+  const need = Number(f.qty_needed) || 0;
+  const u = unitShort(f.unit);
+  const gap = Math.max(need - have, 0);
+  const cost = f.rate !== null && f.rate !== "" ? Number(f.rate) * have : null;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!f.name.trim()) return setErr("Item name is required.");
+    if (have < 0 || need < 0) return setErr("Quantities cannot be negative.");
     setSaving(true);
     setErr("");
     try {
-      await onSave({ ...f, name: f.name.trim() }, {
-        location: locationName,
-        category: categoryName,
-        subcategory: subcategoryName,
-      });
+      await onSave(
+        {
+          ...f,
+          name: f.name.trim(),
+          qty_have: f.qty_have === "" ? 0 : f.qty_have,
+          qty_needed: f.qty_needed === "" ? 0 : f.qty_needed,
+        },
+        {
+          location: locationName,
+          category: categoryName,
+          subcategory: subcategoryName,
+        },
+      );
       onClose();
     } catch (ex) {
       setErr(getApiErrorMessage(ex, "Couldn’t save the item."));
       setSaving(false);
     }
   }
-
-  const gap = Math.max(f.qty_needed - f.qty_have, 0);
-  const cost = f.rate !== null && f.rate !== "" ? Number(f.rate) * f.qty_have : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
@@ -139,6 +182,14 @@ export default function ItemForm({ item, projectId, members, locations, categori
           </Field>
           <Field label="Variant (size, type)">
             <input className={input} value={f.variant} onChange={(e) => set("variant", e.target.value)} />
+          </Field>
+
+          <div className="text-sm text-slate-700">
+            <span className="mb-1 block">Color</span>
+            <ColorField value={f.color} onChange={(v) => set("color", v)} />
+          </div>
+          <Field label="Brand">
+            <input className={input} value={f.brand} onChange={(e) => set("brand", e.target.value)} />
           </Field>
 
           <Field label="Category">
@@ -169,7 +220,7 @@ export default function ItemForm({ item, projectId, members, locations, categori
             {newSub && <span className="mt-1 block text-xs text-slate-600">New subcategory, created when you save.</span>}
           </Field>
 
-          <Field label="Location">
+          <Field label="Location" wide>
             <input
               className={input}
               list="inv-locations"
@@ -180,9 +231,6 @@ export default function ItemForm({ item, projectId, members, locations, categori
             <datalist id="inv-locations">
               {locations.map((l) => <option key={l.id} value={l.name} />)}
             </datalist>
-          </Field>
-          <Field label="Brand">
-            <input className={input} value={f.brand} onChange={(e) => set("brand", e.target.value)} />
           </Field>
 
           <div className="sm:col-span-2">
@@ -222,17 +270,30 @@ export default function ItemForm({ item, projectId, members, locations, categori
             </select>
           </Field>
 
-          <Field label="Quantity we have">
-            <input type="number" min={0} className={input} value={f.qty_have} onChange={(e) => set("qty_have", Math.max(Number(e.target.value) || 0, 0))} />
-          </Field>
-          <Field label="Quantity we need">
-            <input type="number" min={0} className={input} value={f.qty_needed} onChange={(e) => set("qty_needed", Math.max(Number(e.target.value) || 0, 0))} />
-            {gap > 0 && <span className="mt-1 block text-xs text-amber-700">Short by {gap}</span>}
+          <Field label="Unit (applies to quantities and rate)" wide>
+            <select className={input} value={f.unit} onChange={(e) => set("unit", e.target.value as ItemInput["unit"])}>
+              {UNITS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+            </select>
           </Field>
 
-          <Field label="Rate (₹ per unit)">
+          <div className="text-sm text-slate-700">
+            <span className="mb-1 block">Quantity we have</span>
+            <QtyInput value={f.qty_have} unit={u} onChange={(v) => set("qty_have", v)} />
+          </div>
+          <div className="text-sm text-slate-700">
+            <span className="mb-1 block">Quantity we need</span>
+            <QtyInput value={f.qty_needed} unit={u} onChange={(v) => set("qty_needed", v)} />
+            {gap > 0 && (
+              <span className="mt-1 block text-xs text-amber-700">
+                Short by {fmtQty(gap)}{u && ` ${u}`}
+              </span>
+            )}
+          </div>
+
+          <Field label={`Rate (₹ per ${u || "unit"})`}>
             <input
               type="number"
+              inputMode="decimal"
               min={0}
               step="0.01"
               className={input}
@@ -247,21 +308,11 @@ export default function ItemForm({ item, projectId, members, locations, categori
             </div>
           </div>
 
-          <Field label="Action">
+          <Field label="Action" wide>
             <select className={input} value={f.action} onChange={(e) => set("action", e.target.value as ItemInput["action"])}>
               {ACTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
             </select>
           </Field>
-          <div className="flex flex-wrap items-end gap-5 pb-1.5">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={f.essential} onChange={(e) => set("essential", e.target.checked)} />
-              Essential
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={f.is_consumable} onChange={(e) => set("is_consumable", e.target.checked)} />
-              Consumable
-            </label>
-          </div>
 
           <Field label="Purchase date">
             <input type="date" className={input} value={f.purchase_date ?? ""} onChange={(e) => set("purchase_date", e.target.value || null)} />

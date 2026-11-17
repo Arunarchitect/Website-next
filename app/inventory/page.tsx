@@ -9,6 +9,7 @@ import {
   createLocation,
   createSubCategory,
   deleteItem,
+  fmtQty,
   getApiErrorMessage,
   labelOf,
   listCategories,
@@ -16,6 +17,8 @@ import {
   listLocations,
   listMyProjects,
   money,
+  unitShort,
+  unitText,
   updateItem,
   type Category,
   type Condition,
@@ -28,6 +31,9 @@ import ItemForm, { type SaveNames } from "./ItemForm";
 import ImportPanel from "./ImportPanel";
 import CategoryManager from "./CategoryManager";
 import CustodianDialog from "./CustodianDialog";
+import JsonPanel from "./JsonPanel";
+import { colorName } from "./ColorField";
+import { copyText, itemsToJson } from "./itemJson";
 
 type Tab = "all" | "unrated" | "attention" | "lacking";
 
@@ -69,6 +75,9 @@ export default function InventoryPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [custodianItem, setCustodianItem] = useState<Item | null>(null);
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [notice, setNotice] = useState("");
 
   const project = projects.find((p) => p.id === projectId) ?? null;
   const canEdit = project?.can_edit ?? false;
@@ -103,6 +112,7 @@ export default function InventoryPage() {
       listCategories(projectId),
     ]);
     setItems(its);
+    setSelected((prev) => new Set([...prev].filter((id) => its.some((i) => i.id === id))));
     setLocations(locs);
     setCategories(cats);
   }, [projectId]);
@@ -131,6 +141,7 @@ export default function InventoryPage() {
     setLocationId("");
     setSearch("");
     setTab("all");
+    setSelected(new Set());
     reload()
       .catch((e) =>
         setError(getApiErrorMessage(e, "Couldn’t load the inventory.")),
@@ -138,12 +149,18 @@ export default function InventoryPage() {
       .finally(() => setLoading(false));
   }, [projectId, reload]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const counts = useMemo(
     () => ({
       all: items.length,
       unrated: items.filter((i) => i.condition === "").length,
       attention: items.filter(needsAction).length,
-      lacking: items.filter((i) => i.gap > 0).length,
+      lacking: items.filter((i) => Number(i.gap) > 0).length,
     }),
     [items],
   );
@@ -159,7 +176,7 @@ export default function InventoryPage() {
     return items.filter((i) => {
       if (tab === "unrated" && i.condition !== "") return false;
       if (tab === "attention" && !needsAction(i)) return false;
-      if (tab === "lacking" && i.gap === 0) return false;
+      if (tab === "lacking" && Number(i.gap) === 0) return false;
       if (
         categoryId === "none"
           ? i.category !== null
@@ -267,6 +284,40 @@ export default function InventoryPage() {
     }
   }
 
+  const visibleIds = visible.map((i) => i.id);
+  const allSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someSelected = !allSelected && visibleIds.some((id) => selected.has(id));
+
+  function toggleAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function copySelected() {
+    const chosen = items.filter((i) => selected.has(i.id));
+    if (!project || chosen.length === 0) return;
+    const ok = await copyText(itemsToJson(chosen, project));
+    setNotice(
+      ok
+        ? `Copied JSON of ${chosen.length} item${chosen.length === 1 ? "" : "s"}.`
+        : "Couldn’t copy to the clipboard.",
+    );
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "all", label: "All items" },
     { key: "unrated", label: "Not rated" },
@@ -284,7 +335,7 @@ export default function InventoryPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
+    <main className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">
@@ -339,6 +390,9 @@ export default function InventoryPage() {
               <button onClick={() => setImportOpen(true)} className={ghostBtn}>
                 Import from sheet
               </button>
+              <button onClick={() => setJsonOpen(true)} className={ghostBtn}>
+                Paste JSON
+              </button>
               <button
                 onClick={() => {
                   setEditing(null);
@@ -366,6 +420,12 @@ export default function InventoryPage() {
           <button className="underline" onClick={() => setError("")}>
             Dismiss
           </button>
+        </p>
+      )}
+
+      {notice && (
+        <p role="status" className="rounded bg-emerald-50 p-3 text-sm text-emerald-900">
+          {notice}
         </p>
       )}
 
@@ -456,17 +516,43 @@ export default function InventoryPage() {
         </select>
       </div>
 
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <span>{selected.size} selected</span>
+          <button onClick={copySelected} className={ghostBtn}>
+            Copy JSON
+          </button>
+          <button className="underline" onClick={() => setSelected(new Set())}>
+            Clear selection
+          </button>
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded border border-slate-200 bg-white">
-        <table className="w-full min-w-[64rem] text-left text-sm">
+        <table className="w-full min-w-[80rem] text-left text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
             <tr>
+              <th className="w-8 px-3 py-2">
+                <input
+                  type="checkbox"
+                  aria-label="Select all shown"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected;
+                  }}
+                  onChange={toggleAll}
+                  disabled={visible.length === 0}
+                />
+              </th>
               <th className="px-3 py-2 font-medium">Code</th>
               <th className="px-3 py-2 font-medium">Item</th>
+              <th className="px-3 py-2 font-medium">Color</th>
               <th className="px-3 py-2 font-medium">Category</th>
               <th className="px-3 py-2 font-medium">Location</th>
               <th className="px-3 py-2 font-medium">Custodians</th>
               <th className="px-3 py-2 font-medium">Condition</th>
               <th className="px-3 py-2 font-medium">Have / need</th>
+              <th className="px-3 py-2 font-medium">Unit</th>
               <th className="px-3 py-2 font-medium">Rate</th>
               <th className="px-3 py-2 font-medium">Cost</th>
               <th className="px-3 py-2 font-medium">Action</th>
@@ -477,7 +563,7 @@ export default function InventoryPage() {
             {loading && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={14}
                   className="px-3 py-8 text-center text-slate-500"
                 >
                   Loading…
@@ -487,7 +573,7 @@ export default function InventoryPage() {
             {!loading && visible.length === 0 && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={14}
                   className="px-3 py-8 text-center text-slate-500"
                 >
                   {items.length === 0
@@ -498,119 +584,154 @@ export default function InventoryPage() {
                 </td>
               </tr>
             )}
-            {visible.map((i) => (
-              <tr
-                key={i.id}
-                className="border-b border-slate-100 align-top last:border-0"
-              >
-                <td className="px-3 py-2 text-slate-500">{i.code}</td>
-                <td className="px-3 py-2">
-                  <div className="font-medium text-slate-900">
-                    {i.name}
-                    {i.essential && (
-                      <span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-xs font-normal text-slate-700">
-                        Essential
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {[i.variant, i.brand].filter(Boolean).join(" · ")}
-                  </div>
-                </td>
-                <td className="px-3 py-2">
-                  {i.category_name || (
-                    <span className="text-slate-400">Uncategorised</span>
-                  )}
-                  {i.subcategory_name && (
+            {visible.map((i) => {
+              const u = unitShort(i.unit);
+              return (
+                <tr
+                  key={i.id}
+                  className={`border-b border-slate-100 align-top last:border-0 ${
+                    selected.has(i.id) ? "bg-slate-50" : ""
+                  }`}
+                >
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${i.name}`}
+                      checked={selected.has(i.id)}
+                      onChange={() => toggleOne(i.id)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-slate-500">{i.code}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-900">{i.name}</div>
                     <div className="text-xs text-slate-500">
-                      {i.subcategory_name}
+                      {[i.variant, i.brand].filter(Boolean).join(" · ")}
                     </div>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {i.location_name || <span className="text-slate-400">—</span>}
-                </td>
-                <td className="px-3 py-2">
-                  {i.custodian_details.length ? (
-                    i.custodian_details.map((c) => c.name).join(", ")
-                  ) : (
-                    <span className="text-slate-400">Unassigned</span>
-                  )}
-                  {canEdit && (
-                    <button
-                      className="ml-2 text-xs text-slate-600 underline"
-                      onClick={() => setCustodianItem(i)}
-                    >
-                      Edit
-                    </button>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {canEdit ? (
-                    <select
-                      aria-label={`Condition of ${i.name}`}
-                      value={i.condition}
-                      onChange={(e) =>
-                        setCondition(i, e.target.value as Condition)
-                      }
-                      className={`rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 ${conditionStyle[i.condition]}`}
-                    >
-                      <option value="">Not rated</option>
-                      {CONDITIONS.map((c) => (
-                        <option key={c.value} value={c.value}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span
-                      className={`inline-block rounded border px-2 py-1 text-sm ${conditionStyle[i.condition]}`}
-                    >
-                      {i.condition
-                        ? labelOf(CONDITIONS, i.condition)
-                        : "Not rated"}
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {i.qty_have} / {i.qty_needed}
-                  {i.gap > 0 && (
-                    <div className="text-xs text-amber-700">
-                      Short by {i.gap}
-                    </div>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2">{money(i.rate)}</td>
-                <td className="whitespace-nowrap px-3 py-2">{money(i.cost)}</td>
-                <td className="px-3 py-2">{labelOf(ACTIONS, i.action)}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right">
-                  {canEdit && (
-                    <>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {i.color ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className="inline-block h-5 w-5 rounded border border-slate-300"
+                          style={{ backgroundColor: i.color }}
+                          aria-hidden="true"
+                        />
+                        <span className="text-xs text-slate-600">
+                          {colorName(i.color) || i.color}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {i.category_name || (
+                      <span className="text-slate-400">Uncategorised</span>
+                    )}
+                    {i.subcategory_name && (
+                      <div className="text-xs text-slate-500">
+                        {i.subcategory_name}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {i.location_name || (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {i.custodian_details.length ? (
+                      i.custodian_details.map((c) => c.name).join(", ")
+                    ) : (
+                      <span className="text-slate-400">Unassigned</span>
+                    )}
+                    {canEdit && (
                       <button
-                        className="mr-3 text-slate-700 underline"
-                        onClick={() => {
-                          setEditing(i);
-                          setFormOpen(true);
-                        }}
+                        className="ml-2 text-xs text-slate-600 underline"
+                        onClick={() => setCustodianItem(i)}
                       >
                         Edit
                       </button>
-                      <button
-                        className="text-rose-700 underline"
-                        onClick={() => remove(i)}
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {canEdit ? (
+                      <select
+                        aria-label={`Condition of ${i.name}`}
+                        value={i.condition}
+                        onChange={(e) =>
+                          setCondition(i, e.target.value as Condition)
+                        }
+                        className={`rounded border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 ${conditionStyle[i.condition]}`}
                       >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
+                        <option value="">Not rated</option>
+                        {CONDITIONS.map((c) => (
+                          <option key={c.value} value={c.value}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        className={`inline-block rounded border px-2 py-1 text-sm ${conditionStyle[i.condition]}`}
+                      >
+                        {i.condition
+                          ? labelOf(CONDITIONS, i.condition)
+                          : "Not rated"}
+                      </span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {fmtQty(i.qty_have)} / {fmtQty(i.qty_needed)}
+                    {Number(i.gap) > 0 && (
+                      <div className="text-xs text-amber-700">
+                        Short by {fmtQty(i.gap)}
+                        {u && ` ${u}`}
+                      </div>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-600">
+                    {unitText(i.unit)}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {money(i.rate)}
+                    {u && i.rate !== null && (
+                      <span className="text-xs text-slate-500"> / {u}</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {money(i.cost)}
+                  </td>
+                  <td className="px-3 py-2">{labelOf(ACTIONS, i.action)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
+                    {canEdit && (
+                      <>
+                        <button
+                          className="mr-3 text-slate-700 underline"
+                          onClick={() => {
+                            setEditing(i);
+                            setFormOpen(true);
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="text-rose-700 underline"
+                          onClick={() => remove(i)}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           {!loading && visible.length > 0 && totalCost > 0 && (
             <tfoot className="border-t border-slate-200 bg-slate-50 text-slate-700">
               <tr>
-                <td colSpan={8} className="px-3 py-2 text-right font-medium">
+                <td colSpan={11} className="px-3 py-2 text-right font-medium">
                   Total cost of items shown
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 font-medium">
@@ -657,6 +778,13 @@ export default function InventoryPage() {
           members={project.members}
           onSave={(ids) => saveCustodians(custodianItem, ids)}
           onClose={() => setCustodianItem(null)}
+        />
+      )}
+      {jsonOpen && project && canEdit && (
+        <JsonPanel
+          projectId={project.id}
+          onDone={reload}
+          onClose={() => setJsonOpen(false)}
         />
       )}
     </main>

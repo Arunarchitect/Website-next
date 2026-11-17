@@ -82,9 +82,24 @@ export const ACTIONS = [
   { value: "DISPOSE", label: "Dispose" },
 ] as const;
 
+// `short` is what is printed next to numbers. Count prints nothing.
+export const UNITS = [
+  { value: "COUNT", label: "Count (nos)", short: "" },
+  { value: "G", label: "Gram (g)", short: "g" },
+  { value: "KG", label: "Kilogram (kg)", short: "kg" },
+  { value: "MM", label: "Millimetre (mm)", short: "mm" },
+  { value: "CM", label: "Centimetre (cm)", short: "cm" },
+  { value: "M", label: "Metre (m)", short: "m" },
+  { value: "M2", label: "Square metre (m²)", short: "m²" },
+  { value: "M3", label: "Cubic metre (m³)", short: "m³" },
+  { value: "ML", label: "Millilitre (ml)", short: "ml" },
+  { value: "L", label: "Litre (L)", short: "L" },
+] as const;
+
 export type Status = (typeof STATUSES)[number]["value"];
 export type Condition = (typeof CONDITIONS)[number]["value"] | "";
 export type ActionValue = (typeof ACTIONS)[number]["value"];
+export type Unit = (typeof UNITS)[number]["value"];
 
 // ── Types ───────────────────────────────────────────────────────────────
 export interface Member {
@@ -130,6 +145,7 @@ export interface Item {
   code: string;
   name: string;
   variant: string;
+  color: string; // "#RRGGBB" or "" (not set)
   category: number | null;
   category_name: string;
   subcategory: number | null;
@@ -140,25 +156,29 @@ export interface Item {
   custodian_details: Member[];
   status: Status;
   condition: Condition;
-  qty_have: number;
-  qty_needed: number;
-  gap: number;
+  unit: Unit;
+  qty_have: string; // decimals arrive as strings from DRF, e.g. "2.500"
+  qty_needed: string;
+  gap: string; // read-only, max(needed - have, 0)
   rate: string | null; // per unit; DRF sends decimals as strings
   cost: string | null; // rate × qty_have, read-only
   action: ActionValue;
-  essential: boolean;
-  is_consumable: boolean;
   brand: string;
   purchase_date: string | null;
   warranty_until: string | null;
   remarks: string;
 }
 
+// Quantities may be sent as numbers or strings; DRF accepts both.
 export type ItemInput = Omit<
   Item,
   | "id" | "seq" | "code" | "gap" | "cost"
   | "category_name" | "subcategory_name" | "location_name" | "custodian_details"
->;
+  | "qty_have" | "qty_needed"
+> & {
+  qty_have: number | string;
+  qty_needed: number | string;
+};
 
 export interface ImportResult {
   created: number;
@@ -166,6 +186,24 @@ export interface ImportResult {
   categories_created: number;
   subcategories_created: number;
   unmatched_custodians: string[];
+}
+
+export interface BulkRowResult {
+  index: number;
+  code: string;
+  name: string;
+  status: "create" | "update" | "unchanged" | "error";
+  errors: string[];
+  warnings: string[];
+  changes: string[];
+}
+
+export interface BulkResult {
+  ok: boolean;
+  dry_run: boolean;
+  applied: boolean;
+  summary: { create: number; update: number; unchanged: number; error: number };
+  rows: BulkRowResult[];
 }
 
 // ── Calls ───────────────────────────────────────────────────────────────
@@ -236,9 +274,33 @@ export async function importRows(
   return (await apiClient.post("/inventory/items/import/", { project, rows })).data;
 }
 
+/** Validates (dryRun = true) or applies (dryRun = false) a list of items as one transaction. */
+export async function bulkItems(
+  project: number,
+  items: unknown[],
+  dryRun: boolean
+): Promise<BulkResult> {
+  return (
+    await apiClient.post("/inventory/items/bulk/", { project, items, dry_run: dryRun })
+  ).data;
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 export const labelOf = (list: readonly { value: string; label: string }[], value: string) =>
   list.find((o) => o.value === value)?.label ?? value;
+
+/** Short unit text for display: "kg", "m²"; "" for count. */
+export const unitShort = (unit: string) =>
+  UNITS.find((u) => u.value === unit)?.short ?? "";
+
+/** Unit text for table columns: "kg", "m²", and "nos" for count. */
+export const unitText = (unit: string) => unitShort(unit) || "nos";
+
+/** "2.500" -> "2.5", "3.000" -> "3". Blank -> "—". */
+export const fmtQty = (v: string | number | null | undefined) =>
+  v === null || v === undefined || v === ""
+    ? "—"
+    : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 3 });
 
 /** Formats an amount in rupees, e.g. "20000.00" -> "₹20,000". Blank -> "—". */
 export const money = (v: string | number | null | undefined) =>

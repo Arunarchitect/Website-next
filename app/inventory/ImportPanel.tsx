@@ -7,6 +7,7 @@ import { getApiErrorMessage, importRows, type ImportResult } from "./inventoryAp
 const HEADER_MAP: Record<string, string> = {
   object: "name", item: "name", name: "name",
   type: "variant", variant: "variant",
+  color: "color", colour: "color",
   custodian: "custodian", owner: "custodian",
   category: "category",
   subcategory: "subcategory", "sub category": "subcategory", "sub-category": "subcategory",
@@ -15,6 +16,7 @@ const HEADER_MAP: Record<string, string> = {
   condition: "condition",
   quantity: "qty_have", qty: "qty_have", "qty have": "qty_have",
   "qty needed": "qty_needed",
+  unit: "unit", uom: "unit", "unit of measure": "unit",
   remarks: "remarks",
 };
 
@@ -76,9 +78,11 @@ export default function ImportPanel({ projectId, onDone, onClose }: Props) {
         <h2 className="text-lg font-semibold text-slate-900">Import from a sheet</h2>
         <p className="mt-1 text-sm text-slate-600">
           Copy the rows from Excel or Google Sheets, header row included, and paste them here. Columns
-          are matched by name: Object, Type, Custodian, Category, SubCategory, Space, Brand, Condition,
-          Quantity, Remarks. Other columns are ignored. Categories, subcategories and spaces in the sheet
-          are created for you, and rows with no quantity import as 1.
+          are matched by name: Object, Type, Color, Custodian, Category, SubCategory, Space, Brand,
+          Condition, Quantity, Unit, Remarks. Other columns are ignored. Color can be a hex code
+          (#A1B2C3) or a basic name like white. Unit can be kg, g, m, sqm, litre, nos and so on;
+          blank means count. Categories, subcategories and spaces in the sheet are created for you,
+          and rows with no quantity import as 1.
         </p>
 
         <input
