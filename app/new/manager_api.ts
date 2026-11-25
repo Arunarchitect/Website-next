@@ -330,3 +330,94 @@ export async function deleteAssignment(id: number): Promise<void> {
   });
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
 }
+
+
+export async function createDeliverable(payload: {
+  project: number;
+  name: string;
+  stage: string;
+  remarks?: string;
+}): Promise<DeliverableOption> {
+  const res = await fetch(`${BASE}/api/v2/manager/deliverables/`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error ?? `Create deliverable failed: ${res.status}`);
+  }
+  const d = await res.json();
+  return {
+    id: d.id,
+    name: d.name,
+    status: d.status,
+    project_id: d.project_id,
+    organisation_id: d.organisation_id,
+    stage: d.stage,
+    stage_display: d.stage_display ?? `Stage ${d.stage}`,
+    project_name: d.project_name ?? "",
+    org_name: d.org_name ?? "",
+  };
+}
+
+function mapDeliverable(d: any): DeliverableOption {
+  return {
+    id: d.id,
+    name: d.name,
+    status: d.status,
+    project_id: d.project_id,
+    organisation_id: d.organisation_id,
+    stage: d.stage,
+    stage_display: d.stage_display ?? `Stage ${d.stage}`,
+    project_name: d.project_name ?? "",
+    org_name: d.org_name ?? "",
+  };
+}
+
+async function errMsg(res: Response, fallback: string): Promise<string> {
+  const d = await res.json().catch(() => ({}));
+  return d.error ?? d.detail ?? `${fallback}: ${res.status}`;
+}
+
+export async function bulkCreateDeliverables(
+  project: number,
+  items: { name: string; stage: string }[],
+): Promise<{ created: DeliverableOption[]; skipped: { name: string; reason: string }[] }> {
+  const res = await fetch(`${BASE}/api/v2/manager/deliverables/bulk/`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ project, items }),
+  });
+  if (!res.ok) throw new Error(await errMsg(res, "Bulk create failed"));
+  const d = await res.json();
+  return { created: d.created.map(mapDeliverable), skipped: d.skipped };
+}
+
+export async function renameDeliverable(
+  id: number,
+  payload: { name?: string; stage?: string },
+): Promise<DeliverableOption> {
+  const res = await fetch(`${BASE}/api/v2/manager/deliverables/${id}/`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await errMsg(res, "Rename failed"));
+  return mapDeliverable(await res.json());
+}
+
+export async function mergeDeliverables(payload: {
+  target: number;
+  sources: number[];
+  name?: string;
+}): Promise<{ deliverable: DeliverableOption; merged: number; worklogs: number; assignments: number }> {
+  const res = await fetch(`${BASE}/api/v2/manager/deliverables/merge/`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await errMsg(res, "Merge failed"));
+  const d = await res.json();
+  return { ...d, deliverable: mapDeliverable(d.deliverable) };
+}
