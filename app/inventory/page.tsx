@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ACTIONS,
@@ -112,7 +114,9 @@ export default function InventoryPage() {
       listCategories(projectId),
     ]);
     setItems(its);
-    setSelected((prev) => new Set([...prev].filter((id) => its.some((i) => i.id === id))));
+    setSelected(
+      (prev) => new Set([...prev].filter((id) => its.some((i) => i.id === id))),
+    );
     setLocations(locs);
     setCategories(cats);
   }, [projectId]);
@@ -287,7 +291,8 @@ export default function InventoryPage() {
   const visibleIds = visible.map((i) => i.id);
   const allSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
-  const someSelected = !allSelected && visibleIds.some((id) => selected.has(id));
+  const someSelected =
+    !allSelected && visibleIds.some((id) => selected.has(id));
 
   function toggleAll() {
     setSelected((prev) => {
@@ -329,7 +334,7 @@ export default function InventoryPage() {
     return (
       <main className="mx-auto max-w-3xl p-6 text-slate-700">
         You are not on any project yet. Ask your organisation admin to add you
-        to your family’s project.
+        to a project.
       </main>
     );
   }
@@ -339,7 +344,7 @@ export default function InventoryPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">
-            Household inventory
+            Organistional inventory
           </h1>
           {project && (
             <p className="text-sm text-slate-600">
@@ -379,6 +384,10 @@ export default function InventoryPage() {
               ))}
             </select>
           )}
+
+          <Link href="/inventory/plans" className={ghostBtn}>
+            Plans
+          </Link>
           {canEdit ? (
             <>
               <button
@@ -424,7 +433,10 @@ export default function InventoryPage() {
       )}
 
       {notice && (
-        <p role="status" className="rounded bg-emerald-50 p-3 text-sm text-emerald-900">
+        <p
+          role="status"
+          className="rounded bg-emerald-50 p-3 text-sm text-emerald-900"
+        >
           {notice}
         </p>
       )}

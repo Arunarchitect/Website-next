@@ -16,12 +16,18 @@ export interface SaveNames {
   subcategory: string;
 }
 
+/** Initial values for a NEW item (ignored when editing). */
+export type ItemPrefill = Partial<Pick<ItemInput, "name" | "unit" | "qty_have" | "rate">>;
+
 interface Props {
   item: Item | null;
   projectId: number;
   members: Member[];
   locations: Location[];
   categories: Category[];
+  prefill?: ItemPrefill;
+  title?: string;
+  submitLabel?: string;
   onSave: (values: ItemInput, names: SaveNames) => Promise<void>;
   onClose: () => void;
 }
@@ -47,6 +53,18 @@ const blank = (project: number): ItemInput => ({
   warranty_until: null,
   remarks: "",
 });
+
+const fromPrefill = (project: number, p?: ItemPrefill): ItemInput => {
+  const base = blank(project);
+  if (!p) return base;
+  return {
+    ...base,
+    name: p.name ?? base.name,
+    unit: p.unit ?? base.unit,
+    qty_have: p.qty_have ?? base.qty_have,
+    rate: p.rate !== undefined ? p.rate : base.rate,
+  };
+};
 
 const fromItem = (i: Item): ItemInput => ({
   project: i.project,
@@ -112,8 +130,19 @@ function QtyInput({
   );
 }
 
-export default function ItemForm({ item, projectId, members, locations, categories, onSave, onClose }: Props) {
-  const [f, setF] = useState<ItemInput>(() => (item ? fromItem(item) : blank(projectId)));
+export default function ItemForm({
+  item,
+  projectId,
+  members,
+  locations,
+  categories,
+  prefill,
+  title,
+  submitLabel,
+  onSave,
+  onClose,
+}: Props) {
+  const [f, setF] = useState<ItemInput>(() => (item ? fromItem(item) : fromPrefill(projectId, prefill)));
   const [locationName, setLocationName] = useState(item?.location_name ?? "");
   const [categoryName, setCategoryName] = useState(item?.category_name ?? "");
   const [subcategoryName, setSubcategoryName] = useState(item?.subcategory_name ?? "");
@@ -141,6 +170,9 @@ export default function ItemForm({ item, projectId, members, locations, categori
   const u = unitShort(f.unit);
   const gap = Math.max(need - have, 0);
   const cost = f.rate !== null && f.rate !== "" ? Number(f.rate) * have : null;
+
+  const heading = title ?? (item ? `Edit item ${item.code}` : "Add item");
+  const submitText = submitLabel ?? (item ? "Save changes" : "Add item");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -172,9 +204,7 @@ export default function ItemForm({ item, projectId, members, locations, categori
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4">
       <form onSubmit={submit} className="my-8 w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">
-          {item ? `Edit item ${item.code}` : "Add item"}
-        </h2>
+        <h2 className="mb-4 text-lg font-semibold text-slate-900">{heading}</h2>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Item">
@@ -333,7 +363,7 @@ export default function ItemForm({ item, projectId, members, locations, categori
             Cancel
           </button>
           <button type="submit" disabled={saving} className="rounded bg-slate-800 px-4 py-1.5 text-sm text-white hover:bg-slate-900 disabled:opacity-60">
-            {saving ? "Saving…" : item ? "Save changes" : "Add item"}
+            {saving ? "Saving…" : submitText}
           </button>
         </div>
       </form>

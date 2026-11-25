@@ -30,7 +30,7 @@ function redirectToLogin() {
   }
 }
 
-const apiClient = axios.create({
+export const apiClient = axios.create({
   baseURL: API_URL,
   headers: { "Content-Type": "application/json", Accept: "application/json" },
   withCredentials: true,
