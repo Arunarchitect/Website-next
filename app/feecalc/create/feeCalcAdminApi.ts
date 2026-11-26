@@ -7,10 +7,12 @@
 import type { FeeTemplateOption } from "../feeCalcApi";
 import type { DiscountPackage } from "../feeCalcTypes";
 
-const BASE = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_HOST ?? "") : "";
+const BASE =
+  typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_HOST ?? "") : "";
 
 function authHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? (localStorage.getItem("access") ?? "") : "";
+  const token =
+    typeof window !== "undefined" ? (localStorage.getItem("access") ?? "") : "";
   return {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -54,28 +56,60 @@ interface RawMembership {
 }
 
 function extractOrgId(m: RawMembership): number {
-  return typeof m.organisation === "number" ? m.organisation : m.organisation.id;
+  return typeof m.organisation === "number"
+    ? m.organisation
+    : m.organisation.id;
 }
 
 function extractOrgName(m: RawMembership): string | undefined {
-  if (typeof m.organisation === "object" && m.organisation?.name) return m.organisation.name;
+  if (typeof m.organisation === "object" && m.organisation?.name)
+    return m.organisation.name;
   return m.organisation_name;
 }
 
+// Build id -> name from the projects list, which already carries organisation_name.
+async function orgNamesFromProjects(): Promise<Map<number, string>> {
+  const names = new Map<number, string>();
+  try {
+    const res = await fetch(`${BASE}/api/projects/`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) return names;
+    const d = await res.json();
+    const rows: Array<{
+      organisation_id?: number;
+      organisation_name?: string;
+    }> = Array.isArray(d) ? d : (d?.results ?? []);
+    for (const p of rows) {
+      if (p.organisation_id != null && p.organisation_name)
+        names.set(p.organisation_id, p.organisation_name);
+    }
+  } catch {
+    /* ignore, fall back to #id */
+  }
+  return names;
+}
+
 export async function fetchAdminOrganisations(): Promise<AdminOrganisation[]> {
-  const res = await fetch(`${BASE}/api/my-memberships/`, { headers: authHeaders() });
+  const res = await fetch(`${BASE}/api/my-memberships/`, {
+    headers: authHeaders(),
+  });
   const data = await handle<RawMembership[]>(res);
-  const seen = new Map<number, AdminOrganisation>();
+  const found = new Map<number, string | undefined>();
   for (const m of data) {
     if (m.role !== "admin" && m.role !== "manager") continue;
     const id = extractOrgId(m);
-    if (!seen.has(id)) {
-      seen.set(id, { id, name: extractOrgName(m) ?? `Organisation #${id}` });
-    }
+    if (!found.has(id) || !found.get(id)) found.set(id, extractOrgName(m));
   }
-  return [...seen.values()];
+  const needLookup = [...found.values()].some((n) => !n);
+  const fromProjects = needLookup
+    ? await orgNamesFromProjects()
+    : new Map<number, string>();
+  return [...found.entries()].map(([id, name]) => ({
+    id,
+    name: name ?? fromProjects.get(id) ?? `Organisation #${id}`,
+  }));
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Projects (scoped to one organisation)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,9 +127,13 @@ export interface AdminProject {
   name: string;
 }
 
-export async function fetchProjectsForOrg(organisationId: number): Promise<AdminProject[]> {
+export async function fetchProjectsForOrg(
+  organisationId: number,
+): Promise<AdminProject[]> {
   const qs = new URLSearchParams({ organisation: String(organisationId) });
-  const res = await fetch(`${BASE}/api/projects/?${qs}`, { headers: authHeaders() });
+  const res = await fetch(`${BASE}/api/projects/?${qs}`, {
+    headers: authHeaders(),
+  });
   return handle<AdminProject[]>(res);
 }
 
@@ -103,9 +141,16 @@ export async function fetchProjectsForOrg(organisationId: number): Promise<Admin
 // Fee templates & discount packages (scoped to one organisation)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function fetchFeeTemplatesForOrg(organisationId: number): Promise<FeeTemplateOption[]> {
-  const qs = new URLSearchParams({ active: "true", organisation: String(organisationId) });
-  const res = await fetch(`${BASE}/api/feecalc/fee-templates/?${qs}`, { headers: authHeaders() });
+export async function fetchFeeTemplatesForOrg(
+  organisationId: number,
+): Promise<FeeTemplateOption[]> {
+  const qs = new URLSearchParams({
+    active: "true",
+    organisation: String(organisationId),
+  });
+  const res = await fetch(`${BASE}/api/feecalc/fee-templates/?${qs}`, {
+    headers: authHeaders(),
+  });
   return handle<FeeTemplateOption[]>(res);
 }
 
@@ -116,7 +161,10 @@ export interface AdminDiscountPackage extends DiscountPackage {
 export async function fetchDiscountPackagesForOrg(
   organisationId: number,
 ): Promise<AdminDiscountPackage[]> {
-  const qs = new URLSearchParams({ active: "true", organisation: String(organisationId) });
+  const qs = new URLSearchParams({
+    active: "true",
+    organisation: String(organisationId),
+  });
   const res = await fetch(`${BASE}/api/feecalc/discount-packages/?${qs}`, {
     headers: authHeaders(),
   });
@@ -183,7 +231,9 @@ export interface AdminQuoteOptionListItem {
   discount_package: { id: number; name: string } | null;
 }
 
-export async function createQuoteOption(payload: QuoteOptionPayload): Promise<QuoteOptionFlat> {
+export async function createQuoteOption(
+  payload: QuoteOptionPayload,
+): Promise<QuoteOptionFlat> {
   const res = await fetch(`${BASE}/api/feecalc/quote-options/`, {
     method: "POST",
     headers: authHeaders(),
@@ -238,7 +288,9 @@ export interface AdminQuoteOptionDetail {
   currency: string;
 }
 
-export async function fetchQuoteOption(id: number): Promise<AdminQuoteOptionDetail> {
+export async function fetchQuoteOption(
+  id: number,
+): Promise<AdminQuoteOptionDetail> {
   const res = await fetch(`${BASE}/api/feecalc/quote-options/${id}/`, {
     headers: authHeaders(),
   });

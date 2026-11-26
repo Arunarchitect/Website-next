@@ -22,6 +22,8 @@ export interface RevenueEntry {
   project_id: number | null;
   project_name: string | null;
   remarks: string;
+  reference?: string;
+
   user: number;
   user_email: string;
   user_name: string;
@@ -36,6 +38,7 @@ export interface RevenueFormData {
   organisation: number;
   project?: number | null;
   remarks?: string;
+  reference?: string;
 }
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
@@ -71,7 +74,7 @@ export async function fetchOrganisations(): Promise<Organisation[]> {
 }
 
 export async function fetchProjects(
-  organisationId?: number
+  organisationId?: number,
 ): Promise<Project[]> {
   // Mounted via project_urlpatterns → /api/v2/projects/?org_id=<id>
   let url = `${BASE}/api/v2/projects/`;
@@ -106,9 +109,7 @@ export async function fetchRevenues(params: {
   return response.json();
 }
 
-export async function addRevenue(
-  data: RevenueFormData
-): Promise<RevenueEntry> {
+export async function addRevenue(data: RevenueFormData): Promise<RevenueEntry> {
   // Validate data before sending
   if (!data.amount || isNaN(data.amount) || data.amount <= 0) {
     throw new Error("Invalid amount. Amount must be greater than zero.");
@@ -133,13 +134,16 @@ export async function addRevenue(
       organisation: data.organisation,
       project: data.project || null,
       remarks: data.remarks || "",
+      reference: data.reference || "", 
     }),
   });
-  
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(
-      errorData.message || errorData.detail || `Failed to add revenue: ${response.status}`
+      errorData.message ||
+        errorData.detail ||
+        `Failed to add revenue: ${response.status}`,
     );
   }
   return response.json();

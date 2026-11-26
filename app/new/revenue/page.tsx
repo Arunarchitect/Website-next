@@ -20,8 +20,18 @@ const REVENUE_SOURCES = [
 ];
 
 const MONTHS = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -38,7 +48,9 @@ function fmtINR(n: number) {
   if (isNaN(n) || n === null || n === undefined || !isFinite(n)) {
     return "₹0";
   }
-  return "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  return (
+    "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 })
+  );
 }
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
@@ -68,10 +80,16 @@ const T = {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function CalGrid({
-  year, month, selDates, activeDates, onToggle,
+  year,
+  month,
+  selDates,
+  activeDates,
+  onToggle,
 }: {
-  year: number; month: number;
-  selDates: Set<string>; activeDates: Set<string>;
+  year: number;
+  month: number;
+  selDates: Set<string>;
+  activeDates: Set<string>;
   onToggle: (d: string) => void;
 }) {
   const total = getDaysInMonth(year, month);
@@ -81,10 +99,22 @@ function CalGrid({
     ...Array.from({ length: total }, (_, i) => i + 1),
   ];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1 }}>
+    <div
+      style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1 }}
+    >
       {DAYS.map((d) => (
-        <div key={d} style={{ textAlign: "center", fontSize: 9, color: T.t5,
-          fontWeight: 700, letterSpacing: "0.08em", paddingBottom: 5, textTransform: "uppercase" }}>
+        <div
+          key={d}
+          style={{
+            textAlign: "center",
+            fontSize: 9,
+            color: T.t5,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            paddingBottom: 5,
+            textTransform: "uppercase",
+          }}
+        >
           {d}
         </div>
       ))}
@@ -94,19 +124,37 @@ function CalGrid({
         const sel = selDates.has(iso);
         const has = activeDates.has(iso);
         return (
-          <button key={iso} onClick={() => onToggle(iso)} style={{
-            background: sel ? T.ac : "transparent",
-            border: `1.5px solid ${sel ? T.ac : "transparent"}`,
-            borderRadius: 6, cursor: "pointer",
-            color: sel ? "#fff" : has ? T.t2 : T.t5,
-            fontSize: 11, padding: "5px 0", width: "100%",
-            fontFamily: "'DM Sans',sans-serif", fontWeight: sel ? 700 : 400,
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-          }}>
+          <button
+            key={iso}
+            onClick={() => onToggle(iso)}
+            style={{
+              background: sel ? T.ac : "transparent",
+              border: `1.5px solid ${sel ? T.ac : "transparent"}`,
+              borderRadius: 6,
+              cursor: "pointer",
+              color: sel ? "#fff" : has ? T.t2 : T.t5,
+              fontSize: 11,
+              padding: "5px 0",
+              width: "100%",
+              fontFamily: "'DM Sans',sans-serif",
+              fontWeight: sel ? 700 : 400,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
             {day}
             {has && (
-              <span style={{ width: 3, height: 3, borderRadius: "50%",
-                background: sel ? "#fff" : T.acText, opacity: 0.8 }} />
+              <span
+                style={{
+                  width: 3,
+                  height: 3,
+                  borderRadius: "50%",
+                  background: sel ? "#fff" : T.acText,
+                  opacity: 0.8,
+                }}
+              />
             )}
           </button>
         );
@@ -118,9 +166,23 @@ function CalGrid({
 function ProgressBar({ pct, color }: { pct: number; color: string }) {
   const safePct = isNaN(pct) ? 0 : Math.min(100, Math.max(0, pct));
   return (
-    <div style={{ height: 3, borderRadius: 99, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-      <div style={{ height: "100%", borderRadius: 99, background: color,
-        width: `${safePct}%`, transition: "width 0.5s" }} />
+    <div
+      style={{
+        height: 3,
+        borderRadius: 99,
+        background: "rgba(255,255,255,0.06)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          height: "100%",
+          borderRadius: 99,
+          background: color,
+          width: `${safePct}%`,
+          transition: "width 0.5s",
+        }}
+      />
     </div>
   );
 }
@@ -131,8 +193,16 @@ function Divider() {
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 11, fontWeight: 700, color: T.t4,
-      letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: T.t4,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        marginBottom: 8,
+      }}
+    >
       {children}
     </div>
   );
@@ -168,6 +238,7 @@ export default function AddRevenuePage() {
     organisation_id: null as number | null,
     project_id: null as number | null,
     remarks: "",
+    reference: "",
   });
 
   // ─── Derived date range ──────────────────────────────────────────────────
@@ -179,7 +250,10 @@ export default function AddRevenuePage() {
     if (selMonth !== null) {
       const m = String(selMonth + 1).padStart(2, "0");
       const lastDay = getDaysInMonth(selYear, selMonth);
-      return { dateFrom: `${selYear}-${m}-01`, dateTo: `${selYear}-${m}-${lastDay}` };
+      return {
+        dateFrom: `${selYear}-${m}-01`,
+        dateTo: `${selYear}-${m}-${lastDay}`,
+      };
     }
     const now = new Date();
     const m = String(now.getMonth() + 1).padStart(2, "0");
@@ -212,7 +286,9 @@ export default function AddRevenuePage() {
       }
     };
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ─── Fetch projects when org changes ─────────────────────────────────────
@@ -234,7 +310,9 @@ export default function AddRevenuePage() {
       }
     };
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [formData.organisation_id]);
 
   // ─── Fetch revenues when filters change ──────────────────────────────────
@@ -260,7 +338,9 @@ export default function AddRevenuePage() {
       }
     };
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [dateFrom, dateTo, formData.organisation_id, formData.project_id]);
 
   // ─── Stats ────────────────────────────────────────────────────────────────
@@ -274,25 +354,32 @@ export default function AddRevenuePage() {
     const sourceList = Object.entries(bySource)
       .map(([source, total]) => ({ source, total: total || 0 }))
       .sort((a, b) => b.total - a.total);
-    return { 
-      total_revenue: total || 0, 
-      revenue_by_source: sourceList, 
-      total_count: revenues.length || 0 
+    return {
+      total_revenue: total || 0,
+      revenue_by_source: sourceList,
+      total_count: revenues.length || 0,
     };
   }, [revenues]);
 
   // ─── Form handlers ────────────────────────────────────────────────────────
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >,
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: name === "amount"
-        ? value === "" ? "" : parseFloat(value)
-        : name === "project_id"
-        ? value === "" ? null : Number(value)
-        : value,
+      [name]:
+        name === "amount"
+          ? value === ""
+            ? ""
+            : parseFloat(value)
+          : name === "project_id"
+            ? value === ""
+              ? null
+              : Number(value)
+            : value,
     }));
   };
 
@@ -332,10 +419,16 @@ export default function AddRevenuePage() {
         organisation: formData.organisation_id,
         project: formData.project_id,
         remarks: formData.remarks,
+        reference: formData.reference,
       });
 
       setSuccess(true);
-      setFormData((prev) => ({ ...prev, amount: "", source: "fees", remarks: "" }));
+      setFormData((prev) => ({
+        ...prev,
+        amount: "",
+        source: "fees",
+        remarks: "",
+      }));
 
       // Refresh revenue list
       const refreshed = await fetchRevenues({
@@ -350,7 +443,9 @@ export default function AddRevenuePage() {
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       console.error("Error adding revenue:", err);
-      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
+      setError(
+        err instanceof Error ? err.message : "An unexpected error occurred.",
+      );
     } finally {
       setLoading(false);
     }
@@ -358,41 +453,57 @@ export default function AddRevenuePage() {
 
   // ─── Calendar helpers ─────────────────────────────────────────────────────
   function prevMonth() {
-    if (calMonth === 0) { setCalMonth(11); setCalYear((y) => y - 1); }
-    else setCalMonth((m) => m - 1);
+    if (calMonth === 0) {
+      setCalMonth(11);
+      setCalYear((y) => y - 1);
+    } else setCalMonth((m) => m - 1);
   }
   function nextMonth() {
-    if (calMonth === 11) { setCalMonth(0); setCalYear((y) => y + 1); }
-    else setCalMonth((m) => m + 1);
+    if (calMonth === 11) {
+      setCalMonth(0);
+      setCalYear((y) => y + 1);
+    } else setCalMonth((m) => m + 1);
   }
   function toggleDate(iso: string) {
-    setSelDates((p) => { 
-      const n = new Set(p); 
+    setSelDates((p) => {
+      const n = new Set(p);
       if (n.has(iso)) {
         n.delete(iso);
       } else {
         n.add(iso);
       }
-      return n; 
+      return n;
     });
   }
-  function clearDateFilters() { setSelDates(new Set()); setSelMonth(null); }
+  function clearDateFilters() {
+    setSelDates(new Set());
+    setSelMonth(null);
+  }
 
   const hasDateFilter = selDates.size > 0 || selMonth !== null;
 
   // ─── Shared input style ───────────────────────────────────────────────────
   const inputStyle: React.CSSProperties = {
-    width: "100%", padding: "12px",
-    background: T.panel2, border: `1px solid ${T.panel2B}`,
-    borderRadius: 8, fontSize: 14, color: T.t2,
+    width: "100%",
+    padding: "12px",
+    background: T.panel2,
+    border: `1px solid ${T.panel2B}`,
+    borderRadius: 8,
+    fontSize: 14,
+    color: T.t2,
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={{
-      minHeight: "100vh", background: T.bg, color: T.t2,
-      fontFamily: "'DM Sans','Sora',sans-serif", padding: "28px 24px 60px",
-    }}>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: T.bg,
+        color: T.t2,
+        fontFamily: "'DM Sans','Sora',sans-serif",
+        padding: "28px 24px 60px",
+      }}
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Sora:wght@400;600;700&display=swap');
         *{box-sizing:border-box;margin:0;}
@@ -403,57 +514,122 @@ export default function AddRevenuePage() {
         input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.6);}
       `}</style>
 
-      <div style={{
-        display: "grid", gridTemplateColumns: "300px 1fr", gap: 20,
-        alignItems: "start", maxWidth: 1400, margin: "0 auto",
-      }}>
-
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "300px 1fr",
+          gap: 20,
+          alignItems: "start",
+          maxWidth: 1400,
+          margin: "0 auto",
+        }}
+      >
         {/* ── LEFT: Calendar + Filters ──────────────────────────────────── */}
-        <div style={{
-          background: T.panel, border: `1px solid ${T.panelB}`,
-          borderRadius: 14, overflow: "hidden", position: "sticky",
-          top: 20, maxHeight: "calc(100vh - 40px)", overflowY: "auto",
-        }}>
-
+        <div
+          style={{
+            background: T.panel,
+            border: `1px solid ${T.panelB}`,
+            borderRadius: 14,
+            overflow: "hidden",
+            position: "sticky",
+            top: 20,
+            maxHeight: "calc(100vh - 40px)",
+            overflowY: "auto",
+          }}
+        >
           {/* Calendar navigation */}
           <div style={{ padding: "16px 14px 14px" }}>
-            <div style={{ display: "flex", alignItems: "center",
-              justifyContent: "space-between", marginBottom: 12 }}>
-              <button onClick={prevMonth} style={{
-                width: 30, height: 30, borderRadius: 6,
-                background: T.panel2, border: `1px solid ${T.panel2B}`,
-                color: T.t4, cursor: "pointer", display: "flex",
-                alignItems: "center", justifyContent: "center", fontSize: 16,
-              }}>‹</button>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 12,
+              }}
+            >
+              <button
+                onClick={prevMonth}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: T.panel2,
+                  border: `1px solid ${T.panel2B}`,
+                  color: T.t4,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 16,
+                }}
+              >
+                ‹
+              </button>
               <div style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: T.t2 }}>
                   {MONTHS[calMonth]}
                 </div>
-                <div style={{ fontSize: 10, color: T.t5, marginTop: 1 }}>{calYear}</div>
+                <div style={{ fontSize: 10, color: T.t5, marginTop: 1 }}>
+                  {calYear}
+                </div>
               </div>
-              <button onClick={nextMonth} style={{
-                width: 30, height: 30, borderRadius: 6,
-                background: T.panel2, border: `1px solid ${T.panel2B}`,
-                color: T.t4, cursor: "pointer", display: "flex",
-                alignItems: "center", justifyContent: "center", fontSize: 16,
-              }}>›</button>
+              <button
+                onClick={nextMonth}
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: T.panel2,
+                  border: `1px solid ${T.panel2B}`,
+                  color: T.t4,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 16,
+                }}
+              >
+                ›
+              </button>
             </div>
 
-            <CalGrid year={calYear} month={calMonth}
-              selDates={selDates} activeDates={activeDates} onToggle={toggleDate} />
+            <CalGrid
+              year={calYear}
+              month={calMonth}
+              selDates={selDates}
+              activeDates={activeDates}
+              onToggle={toggleDate}
+            />
 
             {selDates.size > 0 && (
-              <div style={{
-                marginTop: 8, display: "flex", alignItems: "center",
-                justifyContent: "space-between", background: T.acLight,
-                borderRadius: 6, padding: "5px 9px",
-              }}>
-                <span style={{ fontSize: 10.5, color: T.acText, fontWeight: 600 }}>
+              <div
+                style={{
+                  marginTop: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: T.acLight,
+                  borderRadius: 6,
+                  padding: "5px 9px",
+                }}
+              >
+                <span
+                  style={{ fontSize: 10.5, color: T.acText, fontWeight: 600 }}
+                >
                   {selDates.size} date{selDates.size > 1 ? "s" : ""} selected
                 </span>
-                <button onClick={() => setSelDates(new Set())} style={{
-                  background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 14,
-                }}>✕</button>
+                <button
+                  onClick={() => setSelDates(new Set())}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: T.red,
+                    cursor: "pointer",
+                    fontSize: 14,
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             )}
           </div>
@@ -463,16 +639,30 @@ export default function AddRevenuePage() {
           {/* Quick Month */}
           <div style={{ padding: "12px 14px" }}>
             <Label>Quick Month</Label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 3 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4,1fr)",
+                gap: 3,
+              }}
+            >
               {MONTHS.map((m, i) => (
-                <button key={m} onClick={() => setSelMonth(selMonth === i ? null : i)} style={{
-                  background: selMonth === i ? T.acLight : "transparent",
-                  border: `1px solid ${selMonth === i ? T.acMid : T.divider}`,
-                  borderRadius: 5, color: selMonth === i ? T.acText : T.t5,
-                  fontSize: 10, padding: "6px 0", cursor: "pointer",
-                  textTransform: "uppercase", letterSpacing: "0.04em",
-                  fontWeight: selMonth === i ? 700 : 400,
-                }}>
+                <button
+                  key={m}
+                  onClick={() => setSelMonth(selMonth === i ? null : i)}
+                  style={{
+                    background: selMonth === i ? T.acLight : "transparent",
+                    border: `1px solid ${selMonth === i ? T.acMid : T.divider}`,
+                    borderRadius: 5,
+                    color: selMonth === i ? T.acText : T.t5,
+                    fontSize: 10,
+                    padding: "6px 0",
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    fontWeight: selMonth === i ? 700 : 400,
+                  }}
+                >
                   {m.slice(0, 3)}
                 </button>
               ))}
@@ -484,14 +674,23 @@ export default function AddRevenuePage() {
             <Label>Year</Label>
             <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
               {AVAILABLE_YEARS.map((y) => (
-                <button key={y} onClick={() => setSelYear(y)} style={{
-                  flex: "1 1 0",
-                  background: selYear === y ? T.acLight : "transparent",
-                  border: `1px solid ${selYear === y ? T.acMid : T.divider}`,
-                  borderRadius: 5, color: selYear === y ? T.acText : T.t5,
-                  fontSize: 10, padding: "6px 0", cursor: "pointer",
-                  fontWeight: selYear === y ? 700 : 400,
-                }}>{y}</button>
+                <button
+                  key={y}
+                  onClick={() => setSelYear(y)}
+                  style={{
+                    flex: "1 1 0",
+                    background: selYear === y ? T.acLight : "transparent",
+                    border: `1px solid ${selYear === y ? T.acMid : T.divider}`,
+                    borderRadius: 5,
+                    color: selYear === y ? T.acText : T.t5,
+                    fontSize: 10,
+                    padding: "6px 0",
+                    cursor: "pointer",
+                    fontWeight: selYear === y ? 700 : 400,
+                  }}
+                >
+                  {y}
+                </button>
               ))}
             </div>
           </div>
@@ -502,23 +701,36 @@ export default function AddRevenuePage() {
           <div style={{ padding: "12px 14px" }}>
             <Label>Organisation</Label>
             {loadingOrgs ? (
-              <div style={{ padding: "8px 12px", background: T.panel2,
-                borderRadius: 6, fontSize: 12, color: T.t5 }}>Loading…</div>
+              <div
+                style={{
+                  padding: "8px 12px",
+                  background: T.panel2,
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: T.t5,
+                }}
+              >
+                Loading…
+              </div>
             ) : (
               <select
                 value={formData.organisation_id ?? ""}
                 onChange={(e) =>
                   setFormData((prev) => ({
                     ...prev,
-                    organisation_id: e.target.value ? Number(e.target.value) : null,
-                    project_id: null,   // reset project when org changes
+                    organisation_id: e.target.value
+                      ? Number(e.target.value)
+                      : null,
+                    project_id: null, // reset project when org changes
                   }))
                 }
                 style={{ ...inputStyle, padding: "8px 10px", fontSize: 12 }}
               >
                 <option value="">All organisations</option>
                 {organisations.map((org) => (
-                  <option key={org.id} value={org.id}>{org.name}</option>
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
                 ))}
               </select>
             )}
@@ -528,8 +740,17 @@ export default function AddRevenuePage() {
           <div style={{ padding: "0 14px 12px" }}>
             <Label>Project</Label>
             {loadingProjects ? (
-              <div style={{ padding: "8px 12px", background: T.panel2,
-                borderRadius: 6, fontSize: 12, color: T.t5 }}>Loading…</div>
+              <div
+                style={{
+                  padding: "8px 12px",
+                  background: T.panel2,
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: T.t5,
+                }}
+              >
+                Loading…
+              </div>
             ) : (
               <select
                 value={formData.project_id ?? ""}
@@ -541,15 +762,21 @@ export default function AddRevenuePage() {
                 }
                 disabled={!formData.organisation_id}
                 style={{
-                  ...inputStyle, padding: "8px 10px", fontSize: 12,
-                  background: !formData.organisation_id ? "rgba(255,255,255,0.02)" : T.panel2,
+                  ...inputStyle,
+                  padding: "8px 10px",
+                  fontSize: 12,
+                  background: !formData.organisation_id
+                    ? "rgba(255,255,255,0.02)"
+                    : T.panel2,
                   color: !formData.organisation_id ? T.t5 : T.t2,
                   cursor: !formData.organisation_id ? "not-allowed" : "pointer",
                 }}
               >
                 <option value="">All projects</option>
                 {projects.map((proj) => (
-                  <option key={proj.id} value={proj.id}>{proj.name}</option>
+                  <option key={proj.id} value={proj.id}>
+                    {proj.name}
+                  </option>
                 ))}
               </select>
             )}
@@ -561,34 +788,68 @@ export default function AddRevenuePage() {
           {!loadingRevenues && (
             <div style={{ padding: "12px 14px" }}>
               <Label>Revenue Summary</Label>
-              <div style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                marginBottom: 8, padding: "8px 10px", borderRadius: 6, background: T.greenBg,
-              }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: T.greenBg,
+                }}
+              >
                 <span style={{ fontSize: 11, color: T.t4 }}>Total Revenue</span>
                 <span style={{ fontSize: 13, fontWeight: 700, color: T.green }}>
                   {fmtINR(stats.total_revenue)}
                 </span>
               </div>
               <div style={{ marginBottom: 6 }}>
-                <span style={{ fontSize: 10, color: T.t4 }}>Entries: {stats.total_count}</span>
+                <span style={{ fontSize: 10, color: T.t4 }}>
+                  Entries: {stats.total_count}
+                </span>
               </div>
               {stats.revenue_by_source.map((item) => (
                 <div key={item.source} style={{ marginBottom: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                    <span style={{ fontSize: 10.5, color: T.t4 }}>{item.source}</span>
-                    <span style={{ fontSize: 10.5, color: T.green, fontWeight: 600 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: 3,
+                    }}
+                  >
+                    <span style={{ fontSize: 10.5, color: T.t4 }}>
+                      {item.source}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: T.green,
+                        fontWeight: 600,
+                      }}
+                    >
                       {fmtINR(item.total)}
                     </span>
                   </div>
                   <ProgressBar
-                    pct={stats.total_revenue > 0 ? (item.total / stats.total_revenue) * 100 : 0}
+                    pct={
+                      stats.total_revenue > 0
+                        ? (item.total / stats.total_revenue) * 100
+                        : 0
+                    }
                     color={T.green}
                   />
                 </div>
               ))}
               {stats.revenue_by_source.length === 0 && (
-                <div style={{ fontSize: 11, color: T.t5, textAlign: "center", padding: "8px 0" }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: T.t5,
+                    textAlign: "center",
+                    padding: "8px 0",
+                  }}
+                >
                   No revenue data for selected period
                 </div>
               )}
@@ -597,11 +858,21 @@ export default function AddRevenuePage() {
 
           {hasDateFilter && (
             <div style={{ padding: "10px 14px 20px" }}>
-              <button onClick={clearDateFilters} style={{
-                width: "100%", background: "transparent",
-                border: `1px solid ${T.divider}`, borderRadius: 7,
-                padding: "8px 0", fontSize: 11, color: T.t5, cursor: "pointer",
-              }}>✕ Clear date filters</button>
+              <button
+                onClick={clearDateFilters}
+                style={{
+                  width: "100%",
+                  background: "transparent",
+                  border: `1px solid ${T.divider}`,
+                  borderRadius: 7,
+                  padding: "8px 0",
+                  fontSize: 11,
+                  color: T.t5,
+                  cursor: "pointer",
+                }}
+              >
+                ✕ Clear date filters
+              </button>
             </div>
           )}
         </div>
@@ -609,28 +880,48 @@ export default function AddRevenuePage() {
         {/* ── RIGHT: Form ───────────────────────────────────────────────── */}
         <div>
           {/* Header */}
-          <div style={{
-            background: T.panel, border: `1px solid ${T.panelB}`,
-            borderRadius: 14, padding: "20px 24px", marginBottom: 20,
-          }}>
-            <h1 style={{
-              fontSize: 20, fontWeight: 700, fontFamily: "'Sora',sans-serif",
-              letterSpacing: "-0.035em", color: T.t1, marginBottom: 8,
-            }}>Add Revenue</h1>
+          <div
+            style={{
+              background: T.panel,
+              border: `1px solid ${T.panelB}`,
+              borderRadius: 14,
+              padding: "20px 24px",
+              marginBottom: 20,
+            }}
+          >
+            <h1
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+                fontFamily: "'Sora',sans-serif",
+                letterSpacing: "-0.035em",
+                color: T.t1,
+                marginBottom: 8,
+              }}
+            >
+              Add Revenue
+            </h1>
             <p style={{ color: T.t5, fontSize: 12 }}>
               Record new revenue received by your organisation
             </p>
           </div>
 
           {/* Active date range display */}
-          <div style={{
-            background: T.panel, border: `1px solid ${T.panelB}`,
-            borderRadius: 14, padding: "12px 16px", marginBottom: 20,
-          }}>
+          <div
+            style={{
+              background: T.panel,
+              border: `1px solid ${T.panelB}`,
+              borderRadius: 14,
+              padding: "12px 16px",
+              marginBottom: 20,
+            }}
+          >
             <div style={{ fontSize: 11, color: T.t4, marginBottom: 4 }}>
-              {selDates.size > 0 ? "Selected Dates"
-                : selMonth !== null ? "Selected Month"
-                : "Current Month"}
+              {selDates.size > 0
+                ? "Selected Dates"
+                : selMonth !== null
+                  ? "Selected Month"
+                  : "Current Month"}
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, color: T.t2 }}>
               {dateFrom} → {dateTo}
@@ -639,36 +930,64 @@ export default function AddRevenuePage() {
 
           {/* Success banner */}
           {success && (
-            <div style={{
-              marginBottom: 20, padding: "12px 16px",
-              background: T.greenBg, border: `1px solid ${T.green}30`,
-              borderRadius: 8, color: T.green, fontSize: 13,
-            }}>✓ Revenue added successfully!</div>
+            <div
+              style={{
+                marginBottom: 20,
+                padding: "12px 16px",
+                background: T.greenBg,
+                border: `1px solid ${T.green}30`,
+                borderRadius: 8,
+                color: T.green,
+                fontSize: 13,
+              }}
+            >
+              ✓ Revenue added successfully!
+            </div>
           )}
 
           {/* Error banner */}
           {error && (
-            <div style={{
-              marginBottom: 20, padding: "12px 16px",
-              background: T.redBg, border: `1px solid ${T.red}30`,
-              borderRadius: 8, color: T.red, fontSize: 13,
-            }}>⚠ {error}</div>
+            <div
+              style={{
+                marginBottom: 20,
+                padding: "12px 16px",
+                background: T.redBg,
+                border: `1px solid ${T.red}30`,
+                borderRadius: 8,
+                color: T.red,
+                fontSize: 13,
+              }}
+            >
+              ⚠ {error}
+            </div>
           )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit} style={{
-            background: T.panel, border: `1px solid ${T.panelB}`,
-            borderRadius: 14, padding: 24,
-          }}>
-
+          <form
+            onSubmit={handleSubmit}
+            style={{
+              background: T.panel,
+              border: `1px solid ${T.panelB}`,
+              borderRadius: 14,
+              padding: 24,
+            }}
+          >
             {/* Amount */}
             <div style={{ marginBottom: 20 }}>
               <Label>Amount *</Label>
               <div style={{ position: "relative" }}>
-                <span style={{
-                  position: "absolute", left: 12, top: "50%",
-                  transform: "translateY(-50%)", color: T.t4, fontSize: 14,
-                }}>₹</span>
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 12,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: T.t4,
+                    fontSize: 14,
+                  }}
+                >
+                  ₹
+                </span>
                 <input
                   type="number"
                   name="amount"
@@ -694,7 +1013,9 @@ export default function AddRevenuePage() {
                 style={{ ...inputStyle, cursor: "pointer" }}
               >
                 {REVENUE_SOURCES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -715,13 +1036,18 @@ export default function AddRevenuePage() {
             {/* Organisation (display only — controlled via sidebar) */}
             <div style={{ marginBottom: 20 }}>
               <Label>Organisation *</Label>
-              <div style={{
-                ...inputStyle,
-                color: formData.organisation_id ? T.t2 : T.t5,
-                background: "rgba(255,255,255,0.02)",
-              }}>
-                {organisations.find((o) => o.id === formData.organisation_id)?.name
-                  || (loadingOrgs ? "Loading…" : "Select an organisation in the sidebar")}
+              <div
+                style={{
+                  ...inputStyle,
+                  color: formData.organisation_id ? T.t2 : T.t5,
+                  background: "rgba(255,255,255,0.02)",
+                }}
+              >
+                {organisations.find((o) => o.id === formData.organisation_id)
+                  ?.name ||
+                  (loadingOrgs
+                    ? "Loading…"
+                    : "Select an organisation in the sidebar")}
               </div>
             </div>
 
@@ -734,15 +1060,32 @@ export default function AddRevenuePage() {
                 onChange={handleChange}
                 disabled={!formData.organisation_id || loadingProjects}
                 style={{
-                  ...inputStyle, cursor: "pointer",
+                  ...inputStyle,
+                  cursor: "pointer",
                   opacity: !formData.organisation_id ? 0.5 : 1,
                 }}
               >
                 <option value="">No project</option>
                 {projects.map((proj) => (
-                  <option key={proj.id} value={proj.id}>{proj.name}</option>
+                  <option key={proj.id} value={proj.id}>
+                    {proj.name}
+                  </option>
                 ))}
               </select>
+            </div>
+            {/* Reference */}
+            <div style={{ marginBottom: 20 }}>
+              <Label>Reference (Optional)</Label>
+              <input
+                type="text"
+                name="reference"
+                value={formData.reference}
+                onChange={handleChange}
+                maxLength={120}
+                placeholder="UPI / cheque / UTR number"
+                autoComplete="off"
+                style={inputStyle}
+              />
             </div>
 
             {/* Remarks */}
@@ -763,11 +1106,18 @@ export default function AddRevenuePage() {
               type="submit"
               disabled={loading || !formData.organisation_id}
               style={{
-                width: "100%", padding: "13px",
+                width: "100%",
+                padding: "13px",
                 background: loading || !formData.organisation_id ? T.t5 : T.ac,
-                border: "none", borderRadius: 8,
-                fontSize: 14, fontWeight: 700, color: "#fff",
-                cursor: loading || !formData.organisation_id ? "not-allowed" : "pointer",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 700,
+                color: "#fff",
+                cursor:
+                  loading || !formData.organisation_id
+                    ? "not-allowed"
+                    : "pointer",
                 opacity: loading || !formData.organisation_id ? 0.55 : 1,
                 transition: "opacity 0.2s, background 0.2s",
               }}
@@ -778,38 +1128,85 @@ export default function AddRevenuePage() {
 
           {/* Revenue list for the selected period */}
           {revenues.length > 0 && (
-            <div style={{
-              marginTop: 20, background: T.panel,
-              border: `1px solid ${T.panelB}`, borderRadius: 14, overflow: "hidden",
-            }}>
-              <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: T.t4,
-                  textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            <div
+              style={{
+                marginTop: 20,
+                background: T.panel,
+                border: `1px solid ${T.panelB}`,
+                borderRadius: 14,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderBottom: `1px solid ${T.divider}`,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: T.t4,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                  }}
+                >
                   Entries in period
                 </span>
               </div>
               <div style={{ maxHeight: 340, overflowY: "auto" }}>
                 {revenues.map((r) => (
-                  <div key={r.id} style={{
-                    display: "flex", justifyContent: "space-between",
-                    alignItems: "center", padding: "10px 20px",
-                    borderBottom: `1px solid ${T.divider}`,
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 13, color: T.t2, fontWeight: 500 }}>
+                  <div
+                    key={r.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "10px 20px",
+                      borderBottom: `1px solid ${T.divider}`,
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1, paddingRight: 12 }}>
+                      <div
+                        style={{ fontSize: 13, color: T.t2, fontWeight: 500 }}
+                      >
                         {r.source_display}
                         {r.project_name && (
-                          <span style={{ marginLeft: 6, fontSize: 11,
-                            color: T.acText, fontWeight: 400 }}>
+                          <span
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 11,
+                              color: T.acText,
+                              fontWeight: 400,
+                            }}
+                          >
                             · {r.project_name}
                           </span>
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: T.t5, marginTop: 2 }}>
                         {r.date} · {r.organisation_name}
+                        {r.reference ? ` · Ref: ${r.reference}` : ""}
                       </div>
+                      {r.remarks && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: T.t4,
+                            marginTop: 2,
+                            whiteSpace: "normal",
+                            wordBreak: "break-word",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {r.remarks}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: T.green }}>
+                    <div
+                      style={{ fontSize: 14, fontWeight: 700, color: T.green }}
+                    >
                       {fmtINR(r.amount)}
                     </div>
                   </div>
@@ -819,11 +1216,18 @@ export default function AddRevenuePage() {
           )}
 
           {loadingRevenues && (
-            <div style={{
-              marginTop: 20, padding: "20px", textAlign: "center",
-              background: T.panel, border: `1px solid ${T.panelB}`,
-              borderRadius: 14, fontSize: 13, color: T.t5,
-            }}>
+            <div
+              style={{
+                marginTop: 20,
+                padding: "20px",
+                textAlign: "center",
+                background: T.panel,
+                border: `1px solid ${T.panelB}`,
+                borderRadius: 14,
+                fontSize: 13,
+                color: T.t5,
+              }}
+            >
               Loading revenue data…
             </div>
           )}

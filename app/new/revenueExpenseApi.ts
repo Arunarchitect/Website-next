@@ -26,6 +26,7 @@ export interface RevenueRow {
   source_display:    string;
   date:              string;
   remarks:           string;
+  reference?:        string; 
   organisation_id?:  number;
   organisation_name?: string;
   project_id?:       number;
