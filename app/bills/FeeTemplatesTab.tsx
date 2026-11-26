@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as fa from "./feeAdminApi";
 import { C } from "../feecalc/feeCalcTypes";
-import { Btn, Card, Field, Msg, errText, input, money } from "./ui";
+import { Btn, Busy, Card, Field, ListSkeleton, Msg, errText, input, money } from "./ui";
 
 interface Row {
   key: string;
@@ -48,6 +48,8 @@ function rateText(t: fa.FeeTpl) {
   return `${money(t.default_hourly_rate, t.currency)} / hour`;
 }
 
+const SAVING = "Saving template…";
+
 export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
   const [tpls, setTpls] = useState<fa.FeeTpl[]>([]);
   const [units, setUnits] = useState<fa.QUnit[]>([]);
@@ -61,21 +63,29 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
   } | null>(null);
   const [newStage, setNewStage] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true); // first load of the template list
+  const [busy, setBusy] = useState<string | null>(null); // label of the running action
 
   const load = useCallback(() => {
-    fa.fetchFeeTemplates(orgId)
-      .then(setTpls)
-      .catch((e) => setErr(errText(e)));
-    fa.fetchUnits(orgId)
-      .then(setUnits)
-      .catch(() => setUnits([]));
-    fa.fetchStages(orgId)
-      .then(setStages)
-      .catch(() => setStages([]));
+    return Promise.all([
+      fa
+        .fetchFeeTemplates(orgId)
+        .then(setTpls)
+        .catch((e) => setErr(errText(e)))
+        .finally(() => setLoading(false)),
+      fa
+        .fetchUnits(orgId)
+        .then(setUnits)
+        .catch(() => setUnits([])),
+      fa
+        .fetchStages(orgId)
+        .then(setStages)
+        .catch(() => setStages([])),
+    ]);
   }, [orgId]);
   useEffect(() => {
     setEditing(null);
+    setLoading(true);
     load();
   }, [load]);
 
@@ -125,6 +135,7 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   async function addUnit() {
+    if (busy) return;
     const name = newUnit?.name.trim() ?? "";
     const symbol = newUnit?.symbol.trim() ?? "";
     if (!name || !symbol) return setErr("Enter a unit name and symbol.");
@@ -140,18 +151,23 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
       return;
     }
 
+    setBusy("Saving unit…");
+    setErr(null);
     try {
       const u = await fa.createUnit({ organisation: orgId, name, symbol });
       setUnits((l) => [...l, u]);
       setF((x) => ({ ...x, unit: String(u.id) }));
       setNewUnit(null);
-      setErr(null);
     } catch (e) {
       setErr(errText(e));
+    } finally {
+      setBusy(null);
     }
   }
   async function addStage() {
-    if (!newStage.trim()) return;
+    if (busy || !newStage.trim()) return;
+    setBusy("Adding stage…");
+    setErr(null);
     try {
       const s = await fa.createStage({
         organisation: orgId,
@@ -160,7 +176,6 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
       });
       setStages((l) => [...l, s]);
       setNewStage("");
-      setErr(null);
       setRows((rs) => {
         let done = false;
         return rs.map((r) =>
@@ -171,10 +186,13 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
       });
     } catch (e) {
       setErr(errText(e));
+    } finally {
+      setBusy(null);
     }
   }
 
   async function save() {
+    if (busy) return;
     if (!f.name.trim()) return setErr("Give the template a name.");
     if (f.bt === "quantity_rate" && (!f.unit || !n(f.rate)))
       return setErr("Choose a unit and enter the rate per unit.");
@@ -185,7 +203,7 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
     if (rows.some((r) => !r.stage || !n(r.pct)))
       return setErr("Every stage needs a stage name and a percentage.");
 
-    setBusy(true);
+    setBusy(SAVING);
     setErr(null);
     try {
       const b = {
@@ -237,452 +255,498 @@ export default function FeeTemplatesTab({ orgId }: { orgId: number }) {
     } catch (e) {
       setErr(errText(e));
     } finally {
-      setBusy(false);
-      load();
+      await load(); // refresh before the overlay lifts, so the list never shows stale data
+      setBusy(null);
     }
   }
 
-  async function toggle(t: fa.FeeTpl) {
+  async function act(
+    label: string,
+    fn: () => Promise<unknown>,
+    confirmMsg?: string,
+  ) {
+    if (busy) return;
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBusy(label);
+    setErr(null);
     try {
-      await fa.updateFeeTemplate(t.id, { is_active: !t.is_active });
-      load();
+      await fn();
+      await load();
     } catch (e) {
       setErr(errText(e));
+    } finally {
+      setBusy(null);
     }
   }
+  const toggle = (t: fa.FeeTpl) =>
+    act(t.is_active ? "Deactivating template…" : "Activating template…", () =>
+      fa.updateFeeTemplate(t.id, { is_active: !t.is_active }),
+    );
+  const remove = (t: fa.FeeTpl) =>
+    act(
+      "Deleting template…",
+      () => fa.deleteFeeTemplate(t.id),
+      `Delete template "${t.name}"? Its stages and deliverables will be deleted too. This can't be undone.`,
+    );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {err && <Msg>{err}</Msg>}
+    <Busy on={!!busy} label={busy ?? ""}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {err && <Msg>{err}</Msg>}
 
-      {editing === null ? (
-        <Card
-          title="Fee templates"
-          right={
-            <Btn kind="primary" onClick={() => start()}>
-              New template
-            </Btn>
-          }
-        >
-          {tpls.length === 0 && (
-            <div style={{ fontSize: 13, color: C.t3 }}>
-              No templates yet. A template says how a type of work is billed and
-              how the fee splits into payment stages.
-            </div>
-          )}
-          {tpls.map((t) => {
-            const ok =
-              Math.abs(n(t.total_stage_percentage) - 100) < 0.005 &&
-              t.template_stages.length > 0;
-            return (
-              <div
-                key={t.id}
-                style={{
-                  borderTop: `1px solid ${C.border}`,
-                  padding: "11px 0",
-                  opacity: t.is_active ? 1 : 0.55,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <strong style={{ color: C.t1, fontSize: 14 }}>
-                    {t.name}
-                  </strong>
-                  <span style={{ fontSize: 12.5, color: C.t3 }}>
-                    {rateText(t)}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <Btn onClick={() => start(t)}>Edit</Btn>
-                  <Btn onClick={() => toggle(t)}>
-                    {t.is_active ? "Deactivate" : "Activate"}
-                  </Btn>
-                </div>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    marginTop: 5,
-                    color: ok ? C.t3 : C.red,
-                  }}
-                >
-                  {t.template_stages.length === 0
-                    ? "No stages yet"
-                    : t.template_stages
-                        .slice()
-                        .sort((a, b) => a.order - b.order)
-                        .map(
-                          (s) => `${s.fee_stage.name} ${n(s.fee_percentage)}%`,
-                        )
-                        .join(" · ")}
-                  {!ok &&
-                    t.template_stages.length > 0 &&
-                    ` — total ${n(t.total_stage_percentage)}%, must be 100%`}
-                </div>
-              </div>
-            );
-          })}
-        </Card>
-      ) : (
-        <>
+        {editing === null ? (
           <Card
-            title={editing === "new" ? "New fee template" : "Edit fee template"}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-                gap: 10,
-              }}
-            >
-              <Field label="Name" htmlFor="ft-name">
-                <input
-                  id="ft-name"
-                  name="name"
-                  autoComplete="off"
-                  value={f.name}
-                  onChange={(e) => setF({ ...f, name: e.target.value })}
-                  style={input}
-                  placeholder="e.g. Residential design"
-                />
-              </Field>
-              <Field label="How is it billed?" htmlFor="ft-bt">
-                <select
-                  id="ft-bt"
-                  name="billing_type"
-                  value={f.bt}
-                  onChange={(e) =>
-                    setF({ ...f, bt: e.target.value as fa.BillingType })
-                  }
-                  style={input}
-                >
-                  {(Object.keys(TYPES) as fa.BillingType[]).map((k) => (
-                    <option key={k} value={k}>
-                      {TYPES[k]}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {f.bt === "quantity_rate" && (
-                <>
-                  <Field label="Unit" htmlFor="ft-unit">
-                    <select
-                      id="ft-unit"
-                      name="unit"
-                      value={f.unit}
-                      onChange={(e) => setF({ ...f, unit: e.target.value })}
-                      style={input}
-                    >
-                      <option value="">Select…</option>
-                      {units.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name} ({u.symbol})
-                        </option>
-                      ))}
-                    </select>
-                    {!newUnit && (
-                      <Btn
-                        style={{ marginTop: 6 }}
-                        onClick={() => setNewUnit({ name: "", symbol: "" })}
-                      >
-                        Add a unit
-                      </Btn>
-                    )}
-                  </Field>
-                  <Field label="Rate per unit" htmlFor="ft-rate">
-                    <input
-                      id="ft-rate"
-                      name="rate"
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={f.rate}
-                      onChange={(e) => setF({ ...f, rate: e.target.value })}
-                      style={input}
-                    />
-                  </Field>
-                </>
-              )}
-              {f.bt === "percentage" && (
-                <Field label="Percentage of project value" htmlFor="ft-pct">
-                  <input
-                    id="ft-pct"
-                    name="pct"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="any"
-                    value={f.pct}
-                    onChange={(e) => setF({ ...f, pct: e.target.value })}
-                    style={input}
-                  />
-                </Field>
-              )}
-              {f.bt === "hourly" && (
-                <Field label="Default hourly rate" htmlFor="ft-hr">
-                  <input
-                    id="ft-hr"
-                    name="hourly"
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={f.hourly}
-                    onChange={(e) => setF({ ...f, hourly: e.target.value })}
-                    style={input}
-                  />
-                </Field>
-              )}
-              <Field label="Currency" htmlFor="ft-cur">
-                <input
-                  id="ft-cur"
-                  name="currency"
-                  maxLength={3}
-                  value={f.currency}
-                  onChange={(e) =>
-                    setF({ ...f, currency: e.target.value.toUpperCase() })
-                  }
-                  style={input}
-                />
-              </Field>
-            </div>
-            {newUnit && (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 10,
-                  alignItems: "flex-end",
-                  flexWrap: "wrap",
-                }}
-              >
-                <Field label="Unit name" htmlFor="nu-name">
-                  <input
-                    id="nu-name"
-                    name="unit_name"
-                    autoComplete="off"
-                    value={newUnit.name}
-                    onChange={(e) =>
-                      setNewUnit({ ...newUnit, name: e.target.value })
-                    }
-                    style={{ ...input, width: 180 }}
-                    placeholder="Square feet"
-                  />
-                </Field>
-                <Field label="Symbol" htmlFor="nu-sym">
-                  <input
-                    id="nu-sym"
-                    name="unit_symbol"
-                    autoComplete="off"
-                    value={newUnit.symbol}
-                    onChange={(e) =>
-                      setNewUnit({ ...newUnit, symbol: e.target.value })
-                    }
-                    style={{ ...input, width: 100 }}
-                    placeholder="sq.ft"
-                  />
-                </Field>
-                <Btn kind="primary" onClick={addUnit}>
-                  Save unit
-                </Btn>
-                <Btn onClick={() => setNewUnit(null)}>Cancel</Btn>
-              </div>
-            )}
-          </Card>
-
-          <Card
-            title="Payment stages"
+            title="Fee templates"
             right={
-              <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: Math.abs(remaining) < 0.005 ? C.green : C.red,
-                }}
-              >
-                {total}% of 100%
-              </span>
+              <Btn kind="primary" disabled={!!busy || loading} onClick={() => start()}>
+                New template
+              </Btn>
             }
           >
-            <div style={{ fontSize: 12.5, color: C.t3, marginBottom: 10 }}>
-              The fee is split across these stages in this order. Percentages
-              must add up to exactly 100% before a fee can be confirmed. Each
-              deliverable you list is created on the project when the fee is
-              confirmed.
-            </div>
-            {rows.map((r, i) => (
+            {loading && <ListSkeleton rows={3} />}
+            {!loading && tpls.length === 0 && (
+              <div style={{ fontSize: 13, color: C.t3 }}>
+                No templates yet. A template says how a type of work is billed and
+                how the fee splits into payment stages.
+              </div>
+            )}
+            {!loading &&
+              tpls.map((t) => {
+                const ok =
+                  Math.abs(n(t.total_stage_percentage) - 100) < 0.005 &&
+                  t.template_stages.length > 0;
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      borderTop: `1px solid ${C.border}`,
+                      padding: "11px 0",
+                      opacity: t.is_active ? 1 : 0.55,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <strong style={{ color: C.t1, fontSize: 14 }}>
+                        {t.name}
+                      </strong>
+                      {!t.is_active && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: C.t3,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 5,
+                            padding: "1px 6px",
+                          }}
+                        >
+                          Inactive
+                        </span>
+                      )}
+                      <span style={{ fontSize: 12.5, color: C.t3 }}>
+                        {rateText(t)}
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      <Btn disabled={!!busy} onClick={() => start(t)}>
+                        Edit
+                      </Btn>
+                      <Btn disabled={!!busy} onClick={() => toggle(t)}>
+                        {t.is_active ? "Deactivate" : "Activate"}
+                      </Btn>
+                      <Btn kind="danger" disabled={!!busy} onClick={() => remove(t)}>
+                        Delete
+                      </Btn>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        marginTop: 5,
+                        color: ok ? C.t3 : C.red,
+                      }}
+                    >
+                      {t.template_stages.length === 0
+                        ? "No stages yet"
+                        : t.template_stages
+                            .slice()
+                            .sort((a, b) => a.order - b.order)
+                            .map(
+                              (s) => `${s.fee_stage.name} ${n(s.fee_percentage)}%`,
+                            )
+                            .join(" · ")}
+                      {!ok &&
+                        t.template_stages.length > 0 &&
+                        ` — total ${n(t.total_stage_percentage)}%, must be 100%`}
+                    </div>
+                  </div>
+                );
+              })}
+          </Card>
+        ) : (
+          <>
+            <Card
+              title={editing === "new" ? "New fee template" : "Edit fee template"}
+            >
               <div
-                key={r.key}
                 style={{
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 9,
-                  padding: 10,
-                  marginBottom: 8,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
+                  gap: 10,
                 }}
               >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "2fr 1fr 1fr auto",
-                    gap: 8,
-                    alignItems: "end",
-                  }}
-                >
-                  <Field label={`Stage ${i + 1}`} htmlFor={`st-${r.key}`}>
-                    <select
-                      id={`st-${r.key}`}
-                      name="stage"
-                      value={r.stage}
-                      onChange={(e) => upd(r.key, { stage: e.target.value })}
-                      style={input}
-                    >
-                      <option value="">Select…</option>
-                      {stages
-                        .filter(
-                          (s) =>
-                            s.is_active &&
-                            (String(s.id) === r.stage ||
-                              !rows.some((o) => o.stage === String(s.id))),
-                        )
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
+                <Field label="Name" htmlFor="ft-name">
+                  <input
+                    id="ft-name"
+                    name="name"
+                    autoComplete="off"
+                    value={f.name}
+                    onChange={(e) => setF({ ...f, name: e.target.value })}
+                    style={input}
+                    placeholder="e.g. Residential design"
+                  />
+                </Field>
+                <Field label="How is it billed?" htmlFor="ft-bt">
+                  <select
+                    id="ft-bt"
+                    name="billing_type"
+                    value={f.bt}
+                    onChange={(e) =>
+                      setF({ ...f, bt: e.target.value as fa.BillingType })
+                    }
+                    style={input}
+                  >
+                    {(Object.keys(TYPES) as fa.BillingType[]).map((k) => (
+                      <option key={k} value={k}>
+                        {TYPES[k]}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {f.bt === "quantity_rate" && (
+                  <>
+                    <Field label="Unit" htmlFor="ft-unit">
+                      <select
+                        id="ft-unit"
+                        name="unit"
+                        value={f.unit}
+                        onChange={(e) => setF({ ...f, unit: e.target.value })}
+                        style={input}
+                      >
+                        <option value="">Select…</option>
+                        {units.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} ({u.symbol})
                           </option>
                         ))}
-                    </select>
-                  </Field>
-                  <Field label="Percent" htmlFor={`pc-${r.key}`}>
+                      </select>
+                      {!newUnit && (
+                        <Btn
+                          style={{ marginTop: 6 }}
+                          disabled={!!busy}
+                          onClick={() => setNewUnit({ name: "", symbol: "" })}
+                        >
+                          Add a unit
+                        </Btn>
+                      )}
+                    </Field>
+                    <Field label="Rate per unit" htmlFor="ft-rate">
+                      <input
+                        id="ft-rate"
+                        name="rate"
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={f.rate}
+                        onChange={(e) => setF({ ...f, rate: e.target.value })}
+                        style={input}
+                      />
+                    </Field>
+                  </>
+                )}
+                {f.bt === "percentage" && (
+                  <Field label="Percentage of project value" htmlFor="ft-pct">
                     <input
-                      id={`pc-${r.key}`}
-                      name="percent"
+                      id="ft-pct"
+                      name="pct"
                       type="number"
                       min="0"
                       max="100"
                       step="any"
-                      value={r.pct}
-                      onChange={(e) => upd(r.key, { pct: e.target.value })}
+                      value={f.pct}
+                      onChange={(e) => setF({ ...f, pct: e.target.value })}
                       style={input}
                     />
                   </Field>
-                  <Field label="Due after (days)" htmlFor={`dy-${r.key}`}>
+                )}
+                {f.bt === "hourly" && (
+                  <Field label="Default hourly rate" htmlFor="ft-hr">
                     <input
-                      id={`dy-${r.key}`}
-                      name="days"
+                      id="ft-hr"
+                      name="hourly"
                       type="number"
                       min="0"
-                      value={r.days}
-                      onChange={(e) => upd(r.key, { days: e.target.value })}
+                      step="any"
+                      value={f.hourly}
+                      onChange={(e) => setF({ ...f, hourly: e.target.value })}
                       style={input}
                     />
                   </Field>
-                  <Btn
-                    kind="danger"
-                    onClick={() =>
-                      setRows((rs) => rs.filter((x) => x.key !== r.key))
+                )}
+                <Field label="Currency" htmlFor="ft-cur">
+                  <input
+                    id="ft-cur"
+                    name="currency"
+                    maxLength={3}
+                    value={f.currency}
+                    onChange={(e) =>
+                      setF({ ...f, currency: e.target.value.toUpperCase() })
                     }
-                  >
-                    Remove
-                  </Btn>
-                </div>
-                <div style={{ marginTop: 8 }}>
-                  <Field
-                    label="Deliverables (one per line, optional)"
-                    htmlFor={`dl-${r.key}`}
-                  >
-                    <textarea
-                      id={`dl-${r.key}`}
-                      name="deliverables"
-                      rows={2}
-                      value={r.delivs}
-                      onChange={(e) => upd(r.key, { delivs: e.target.value })}
-                      style={{ ...input, resize: "vertical" }}
+                    style={input}
+                  />
+                </Field>
+              </div>
+              {newUnit && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 10,
+                    alignItems: "flex-end",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <Field label="Unit name" htmlFor="nu-name">
+                    <input
+                      id="nu-name"
+                      name="unit_name"
+                      autoComplete="off"
+                      value={newUnit.name}
+                      onChange={(e) =>
+                        setNewUnit({ ...newUnit, name: e.target.value })
+                      }
+                      style={{ ...input, width: 180 }}
+                      placeholder="Square feet"
                     />
                   </Field>
+                  <Field label="Symbol" htmlFor="nu-sym">
+                    <input
+                      id="nu-sym"
+                      name="unit_symbol"
+                      autoComplete="off"
+                      value={newUnit.symbol}
+                      onChange={(e) =>
+                        setNewUnit({ ...newUnit, symbol: e.target.value })
+                      }
+                      style={{ ...input, width: 100 }}
+                      placeholder="sq.ft"
+                    />
+                  </Field>
+                  <Btn kind="primary" disabled={!!busy} onClick={addUnit}>
+                    Save unit
+                  </Btn>
+                  <Btn disabled={!!busy} onClick={() => setNewUnit(null)}>
+                    Cancel
+                  </Btn>
                 </div>
+              )}
+            </Card>
+
+            <Card
+              title="Payment stages"
+              right={
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: Math.abs(remaining) < 0.005 ? C.green : C.red,
+                  }}
+                >
+                  {total}% of 100%
+                </span>
+              }
+            >
+              <div style={{ fontSize: 12.5, color: C.t3, marginBottom: 10 }}>
+                The fee is split across these stages in this order. Percentages
+                must add up to exactly 100% before a fee can be confirmed. Each
+                deliverable you list is created on the project when the fee is
+                confirmed.
               </div>
-            ))}
+              {rows.map((r, i) => (
+                <div
+                  key={r.key}
+                  style={{
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 9,
+                    padding: 10,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "2fr 1fr 1fr auto",
+                      gap: 8,
+                      alignItems: "end",
+                    }}
+                  >
+                    <Field label={`Stage ${i + 1}`} htmlFor={`st-${r.key}`}>
+                      <select
+                        id={`st-${r.key}`}
+                        name="stage"
+                        value={r.stage}
+                        onChange={(e) => upd(r.key, { stage: e.target.value })}
+                        style={input}
+                      >
+                        <option value="">Select…</option>
+                        {stages
+                          .filter(
+                            (s) =>
+                              s.is_active &&
+                              (String(s.id) === r.stage ||
+                                !rows.some((o) => o.stage === String(s.id))),
+                          )
+                          .map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                    <Field label="Percent" htmlFor={`pc-${r.key}`}>
+                      <input
+                        id={`pc-${r.key}`}
+                        name="percent"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="any"
+                        value={r.pct}
+                        onChange={(e) => upd(r.key, { pct: e.target.value })}
+                        style={input}
+                      />
+                    </Field>
+                    <Field label="Due after (days)" htmlFor={`dy-${r.key}`}>
+                      <input
+                        id={`dy-${r.key}`}
+                        name="days"
+                        type="number"
+                        min="0"
+                        value={r.days}
+                        onChange={(e) => upd(r.key, { days: e.target.value })}
+                        style={input}
+                      />
+                    </Field>
+                    <Btn
+                      kind="danger"
+                      onClick={() =>
+                        setRows((rs) => rs.filter((x) => x.key !== r.key))
+                      }
+                    >
+                      Remove
+                    </Btn>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <Field
+                      label="Deliverables (one per line, optional)"
+                      htmlFor={`dl-${r.key}`}
+                    >
+                      <textarea
+                        id={`dl-${r.key}`}
+                        name="deliverables"
+                        rows={2}
+                        value={r.delivs}
+                        onChange={(e) => upd(r.key, { delivs: e.target.value })}
+                        style={{ ...input, resize: "vertical" }}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              ))}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  alignItems: "flex-end",
+                  marginTop: 4,
+                }}
+              >
+                <Btn onClick={() => setRows((rs) => [...rs, newRow()])}>
+                  Add stage
+                </Btn>
+                {rows.length > 0 && Math.abs(remaining) >= 0.005 && (
+                  <Btn
+                    onClick={() =>
+                      setRows((rs) =>
+                        rs.map((r, i) =>
+                          i === rs.length - 1
+                            ? {
+                                ...r,
+                                pct: String(
+                                  Math.round((n(r.pct) + remaining) * 100) / 100,
+                                ),
+                              }
+                            : r,
+                        ),
+                      )
+                    }
+                  >
+                    Put {remaining}% on the last stage
+                  </Btn>
+                )}
+                <span style={{ flex: 1 }} />
+                <Field label="Need a new stage name?" htmlFor="ns-name">
+                  <input
+                    id="ns-name"
+                    name="new_stage"
+                    autoComplete="off"
+                    value={newStage}
+                    onChange={(e) => setNewStage(e.target.value)}
+                    style={{ ...input, width: 200 }}
+                    placeholder="e.g. Working drawings"
+                  />
+                </Field>
+                <Btn onClick={addStage} disabled={!!busy || !newStage.trim()}>
+                  Add to list
+                </Btn>
+              </div>
+            </Card>
+
             <div
               style={{
                 display: "flex",
-                gap: 8,
+                gap: 10,
+                alignItems: "center",
                 flexWrap: "wrap",
-                alignItems: "flex-end",
-                marginTop: 4,
               }}
             >
-              <Btn onClick={() => setRows((rs) => [...rs, newRow()])}>
-                Add stage
+              <Btn kind="primary" disabled={!!busy} onClick={save}>
+                {busy === SAVING ? "Saving…" : "Save template"}
               </Btn>
-              {rows.length > 0 && Math.abs(remaining) >= 0.005 && (
-                <Btn
-                  onClick={() =>
-                    setRows((rs) =>
-                      rs.map((r, i) =>
-                        i === rs.length - 1
-                          ? {
-                              ...r,
-                              pct: String(
-                                Math.round((n(r.pct) + remaining) * 100) / 100,
-                              ),
-                            }
-                          : r,
-                      ),
-                    )
-                  }
-                >
-                  Put {remaining}% on the last stage
-                </Btn>
-              )}
-              <span style={{ flex: 1 }} />
-              <Field label="Need a new stage name?" htmlFor="ns-name">
+              <Btn disabled={!!busy} onClick={() => setEditing(null)}>
+                Cancel
+              </Btn>
+              <label style={{ fontSize: 13, color: C.t2 }}>
                 <input
-                  id="ns-name"
-                  name="new_stage"
-                  autoComplete="off"
-                  value={newStage}
-                  onChange={(e) => setNewStage(e.target.value)}
-                  style={{ ...input, width: 200 }}
-                  placeholder="e.g. Working drawings"
-                />
-              </Field>
-              <Btn onClick={addStage} disabled={!newStage.trim()}>
-                Add to list
-              </Btn>
+                  type="checkbox"
+                  name="active"
+                  checked={f.active}
+                  onChange={(e) => setF({ ...f, active: e.target.checked })}
+                />{" "}
+                Active
+              </label>
+              <span style={{ fontSize: 12, color: C.t4 }}>
+                Stages already used by a confirmed fee can&apos;t be removed.
+              </span>
             </div>
-          </Card>
-
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <Btn kind="primary" disabled={busy} onClick={save}>
-              {busy ? "Saving…" : "Save template"}
-            </Btn>
-            <Btn disabled={busy} onClick={() => setEditing(null)}>
-              Cancel
-            </Btn>
-            <label style={{ fontSize: 13, color: C.t2 }}>
-              <input
-                type="checkbox"
-                name="active"
-                checked={f.active}
-                onChange={(e) => setF({ ...f, active: e.target.checked })}
-              />{" "}
-              Active
-            </label>
-            <span style={{ fontSize: 12, color: C.t4 }}>
-              Stages already used by a confirmed fee can&apos;t be removed.
-            </span>
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </Busy>
   );
 }

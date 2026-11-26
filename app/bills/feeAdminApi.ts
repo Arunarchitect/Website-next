@@ -34,6 +34,8 @@ export const fetchFeeTemplates = (org: number) =>
   call<FeeTpl[] | { results: FeeTpl[] }>(`${F}/fee-templates/?organisation=${org}`).then(list);
 export const createFeeTemplate = (b: object) => post<{ id: number }>("/fee-templates/", b);
 export const updateFeeTemplate = (id: number, b: object) => patch<{ id: number }>(`/fee-templates/${id}/`, b);
+export const deleteFeeTemplate = (id: number) => del(`/fee-templates/${id}/`);
+
 
 // units & stage library
 export const fetchUnits = (org: number) =>
@@ -52,8 +54,12 @@ export const deleteDeliv = (id: number) => del(`/deliverable-templates/${id}/`);
 
 // project fee calculation
 export interface CalcBody { fee_template: number; quantity: string; discount_percentage: string; currency: string }
+export interface RepriceBody { fee_template?: number; quantity: string; discount_percentage: string }
 export const fetchCalcs = (project: number) =>
   call<Calc[] | { results: Calc[] }>(`${F}/project-calculations/?project=${project}`).then(list);
 export const createCalc = (b: CalcBody & { project: number }) => post<{ id: number }>("/project-calculations/", b);
 export const updateCalc = (id: number, b: CalcBody) => patch<{ id: number }>(`/project-calculations/${id}/`, b);
 export const confirmCalc = (id: number) => post<unknown>(`/project-calculations/${id}/confirm/`, {});
+// fee_template omitted = same template, current rate; fee_template set = switch template
+export const repriceCalc = (id: number, b: RepriceBody) =>
+  post<unknown>(`/project-calculations/${id}/reprice/`, b);

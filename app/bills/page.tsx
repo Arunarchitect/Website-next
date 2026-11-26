@@ -11,7 +11,7 @@ import ProjectFeesTab from "./ProjectFeesTab";
 import FeeTemplatesTab from "./FeeTemplatesTab";
 import TemplatesTab from "./TemplatesTab";
 import MembersTab from "./MembersTab";
-import { Card, Msg, errText, input } from "./ui";
+import { BarLoader, Card, Msg, Skeleton, errText, input } from "./ui";
 
 const TABS = [
   { id: "fees", label: "Project fees" },
@@ -25,6 +25,7 @@ export default function BillsHub() {
   const [ready, setReady] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [orgs, setOrgs] = useState<AdminOrganisation[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
   const [orgId, setOrgId] = useState<number | null>(null);
   const [tab, setTab] = useState<TabId>("fees");
   const [err, setErr] = useState<string | null>(null);
@@ -39,7 +40,8 @@ export default function BillsHub() {
         setOrgs(l);
         if (l.length === 1) setOrgId(l[0].id);
       })
-      .catch((e) => setErr(errText(e)));
+      .catch((e) => setErr(errText(e)))
+      .finally(() => setOrgsLoading(false));
   }, []);
 
   if (!ready) return null;
@@ -92,7 +94,20 @@ export default function BillsHub() {
         </div>
 
         {err && <Msg>{err}</Msg>}
-        {orgs.length === 0 && !err && (
+
+        {orgsLoading && (
+          <Card>
+            <div role="status" aria-label="Loading organisations">
+              <BarLoader />
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+                <Skeleton w={90} h={12} />
+                <Skeleton h={36} r={8} />
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {!orgsLoading && orgs.length === 0 && !err && (
           <Card>
             <span style={{ fontSize: 13, color: C.t3 }}>
               You need an admin or manager role in an organisation to manage
