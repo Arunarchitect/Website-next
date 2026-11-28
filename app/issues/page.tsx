@@ -149,6 +149,21 @@ function buildOrderingParam(field: SortField, order: SortOrder): string {
   return order === "newest" ? `-${field}` : field;
 }
 
+// ---------------------------------------------------------------------------
+// Search mode — server-side via `search_mode`.
+//   any    -> any word matches (OR)
+//   all    -> every word matches, each in any field (AND)
+//   phrase -> the whole text as one phrase
+// ---------------------------------------------------------------------------
+
+type SearchMode = "any" | "all" | "phrase";
+
+const SEARCH_MODE_OPTIONS: { value: SearchMode; label: string }[] = [
+  { value: "any", label: "Any word (OR)" },
+  { value: "all", label: "All words (AND)" },
+  { value: "phrase", label: "Exact phrase" },
+];
+
 function extractValidationMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err) && err.response?.data) {
     const data = err.response.data as Record<string, unknown>;
@@ -177,6 +192,7 @@ interface PersistedFilters {
   domainFilter: "all" | IssueDomain;
   activeStatFilters: StatFilterKey[];
   searchQuery: string;
+  searchMode: SearchMode;
   sortField: SortField;
   sortOrder: SortOrder;
 }
@@ -216,6 +232,9 @@ export default function IssuesPage() {
   // --- Search ---------------------------------------------------------------
   const [searchQuery, setSearchQuery] = useState(() => loadPersistedFilters().searchQuery ?? "");
   const [debouncedSearch, setDebouncedSearch] = useState(() => loadPersistedFilters().searchQuery ?? "");
+  const [searchMode, setSearchMode] = useState<SearchMode>(
+    () => loadPersistedFilters().searchMode ?? "any"
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
@@ -331,6 +350,7 @@ export default function IssuesPage() {
         status_in: buildStatusInParam(activeStatFilters),
         priority_in: buildPriorityInParam(activeStatFilters),
         search: debouncedSearch || undefined,
+        search_mode: debouncedSearch ? searchMode : undefined,
         ordering: buildOrderingParam(sortField, sortOrder),
         page: targetPage,
         page_size: PAGE_SIZE,
@@ -364,7 +384,7 @@ export default function IssuesPage() {
     refreshList(1);
     refreshStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterOrgId, filterProjectId, filterDeliverableId, domainFilter, activeStatFilters, debouncedSearch, sortField, sortOrder]);
+  }, [filterOrgId, filterProjectId, filterDeliverableId, domainFilter, activeStatFilters, debouncedSearch, searchMode, sortField, sortOrder]);
 
   // Page changes only refetch the list.
   useEffect(() => {
@@ -384,6 +404,7 @@ export default function IssuesPage() {
       domainFilter,
       activeStatFilters: Array.from(activeStatFilters),
       searchQuery,
+      searchMode,
       sortField,
       sortOrder,
     };
@@ -393,7 +414,7 @@ export default function IssuesPage() {
       // Ignore storage errors (e.g. private browsing quota) — persistence
       // is a nice-to-have, not critical to the page working.
     }
-  }, [filterOrgId, filterProjectId, filterDeliverableId, domainFilter, activeStatFilters, searchQuery, sortField, sortOrder]);
+  }, [filterOrgId, filterProjectId, filterDeliverableId, domainFilter, activeStatFilters, searchQuery, searchMode, sortField, sortOrder]);
 
   // Load the organisation list once, for the filter bar.
   useEffect(() => {
@@ -596,7 +617,7 @@ export default function IssuesPage() {
           <input
             type="text"
             className="search-bar-input"
-            placeholder="Search issues by title, description, module, category…"
+            placeholder="Search issues by title, description, comments, module, project…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -608,6 +629,12 @@ export default function IssuesPage() {
         </div>
 
         <div className="sort-controls" style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}>
+          <div className="form-field" style={{ flex: '0 0 auto', minWidth: '160px' }}>
+            <label>Search mode</label>
+            <select className="field-select" value={searchMode} onChange={(e) => setSearchMode(e.target.value as SearchMode)}>
+              {SEARCH_MODE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+          </div>
           <div className="form-field" style={{ flex: '0 0 auto', minWidth: '160px' }}>
             <label>Sort by</label>
             <select className="field-select" value={sortField} onChange={(e) => setSortField(e.target.value as SortField)}>

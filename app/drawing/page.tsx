@@ -26,6 +26,7 @@ import {
   restoreDocument,
   getMyMemberships,
   RawMembership,
+  SearchMode,
 } from "./drawingApi";
 import {
   Organisation,
@@ -46,6 +47,12 @@ import "./approval.css";
 const UPLOAD_ROLES = ["admin", "manager", "member"];
 
 const Spinner = () => <span className="btn-spinner" aria-hidden="true" />;
+
+const SEARCH_MODE_OPTIONS: { value: SearchMode; label: string }[] = [
+  { value: "any", label: "Any word (OR)" },
+  { value: "all", label: "All words (AND)" },
+  { value: "phrase", label: "Exact phrase" },
+];
 
 /**
  * What the Status dropdown can hold. "pending" / "rejected" are both
@@ -100,6 +107,7 @@ function DocumentsPageInner() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(undefined);
   const [selectedDeliverableId, setSelectedDeliverableId] = useState<number | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("any");
   const [showPrivateOnly, setShowPrivateOnly] = useState<boolean>(false);
   const [mineOnly, setMineOnly] = useState<boolean>(false);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
@@ -313,6 +321,7 @@ function DocumentsPageInner() {
     selectedProjectId,
     selectedDeliverableId,
     searchTerm,
+    searchMode,
     showPrivateOnly,
     mineOnly,
     pageSize,
@@ -335,6 +344,7 @@ function DocumentsPageInner() {
           projectId: selectedProjectId,
           deliverableId: selectedDeliverableId,
           search: searchTerm,
+          searchMode,
           showPrivate: showPrivateOnly,
           mine: mineOnly,
           page: currentPage,
@@ -354,6 +364,7 @@ function DocumentsPageInner() {
           projectId: selectedProjectId,
           deliverableId: selectedDeliverableId,
           search: searchTerm,
+          searchMode,
           mine: mineOnly,
           page: 1,
           pageSize: 1000,
@@ -376,6 +387,7 @@ function DocumentsPageInner() {
       selectedProjectId,
       selectedDeliverableId,
       searchTerm,
+      searchMode,
       showPrivateOnly,
       mineOnly,
       currentPage,
@@ -623,6 +635,7 @@ function DocumentsPageInner() {
     setSelectedProjectId(undefined);
     setSelectedDeliverableId(undefined);
     setSearchTerm("");
+    setSearchMode("any");
     setShowPrivateOnly(false);
     setMineOnly(false);
     setCurrentPage(1);
@@ -803,7 +816,7 @@ function DocumentsPageInner() {
           <i className="ti ti-search" aria-hidden="true" />
           <input
             type="text"
-            placeholder="Search by title, tags, project, or deliverable..."
+            placeholder="Search by title, description, tags, project, or deliverable..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="documents-search-input"
@@ -925,6 +938,23 @@ function DocumentsPageInner() {
             </select>
           </div>
         )}
+
+        <div className="documents-filter-group">
+          <label className="documents-filter-label">
+            <i className="ti ti-search" /> Search mode
+          </label>
+          <select
+            className="documents-filter-select"
+            value={searchMode}
+            onChange={(e) => setSearchMode(e.target.value as SearchMode)}
+          >
+            {SEARCH_MODE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="documents-filter-group" style={{ marginLeft: "auto" }}>
           <label className="documents-filter-label">
@@ -1322,6 +1352,7 @@ function DocumentsPageInner() {
           projectId: selectedProjectId,
           deliverableId: selectedDeliverableId,
           search: searchTerm,
+          searchMode,
           showPrivate: showPrivateOnly,
           ordering: sortOrder === "newest" ? "-created_at" : "created_at",
           // Only approved (published) drawings can be shared.

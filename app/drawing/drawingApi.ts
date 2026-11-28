@@ -233,11 +233,21 @@ export const getDeliverables = async (projectId?: number): Promise<Deliverable[]
   }
 };
 
+/**
+ * Search mode, sent to the server as `search_mode`:
+ *   any    -> any word matches (OR)
+ *   all    -> every word matches, each in any field (AND)
+ *   phrase -> the whole text as one phrase
+ */
+export type SearchMode = 'any' | 'all' | 'phrase';
+
 export interface DocumentFilters {
   organisationId?: number;
   projectId?: number;
   deliverableId?: number;
   search?: string;
+  /** How `search` is interpreted. Defaults to 'any' on the server. */
+  searchMode?: SearchMode;
   showPrivate?: boolean;
   page?: number;
   pageSize?: number;
@@ -266,6 +276,9 @@ export const getDocuments = async (
     }
     if (filters.search) {
       params.append('search', filters.search);
+      if (filters.searchMode) {
+        params.append('search_mode', filters.searchMode);
+      }
     }
     if (filters.showPrivate) {
       params.append('show_private', 'true');
@@ -500,7 +513,10 @@ export const getActiveGuestLinks = async (
     if (filters.organisationId) params.append('organisation_id', filters.organisationId.toString());
     if (filters.projectId) params.append('project_id', filters.projectId.toString());
     if (filters.deliverableId) params.append('deliverable_id', filters.deliverableId.toString());
-    if (filters.search) params.append('search', filters.search);
+    if (filters.search) {
+      params.append('search', filters.search);
+      if (filters.searchMode) params.append('search_mode', filters.searchMode);
+    }
     if (filters.showPrivate) params.append('show_private', 'true');
     if (filters.status) params.append('status', filters.status);
     const response = await apiClient.get(`/drawings/documents/guest-links/?${params.toString()}`);

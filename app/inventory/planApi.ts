@@ -40,6 +40,7 @@ export interface PlanLine {
   qty: string;
   est_rate: string | null;
   done: boolean;
+  important: boolean; // BUY lines only: buy this first (priority)
   notes: string;
   added_to_inventory: number | null;
   item_code: string | null;
@@ -101,12 +102,19 @@ export const finishPlan = async (
 
 export const addBuyLine = async (
   plan: number,
-  d: { name: string; qty: number | string; unit: Unit; est_rate: number | string | null; for_line?: number }
+  d: {
+    name: string;
+    qty: number | string;
+    unit: Unit;
+    est_rate: number | string | null;
+    for_line?: number;
+    important?: boolean;
+  }
 ): Promise<PlanLine> => (await apiClient.post("/inventory/plan-lines/", { plan, ...d })).data;
 
 export const updateLine = async (
   id: number,
-  d: Partial<Pick<PlanLine, "done" | "qty" | "est_rate" | "name" | "unit" | "notes">>
+  d: Partial<Pick<PlanLine, "done" | "important" | "qty" | "est_rate" | "name" | "unit" | "notes">>
 ): Promise<PlanLine> => (await apiClient.patch(`/inventory/plan-lines/${id}/`, d)).data;
 
 export const deleteLine = async (id: number): Promise<void> => {

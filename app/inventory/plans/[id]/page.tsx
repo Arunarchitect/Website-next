@@ -7,6 +7,7 @@
  *   - nothing fits -> the last row adds what you typed to To buy
  *
  * Lines are edited with an Edit button; Save sends all changes in one update.
+ * To buy lines can be starred as priority; starred lines sort to the top.
  */
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -63,6 +64,43 @@ const qtyText = (n: number | string, unit: string) => {
 
 type Row = { kind: "item"; entry: Entry; inPlan: boolean } | { kind: "buy"; name: string };
 
+type SortKey = "priority" | "bought" | "boughtPriority" | "az" | "za" | "newest" | "oldest";
+
+const SORTS: { value: SortKey; label: string }[] = [
+  { value: "priority", label: "Priority first" },
+  { value: "bought", label: "Bought / packed first" },
+  { value: "boughtPriority", label: "Bought first, then priority" },
+  { value: "az", label: "A to Z" },
+  { value: "za", label: "Z to A" },
+  { value: "newest", label: "Newest added" },
+  { value: "oldest", label: "Oldest added" },
+];
+
+/** Returns a sorted copy. Lines have no date field, so "added" order is the line id (it only grows). */
+function sortLines(lines: PlanLine[], key: SortKey): PlanLine[] {
+  const byName = (a: PlanLine, b: PlanLine) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }) || a.id - b.id;
+  const arr = [...lines];
+  switch (key) {
+    case "bought": // ticked lines first (bought in To buy, packed in Taking)
+      return arr.sort((a, b) => Number(b.done) - Number(a.done) || a.id - b.id);
+    case "boughtPriority": // ticked lines first, then starred, then added order
+      return arr.sort(
+        (a, b) => Number(b.done) - Number(a.done) || Number(b.important) - Number(a.important) || a.id - b.id
+      );
+    case "az":
+      return arr.sort(byName);
+    case "za":
+      return arr.sort((a, b) => byName(b, a));
+    case "newest":
+      return arr.sort((a, b) => b.id - a.id);
+    case "oldest":
+      return arr.sort((a, b) => a.id - b.id);
+    default: // priority: starred first, then the order they were added
+      return arr.sort((a, b) => Number(b.important) - Number(a.important) || a.id - b.id);
+  }
+}
+
 export default function PlanPage() {
   const params = useParams<{ id: string }>();
   const planId = Number(params.id);
@@ -83,6 +121,9 @@ export default function PlanPage() {
   // Line editing (one line at a time)
   const [editId, setEditId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>({ name: "", qty: "", unit: "COUNT" as Unit, est_rate: "" });
+
+  // Sorting (applies to both Taking and To buy)
+  const [sortBy, setSortBy] = useState<SortKey>("priority");
 
   // Smart search
   const [query, setQuery] = useState("");
@@ -146,8 +187,9 @@ export default function PlanPage() {
     [plan]
   );
 
-  const taking = (plan?.lines ?? []).filter((l) => l.source === "ITEM");
-  const buying = (plan?.lines ?? []).filter((l) => l.source === "BUY");
+  const taking = sortLines((plan?.lines ?? []).filter((l) => l.source === "ITEM"), sortBy);
+  const buying = sortLines((plan?.lines ?? []).filter((l) => l.source === "BUY"), sortBy);
+  const priorityOpen = buying.filter((l) => l.important && !l.done).length;
   const buyTotal = buying.reduce((s, l) => s + (l.est_rate ? Number(l.est_rate) * Number(l.qty) : 0), 0);
   const isDone = plan?.status === "DONE";
 
@@ -280,8 +322,11 @@ export default function PlanPage() {
     }
   }
 
-  /** Used by the checkboxes (packed / bought). */
-  async function patchLine(line: PlanLine, patch: Partial<Pick<PlanLine, "done" | "qty" | "name" | "unit">>): Promise<Plan | null> {
+  /** Used by the checkboxes (packed / bought) and the priority star. */
+  async function patchLine(
+    line: PlanLine,
+    patch: Partial<Pick<PlanLine, "done" | "important" | "qty" | "name" | "unit">>
+  ): Promise<Plan | null> {
     setPlan((p) => p && { ...p, lines: p.lines.map((l) => (l.id === line.id ? { ...l, ...patch } : l)) });
     try {
       await updateLine(line.id, patch);
@@ -546,6 +591,22 @@ export default function PlanPage() {
         </div>
       )}
 
+      <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
+        <label htmlFor="plan-sort">Sort by</label>
+        <select
+          id="plan-sort"
+          className={`${field} py-1`}
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortKey)}
+        >
+          {SORTS.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         {/* ── Taking ────────────────────────────────────────────────── */}
         <section className="rounded border border-slate-200 bg-white p-4" aria-label="Taking">
@@ -647,9 +708,12 @@ export default function PlanPage() {
         <section className="rounded border border-slate-200 bg-white p-4" aria-label="To buy">
           <h2 className="mb-1 text-base font-semibold text-slate-900">
             To buy <span className="font-normal text-slate-500">({buying.filter((l) => l.done).length}/{buying.length} bought)</span>
+            {priorityOpen > 0 && (
+              <span className="ml-2 text-xs font-normal text-rose-700">{priorityOpen} priority</span>
+            )}
           </h2>
           <p className="mb-2 text-xs text-slate-500">
-            Tick Bought when you have it. Rented or borrowed things can stay here without going into inventory.
+            Tick Bought when you have it. Tap the star to buy something first. Rented or borrowed things can stay here without going into inventory.
           </p>
           {buying.length === 0 && <p className="text-sm text-slate-500">Nothing to buy. Type a new name above to add it here.</p>}
           <ul className="divide-y divide-slate-100">
@@ -664,6 +728,19 @@ export default function PlanPage() {
                     disabled={isDone}
                     onChange={(e) => patchLine(l, { done: e.target.checked })}
                   />
+                  <button
+                    type="button"
+                    disabled={isDone}
+                    aria-pressed={l.important}
+                    aria-label={l.important ? `Remove priority from ${l.name}` : `Mark ${l.name} as priority`}
+                    title={l.important ? "Priority: buy first" : "Mark as priority"}
+                    onClick={() => patchLine(l, { important: !l.important })}
+                    className={`text-lg leading-none ${
+                      l.important ? "text-amber-500" : "text-slate-300 hover:text-amber-500"
+                    } disabled:cursor-default disabled:hover:text-slate-300`}
+                  >
+                    {l.important ? "★" : "☆"}
+                  </button>
                   <div className="min-w-0 flex-1">
                     {editId === l.id ? (
                       <input
@@ -674,7 +751,12 @@ export default function PlanPage() {
                         onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                       />
                     ) : (
-                      <div className={`font-medium ${l.done ? "text-slate-400 line-through" : "text-slate-900"}`}>{l.name}</div>
+                      <div className={`font-medium ${l.done ? "text-slate-400 line-through" : "text-slate-900"}`}>
+                        {l.name}
+                        {l.important && !l.done && (
+                          <span className="ml-2 rounded bg-rose-50 px-1.5 py-0.5 text-xs font-normal text-rose-800">Priority</span>
+                        )}
+                      </div>
                     )}
                     {parent && <div className="mt-0.5 text-xs text-slate-500">Extra for {parent.item_code ?? parent.name}</div>}
                     <div className="mt-0.5 text-xs text-slate-500">

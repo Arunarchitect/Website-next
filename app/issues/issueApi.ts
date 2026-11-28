@@ -112,6 +112,7 @@ export interface GetIssuesParams {
   priority_in?: string;
   assigned_to?: number;
   search?: string;
+  search_mode?: string;
   ordering?: string;
   page?: number;
   page_size?: number;
