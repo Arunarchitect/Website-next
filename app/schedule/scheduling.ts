@@ -91,7 +91,8 @@ export function rollup(tasks: Task[]): Task[] {
   const map = new Map(tasks.map((t) => [t.id, { ...t }]));
   const kids = new Map<string, string[]>();
   tasks.forEach((t) => {
-    if (t.parentId) kids.set(t.parentId, [...(kids.get(t.parentId) ?? []), t.id]);
+    if (t.parentId)
+      kids.set(t.parentId, [...(kids.get(t.parentId) ?? []), t.id]);
   });
   const visit = (id: string) => {
     const k = kids.get(id);
@@ -108,12 +109,18 @@ export function rollup(tasks: Task[]): Task[] {
     g.completion = total > 0 ? Math.round(done / total) : 0;
     g.isMilestone = false;
 
-    const bStarts = ch.map((c) => c.baselineStart).filter((x): x is string => !!x);
-    const bFins = ch.map((c) => c.baselineFinish).filter((x): x is string => !!x);
+    const bStarts = ch
+      .map((c) => c.baselineStart)
+      .filter((x): x is string => !!x);
+    const bFins = ch
+      .map((c) => c.baselineFinish)
+      .filter((x): x is string => !!x);
     g.baselineStart = bStarts.length ? minIso(bStarts) : null;
     g.baselineFinish = bFins.length ? maxIso(bFins) : null;
 
-    const aStarts = ch.map((c) => c.actualStart).filter((x): x is string => !!x);
+    const aStarts = ch
+      .map((c) => c.actualStart)
+      .filter((x): x is string => !!x);
     const aFins = ch.map((c) => c.actualFinish).filter((x): x is string => !!x);
     g.actualStart = aStarts.length ? minIso(aStarts) : null;
     g.actualFinish = aFins.length === ch.length ? maxIso(aFins) : null;
@@ -153,7 +160,11 @@ export function finishVariance(t: Task): number | null {
  *  - back to 0                   -> actualStart and actualFinish cleared
  * actualFinish is never earlier than actualStart.
  */
-export function applyProgress(t: Task, completion: number, today: string): Task {
+export function applyProgress(
+  t: Task,
+  completion: number,
+  today: string,
+): Task {
   const c = Math.max(0, Math.min(100, completion));
   let actualStart = t.actualStart ?? null;
   let actualFinish = t.actualFinish ?? null;
@@ -164,7 +175,8 @@ export function applyProgress(t: Task, completion: number, today: string): Task 
   } else {
     if (!actualStart) actualStart = today;
     if (c >= 100) {
-      if (!actualFinish) actualFinish = today > actualStart ? today : actualStart;
+      if (!actualFinish)
+        actualFinish = today > actualStart ? today : actualStart;
     } else {
       actualFinish = null;
     }
@@ -183,13 +195,15 @@ export function completionBlocker(
   pct: number,
   tasks: Task[],
   seqs: Sequence[],
-  cal?: WorkingCalendar
+  cal?: WorkingCalendar,
 ): string | null {
   if (pct < 100) return null; // lowering is allowed; successors are reopened instead
 
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const names = (list: (Task | undefined)[]) =>
-    [...new Set(list.filter((t): t is Task => !!t).map((t) => `"${t.name}"`))].join(", ");
+    [
+      ...new Set(list.filter((t): t is Task => !!t).map((t) => `"${t.name}"`)),
+    ].join(", ");
 
   const open = seqs
     .filter((s) => s.relatedTask === id)
@@ -216,7 +230,7 @@ export function completionBlocker(
 export function reopenDownstream(
   tasks: Task[],
   seqs: Sequence[],
-  id: string
+  id: string,
 ): { tasks: Task[]; reopened: string[] } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const reopened = new Set<string>();
@@ -241,7 +255,7 @@ export function reopenDownstream(
     tasks: tasks.map((t) =>
       reopened.has(t.id)
         ? { ...t, completion: 0, actualStart: null, actualFinish: null }
-        : t
+        : t,
     ),
     reopened: [...reopened],
   };
@@ -252,8 +266,22 @@ export function reopenDownstream(
 const isLocked = (t: Task): boolean =>
   !!t.actualStart || !!t.actualFinish || t.completion > 0;
 
-/** Finished tasks: never moved by auto-schedule. */
-const isFinished = (t: Task): boolean => t.completion >= 100 || !!t.actualFinish;
+export const isFinished = (t: Task): boolean =>
+  t.completion >= 100 || !!t.actualFinish;
+
+/**
+ * Which calendar applies to this task. undefined = plain calendar days.
+ * Finished tasks are history; CONTINUOUS tasks (curing) run through holidays.
+ */
+export function calendarFor(
+  t: Task,
+  cal?: WorkingCalendar,
+): WorkingCalendar | undefined {
+  if (!cal) return undefined;
+  if (isFinished(t)) return undefined;
+  if (t.calendarMode === "CONTINUOUS") return undefined;
+  return cal;
+}
 
 /** Has real progress but is not finished. */
 const isInProgress = (t: Task): boolean =>
@@ -273,7 +301,7 @@ export function earliestCompletionDate(
   id: string,
   byId: Map<string, Task>,
   seqs: Sequence[],
-  cal?: WorkingCalendar
+  cal?: WorkingCalendar,
 ): string | null {
   let best: number | null = null;
   for (const s of seqs) {
@@ -319,7 +347,7 @@ function finalizeCompleted(
   tasks: Task[],
   parents: Set<string>,
   today: string,
-  cal?: WorkingCalendar
+  cal?: WorkingCalendar,
 ): Task[] {
   return tasks.map((t) => {
     if (parents.has(t.id)) return t;
@@ -338,18 +366,20 @@ function finalizeCompleted(
 
       if (u.isMilestone) return u;
 
+      // Finished/continuous tasks use plain calendar days.
+      const c = calendarFor(u, cal);
+
       // Started, not finished: planned dates follow reality.
-      // Start = actual start, same length, finish never before today.
       if (u.actualStart) {
         const start = u.actualStart;
         let finish: string;
-        if (cal) {
+        if (c) {
           const wdur = Math.max(
             1,
-            countWorkdays(u.scheduleStart, u.scheduleFinish, cal)
+            countWorkdays(u.scheduleStart, u.scheduleFinish, c),
           );
-          finish = addWorkdays(nextWorkday(start, cal), wdur - 1, cal);
-          if (finish < today) finish = nextWorkday(today, cal);
+          finish = addWorkdays(nextWorkday(start, c), wdur - 1, c);
+          if (finish < today) finish = nextWorkday(today, c);
         } else {
           const dur = toDay(u.scheduleFinish) - toDay(u.scheduleStart);
           finish = toISO(toDay(start) + Math.max(0, dur));
@@ -359,21 +389,15 @@ function finalizeCompleted(
         return { ...u, scheduleStart: start, scheduleFinish: finish };
       }
 
-      // Has progress but no actual start: just extend a past finish to today.
-      // (0% tasks are left alone; the scheduler re-places them.)
       if (u.completion > 0 && u.scheduleFinish < today) {
-        return {
-          ...u,
-          scheduleFinish: cal ? nextWorkday(today, cal) : today,
-        };
+        return { ...u, scheduleFinish: c ? nextWorkday(today, c) : today };
       }
       return u;
     }
 
     // ---- completed tasks: actual dates are the truth, nothing in the future ----
     let actualFinish =
-      t.actualFinish ??
-      (t.scheduleFinish <= today ? t.scheduleFinish : today);
+      t.actualFinish ?? (t.scheduleFinish <= today ? t.scheduleFinish : today);
     if (actualFinish > today) actualFinish = today;
 
     let actualStart =
@@ -409,7 +433,10 @@ function topoOrder(ids: string[], seqs: Sequence[]): string[] {
   for (const s of seqs) {
     if (!idSet.has(s.relatingTask) || !idSet.has(s.relatedTask)) continue;
     indeg.set(s.relatedTask, (indeg.get(s.relatedTask) ?? 0) + 1);
-    succ.set(s.relatingTask, [...(succ.get(s.relatingTask) ?? []), s.relatedTask]);
+    succ.set(s.relatingTask, [
+      ...(succ.get(s.relatingTask) ?? []),
+      s.relatedTask,
+    ]);
   }
   const queue = ids.filter((id) => indeg.get(id) === 0);
   const order: string[] = [];
@@ -443,10 +470,10 @@ function topoOrder(ids: string[], seqs: Sequence[]): string[] {
 export function autoSchedule(
   tasks: Task[],
   seqs: Sequence[],
-  compress = true
+  compress = true,
 ): Task[] {
   const parents = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
   );
   const today = todayISO();
   tasks = finalizeCompleted(tasks, parents, today);
@@ -458,7 +485,10 @@ export function autoSchedule(
   const anchor = Math.max(earliest, toDay(today));
   const map = new Map(tasks.map((t) => [t.id, t]));
 
-  for (const id of topoOrder(leaves.map((t) => t.id), seqs)) {
+  for (const id of topoOrder(
+    leaves.map((t) => t.id),
+    seqs,
+  )) {
     const q = map.get(id);
     if (!q || isLocked(q)) continue;
     const qs = toDay(q.scheduleStart);
@@ -523,10 +553,10 @@ export function autoScheduleWorkdays(
   tasks: Task[],
   seqs: Sequence[],
   cal: WorkingCalendar,
-  compress = true
+  compress = true,
 ): Task[] {
   const parents = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
   );
   const today = todayISO();
   tasks = finalizeCompleted(tasks, parents, today, cal);
@@ -536,23 +566,28 @@ export function autoScheduleWorkdays(
 
   const earliest = Math.min(...leaves.map((t) => toDay(t.scheduleStart)));
   const anchor = toDay(
-    nextWorkday(toISO(Math.max(earliest, toDay(today))), cal)
+    nextWorkday(toISO(Math.max(earliest, toDay(today))), cal),
   );
   const map = new Map(tasks.map((t) => [t.id, t]));
 
-  for (const id of topoOrder(leaves.map((t) => t.id), seqs)) {
+  for (const id of topoOrder(
+    leaves.map((t) => t.id),
+    seqs,
+  )) {
     const q = map.get(id);
     if (!q) continue;
 
     // Finished = history. Never moved, never reopened, links ignored.
     if (isFinished(q)) continue;
 
+    // CONTINUOUS (curing etc.): calendar days, no snapping. Successors still
+    // snap forward to the next working day.
+    const cont = calendarFor(q, cal) === undefined;
     const inProgress = isInProgress(q);
     const qs = toDay(q.scheduleStart);
-    const wdur = Math.max(
-      1,
-      countWorkdays(q.scheduleStart, q.scheduleFinish, cal)
-    );
+    const wdur = cont
+      ? Math.max(1, durationDays(q))
+      : Math.max(1, countWorkdays(q.scheduleStart, q.scheduleFinish, cal));
 
     let target: number | null = null;
     for (const s of seqs) {
@@ -569,8 +604,13 @@ export function autoScheduleWorkdays(
         case "FINISH_FINISH":
         case "START_FINISH": {
           const anchorDay = s.sequenceType === "FINISH_FINISH" ? pf : ps;
+          if (cont) {
+            earliestDay = anchorDay + s.lagDays - (wdur - 1);
+            break;
+          }
           let d = nextWorkday(toISO(anchorDay + s.lagDays), cal);
-          for (let i = 0; i < wdur - 1; i++) d = prevWorkday(toISO(toDay(d) - 1), cal);
+          for (let i = 0; i < wdur - 1; i++)
+            d = prevWorkday(toISO(toDay(d) - 1), cal);
           earliestDay = toDay(d);
           break;
         }
@@ -584,7 +624,6 @@ export function autoScheduleWorkdays(
 
     let startDay: number;
     if (inProgress) {
-      // Started task: only push later, never pull earlier, never to the anchor.
       if (target === null) continue;
       startDay = Math.max(target, qs);
     } else {
@@ -592,8 +631,10 @@ export function autoScheduleWorkdays(
       if (!compress) startDay = Math.max(startDay, qs);
     }
 
-    const start = nextWorkday(toISO(startDay), cal);
-    const finish = addWorkdays(start, wdur - 1, cal);
+    const start = cont ? toISO(startDay) : nextWorkday(toISO(startDay), cal);
+    const finish = cont
+      ? toISO(toDay(start) + wdur - 1)
+      : addWorkdays(start, wdur - 1, cal);
 
     if (start !== q.scheduleStart || finish !== q.scheduleFinish) {
       map.set(id, { ...q, scheduleStart: start, scheduleFinish: finish });
@@ -606,7 +647,7 @@ export function autoScheduleWorkdays(
 export function wouldCycle(
   seqs: Sequence[],
   predecessor: string,
-  successor: string
+  successor: string,
 ): boolean {
   if (predecessor === successor) return true;
   const stack = [successor];
@@ -623,6 +664,61 @@ export function wouldCycle(
   return false;
 }
 
+export interface RemovedLink {
+  seq: Sequence;
+  reason: string;
+}
+
+/**
+ * Single source of truth for link validity. Removes links that:
+ *  - point to a missing task
+ *  - are self links
+ *  - touch a group (a task with children), including parent<->child
+ *  - are duplicates
+ *  - would close a cycle
+ * Returns the SAME array when nothing was removed.
+ */
+export function sanitizeLinks(
+  tasks: Task[],
+  seqs: Sequence[],
+): { sequences: Sequence[]; removed: RemovedLink[] } {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const groups = new Set(
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
+  );
+  const name = (id: string) => `"${byId.get(id)?.name ?? id}"`;
+
+  const kept: Sequence[] = [];
+  const removed: RemovedLink[] = [];
+  const pairs = new Set<string>();
+
+  for (const s of seqs) {
+    const a = s.relatingTask;
+    const b = s.relatedTask;
+    let reason: string | null = null;
+
+    if (!byId.has(a) || !byId.has(b)) {
+      reason = "a linked task no longer exists";
+    } else if (a === b) {
+      reason = `${name(a)} is linked to itself`;
+    } else if (groups.has(a) || groups.has(b)) {
+      const g = groups.has(a) ? a : b;
+      reason = `${name(g)} is a group; link its activities instead`;
+    } else if (pairs.has(`${a}>${b}`)) {
+      reason = `duplicate link ${name(a)} → ${name(b)}`;
+    } else if (wouldCycle(kept, a, b)) {
+      reason = `circular link ${name(a)} → ${name(b)}`;
+    }
+
+    if (reason) {
+      removed.push({ seq: s, reason });
+      continue;
+    }
+    pairs.add(`${a}>${b}`);
+    kept.push(s);
+  }
+  return { sequences: removed.length ? kept : seqs, removed };
+}
 // ---------- duration (calendar-day) ----------
 /**
  * Change a task's duration by shifting its finish date.
@@ -638,22 +734,24 @@ export function setDuration(task: Task, newDays: number): Task {
 
 // ---------- duration (working-day) ----------
 export function durationWorkdays(task: Task, cal?: WorkingCalendar): number {
-  if (!cal) return durationDays(task);
-  return Math.max(1, countWorkdays(task.scheduleStart, task.scheduleFinish, cal));
+  const c = calendarFor(task, cal);
+  if (!c) return durationDays(task);
+  return Math.max(1, countWorkdays(task.scheduleStart, task.scheduleFinish, c));
 }
 
 export function setDurationWithCalendar(
   task: Task,
   newDays: number,
-  cal?: WorkingCalendar
+  cal?: WorkingCalendar,
 ): Task {
   const days = Math.max(1, Math.round(newDays));
-  if (!cal) {
+  const c = calendarFor(task, cal);
+  if (!c) {
     const startDay = toDay(task.scheduleStart);
     return { ...task, scheduleFinish: toISO(startDay + days - 1) };
   }
-  const start = nextWorkday(task.scheduleStart, cal);
-  const finish = addWorkdays(start, days - 1, cal);
+  const start = nextWorkday(task.scheduleStart, c);
+  const finish = addWorkdays(start, days - 1, c);
   return { ...task, scheduleStart: start, scheduleFinish: finish };
 }
 
@@ -678,7 +776,7 @@ export function hasHolidayInside(task: Task, cal: WorkingCalendar): boolean {
 export function snapRangeToWorkdays(
   startISO: string,
   finishISO: string,
-  cal: WorkingCalendar
+  cal: WorkingCalendar,
 ): { start: string; finish: string } {
   const start = nextWorkday(startISO, cal);
   let finish = prevWorkday(finishISO, cal);
@@ -689,7 +787,7 @@ export function snapRangeToWorkdays(
 /** ISO-8601 week number for a date (used for Gantt week labels). */
 export function isoWeek(date: Date): number {
   const d = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
   );
   const day = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - day);
@@ -705,7 +803,7 @@ function compareTasks(
   rolled: Map<string, Task>,
   a: Task,
   b: Task,
-  key: SortKey
+  key: SortKey,
 ): number {
   const ra = rolled.get(a.id) ?? a;
   const rb = rolled.get(b.id) ?? b;
@@ -746,7 +844,7 @@ export function sortTasks(
   parentId: string | null,
   key: SortKey,
   dir: "asc" | "desc" = "asc",
-  deep = false
+  deep = false,
 ): Task[] {
   const r = new Map(rolled.map((t) => [t.id, t]));
   const sign = dir === "asc" ? 1 : -1;
@@ -779,9 +877,7 @@ export function sortTasks(
       }
     });
     // Array.prototype.sort is stable, so ties keep their current order.
-    const sorted = [...sibs].sort(
-      (a, b) => sign * compareTasks(r, a, b, key)
-    );
+    const sorted = [...sibs].sort((a, b) => sign * compareTasks(r, a, b, key));
     slots.forEach((slot, i) => (out[slot] = sorted[i]));
   }
   return out;
@@ -801,11 +897,11 @@ export function sortLeafTasks(
   tasks: Task[],
   rolled: Task[],
   key: SortKey,
-  dir: "asc" | "desc" = "asc"
+  dir: "asc" | "desc" = "asc",
 ): Task[] {
   const r = new Map(rolled.map((t) => [t.id, t]));
   const hasKids = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
   );
   const sign = dir === "asc" ? 1 : -1;
 
@@ -828,7 +924,7 @@ export function sortLeafTasks(
     });
     if (leaves.length < 2) continue;
     const sorted = [...leaves].sort(
-      (a, b) => sign * compareTasks(r, a, b, key)
+      (a, b) => sign * compareTasks(r, a, b, key),
     );
     slots.forEach((slot, i) => {
       out[slot] = sorted[i];
@@ -848,7 +944,7 @@ export function sortLeafTasks(
 export function moveTaskWithinSiblings(
   tasks: Task[],
   id: string,
-  dir: "up" | "down"
+  dir: "up" | "down",
 ): Task[] {
   const idx = tasks.findIndex((t) => t.id === id);
   if (idx < 0) return tasks;

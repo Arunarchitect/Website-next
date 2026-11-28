@@ -26,11 +26,13 @@ import {
   moveTaskWithinSiblings,
   reopenDownstream,
   rollup,
+  sanitizeLinks,
   setBaseline,
   setDurationWithCalendar,
   snapRangeToWorkdays,
   sortLeafTasks,
   sortTasks,
+  calendarFor,
   toDay,
   toISO,
   todayISO,
@@ -190,10 +192,10 @@ export default function ScheduleView() {
   const [pickerError, setPickerError] = useState<string | null>(null);
 
   const [projectId, setProjectId] = useState<number | null>(() =>
-    readParam("project")
+    readParam("project"),
   );
   const [scheduleId, setScheduleId] = useState<number | null>(() =>
-    readParam("schedule")
+    readParam("schedule"),
   );
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -232,7 +234,7 @@ export default function ScheduleView() {
   const [nextIdx, setNextIdx] = useState(0);
 
   const [calendar, setCalendar] = useState<WorkingCalendar>(() =>
-    emptyCalendar()
+    emptyCalendar(),
   );
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [useWorkdays, setUseWorkdays] = useState(true);
@@ -253,7 +255,7 @@ export default function ScheduleView() {
         setPeople(r.people);
         setMePersonId(r.mePersonId);
       })
-      .catch(() => { });
+      .catch(() => {});
     return () => {
       off = true;
     };
@@ -299,8 +301,8 @@ export default function ScheduleView() {
       setLeftW(
         Math.min(
           LEFT_COL_MAX,
-          Math.max(LEFT_COL_MIN, startW + ev.clientX - startX)
-        )
+          Math.max(LEFT_COL_MIN, startW + ev.clientX - startX),
+        ),
       );
     };
     const up = () => {
@@ -341,7 +343,7 @@ export default function ScheduleView() {
       .catch((e) => {
         if (cancelled) return;
         setPickerError(
-          e instanceof Error ? e.message : "Failed to load projects"
+          e instanceof Error ? e.message : "Failed to load projects",
         );
       })
       .finally(() => {
@@ -380,11 +382,11 @@ export default function ScheduleView() {
       setCalendar(
         d.calendar
           ? deserialize(d.calendar as SerializedCalendar)
-          : emptyCalendar()
+          : emptyCalendar(),
       );
       undo.clear();
     },
-    [undo.clear]
+    [undo.clear],
   );
 
   // ---------- backend sync ----------
@@ -406,6 +408,20 @@ export default function ScheduleView() {
   const isMainLocked = currentSched?.scope === "MAIN" && !isViewOnly;
   const readOnly = isViewOnly || !sync.canEdit || isMainLocked;
   const ready = !["loading", "empty", "failed"].includes(sync.status);
+  // Safety net: whatever route a bad link took (add child, move, editor
+  // parent change, paste, import, old data), remove it and tell the user.
+  useEffect(() => {
+    if (!ready || readOnly) return;
+    const { sequences: clean, removed } = sanitizeLinks(tasks, sequences);
+    if (!removed.length) return;
+    setSequences(clean);
+    setCopiedMsg(
+      `Removed ${removed.length} invalid link${removed.length > 1 ? "s" : ""}: ${removed[0].reason}` +
+        (removed.length > 1 ? ` (+${removed.length - 1} more)` : ""),
+    );
+    setTimeout(() => setCopiedMsg(null), 6000);
+    console.warn("Removed invalid links", removed);
+  }, [tasks, sequences, ready, readOnly]);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
 
@@ -432,7 +448,13 @@ export default function ScheduleView() {
       const k = e.key.toLowerCase();
       if (k !== "z" && k !== "y") return;
       if (isTextEntry(e.target as HTMLElement | null)) return; // native text undo
-      if (editingId || pasteOpen || scopedPasteOpen || calendarOpen || compareOpen)
+      if (
+        editingId ||
+        pasteOpen ||
+        scopedPasteOpen ||
+        calendarOpen ||
+        compareOpen
+      )
         return;
       e.preventDefault();
       const isRedo = k === "y" || e.shiftKey;
@@ -515,12 +537,12 @@ export default function ScheduleView() {
       useWorkdays
         ? computeCpmWorkdays(tasks, sequences, calendar)
         : computeCpm(tasks, sequences),
-    [tasks, sequences, useWorkdays, calendar]
+    [tasks, sequences, useWorkdays, calendar],
   );
 
   const { current, next: nextAuto } = useMemo(
     () => findCurrentAndNext(tasks, cpm, todayDay),
-    [tasks, cpm, todayDay]
+    [tasks, cpm, todayDay],
   );
 
   const nowList = useMemo(() => {
@@ -530,11 +552,11 @@ export default function ScheduleView() {
 
   const upcoming = useMemo(
     () => upcomingQueue(tasks, cpm, todayDay),
-    [tasks, cpm, todayDay]
+    [tasks, cpm, todayDay],
   );
   useEffect(() => {
     setNextIdx((i) =>
-      Math.min(Math.max(0, i), Math.max(0, upcoming.length - 1))
+      Math.min(Math.max(0, i), Math.max(0, upcoming.length - 1)),
     );
   }, [upcoming.length]);
 
@@ -560,7 +582,7 @@ export default function ScheduleView() {
       if (el) {
         el.scrollLeft = Math.max(
           0,
-          pendingCenter.current * zoom - el.clientWidth / 2
+          pendingCenter.current * zoom - el.clientWidth / 2,
         );
       }
       pendingCenter.current = null;
@@ -656,7 +678,7 @@ export default function ScheduleView() {
       completion,
       tasks,
       sequences,
-      useWorkdays ? calendar : undefined
+      useWorkdays ? calendar : undefined,
     );
     if (problem) {
       notify(problem); // slider snaps back because it is controlled
@@ -681,7 +703,7 @@ export default function ScheduleView() {
         ) {
           u = {
             ...u,
-            scheduleFinish: useWorkdays
+            scheduleFinish: calendarFor(u, useWorkdays ? calendar : undefined)
               ? nextWorkday(todayStr, calendar)
               : todayStr,
           };
@@ -699,7 +721,7 @@ export default function ScheduleView() {
   const updateActual = (
     id: string,
     field: "actualStart" | "actualFinish",
-    value: string
+    value: string,
   ) =>
     setTasks((prev) =>
       prev.map((t) => {
@@ -714,11 +736,13 @@ export default function ScheduleView() {
           nextTask.actualFinish = nextTask.actualStart;
         }
         if (nextTask.completion >= 100) {
-          if (nextTask.actualStart) nextTask.scheduleStart = nextTask.actualStart;
-          if (nextTask.actualFinish) nextTask.scheduleFinish = nextTask.actualFinish;
+          if (nextTask.actualStart)
+            nextTask.scheduleStart = nextTask.actualStart;
+          if (nextTask.actualFinish)
+            nextTask.scheduleFinish = nextTask.actualFinish;
         }
         return nextTask;
-      })
+      }),
     );
 
   const setBaselineNow = () => {
@@ -739,20 +763,17 @@ export default function ScheduleView() {
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
-        if (!useWorkdays) {
+        const c = calendarFor(t, useWorkdays ? calendar : undefined);
+        if (!c) {
           return {
             ...t,
             scheduleStart: start,
             scheduleFinish: finish < start ? start : finish,
           };
         }
-        const { start: s, finish: f } = snapRangeToWorkdays(
-          start,
-          finish,
-          calendar
-        );
+        const { start: s, finish: f } = snapRangeToWorkdays(start, finish, c);
         return { ...t, scheduleStart: s, scheduleFinish: f };
-      })
+      }),
     );
 
   // Calendar-day math when no calendar is passed, working-day math when it is.
@@ -761,12 +782,12 @@ export default function ScheduleView() {
       prev.map((t) =>
         t.id === id
           ? setDurationWithCalendar(
-            t,
-            newDays,
-            useWorkdays ? calendar : undefined
-          )
-          : t
-      )
+              t,
+              newDays,
+              useWorkdays ? calendar : undefined,
+            )
+          : t,
+      ),
     );
 
   const predecessorsOf = (id: string) =>
@@ -796,7 +817,7 @@ export default function ScheduleView() {
 
   const updateSequence = (id: string, patch: Partial<Sequence>) =>
     setSequences((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+      prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
     );
 
   const removeSequence = (id: string) =>
@@ -836,7 +857,7 @@ export default function ScheduleView() {
     setFlashId(id);
     setTimeout(
       () => setFlashId((cur) => (cur === id ? null : cur)),
-      HIGHLIGHT_MS
+      HIGHLIGHT_MS,
     );
   };
 
@@ -862,7 +883,7 @@ export default function ScheduleView() {
     if (sortLeavesOnly) {
       setTasks((prev) => sortLeafTasks(prev, rolled, key, dir));
       notify(
-        `Sorted end tasks by ${SORT_KEY_LABEL[key]} (${dir === "asc" ? "ascending" : "descending"})`
+        `Sorted end tasks by ${SORT_KEY_LABEL[key]} (${dir === "asc" ? "ascending" : "descending"})`,
       );
       setSortMenuOpen(false);
       return;
@@ -872,13 +893,13 @@ export default function ScheduleView() {
       ? null
       : tasks.some((c) => c.parentId === sel.id)
         ? sel.id
-        : sel.parentId ?? null;
+        : (sel.parentId ?? null);
     setTasks((prev) => sortTasks(prev, rolled, parent, key, dir, sortDeep));
     const where = parent
       ? `"${tasks.find((t) => t.id === parent)?.name ?? "group"}"`
       : "top level";
     notify(
-      `Sorted ${where} by ${SORT_KEY_LABEL[key]} (${dir === "asc" ? "ascending" : "descending"})`
+      `Sorted ${where} by ${SORT_KEY_LABEL[key]} (${dir === "asc" ? "ascending" : "descending"})`,
     );
     setSortMenuOpen(false);
   };
@@ -891,7 +912,7 @@ export default function ScheduleView() {
     setFlashId(id);
     setTimeout(
       () => setFlashId((cur) => (cur === id ? null : cur)),
-      HIGHLIGHT_MS
+      HIGHLIGHT_MS,
     );
   };
 
@@ -966,7 +987,7 @@ export default function ScheduleView() {
     setFlashId(id);
     setTimeout(
       () => setFlashId((cur) => (cur === id ? null : cur)),
-      HIGHLIGHT_MS
+      HIGHLIGHT_MS,
     );
   };
 
@@ -978,16 +999,16 @@ export default function ScheduleView() {
     return prev.map((t) =>
       t.id === parentId
         ? {
-          ...t,
-          scheduleStart: r.scheduleStart,
-          scheduleFinish: r.scheduleFinish,
-          baselineStart: r.baselineStart,
-          baselineFinish: r.baselineFinish,
-          actualStart: r.actualStart,
-          actualFinish: r.actualFinish,
-          completion: r.completion,
-        }
-        : t
+            ...t,
+            scheduleStart: r.scheduleStart,
+            scheduleFinish: r.scheduleFinish,
+            baselineStart: r.baselineStart,
+            baselineFinish: r.baselineFinish,
+            actualStart: r.actualStart,
+            actualFinish: r.actualFinish,
+            completion: r.completion,
+          }
+        : t,
     );
   };
 
@@ -1007,12 +1028,12 @@ export default function ScheduleView() {
     setTasks((prev) =>
       freezeIfLeaf(
         prev.filter((t) => !toRemove.has(t.id)),
-        parentOfRoot && !toRemove.has(parentOfRoot) ? parentOfRoot : null
-      )
+        parentOfRoot && !toRemove.has(parentOfRoot) ? parentOfRoot : null,
+      ),
     );
     setSequences((prev) => {
       const kept = prev.filter(
-        (s) => !toRemove.has(s.relatingTask) && !toRemove.has(s.relatedTask)
+        (s) => !toRemove.has(s.relatingTask) && !toRemove.has(s.relatedTask),
       );
 
       // Bridge predecessors to successors only when deleting a single leaf task.
@@ -1029,7 +1050,8 @@ export default function ScheduleView() {
           const b = s.relatedTask;
           if (a === b) continue;
           // skip if a link a -> b already exists
-          if (result.some((x) => x.relatingTask === a && x.relatedTask === b)) continue;
+          if (result.some((x) => x.relatingTask === a && x.relatedTask === b))
+            continue;
           // skip if it would create a cycle
           if (wouldCycle(result, a, b)) continue;
           result.push({
@@ -1049,7 +1071,7 @@ export default function ScheduleView() {
     setMenuFor((cur) => (cur && toRemove.has(cur) ? null : cur));
     setEditingId((cur) => (cur && toRemove.has(cur) ? null : cur));
   };
-  
+
   const updateTask = (id: string, incoming: Partial<Task>) => {
     let patch: Partial<Task> = incoming;
     const existing = tasks.find((t) => t.id === id);
@@ -1064,7 +1086,7 @@ export default function ScheduleView() {
         incoming.completion,
         tasks,
         sequences,
-        useWorkdays ? calendar : undefined
+        useWorkdays ? calendar : undefined,
       );
       if (problem) {
         notify(problem);
@@ -1105,8 +1127,8 @@ export default function ScheduleView() {
     setTasks((prev) =>
       freezeIfLeaf(
         prev.map((t) => (t.id === id ? { ...t, parentId: newParent } : t)),
-        oldParent === newParent ? null : oldParent
-      )
+        oldParent === newParent ? null : oldParent,
+      ),
     );
     if (newParent) {
       setCollapsed((prev) => {
@@ -1119,7 +1141,7 @@ export default function ScheduleView() {
     setFlashId(id);
     setTimeout(
       () => setFlashId((cur) => (cur === id ? null : cur)),
-      HIGHLIGHT_MS
+      HIGHLIGHT_MS,
     );
   };
 
@@ -1411,7 +1433,7 @@ export default function ScheduleView() {
                 setScheduleId(id);
                 listMyProjects()
                   .then(setMyProjects)
-                  .catch(() => { });
+                  .catch(() => {});
               }
             }}
             className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
@@ -1461,10 +1483,10 @@ export default function ScheduleView() {
   const criticalCount = cpm.criticalIds.size;
   const hasBaseline = tasks.some((t) => t.baselineFinish);
   const parentIdSet = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
   );
   const lateCount = tasks.filter(
-    (t) => !parentIdSet.has(t.id) && (finishVariance(t) ?? 0) > 0
+    (t) => !parentIdSet.has(t.id) && (finishVariance(t) ?? 0) > 0,
   ).length;
   const criticalDuration = cpm.projectFinish - cpm.projectStart + 1;
   // TEMP DEBUG: root causes of drift
@@ -1487,7 +1509,9 @@ export default function ScheduleView() {
     .filter((t) => isDrifted(t.id))
     .filter(
       (t) =>
-        !sequences.some((s) => s.relatedTask === t.id && isDrifted(s.relatingTask))
+        !sequences.some(
+          (s) => s.relatedTask === t.id && isDrifted(s.relatingTask),
+        ),
     )
     .map((t) => ({
       id: t.id,
@@ -1507,7 +1531,7 @@ export default function ScheduleView() {
     .slice(0, 5);
 
   const editingTask = editingId
-    ? rolled.find((t) => t.id === editingId) ?? null
+    ? (rolled.find((t) => t.id === editingId) ?? null)
     : null;
 
   const handleRowAction = (task: Task, action: RowMenuAction) => {
@@ -1532,13 +1556,13 @@ export default function ScheduleView() {
           withDescendants(task.id, tasks),
           tasks,
           sequences,
-          people
+          people,
         ).then((r) => {
           setCopiedMsg(r.message);
           setFlashId(task.id);
           setTimeout(
             () => setFlashId((c) => (c === task.id ? null : c)),
-            HIGHLIGHT_MS
+            HIGHLIGHT_MS,
           );
           setTimeout(() => setCopiedMsg(null), 4000);
           if (!r.ok) window.alert(r.message);
@@ -1548,7 +1572,7 @@ export default function ScheduleView() {
       case "delete":
         if (
           window.confirm(
-            `Delete "${task.name}" and everything under it? This cannot be undone.`
+            `Delete "${task.name}" and everything under it? This cannot be undone.`,
           )
         ) {
           deleteTask(task.id);
@@ -1561,7 +1585,9 @@ export default function ScheduleView() {
   };
 
   const copyBaselineJson = async () => {
-    const withBaseline = rolled.filter((t) => t.baselineStart && t.baselineFinish);
+    const withBaseline = rolled.filter(
+      (t) => t.baselineStart && t.baselineFinish,
+    );
     if (!withBaseline.length) {
       notify("No baseline set yet.");
       return;
@@ -1584,7 +1610,7 @@ export default function ScheduleView() {
         ...(t.remarks ? { remarks: t.remarks } : {}),
       })),
       sequences: sequences.filter(
-        (s) => ids.has(s.relatingTask) && ids.has(s.relatedTask)
+        (s) => ids.has(s.relatingTask) && ids.has(s.relatedTask),
       ),
     };
 
@@ -1614,7 +1640,7 @@ export default function ScheduleView() {
   const refreshProjects = () =>
     listMyProjects()
       .then(setMyProjects)
-      .catch(() => { });
+      .catch(() => {});
 
   const applyDoc = (doc: ScheduleDoc) => {
     setTasks(doc.tasks);
@@ -1649,12 +1675,12 @@ export default function ScheduleView() {
 
   const setAssignees = (id: string, ids: number[]) =>
     setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, assigneeIds: ids } : t))
+      prev.map((t) => (t.id === id ? { ...t, assigneeIds: ids } : t)),
     );
 
   const handleAddPerson = async (
     name: string,
-    email: string
+    email: string,
   ): Promise<SchedulePerson | null> => {
     if (projectId == null) return null;
     try {
@@ -1662,7 +1688,7 @@ export default function ScheduleView() {
       setPeople((prev) =>
         prev.some((x) => x.id === p.id)
           ? prev.map((x) => (x.id === p.id ? p : x))
-          : [...prev, p]
+          : [...prev, p],
       );
       return p;
     } catch (e) {
@@ -1675,7 +1701,7 @@ export default function ScheduleView() {
     if (!meta) return;
     if (
       !window.confirm(
-        "Replace your copy with the current main schedule? Your changes will be discarded (a snapshot is kept)."
+        "Replace your copy with the current main schedule? Your changes will be discarded (a snapshot is kept).",
       )
     )
       return;
@@ -1694,7 +1720,7 @@ export default function ScheduleView() {
     if (!meta) return;
     if (
       !window.confirm(
-        `Overwrite the main schedule with ${meta.ownerName ?? "this"}'s copy? The current main is snapshotted first.`
+        `Overwrite the main schedule with ${meta.ownerName ?? "this"}'s copy? The current main is snapshotted first.`,
       )
     )
       return;
@@ -1712,7 +1738,8 @@ export default function ScheduleView() {
   };
 
   const mySchedId =
-    currentProject?.schedules.find((s) => s.isMine && s.scope === "PERSONAL")?.id ?? null;
+    currentProject?.schedules.find((s) => s.isMine && s.scope === "PERSONAL")
+      ?.id ?? null;
 
   const toggleChecked = (id: string) =>
     setCheckedIds((prev) => {
@@ -1727,26 +1754,31 @@ export default function ScheduleView() {
 
   const toggleAllVisible = () =>
     setCheckedIds(
-      allVisibleChecked ? new Set() : new Set(rows.map((r) => r.task.id))
+      allVisibleChecked ? new Set() : new Set(rows.map((r) => r.task.id)),
     );
 
   const selectionIds = (): string[] =>
     includeChildren
       ? [
-        ...new Set(
-          [...checkedIds].flatMap((id) => withDescendants(id, tasks))
-        ),
-      ]
+          ...new Set(
+            [...checkedIds].flatMap((id) => withDescendants(id, tasks)),
+          ),
+        ]
       : [...checkedIds];
 
   const applyPaste = (data: SelectionJson) => {
     const r = applySelection(data, tasks, sequences);
+    const { sequences: clean, removed } = sanitizeLinks(r.tasks, r.sequences);
     setTasks(r.tasks);
-    setSequences(r.sequences);
+    setSequences(clean);
     setPasteOpen(false);
     setScopedPasteOpen(false);
-    setCopiedMsg("Changes applied.");
-    setTimeout(() => setCopiedMsg(null), 4000);
+    setCopiedMsg(
+      removed.length
+        ? `Changes applied. Removed ${removed.length} invalid link(s): ${removed[0].reason}`
+        : "Changes applied.",
+    );
+    setTimeout(() => setCopiedMsg(null), 5000);
   };
 
   const copySelected = () => {
@@ -1772,7 +1804,7 @@ export default function ScheduleView() {
   const hasNextQueue = upcoming.length > 1;
 
   const currentScheduleMeta = currentProject?.schedules.find(
-    (s) => s.id === scheduleId
+    (s) => s.id === scheduleId,
   );
   const heading =
     currentScheduleMeta?.name ?? currentProject?.name ?? demoSchedule.name;
@@ -1997,8 +2029,8 @@ export default function ScheduleView() {
               {sortMenuOpen && (
                 <div className="absolute right-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-md border bg-white text-xs shadow-lg">
                   <div className="border-b bg-gray-50 px-3 py-1.5 text-[10px] text-gray-500">
-                    Applies to the selected group (or the siblings of the selected
-                    activity). Nothing selected = top level.
+                    Applies to the selected group (or the siblings of the
+                    selected activity). Nothing selected = top level.
                   </div>
                   {SORT_OPTIONS.map(([k, d, label]) => (
                     <button
@@ -2028,8 +2060,8 @@ export default function ScheduleView() {
                       onChange={(e) => setSortLeavesOnly(e.target.checked)}
                     />
                     <span>
-                      Sort end tasks only — never reorder phases or the top level, just the
-                      lowest-level tasks inside each group
+                      Sort end tasks only — never reorder phases or the top
+                      level, just the lowest-level tasks inside each group
                     </span>
                   </label>
                 </div>
@@ -2117,7 +2149,8 @@ export default function ScheduleView() {
           data-print-hide
         >
           <span>
-            This is the <b>main schedule</b> and it is read-only. Edit your own copy
+            This is the <b>main schedule</b> and it is read-only. Edit your own
+            copy
             {isAdmin ? ", then promote it to replace main." : "."}
           </span>
           {mySchedId != null ? (
@@ -2154,10 +2187,10 @@ export default function ScheduleView() {
             ⚠ There&apos;s a problem with the schedule links
           </div>
           <p className="mb-2">
-            The links push these tasks later than their planned dates, so the header
-            finish ({fmtDate(cpm.projectFinish)}) differs from the Gantt finish (
-            {fmtDate(maxDay)}). Fix the link type or lag in the Predecessors column,
-            or move the task&apos;s dates.
+            The links push these tasks later than their planned dates, so the
+            header finish ({fmtDate(cpm.projectFinish)}) differs from the Gantt
+            finish ({fmtDate(maxDay)}). Fix the link type or lag in the
+            Predecessors column, or move the task&apos;s dates.
           </p>
           <ul className="space-y-1">
             {linkProblems.map((r) => (
@@ -2169,7 +2202,8 @@ export default function ScheduleView() {
                 >
                   {r.name}
                 </button>
-                : planned finish {r.stored}, links force {r.cpm} (+{r.daysLate}d).
+                : planned finish {r.stored}, links force {r.cpm} (+{r.daysLate}
+                d).
                 <span className="block text-amber-800">
                   Predecessors: {r.preds || "none"}
                 </span>
@@ -2182,15 +2216,17 @@ export default function ScheduleView() {
       {/* ================= NOW / NEXT STRIP ================= */}
       <section className="mb-4 grid gap-3 md:grid-cols-2">
         <div
-          className={`rounded border-l-4 p-3 ${nowList.length
-            ? "border-blue-500 bg-blue-50/60"
-            : "border-gray-300 bg-gray-50"
-            }`}
+          className={`rounded border-l-4 p-3 ${
+            nowList.length
+              ? "border-blue-500 bg-blue-50/60"
+              : "border-gray-300 bg-gray-50"
+          }`}
         >
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
             <span
-              className={`h-2 w-2 rounded-full ${nowList.length ? "bg-blue-500 animate-pulse" : "bg-gray-400"
-                }`}
+              className={`h-2 w-2 rounded-full ${
+                nowList.length ? "bg-blue-500 animate-pulse" : "bg-gray-400"
+              }`}
             />
             Now
             {nowList.length > 1 && (
@@ -2255,16 +2291,18 @@ export default function ScheduleView() {
         </div>
 
         <div
-          className={`rounded border-l-4 p-3 ${next
-            ? "border-emerald-500 bg-emerald-50/60"
-            : "border-gray-300 bg-gray-50"
-            }`}
+          className={`rounded border-l-4 p-3 ${
+            next
+              ? "border-emerald-500 bg-emerald-50/60"
+              : "border-gray-300 bg-gray-50"
+          }`}
         >
           <div className="mb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
               <span
-                className={`h-2 w-2 rounded-full ${next ? "bg-emerald-500" : "bg-gray-400"
-                  }`}
+                className={`h-2 w-2 rounded-full ${
+                  next ? "bg-emerald-500" : "bg-gray-400"
+                }`}
               />
               Next up
               {upcoming.length > 0 && (
@@ -2316,8 +2354,8 @@ export default function ScheduleView() {
               </div>
 
               <div className="mt-0.5 text-xs text-gray-600">
-                Starts {fmtDate(rangeFor(next).es)} · runs{" "}
-                {rangeFor(next).dur} days · ends {fmtDate(rangeFor(next).ef)}
+                Starts {fmtDate(rangeFor(next).es)} · runs {rangeFor(next).dur}{" "}
+                days · ends {fmtDate(rangeFor(next).ef)}
               </div>
 
               <p className="mt-1 text-xs text-gray-700">
@@ -2548,14 +2586,15 @@ export default function ScheduleView() {
                       onTouchEnd={cancelLongPress}
                       onTouchCancel={cancelLongPress}
                       onContextMenu={(e) => e.preventDefault()}
-                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${selected
-                        ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                        : predIds.has(task.id)
-                          ? "bg-amber-50 hover:bg-amber-100/60"
-                          : succIds.has(task.id)
-                            ? "bg-emerald-50 hover:bg-emerald-100/60"
-                            : "hover:bg-gray-50"
-                        } ${flash ? "animate-pulse" : ""}`}
+                      className={`flex cursor-pointer select-none items-center gap-1 truncate px-2 text-xs transition-colors ${
+                        selected
+                          ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                          : predIds.has(task.id)
+                            ? "bg-amber-50 hover:bg-amber-100/60"
+                            : succIds.has(task.id)
+                              ? "bg-emerald-50 hover:bg-emerald-100/60"
+                              : "hover:bg-gray-50"
+                      } ${flash ? "animate-pulse" : ""}`}
                       style={{ height: ROW_H, paddingLeft: 8 + depth * 14 }}
                     >
                       {hasChildren ? (
@@ -2574,13 +2613,15 @@ export default function ScheduleView() {
                       {!hasChildren && critical && showCritical && (
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                          title={`Critical · float ${cpm.totalFloat.get(task.id) ?? 0
-                            }d`}
+                          title={`Critical · float ${
+                            cpm.totalFloat.get(task.id) ?? 0
+                          }d`}
                         />
                       )}
                       <span
-                        className={`truncate ${hasChildren ? "font-semibold" : ""
-                          }`}
+                        className={`truncate ${
+                          hasChildren ? "font-semibold" : ""
+                        }`}
                         title={task.name}
                       >
                         {task.name}
@@ -2592,7 +2633,9 @@ export default function ScheduleView() {
                         >
                           {(task.assigneeIds ?? [])
                             .map((id) =>
-                              initialsOf(people.find((p) => p.id === id)?.name ?? "")
+                              initialsOf(
+                                people.find((p) => p.id === id)?.name ?? "",
+                              ),
                             )
                             .filter(Boolean)
                             .join(" ")}
@@ -2658,12 +2701,13 @@ export default function ScheduleView() {
                         return (
                           <div
                             key={i}
-                            className={`overflow-hidden border-r text-center leading-5 ${holiday
-                              ? "bg-pink-100"
-                              : isWeekend
-                                ? "bg-gray-100"
-                                : ""
-                              }`}
+                            className={`overflow-hidden border-r text-center leading-5 ${
+                              holiday
+                                ? "bg-pink-100"
+                                : isWeekend
+                                  ? "bg-gray-100"
+                                  : ""
+                            }`}
                             style={{ width: zoom }}
                             title={holiday ? "Holiday" : undefined}
                           >
@@ -2687,12 +2731,13 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={i}
-                          className={`h-full ${holiday
-                            ? "bg-pink-50"
-                            : isWeekend
-                              ? "bg-gray-50"
-                              : ""
-                            } ${showDayGrid ? "border-r" : ""}`}
+                          className={`h-full ${
+                            holiday
+                              ? "bg-pink-50"
+                              : isWeekend
+                                ? "bg-gray-50"
+                                : ""
+                          } ${showDayGrid ? "border-r" : ""}`}
                           style={{ width: zoom }}
                         />
                       );
@@ -2747,14 +2792,15 @@ export default function ScheduleView() {
                     return (
                       <div
                         key={`hl-${task.id}`}
-                        className={`pointer-events-none absolute left-0 right-0 ${selected
-                          ? "bg-blue-100/60"
-                          : isPred
-                            ? "bg-amber-100/30"
-                            : isSucc
-                              ? "bg-emerald-100/30"
-                              : ""
-                          } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
+                        className={`pointer-events-none absolute left-0 right-0 ${
+                          selected
+                            ? "bg-blue-100/60"
+                            : isPred
+                              ? "bg-amber-100/30"
+                              : isSucc
+                                ? "bg-emerald-100/30"
+                                : ""
+                        } ${flash ? "bg-yellow-200/40 animate-pulse" : ""}`}
                         style={{ top: i * ROW_H, height: ROW_H }}
                       />
                     );
@@ -2819,8 +2865,8 @@ export default function ScheduleView() {
                         (toDay(task.baselineFinish) -
                           toDay(task.baselineStart) +
                           1) *
-                        zoom -
-                        2
+                          zoom -
+                          2,
                       );
                       return (
                         <div
@@ -2846,18 +2892,20 @@ export default function ScheduleView() {
                       return (
                         <div
                           key={`ac-${task.id}`}
-                          className={`pointer-events-none absolute z-10 h-1 rounded ${late ? "bg-orange-500" : "bg-emerald-500"
-                            } ${task.actualFinish ? "" : "opacity-70"}`}
+                          className={`pointer-events-none absolute z-10 h-1 rounded ${
+                            late ? "bg-orange-500" : "bg-emerald-500"
+                          } ${task.actualFinish ? "" : "opacity-70"}`}
                           style={{
                             left: (aStartDay - minDay) * zoom,
                             top: i * ROW_H + 3,
                             width: Math.max(
                               2,
-                              (aEndDay - aStartDay + 1) * zoom - 2
+                              (aEndDay - aStartDay + 1) * zoom - 2,
                             ),
                           }}
-                          title={`Actual ${task.actualStart} → ${task.actualFinish ?? "in progress"
-                            }`}
+                          title={`Actual ${task.actualStart} → ${
+                            task.actualFinish ?? "in progress"
+                          }`}
                         />
                       );
                     })}
@@ -2867,7 +2915,7 @@ export default function ScheduleView() {
                     const dur = durationDays(task);
                     const w = Math.max(
                       task.isMilestone ? 6 : 2,
-                      dur * zoom - (task.isMilestone ? 0 : 2)
+                      dur * zoom - (task.isMilestone ? 0 : 2),
                     );
                     const critical =
                       !hasChildren && cpm.criticalIds.has(task.id);
@@ -2885,7 +2933,8 @@ export default function ScheduleView() {
                     const innerColor =
                       critical && showCritical ? "bg-red-700" : "bg-blue-700";
                     const durLabel =
-                      useWorkdays && !hasChildren
+                      !hasChildren &&
+                      calendarFor(task, useWorkdays ? calendar : undefined)
                         ? `${durationWorkdays(task, calendar)} working days`
                         : `${dur}d`;
                     return (
@@ -2901,8 +2950,9 @@ export default function ScheduleView() {
                         onTouchEnd={cancelLongPress}
                         onTouchCancel={cancelLongPress}
                         onContextMenu={(e) => e.preventDefault()}
-                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                          }`}
+                        className={`absolute h-3 cursor-pointer select-none rounded ${barColor} z-10 ${
+                          selected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                        }`}
                         style={{
                           left: s * zoom,
                           top: i * ROW_H + 8,
@@ -2911,7 +2961,9 @@ export default function ScheduleView() {
                         }}
                         title={
                           `${task.name}\n${task.scheduleStart} → ${task.scheduleFinish} · ${durLabel}` +
-                          (task.completion > 0 ? ` · ${task.completion}%` : "") +
+                          (task.completion > 0
+                            ? ` · ${task.completion}%`
+                            : "") +
                           (floatD !== undefined
                             ? `\nFloat: ${floatD}d${critical ? " · CRITICAL" : ""}`
                             : "")
@@ -3016,8 +3068,12 @@ export default function ScheduleView() {
                 Var
               </th>
               <th className="w-48 px-2 py-2">Assignee</th>
-              <th className="w-64 px-2 py-2" title="Lag is in calendar days">Predecessors</th>
-              <th className="w-64 px-2 py-2" title="Lag is in calendar days">Successors</th>
+              <th className="w-64 px-2 py-2" title="Lag is in calendar days">
+                Predecessors
+              </th>
+              <th className="w-64 px-2 py-2" title="Lag is in calendar days">
+                Successors
+              </th>
               <th className="w-10 px-2 py-2"></th>
             </tr>
           </thead>
@@ -3042,16 +3098,17 @@ export default function ScheduleView() {
                   key={task.id}
                   id={`row-${task.id}`}
                   onClick={() => handleRowClick(task.id, !!hasChildren)}
-                  className={`cursor-pointer border-t transition-colors ${selected
-                    ? "bg-blue-100"
-                    : predIds.has(task.id)
-                      ? "bg-amber-50/70 hover:bg-amber-50"
-                      : succIds.has(task.id)
-                        ? "bg-emerald-50/70 hover:bg-emerald-50"
-                        : critical && showCritical
-                          ? "bg-red-50/40 hover:bg-red-50/70"
-                          : "hover:bg-gray-50"
-                    } ${flash ? "animate-pulse" : ""}`}
+                  className={`cursor-pointer border-t transition-colors ${
+                    selected
+                      ? "bg-blue-100"
+                      : predIds.has(task.id)
+                        ? "bg-amber-50/70 hover:bg-amber-50"
+                        : succIds.has(task.id)
+                          ? "bg-emerald-50/70 hover:bg-emerald-50"
+                          : critical && showCritical
+                            ? "bg-red-50/40 hover:bg-red-50/70"
+                            : "hover:bg-gray-50"
+                  } ${flash ? "animate-pulse" : ""}`}
                 >
                   <td
                     className="px-2 py-1.5"
@@ -3122,6 +3179,14 @@ export default function ScheduleView() {
                           MILESTONE
                         </span>
                       )}
+                      {task.calendarMode === "CONTINUOUS" && (
+                        <span
+                          className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-800"
+                          title="Works through weekends and holidays (e.g. curing)"
+                        >
+                          CONT
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-2 py-1.5">
@@ -3134,7 +3199,7 @@ export default function ScheduleView() {
                         updateDates(
                           task.id,
                           e.target.value,
-                          task.scheduleFinish
+                          task.scheduleFinish,
                         )
                       }
                       className="w-full rounded border px-1 py-0.5 text-xs disabled:bg-gray-100"
@@ -3241,14 +3306,15 @@ export default function ScheduleView() {
                     />
                   </td>
                   <td
-                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${variance === null
-                      ? "text-gray-400"
-                      : variance > 0
-                        ? "font-semibold text-red-600"
-                        : variance < 0
-                          ? "text-emerald-600"
-                          : "text-gray-600"
-                      }`}
+                    className={`px-2 py-1.5 text-right tabular-nums text-xs ${
+                      variance === null
+                        ? "text-gray-400"
+                        : variance > 0
+                          ? "font-semibold text-red-600"
+                          : variance < 0
+                            ? "text-emerald-600"
+                            : "text-gray-600"
+                    }`}
                     title={
                       variance === null
                         ? "No baseline set"
@@ -3328,7 +3394,6 @@ export default function ScheduleView() {
                                   lagDays: Number(e.target.value),
                                 })
                               }
-
                               className="w-10 rounded border text-[10px]"
                             />
                             {!readOnly && (
@@ -3348,7 +3413,7 @@ export default function ScheduleView() {
                             setPicker(
                               isPickerOpen && picker.mode === "pred"
                                 ? null
-                                : { taskId: task.id, mode: "pred" }
+                                : { taskId: task.id, mode: "pred" },
                             )
                           }
                           className="self-start rounded border border-dashed px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50"
@@ -3437,7 +3502,7 @@ export default function ScheduleView() {
                             setPicker(
                               isPickerOpen && picker.mode === "succ"
                                 ? null
-                                : { taskId: task.id, mode: "succ" }
+                                : { taskId: task.id, mode: "succ" },
                             )
                           }
                           className="self-start rounded border border-dashed px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50"
@@ -3522,7 +3587,7 @@ export default function ScheduleView() {
               ...prev.filter(
                 (s) =>
                   s.relatingTask !== editingTask.id &&
-                  s.relatedTask !== editingTask.id
+                  s.relatedTask !== editingTask.id,
               ),
               ...next,
             ])

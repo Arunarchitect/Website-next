@@ -4,19 +4,25 @@ import { useState } from "react";
 import type { Sequence, Task, SchedulePerson } from "./data";
 import type { SerializedCalendar } from "./calendar";
 import { LINK_RULES } from "./JsonTool";
+import { sanitizeLinks } from "./scheduling";
 
 const INSTRUCTIONS = [
   "You are editing a whole construction schedule. Do what the user asks by changing tasks[] and sequences[], then reply with the COMPLETE JSON object only (no markdown fences, no commentary).",
   "Return EVERY task you want to keep. A task or link that is missing from your reply will be DELETED when the JSON is pasted back.",
   "Keep all field names exactly as they are. Do not add new top-level keys.",
   "id: unique string. Keep existing ids. New tasks get short readable unique ids, e.g. 'a-new-excavation'.",
-  "parentId: null for top-level, or the id of another task in tasks[] (a group/phase).",
+  "parentId: null for top-level, or the id of another task in tasks[] (a group/phase). Every parentId must be the id of a task that exists in tasks[].",
   "scheduleStart / scheduleFinish: ISO dates YYYY-MM-DD, finish >= start. Group rows (tasks that have children) get their dates and completion from their children automatically; do not try to set them.",
   "completion: 0-100. isMilestone: true for single-day markers. linkedElements: leave as [] unless you have IFC global ids.",
   "assigneeIds: list of person ids taken from people[] (id + name). Use only ids that exist in people[]; never invent ids. Only leaf tasks get assignees.",
   "baselineStart/baselineFinish/actualStart/actualFinish: leave exactly as given unless the user explicitly asks to change them.",
+  "GROUPS AND LINKS: 'groupIds' lists every task that has children. NEVER put a groupId in a link, as predecessor or successor. NEVER link a task to its own parent group or to any other group. A link between a group and its own child is invalid.",
+  "When you add children to a task, that task becomes a group: remove every link that uses it and re-create those links on the correct child tasks instead.",
+  "When you add new tasks under a group, put them under that group with parentId (do not leave them at top level unless they are real top-level phases), and link only the leaf tasks to each other.",
   ...LINK_RULES,
+  "Before replying, check: (1) no link id appears in groupIds, (2) no self-link, duplicate pair or cycle, (3) every parentId and link id exists in tasks[].",
   "calendar and people are read-only context. Return them unchanged or omit them.",
+  "calendarMode: 'WORKING' (default) or 'CONTINUOUS'. CONTINUOUS is for passive work such as curing or drying that runs through weekends and holidays; its duration is in calendar days. Leave it exactly as given unless the user asks to change it.",
 ];
 
 interface Props {
@@ -36,7 +42,7 @@ export default function ScheduleExport({
 
   const flashFor = (msg: string) => {
     setFlash(msg);
-    setTimeout(() => setFlash(null), 1800);
+    setTimeout(() => setFlash(null), 2600);
   };
 
   const copyText = async (text: string): Promise<boolean> => {
@@ -63,7 +69,11 @@ export default function ScheduleExport({
 
   const peopleList = people.map((p) => ({ id: p.id, name: p.name }));
 
+  // Never hand the AI invalid links to learn from or copy.
+  const cleanSeqs = () => sanitizeLinks(tasks, sequences);
+
   const copyForAI = async () => {
+    const { sequences: clean, removed } = cleanSeqs();
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const groupIds = [
       ...new Set(tasks.map((t) => t.parentId).filter((x): x is string => !!x)),
@@ -74,7 +84,7 @@ export default function ScheduleExport({
       people: peopleList,
       groupIds, // read-only: never link these
       tasks,
-      sequences: sequences.map((s) => ({
+      sequences: clean.map((s) => ({
         id: s.id,
         relatingTask: s.relatingTask, // predecessor
         relatedTask: s.relatedTask, // successor
@@ -82,19 +92,32 @@ export default function ScheduleExport({
         lagDays: s.lagDays,
       })),
       // read-only helper so the AI can see what each link means
-      _linkMeanings: sequences.map(
+      _linkMeanings: clean.map(
         (s) =>
-          `${s.id}: "${byId.get(s.relatingTask)?.name ?? s.relatingTask}" (predecessor) ${s.sequenceType} "${byId.get(s.relatedTask)?.name ?? s.relatedTask}" (successor), lag ${s.lagDays}d`
+          `${s.id}: "${byId.get(s.relatingTask)?.name ?? s.relatingTask}" (predecessor) ${s.sequenceType} "${byId.get(s.relatedTask)?.name ?? s.relatedTask}" (successor), lag ${s.lagDays}d`,
       ),
     };
     const ok = await copyText(JSON.stringify(payload, null, 2));
-    flashFor(ok ? `Copied for AI (${tasks.length} tasks)` : "Copy failed");
+    flashFor(
+      !ok
+        ? "Copy failed"
+        : removed.length
+          ? `Copied for AI (${tasks.length} tasks). Skipped ${removed.length} invalid link(s).`
+          : `Copied for AI (${tasks.length} tasks)`,
+    );
   };
 
   const copyPlain = async () => {
-    const payload = { calendar, people: peopleList, tasks, sequences };
+    const { sequences: clean, removed } = cleanSeqs();
+    const payload = { calendar, people: peopleList, tasks, sequences: clean };
     const ok = await copyText(JSON.stringify(payload, null, 2));
-    flashFor(ok ? `Copied ${tasks.length} tasks` : "Copy failed");
+    flashFor(
+      !ok
+        ? "Copy failed"
+        : removed.length
+          ? `Copied ${tasks.length} tasks. Skipped ${removed.length} invalid link(s).`
+          : `Copied ${tasks.length} tasks`,
+    );
   };
 
   return (

@@ -47,6 +47,7 @@ export interface Task {
   remarks?: string;
   workCode?: string;
   assigneeIds?: number[]; // SchedulePerson ids
+  calendarMode?: "WORKING" | "CONTINUOUS";
 }
 
 export interface SchedulePerson {

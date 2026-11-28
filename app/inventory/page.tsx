@@ -35,7 +35,8 @@ import CategoryManager from "./CategoryManager";
 import CustodianDialog from "./CustodianDialog";
 import JsonPanel from "./JsonPanel";
 import { colorName } from "./ColorField";
-import { copyText, itemsToJson } from "./itemJson";
+
+import { copyText, itemsToJson, inventoryForAiJson } from "./itemJson";
 
 type Tab = "all" | "unrated" | "attention" | "lacking";
 
@@ -323,6 +324,17 @@ export default function InventoryPage() {
     );
   }
 
+  async function copyForAi() {
+    if (!project) return;
+    const r = inventoryForAiJson(items, project, categories, locations);
+    const ok = await copyText(r.json);
+    setNotice(
+      ok
+        ? `Copied ${r.count} item${r.count === 1 ? "" : "s"} for AI. Write your change in "request".`
+        : "Couldn’t copy to the clipboard.",
+    );
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "all", label: "All items" },
     { key: "unrated", label: "Not rated" },
@@ -344,7 +356,7 @@ export default function InventoryPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">
-            Organistional inventory
+            Organisational inventory
           </h1>
           {project && (
             <p className="text-sm text-slate-600">
@@ -398,6 +410,13 @@ export default function InventoryPage() {
               </button>
               <button onClick={() => setImportOpen(true)} className={ghostBtn}>
                 Import from sheet
+              </button>
+              <button
+                onClick={copyForAi}
+                disabled={loading}
+                className={ghostBtn}
+              >
+                Copy for AI
               </button>
               <button onClick={() => setJsonOpen(true)} className={ghostBtn}>
                 Paste JSON

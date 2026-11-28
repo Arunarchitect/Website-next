@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { ApiError, importSchedule } from "./api";
 import type { ScheduleDoc } from "./api";
 import type { Sequence, Task } from "./data";
+import { sanitizeLinks } from "./scheduling";
 
 // ── The template that gets copied to the clipboard ──────────────────────
 const JSON_TEMPLATE = `{
@@ -15,9 +16,11 @@ const JSON_TEMPLATE = `{
     "completion: 0-100. isMilestone: true for single-day markers.",
     "linkedElements: leave as [] unless you have IFC global ids.",
     "sequences[]: each entry links two task ids.",
+    "  relatingTask = the PREDECESSOR, relatedTask = the SUCCESSOR.",
     "  sequenceType: FINISH_START | START_START | FINISH_FINISH | START_FINISH",
     "  lagDays: integer; negative = lead.",
-    "Group tasks (those with children) should NOT be linked — link leaves only.",
+    "Group tasks (those with children) must NOT be linked, including to their own children — link leaves only. Such links are dropped on import.",
+    "No self-links, no duplicate pairs, no cycles.",
     "Delete this _instructions key before uploading if you want; the backend ignores unknown top-level keys."
   ],
 
@@ -121,6 +124,8 @@ interface Preview {
   sequences: number;
   hasCalendar: boolean;
   source: string;
+  /** Reasons for links that were removed and will NOT be imported. */
+  cleaned: string[];
   parsed: {
     tasks: Task[];
     sequences: Sequence[];
@@ -151,24 +156,11 @@ export default function ScheduleImport({
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  console.log("[import] RENDER", {
-    open,
-    tab,
-    pasteLen: pasteText.length,
-    preview: preview ? `${preview.tasks}t/${preview.sequences}s` : null,
-    error,
-    busy,
-    canEdit,
-    scheduleId,
-  });
-
   if (!canEdit || scheduleId == null) {
-    console.log("[import] RENDER BAIL", { canEdit, scheduleId });
     return null;
   }
 
   const reset = () => {
-    console.log("[import] reset()");
     setPreview(null);
     setError(null);
     setPasteText("");
@@ -176,17 +168,12 @@ export default function ScheduleImport({
   };
 
   const closeAll = () => {
-    console.log("[import] closeAll()");
     reset();
     setOpen(false);
   };
 
   // ── Validate raw JSON text ────────────────────────────────────────────
   const validateText = (text: string, source: string): Preview | null => {
-    console.log("[import] validateText() START", { source, len: text.length });
-    console.log("[import] validateText() first 80:", text.slice(0, 80));
-    console.log("[import] validateText() last 80:", text.slice(-80));
-
     // Sanitize common paste artifacts.
     const clean = text
       .replace(/^\uFEFF/, "")
@@ -196,37 +183,29 @@ export default function ScheduleImport({
       .replace(/\s*```\s*$/i, "")
       .trim();
 
-    console.log("[import] validateText() after sanitize len:", clean.length);
-
     let raw: unknown;
     try {
       raw = JSON.parse(clean);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "parse error";
-      console.error("[import] validateText() JSON.parse FAILED:", msg);
       setError(`Invalid JSON: ${msg}`);
       return null;
     }
 
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-      console.error("[import] validateText() top-level not an object");
       setError("Top-level JSON must be an object.");
       return null;
     }
 
     const parsed = raw as Rec;
-    console.log("[import] validateText() parsed OK, top keys:", Object.keys(parsed));
-
     const rawTasks = parsed.tasks;
     const rawSequences = parsed.sequences;
 
     if (!Array.isArray(rawTasks)) {
-      console.error("[import] validateText() tasks is not an array");
       setError("JSON must contain a 'tasks' array.");
       return null;
     }
     if (!Array.isArray(rawSequences)) {
-      console.error("[import] validateText() sequences is not an array");
       setError("JSON must contain a 'sequences' array.");
       return null;
     }
@@ -234,36 +213,39 @@ export default function ScheduleImport({
     const taskList = rawTasks as Rec[];
     const seqList = rawSequences as Rec[];
 
-    console.log(
-      `[import] validateText() tasks=${taskList.length}, sequences=${seqList.length}`
-    );
-
     const ids = new Set<string>();
     for (const t of taskList) {
       const tid = t?.id;
       if (typeof tid !== "string" || !tid) {
-        console.error("[import] validateText() task missing id:", t);
         setError("Every task needs a non-empty string `id`.");
         return null;
       }
       if (ids.has(tid)) {
-        console.error("[import] validateText() duplicate task id:", tid);
         setError(`Duplicate task id "${tid}".`);
         return null;
       }
       ids.add(tid);
     }
 
+    // parents must exist
+    for (const t of taskList) {
+      const p = t.parentId;
+      if (p != null && (typeof p !== "string" || !ids.has(p))) {
+        setError(
+          `Task "${String(t.name ?? t.id)}" has parentId "${String(p)}" which doesn't exist.`
+        );
+        return null;
+      }
+    }
+
     const seqIds = new Set<string>();
     for (const s of seqList) {
       const sid = s?.id;
       if (typeof sid !== "string" || !sid) {
-        console.error("[import] validateText() sequence missing id:", s);
         setError("Every sequence needs a non-empty string `id`.");
         return null;
       }
       if (seqIds.has(sid)) {
-        console.error("[import] validateText() duplicate sequence id:", sid);
         setError(`Duplicate sequence id "${sid}".`);
         return null;
       }
@@ -277,40 +259,38 @@ export default function ScheduleImport({
         !ids.has(a) ||
         !ids.has(b)
       ) {
-        console.error("[import] validateText() bad sequence endpoints:", sid, a, "→", b);
         setError(
           `Sequence "${sid}" references a task that doesn't exist in the file.`
         );
         return null;
       }
       if (a === b) {
-        console.error("[import] validateText() self-link:", sid);
         setError(`Sequence "${sid}" links a task to itself.`);
         return null;
       }
     }
 
-    const result: Preview = {
+    // Drop group links / duplicates / cycles instead of saving them.
+    const { sequences: cleanSeqs, removed } = sanitizeLinks(
+      rawTasks as Task[],
+      rawSequences as Sequence[]
+    );
+
+    return {
       tasks: taskList.length,
-      sequences: seqList.length,
+      sequences: cleanSeqs.length,
       hasCalendar: !!parsed.calendar,
       source,
+      cleaned: removed.map((r) => r.reason),
       parsed: {
         tasks: rawTasks as Task[],
-        sequences: rawSequences as Sequence[],
+        sequences: cleanSeqs,
         calendar: parsed.calendar,
       },
     };
-    console.log("[import] validateText() PASSED, returning preview:", {
-      tasks: result.tasks,
-      sequences: result.sequences,
-      hasCalendar: result.hasCalendar,
-    });
-    return result;
   };
 
   const handleFile = async (file: File) => {
-    console.log("[import] handleFile()", file.name, file.size);
     setError(null);
     setPreview(null);
 
@@ -332,34 +312,23 @@ export default function ScheduleImport({
     }
 
     const p = validateText(text, file.name);
-    console.log("[import] handleFile() got preview:", !!p);
     if (p) setPreview(p);
   };
 
   const handlePasteValidate = () => {
-    console.log("[import] handlePasteValidate() CLICKED");
-    console.log("[import] handlePasteValidate() pasteText length:", pasteText.length);
     setError(null);
     setPreview(null);
 
     if (!pasteText.trim()) {
-      console.warn("[import] handlePasteValidate() pasteText is empty");
       setError("Paste some JSON first.");
       return;
     }
 
     const p = validateText(pasteText, "pasted JSON");
-    console.log("[import] handlePasteValidate() got preview:", !!p);
-    if (p) {
-      console.log("[import] handlePasteValidate() calling setPreview");
-      setPreview(p);
-    } else {
-      console.warn("[import] handlePasteValidate() preview null — not setting");
-    }
+    if (p) setPreview(p);
   };
 
   const copyTemplate = async () => {
-    console.log("[import] copyTemplate()");
     try {
       await navigator.clipboard.writeText(JSON_TEMPLATE);
       setCopied(true);
@@ -382,26 +351,17 @@ export default function ScheduleImport({
   };
 
   const loadTemplateIntoPaste = () => {
-    console.log("[import] loadTemplateIntoPaste() CLICKED");
-    console.log("[import] JSON_TEMPLATE length:", JSON_TEMPLATE.length);
     setPasteText(JSON_TEMPLATE);
     setError(null);
     setPreview(null);
   };
 
   const doImport = async () => {
-    console.log("[import] doImport() CLICKED", {
-      hasPreview: !!preview,
-      preview: preview ? { tasks: preview.tasks, sequences: preview.sequences } : null,
-      scheduleId,
-    });
-    if (!preview || scheduleId == null) {
-      console.warn("[import] doImport() bailing — no preview or no scheduleId");
-      return;
-    }
+    if (!preview || scheduleId == null) return;
     setBusy(true);
     setError(null);
 
+    // preview.parsed.sequences is already the cleaned list.
     const payload: Record<string, unknown> = {
       tasks: preview.parsed.tasks,
       sequences: preview.parsed.sequences,
@@ -417,18 +377,10 @@ export default function ScheduleImport({
     const file = new File([blob], fileName, { type: "application/json" });
 
     try {
-      console.log("[import] doImport() calling importSchedule", { scheduleId, fileName });
       const doc = await importSchedule(scheduleId, file);
-      console.log("[import] doImport() SUCCESS, doc:", {
-        id: doc.id,
-        version: doc.version,
-        tasks: doc.tasks.length,
-        sequences: doc.sequences.length,
-      });
       onImported(doc);
       closeAll();
     } catch (e) {
-      console.error("[import] doImport() FAILED:", e);
       setError(
         e instanceof ApiError
           ? e.message
@@ -444,10 +396,7 @@ export default function ScheduleImport({
   return (
     <>
       <button
-        onClick={() => {
-          console.log("[import] OPEN modal");
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
         className="rounded border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
         title="Import a schedule from JSON (file or paste)"
         data-print-hide
@@ -572,7 +521,6 @@ export default function ScheduleImport({
                   <textarea
                     value={pasteText}
                     onChange={(e) => {
-                      console.log("[import] textarea onChange, new len:", e.target.value.length);
                       setPasteText(e.target.value);
                       setPreview(null);
                       setError(null);
@@ -606,13 +554,32 @@ export default function ScheduleImport({
                 </p>
               )}
 
+              {preview && preview.cleaned.length > 0 && (
+                <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <div className="mb-1 font-semibold">
+                    {preview.cleaned.length} invalid link(s) will NOT be
+                    imported:
+                  </div>
+                  <ul className="list-inside list-disc">
+                    {preview.cleaned.slice(0, 8).map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                  {preview.cleaned.length > 8 && (
+                    <div className="mt-1">
+                      …and {preview.cleaned.length - 8} more.
+                    </div>
+                  )}
+                </div>
+              )}
+
               {preview && (
                 <dl className="mt-4 grid grid-cols-2 gap-y-1 rounded border bg-gray-50 p-3 text-sm">
                   <dt className="text-gray-500">Source</dt>
                   <dd className="font-medium">{preview.source}</dd>
                   <dt className="text-gray-500">Tasks</dt>
                   <dd className="font-medium">{preview.tasks}</dd>
-                  <dt className="text-gray-500">Sequences</dt>
+                  <dt className="text-gray-500">Sequences (valid)</dt>
                   <dd className="font-medium">{preview.sequences}</dd>
                   <dt className="text-gray-500">Calendar</dt>
                   <dd className="font-medium">

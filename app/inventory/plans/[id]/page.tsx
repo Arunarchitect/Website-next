@@ -1,20 +1,24 @@
 "use client";
 
-/* app/inventory/plans/[id]/page.tsx */
+/* app/inventory/plans/[id]/page.tsx
+ *
+ * One search bar does both jobs:
+ *   - type a name  -> matching inventory items appear, pick one to add to Taking
+ *   - nothing fits -> the last row adds what you typed to To buy
+ *
+ * Lines are edited with an Edit button; Save sends all changes in one update.
+ */
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   UNITS,
   fmtQty,
   getApiErrorMessage,
-  listCategories,
   listItems,
   listMyProjects,
   money,
   unitShort,
-  type Category,
-  type Item,
   type Project,
   type Unit,
 } from "../../inventoryApi";
@@ -34,6 +38,7 @@ import {
 } from "../../planApi";
 import { ConfirmDialog, FinishDialog } from "../PlanDialogs";
 import AddToInventoryFlow from "../AddToInventoryFlow";
+import PlanJsonTool, { copyPlanForAi, type InventoryEntry } from "../PlanJsonTool";
 
 interface Pending {
   title: string;
@@ -42,35 +47,21 @@ interface Pending {
   run: () => Promise<void>;
 }
 
-/** Quantity box that saves when you leave it. */
-function LineQty({ line, onSave }: { line: PlanLine; onSave: (v: string) => void }) {
-  const [v, setV] = useState(line.qty);
-  useEffect(() => setV(line.qty), [line.qty]);
-  const u = unitShort(line.unit);
-  return (
-    <span className="inline-flex items-center gap-1">
-      <input
-        type="number"
-        min={0}
-        step="any"
-        aria-label={`Quantity of ${line.name}`}
-        className={`${field} w-20 py-1`}
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        onBlur={() => {
-          if (v !== "" && Number(v) >= 0 && Number(v) !== Number(line.qty)) onSave(v);
-          else setV(line.qty);
-        }}
-      />
-      {u && <span className="text-xs text-slate-500">{u}</span>}
-    </span>
-  );
-}
+/** An inventory item plus where it lives, so search results can show it. */
+type Entry = InventoryEntry;
+
+/** Values typed while a line is being edited. */
+type Draft = { name: string; qty: string; unit: Unit; est_rate: string };
+
+/** "1.000" -> "1", "2.500" -> "2.5": decimals only show when they matter. */
+const plain = (x: string | number | null) => (x === null || x === "" ? "" : String(Number(x)));
 
 const qtyText = (n: number | string, unit: string) => {
   const u = unitShort(unit);
   return `${fmtQty(n)}${u ? ` ${u}` : ""}`;
 };
+
+type Row = { kind: "item"; entry: Entry; inPlan: boolean } | { kind: "buy"; name: string };
 
 export default function PlanPage() {
   const params = useParams<{ id: string }>();
@@ -78,27 +69,26 @@ export default function PlanPage() {
 
   const [plan, setPlan] = useState<Plan | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [itemsTick, setItemsTick] = useState(0); // bump to reload inventory
+  const [itemsLoading, setItemsLoading] = useState(true); // search results not complete yet
+  const [loadFailed, setLoadFailed] = useState(false); // some inventory could not be loaded
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [finishOpen, setFinishOpen] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [addInvLine, setAddInvLine] = useState<PlanLine | null>(null);
+  const [jsonOpen, setJsonOpen] = useState(false);
 
-  // Picker (left)
-  const [pickProject, setPickProject] = useState<number | null>(null);
-  const [pickTick, setPickTick] = useState(0); // bump to reload the picker
-  const [pickItems, setPickItems] = useState<Item[]>([]);
-  const [pickCats, setPickCats] = useState<Category[]>([]);
-  const [pickLoading, setPickLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [catId, setCatId] = useState("");
-  const [chosen, setChosen] = useState<Set<number>>(new Set());
+  // Line editing (one line at a time)
+  const [editId, setEditId] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Draft>({ name: "", qty: "", unit: "COUNT" as Unit, est_rate: "" });
 
-  // Quick-add (right)
-  const [bName, setBName] = useState("");
-  const [bQty, setBQty] = useState("1");
-  const [bUnit, setBUnit] = useState<Unit>("COUNT");
-  const [bRate, setBRate] = useState("");
+  // Smart search
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     const p = await getPlan(planId);
@@ -111,29 +101,38 @@ export default function PlanPage() {
       .then(([pl, pr]) => {
         setPlan(pl);
         setProjects(pr);
-        const first = pr.find((p) => p.organisation_id === pl.organisation) ?? pr[0];
-        setPickProject(first?.id ?? null);
       })
       .catch((e) => setError(getApiErrorMessage(e, "Couldn’t load the plan.")));
   }, [planId]);
 
+  // Load every inventory the user can see, once, so search is instant.
   useEffect(() => {
-    setSearch("");
-    setCatId("");
-    setChosen(new Set());
-  }, [pickProject]);
-
-  useEffect(() => {
-    if (pickProject == null) return;
-    setPickLoading(true);
-    Promise.all([listItems(pickProject), listCategories(pickProject)])
-      .then(([its, cats]) => {
-        setPickItems(its);
-        setPickCats(cats);
-      })
-      .catch((e) => setError(getApiErrorMessage(e, "Couldn’t load that inventory.")))
-      .finally(() => setPickLoading(false));
-  }, [pickProject, pickTick]);
+    if (!projects.length) {
+      setItemsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let failed = false;
+    setItemsLoading(true);
+    Promise.all(
+      projects.map((p) =>
+        listItems(p.id)
+          .then((its) => its.map((item): Entry => ({ item, project: p.name, org: p.organisation_name })))
+          .catch(() => {
+            failed = true;
+            return [] as Entry[];
+          })
+      )
+    ).then((lists) => {
+      if (cancelled) return;
+      setEntries(lists.flat());
+      setLoadFailed(failed);
+      setItemsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projects, itemsTick]);
 
   useEffect(() => {
     if (!notice) return;
@@ -147,14 +146,6 @@ export default function PlanPage() {
     [plan]
   );
 
-  const shown = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return pickItems.filter((i) => {
-      if (catId === "none" ? i.category !== null : catId && i.category !== Number(catId)) return false;
-      return !q || [i.name, i.variant, i.brand].some((s) => s.toLowerCase().includes(q));
-    });
-  }, [pickItems, search, catId]);
-
   const taking = (plan?.lines ?? []).filter((l) => l.source === "ITEM");
   const buying = (plan?.lines ?? []).filter((l) => l.source === "BUY");
   const buyTotal = buying.reduce((s, l) => s + (l.est_rate ? Number(l.est_rate) * Number(l.qty) : 0), 0);
@@ -162,6 +153,61 @@ export default function PlanPage() {
 
   const fail = (e: unknown, fallback: string) => setError(getApiErrorMessage(e, fallback));
 
+  // ── Search results ────────────────────────────────────────────────
+  const q = query.trim();
+  const rows: Row[] = useMemo(() => {
+    if (!q) return [];
+    const lc = q.toLowerCase();
+    const hits = entries
+      .filter(({ item: i }) => [i.name, i.variant, i.brand, i.code].some((s) => (s ?? "").toLowerCase().includes(lc)))
+      .sort((a, b) => {
+        const as = a.item.name.toLowerCase().startsWith(lc) ? 0 : 1;
+        const bs = b.item.name.toLowerCase().startsWith(lc) ? 0 : 1;
+        return as - bs || a.item.name.localeCompare(b.item.name);
+      })
+      .slice(0, 8)
+      .map((entry): Row => ({ kind: "item", entry, inPlan: inPlan.has(entry.item.id) }));
+    return [...hits, { kind: "buy", name: q }];
+  }, [q, entries, inPlan]);
+
+  useEffect(() => setActive(0), [q]);
+
+  const open = focused && q !== "" && !isDone;
+
+  function resetSearch() {
+    setQuery("");
+    setActive(0);
+    inputRef.current?.focus();
+  }
+
+  async function pick(row: Row) {
+    // Never add to To buy until the inventory search has finished.
+    if (row.kind === "buy" && itemsLoading) return;
+    if (row.kind === "item") {
+      if (row.inPlan) return;
+      await addItems([row.entry.item.id]);
+    } else {
+      await addBuy(row.name);
+    }
+    resetSearch();
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((a) => Math.min(a + 1, rows.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((a) => Math.max(a - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (rows[active]) pick(rows[active]);
+    } else if (e.key === "Escape") {
+      setQuery("");
+    }
+  }
+
+  // ── Plan actions ──────────────────────────────────────────────────
   /** If a Taking line needs more than the stock, offer to keep the To buy list in step. */
   function askShortfall(line: PlanLine, p: Plan) {
     if (line.source !== "ITEM" || line.item === null || line.item_qty_have === null) return;
@@ -212,15 +258,30 @@ export default function PlanPage() {
     if (!ids.length) return;
     try {
       const r = await addItemsToPlan(planId, ids);
-      setChosen(new Set());
-      setNotice(`Added ${r.added} item${r.added === 1 ? "" : "s"}.`);
-      await refresh();
+      setNotice(`Added ${r.added} item${r.added === 1 ? "" : "s"} to Taking.`);
+      const p = await refresh();
+      // A new line may already be short on stock (e.g. stock is 0): offer the To buy prompt.
+      const fresh = p.lines.find((l) => l.source === "ITEM" && l.item === ids[ids.length - 1]);
+      if (fresh && fresh.item_qty_have !== null && Number(fresh.qty) > Number(fresh.item_qty_have)) {
+        askShortfall(fresh, p);
+      }
     } catch (e) {
-      fail(e, "Couldn’t add the items.");
+      fail(e, "Couldn’t add the item.");
     }
   }
 
-  async function patchLine(line: PlanLine, patch: Partial<Pick<PlanLine, "done" | "qty">>): Promise<Plan | null> {
+  async function addBuy(name: string) {
+    try {
+      await addBuyLine(planId, { name, qty: 1, unit: "COUNT", est_rate: null });
+      setNotice(`Added “${name}” to To buy.`);
+      await refresh();
+    } catch (e) {
+      fail(e, "Couldn’t add the item to buy.");
+    }
+  }
+
+  /** Used by the checkboxes (packed / bought). */
+  async function patchLine(line: PlanLine, patch: Partial<Pick<PlanLine, "done" | "qty" | "name" | "unit">>): Promise<Plan | null> {
     setPlan((p) => p && { ...p, lines: p.lines.map((l) => (l.id === line.id ? { ...l, ...patch } : l)) });
     try {
       await updateLine(line.id, patch);
@@ -234,38 +295,65 @@ export default function PlanPage() {
     }
   }
 
-  async function changeTakingQty(line: PlanLine, v: string) {
-    const p = await patchLine(line, { qty: v });
-    const cur = p?.lines.find((l) => l.id === line.id);
-    if (p && cur) askShortfall(cur, p);
+  // ── Edit / Save ───────────────────────────────────────────────────
+  function startEdit(l: PlanLine) {
+    setError("");
+    setEditId(l.id);
+    setDraft({ name: l.name, qty: plain(l.qty), unit: l.unit as Unit, est_rate: plain(l.est_rate) });
+  }
+
+  function cancelEdit() {
+    setEditId(null);
+  }
+
+  async function saveEdit(l: PlanLine) {
+    const name = draft.name.trim();
+    if (l.source === "BUY" && !name) return setError("Name can’t be empty.");
+    if (draft.qty === "" || Number(draft.qty) < 0) return setError("Enter a valid quantity.");
+    if (draft.est_rate !== "" && Number(draft.est_rate) < 0) return setError("Enter a valid price.");
+
+    const patch: Parameters<typeof updateLine>[1] = {};
+    if (Number(draft.qty) !== Number(l.qty)) patch.qty = draft.qty;
+    if (l.source === "BUY") {
+      if (name !== l.name) patch.name = name;
+      if (draft.unit !== l.unit) patch.unit = draft.unit;
+      const rate = draft.est_rate === "" ? null : draft.est_rate;
+      const oldRate = l.est_rate === null ? null : plain(l.est_rate);
+      if (rate !== oldRate) patch.est_rate = rate;
+    }
+
+    setEditId(null);
+    if (Object.keys(patch).length === 0) return;
+
+    try {
+      await updateLine(l.id, patch);
+    } catch (e) {
+      fail(e, "Couldn’t save the changes.");
+    }
+    try {
+      const p = await refresh();
+      const cur = p.lines.find((x) => x.id === l.id);
+      if (l.source === "ITEM" && patch.qty !== undefined && cur) askShortfall(cur, p);
+    } catch {
+      /* ignore */
+    }
   }
 
   async function removeLine(line: PlanLine) {
     try {
       await deleteLine(line.id);
+      if (editId === line.id) setEditId(null);
       await refresh();
     } catch (e) {
       fail(e, "Couldn’t remove the line.");
     }
   }
 
-  async function addBuy(e: React.FormEvent) {
-    e.preventDefault();
-    if (!bName.trim()) return;
-    try {
-      await addBuyLine(planId, {
-        name: bName.trim(),
-        qty: bQty === "" ? 1 : bQty,
-        unit: bUnit,
-        est_rate: bRate === "" ? null : bRate,
-      });
-      setBName("");
-      setBQty("1");
-      setBRate("");
-      await refresh();
-    } catch (ex) {
-      fail(ex, "Couldn’t add the item to buy.");
-    }
+  async function copyForAi() {
+    if (!plan) return;
+    const r = await copyPlanForAi(plan, entries);
+    if (r.ok) setNotice(r.message);
+    else setError(r.message);
   }
 
   async function reopen() {
@@ -300,10 +388,9 @@ export default function PlanPage() {
   }
 
   const borrowed = (l: PlanLine) => plan.organisation !== null && l.item_org_id !== null && l.item_org_id !== plan.organisation;
-  const pickerOrgs = [...new Set(projects.map((p) => p.organisation_id))];
 
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
+    <main className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <Link href="/inventory/plans" className="text-sm text-slate-600 underline">
@@ -321,9 +408,22 @@ export default function PlanPage() {
             Reopen plan
           </button>
         ) : (
-          <button onClick={() => setFinishOpen(true)} className={primaryBtn}>
-            Finish plan
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={copyForAi}
+              disabled={itemsLoading}
+              title={itemsLoading ? "Waiting for your inventory to load" : "Copy this plan as JSON with instructions for an AI"}
+              className={`${ghostBtn} disabled:opacity-50`}
+            >
+              Copy for AI
+            </button>
+            <button onClick={() => setJsonOpen(true)} className={ghostBtn}>
+              Paste JSON
+            </button>
+            <button onClick={() => setFinishOpen(true)} className={primaryBtn}>
+              Finish plan
+            </button>
+          </div>
         )}
       </header>
 
@@ -341,101 +441,201 @@ export default function PlanPage() {
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* ── Left: pick from inventory ─────────────────────────────── */}
-        <section className="space-y-3 rounded border border-slate-200 bg-white p-4" aria-label="Pick from inventory">
-          <h2 className="text-base font-semibold text-slate-900">Pick from my stuff</h2>
-          <div className="flex flex-wrap gap-2">
-            <select
-              aria-label="Inventory"
-              className={`${field} min-w-[12rem] flex-1`}
-              value={pickProject ?? ""}
-              onChange={(e) => setPickProject(Number(e.target.value))}
-            >
-              {pickerOrgs.map((oid) => (
-                <optgroup key={oid} label={projects.find((p) => p.organisation_id === oid)?.organisation_name}>
-                  {projects
-                    .filter((p) => p.organisation_id === oid)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
-            <select aria-label="Category" className={field} value={catId} onChange={(e) => setCatId(e.target.value)}>
-              <option value="">All categories</option>
-              {pickCats.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-              <option value="none">Uncategorised</option>
-            </select>
-          </div>
+      {/* ── One search bar: inventory or To buy ─────────────────────── */}
+      {!isDone && (
+        <div className="relative z-20">
           <input
-            className={`${field} w-full`}
-            placeholder="Search item, brand"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            ref={inputRef}
+            type="text"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls="plan-search-list"
+            aria-autocomplete="list"
+            autoComplete="off"
+            className={`${field} w-full py-3 text-base`}
+            placeholder="Search your stuff, or type something new to buy…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onKeyDown={onKeyDown}
           />
-
-          {chosen.size > 0 && (
-            <div className="flex items-center gap-3 rounded bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <span>{chosen.size} selected</span>
-              <button className={ghostBtn} onClick={() => addItems([...chosen])}>
-                Add selected
-              </button>
-              <button className="underline" onClick={() => setChosen(new Set())}>
-                Clear
-              </button>
-            </div>
+          {!q && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              Found in your inventory? Pick it to add it to Taking. Not there? Press Enter to add it to To buy.
+            </p>
           )}
 
-          <ul className="max-h-[32rem] divide-y divide-slate-100 overflow-y-auto rounded border border-slate-200">
-            {pickLoading && <li className="p-4 text-center text-sm text-slate-500">Loading…</li>}
-            {!pickLoading && shown.length === 0 && (
-              <li className="p-4 text-center text-sm text-slate-500">
-                {pickItems.length === 0 ? "This inventory has no items." : "No items match."}
-              </li>
-            )}
-            {shown.map((i) => {
-              const added = inPlan.has(i.id);
-              const u = unitShort(i.unit);
+          {open && (
+            <ul
+              id="plan-search-list"
+              role="listbox"
+              className="absolute left-0 right-0 top-full mt-1 max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            >
+              {itemsLoading && (
+                <li role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-600">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700"
+                  />
+                  Checking your inventory…
+                </li>
+              )}
+              {!itemsLoading && loadFailed && (
+                <li role="status" className="px-3 py-2 text-xs text-amber-800">
+                  Couldn’t load every inventory, so results may be incomplete.
+                </li>
+              )}
+              {rows.map((row, idx) => {
+                const isActive = idx === active;
+                const base = `flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${
+                  isActive ? "bg-slate-100" : ""
+                }`;
+                if (row.kind === "buy") {
+                  return (
+                    <li key="buy" role="option" aria-selected={isActive} className={rows.length > 1 ? "border-t border-slate-100" : ""}>
+                      <button
+                        type="button"
+                        disabled={itemsLoading}
+                        className={`${base} ${itemsLoading ? "cursor-wait opacity-50" : ""}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setActive(idx)}
+                        onClick={() => pick(row)}
+                      >
+                        <span className="text-slate-900">
+                          Add <span className="font-medium">“{row.name}”</span> to To buy
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {itemsLoading ? "Waiting for search…" : rows.length > 1 ? "Not listed above" : "No match in inventory"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                }
+                const { item: i, project, org } = row.entry;
+                const u = unitShort(i.unit);
+                return (
+                  <li key={i.id} role="option" aria-selected={isActive} aria-disabled={row.inPlan}>
+                    <button
+                      type="button"
+                      disabled={row.inPlan}
+                      className={`${base} ${row.inPlan ? "cursor-default opacity-60" : ""}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseEnter={() => setActive(idx)}
+                      onClick={() => pick(row)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-slate-900">
+                          {i.name}
+                          {i.variant && <span className="font-normal text-slate-500"> · {i.variant}</span>}
+                        </span>
+                        <span className="block truncate text-xs text-slate-500">
+                          {i.code} · {project} · {org}
+                          {i.location_name && ` · ${i.location_name}`}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-600">
+                        {row.inPlan ? "In plan" : `have ${fmtQty(i.qty_have)}${u ? ` ${u}` : ""}`}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* ── Taking ────────────────────────────────────────────────── */}
+        <section className="rounded border border-slate-200 bg-white p-4" aria-label="Taking">
+          <h2 className="mb-2 text-base font-semibold text-slate-900">
+            Taking <span className="font-normal text-slate-500">({taking.filter((l) => l.done).length}/{taking.length} packed)</span>
+          </h2>
+          {taking.length === 0 && <p className="text-sm text-slate-500">Nothing yet. Search above to add things you own.</p>}
+          <ul className="divide-y divide-slate-100">
+            {taking.map((l) => {
+              const have = l.item_qty_have !== null ? Number(l.item_qty_have) : null;
+              const short = have !== null && Number(l.qty) > have;
+              const shortLine = buying.find((b) => b.for_line === l.id);
               return (
-                <li key={i.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
                   <input
                     type="checkbox"
-                    aria-label={`Select ${i.name}`}
-                    disabled={added}
-                    checked={chosen.has(i.id)}
-                    onChange={() =>
-                      setChosen((prev) => {
-                        const n = new Set(prev);
-                        if (n.has(i.id)) n.delete(i.id);
-                        else n.add(i.id);
-                        return n;
-                      })
-                    }
+                    aria-label={`Packed: ${l.name}`}
+                    checked={l.done}
+                    disabled={isDone}
+                    onChange={(e) => patchLine(l, { done: e.target.checked })}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-slate-900">
-                      {i.name}
-                      {i.variant && <span className="font-normal text-slate-500"> · {i.variant}</span>}
+                    <div className={`font-medium ${l.done ? "text-slate-400 line-through" : "text-slate-900"}`}>
+                      {l.name}
+                      {l.item_code && <span className="ml-1 font-normal text-slate-500">{l.item_code}</span>}
                     </div>
                     <div className="text-xs text-slate-500">
-                      {i.code} · have {fmtQty(i.qty_have)}
-                      {u && ` ${u}`}
-                      {i.location_name && ` · ${i.location_name}`}
+                      {l.item === null ? (
+                        <span className="text-rose-700">This item was deleted from inventory</span>
+                      ) : (
+                        <>
+                          {l.item_project_name}
+                          {l.item_org_name && ` · ${l.item_org_name}`}
+                          {borrowed(l) && (
+                            <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-amber-900">Borrowed, return it</span>
+                          )}
+                          {l.added_to_inventory && (
+                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-900">Just added to inventory</span>
+                          )}
+                        </>
+                      )}
                     </div>
+                    {short && have !== null && (
+                      <div className="text-xs text-amber-700">
+                        Only {qtyText(have, l.unit)} in stock.{" "}
+                        {shortLine ? (
+                          "The rest is in the To buy list."
+                        ) : (
+                          !isDone && (
+                            <button className="underline" onClick={() => askShortfall(l, plan)}>
+                              Add {qtyText(Number(l.qty) - have, l.unit)} to To buy
+                            </button>
+                          )
+                        )}
+                      </div>
+                    )}
                   </div>
-                  {added ? (
-                    <span className="text-xs text-slate-500">In plan</span>
+
+                  {editId === l.id ? (
+                    <>
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        aria-label={`Quantity of ${l.name}`}
+                        className={`${field} w-20 py-1`}
+                        value={draft.qty}
+                        onChange={(e) => setDraft({ ...draft, qty: e.target.value })}
+                      />
+                      <button className={primaryBtn} onClick={() => saveEdit(l)}>
+                        Save
+                      </button>
+                      <button className={ghostBtn} onClick={cancelEdit}>
+                        Cancel
+                      </button>
+                    </>
                   ) : (
-                    <button className="text-slate-700 underline" onClick={() => addItems([i.id])}>
-                      Add
-                    </button>
+                    <>
+                      <span className="text-slate-700">{qtyText(l.qty, l.unit)}</span>
+                      {!isDone && (
+                        <>
+                          <button className={ghostBtn} onClick={() => startEdit(l)}>
+                            Edit
+                          </button>
+                          <button className="text-rose-700 underline" onClick={() => removeLine(l)}>
+                            Remove
+                          </button>
+                        </>
+                      )}
+                    </>
                   )}
                 </li>
               );
@@ -443,164 +643,128 @@ export default function PlanPage() {
           </ul>
         </section>
 
-        {/* ── Right: the checklist ──────────────────────────────────── */}
-        <section className="space-y-5 rounded border border-slate-200 bg-white p-4" aria-label="Plan checklist">
-          <div>
-            <h2 className="mb-2 text-base font-semibold text-slate-900">
-              Taking <span className="font-normal text-slate-500">({taking.filter((l) => l.done).length}/{taking.length} packed)</span>
-            </h2>
-            {taking.length === 0 && <p className="text-sm text-slate-500">Nothing yet. Add things from the left.</p>}
-            <ul className="divide-y divide-slate-100">
-              {taking.map((l) => {
-                const have = l.item_qty_have !== null ? Number(l.item_qty_have) : null;
-                const short = have !== null && Number(l.qty) > have;
-                const shortLine = buying.find((b) => b.for_line === l.id);
-                return (
-                  <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      aria-label={`Packed: ${l.name}`}
-                      checked={l.done}
-                      disabled={isDone}
-                      onChange={(e) => patchLine(l, { done: e.target.checked })}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className={`font-medium ${l.done ? "text-slate-400 line-through" : "text-slate-900"}`}>
-                        {l.name}
-                        {l.item_code && <span className="ml-1 font-normal text-slate-500">{l.item_code}</span>}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {l.item === null ? (
-                          <span className="text-rose-700">This item was deleted from inventory</span>
-                        ) : (
-                          <>
-                            {l.item_project_name}
-                            {l.item_org_name && ` · ${l.item_org_name}`}
-                            {borrowed(l) && (
-                              <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-amber-900">Borrowed, return it</span>
-                            )}
-                            {l.added_to_inventory && (
-                              <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-900">Just added to inventory</span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                      {short && have !== null && (
-                        <div className="text-xs text-amber-700">
-                          Only {qtyText(have, l.unit)} in stock.{" "}
-                          {shortLine ? (
-                            "The rest is in the To buy list."
-                          ) : (
-                            !isDone && (
-                              <button className="underline" onClick={() => askShortfall(l, plan)}>
-                                Add {qtyText(Number(l.qty) - have, l.unit)} to To buy
-                              </button>
-                            )
-                          )}
-                        </div>
+        {/* ── To buy ────────────────────────────────────────────────── */}
+        <section className="rounded border border-slate-200 bg-white p-4" aria-label="To buy">
+          <h2 className="mb-1 text-base font-semibold text-slate-900">
+            To buy <span className="font-normal text-slate-500">({buying.filter((l) => l.done).length}/{buying.length} bought)</span>
+          </h2>
+          <p className="mb-2 text-xs text-slate-500">
+            Tick Bought when you have it. Rented or borrowed things can stay here without going into inventory.
+          </p>
+          {buying.length === 0 && <p className="text-sm text-slate-500">Nothing to buy. Type a new name above to add it here.</p>}
+          <ul className="divide-y divide-slate-100">
+            {buying.map((l) => {
+              const parent = l.for_line ? taking.find((t) => t.id === l.for_line) : undefined;
+              return (
+                <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    aria-label={`Bought: ${l.name}`}
+                    checked={l.done}
+                    disabled={isDone}
+                    onChange={(e) => patchLine(l, { done: e.target.checked })}
+                  />
+                  <div className="min-w-0 flex-1">
+                    {editId === l.id ? (
+                      <input
+                        type="text"
+                        aria-label={`Name of ${l.name}`}
+                        className={`${field} w-full py-1 font-medium`}
+                        value={draft.name}
+                        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      />
+                    ) : (
+                      <div className={`font-medium ${l.done ? "text-slate-400 line-through" : "text-slate-900"}`}>{l.name}</div>
+                    )}
+                    {parent && <div className="mt-0.5 text-xs text-slate-500">Extra for {parent.item_code ?? parent.name}</div>}
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      {l.est_rate !== null ? `${money(l.line_cost)} total` : "No price yet"}
+                      {l.added_to_inventory && <span className="ml-2 text-emerald-700">Added to inventory</span>}
+                    </div>
+                  </div>
+
+                  {editId === l.id ? (
+                    <>
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        aria-label={`Quantity of ${l.name}`}
+                        className={`${field} w-20 py-1`}
+                        value={draft.qty}
+                        onChange={(e) => setDraft({ ...draft, qty: e.target.value })}
+                      />
+                      <select
+                        aria-label={`Unit of ${l.name}`}
+                        className={`${field} py-1`}
+                        value={draft.unit}
+                        onChange={(e) => setDraft({ ...draft, unit: e.target.value as Unit })}
+                      >
+                        {UNITS.map((u) => (
+                          <option key={u.value} value={u.value}>
+                            {u.short || "nos"}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        aria-label={`Price per unit of ${l.name}`}
+                        placeholder={`₹ per ${unitShort(draft.unit) || "unit"}`}
+                        className={`${field} w-28 py-1`}
+                        value={draft.est_rate}
+                        onChange={(e) => setDraft({ ...draft, est_rate: e.target.value })}
+                      />
+                      <button className={primaryBtn} onClick={() => saveEdit(l)}>
+                        Save
+                      </button>
+                      <button className={ghostBtn} onClick={cancelEdit}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-slate-700">
+                        {qtyText(l.qty, l.unit)}
+                        {l.est_rate !== null && ` · ${money(l.est_rate)}/${unitShort(l.unit) || "unit"}`}
+                      </span>
+                      {l.done && !l.added_to_inventory && !isDone && editableProjects.length > 0 && (
+                        <button className={ghostBtn} onClick={() => setAddInvLine(l)}>
+                          Add to inventory
+                        </button>
                       )}
-                    </div>
-                    <LineQty line={l} onSave={(v) => changeTakingQty(l, v)} />
-                    {!isDone && (
-                      <button className="text-rose-700 underline" onClick={() => removeLine(l)}>
-                        Remove
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div>
-            <h2 className="mb-1 text-base font-semibold text-slate-900">
-              To buy <span className="font-normal text-slate-500">({buying.filter((l) => l.done).length}/{buying.length} bought)</span>
-            </h2>
-            <p className="mb-2 text-xs text-slate-500">
-              Tick Bought when you have it. Rented or borrowed things can stay here without going into inventory.
-            </p>
-            <ul className="divide-y divide-slate-100">
-              {buying.map((l) => {
-                const parent = l.for_line ? taking.find((t) => t.id === l.for_line) : undefined;
-                return (
-                  <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      aria-label={`Bought: ${l.name}`}
-                      checked={l.done}
-                      disabled={isDone}
-                      onChange={(e) => patchLine(l, { done: e.target.checked })}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className={`font-medium ${l.done ? "text-slate-400 line-through" : "text-slate-900"}`}>
-                        {l.name}
-                        {parent && <span className="ml-1 font-normal text-slate-500">· extra for {parent.item_code ?? parent.name}</span>}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {l.est_rate !== null ? `${money(l.est_rate)} each · ${money(l.line_cost)}` : "No price"}
-                        {l.added_to_inventory && <span className="ml-2 text-emerald-700">Added to inventory</span>}
-                      </div>
-                    </div>
-                    <LineQty line={l} onSave={(v) => patchLine(l, { qty: v })} />
-                    {l.done && !l.added_to_inventory && !isDone && editableProjects.length > 0 && (
-                      <button className={ghostBtn} onClick={() => setAddInvLine(l)}>
-                        Add to inventory
-                      </button>
-                    )}
-                    {!isDone && (
-                      <button className="text-rose-700 underline" onClick={() => removeLine(l)}>
-                        Remove
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-
-            {!isDone && (
-              <form onSubmit={addBuy} className="mt-3 flex flex-wrap items-center gap-2">
-                <input
-                  className={`${field} min-w-[10rem] flex-1`}
-                  placeholder="Something to buy"
-                  aria-label="Name of item to buy"
-                  value={bName}
-                  onChange={(e) => setBName(e.target.value)}
-                />
-                <input
-                  type="number"
-                  min={0}
-                  step="any"
-                  aria-label="Quantity"
-                  className={`${field} w-20`}
-                  value={bQty}
-                  onChange={(e) => setBQty(e.target.value)}
-                />
-                <select aria-label="Unit" className={field} value={bUnit} onChange={(e) => setBUnit(e.target.value as Unit)}>
-                  {UNITS.map((u) => (
-                    <option key={u.value} value={u.value}>
-                      {u.short || "nos"}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  aria-label={`Rate per ${unitShort(bUnit) || "unit"}`}
-                  placeholder={`₹ per ${unitShort(bUnit) || "unit"}`}
-                  className={`${field} w-28`}
-                  value={bRate}
-                  onChange={(e) => setBRate(e.target.value)}
-                />
-                <button type="submit" className={ghostBtn}>
-                  Add
-                </button>
-              </form>
-            )}
-            {buyTotal > 0 && <p className="mt-3 text-right text-sm font-medium text-slate-800">Estimated to buy: {money(buyTotal)}</p>}
-          </div>
+                      {!isDone && (
+                        <>
+                          <button className={ghostBtn} onClick={() => startEdit(l)}>
+                            Edit
+                          </button>
+                          <button className="text-rose-700 underline" onClick={() => removeLine(l)}>
+                            Remove
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {buyTotal > 0 && <p className="mt-3 text-right text-sm font-medium text-slate-800">Estimated to buy: {money(buyTotal)}</p>}
         </section>
       </div>
+
+      {jsonOpen && (
+        <PlanJsonTool
+          plan={plan}
+          entries={entries}
+          inventoryReady={!itemsLoading}
+          inventoryComplete={!loadFailed}
+          onChanged={refresh}
+          onNotice={setNotice}
+          onClose={() => setJsonOpen(false)}
+        />
+      )}
 
       {pending && (
         <ConfirmDialog
@@ -621,7 +785,7 @@ export default function PlanPage() {
             setAddInvLine(null);
             setNotice(msg);
             refresh().catch(() => undefined);
-            setPickTick((t) => t + 1);
+            setItemsTick((t) => t + 1);
           }}
           onClose={() => setAddInvLine(null)}
         />

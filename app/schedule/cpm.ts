@@ -59,6 +59,9 @@ const emptyResult = (): CpmResult => ({
  * fixed = finished task: pinned to its real dates. startDay / finishDay are
  * the real day numbers (used in working mode, where the index space cannot
  * represent a Sunday / holiday date exactly).
+ *
+ * calDur = CONTINUOUS task (curing etc.): its calendar length - 1. Used in
+ * working mode so a successor sees the real calendar finish.
  */
 interface CoreNode {
   id: string;
@@ -67,6 +70,7 @@ interface CoreNode {
   fixed?: boolean;
   startDay?: number;
   finishDay?: number;
+  calDur?: number;
 }
 
 interface CoreResult {
@@ -92,7 +96,11 @@ interface CalMap {
   size: number; // number of working days in the table
 }
 
-function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult {
+function runCore(
+  nodes: CoreNode[],
+  seqs: Sequence[],
+  cal?: CalMap,
+): CoreResult {
   const es = new Map<string, number>();
   const ef = new Map<string, number>();
   const ls = new Map<string, number>();
@@ -147,7 +155,7 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
     const n = byId.get(id)!;
     let e = n.es0; // user-set start is a floor
     // Finished tasks ignore their incoming links entirely.
-    const incoming = n.fixed ? [] : pred.get(id) ?? [];
+    const incoming = n.fixed ? [] : (pred.get(id) ?? []);
     for (const s of incoming) {
       const p = byId.get(s.relatingTask)!;
       const pES = es.get(p.id) ?? p.es0;
@@ -155,11 +163,22 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
       let cand: number;
       if (cal) {
         // A finished predecessor uses its REAL day numbers (it may sit on a
-        // Sunday/holiday). Otherwise convert the working-day index.
+        // Sunday/holiday). A continuous predecessor that was not pushed by
+        // its own links also keeps its real start (it may start on a
+        // Saturday) and runs for its calendar length. Otherwise convert the
+        // working-day index.
         const pSD =
-          p.fixed && p.startDay != null ? p.startDay : cal.dayOf(pES);
+          p.fixed && p.startDay != null
+            ? p.startDay
+            : p.calDur != null && p.startDay != null && pES === p.es0
+              ? p.startDay
+              : cal.dayOf(pES);
         const pFD =
-          p.fixed && p.finishDay != null ? p.finishDay : cal.dayOf(pEF);
+          p.fixed && p.finishDay != null
+            ? p.finishDay
+            : p.calDur != null
+              ? pSD + p.calDur
+              : cal.dayOf(pEF);
         // lag = calendar days; result snaps forward to the next workday
         switch (s.sequenceType) {
           case "START_START":
@@ -247,7 +266,7 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
           default:
             cand = latestIdx(
               (k) => cal.idxOf(cal.dayOf(k) + 1 + s.lagDays),
-              qLS
+              qLS,
             );
             break;
         }
@@ -290,7 +309,7 @@ function runCore(nodes: CoreNode[], seqs: Sequence[], cal?: CalMap): CoreResult 
 
 const leavesOf = (tasks: Task[]): Task[] => {
   const parents = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
   );
   return tasks.filter((t) => !parents.has(t.id));
 };
@@ -317,7 +336,7 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
         dur: durationDays(t) - 1,
       };
     }),
-    seqs
+    seqs,
   );
 
   return {
@@ -345,20 +364,30 @@ export function computeCpm(tasks: Task[], seqs: Sequence[]): CpmResult {
  *
  * Finished tasks are NOT snapped: they keep their real actual dates (even
  * on an off day), ignore their incoming links, and report 0 float.
+ *
+ * CONTINUOUS tasks (curing etc.) keep their real calendar start and length
+ * when a successor is computed, so the successor lands on the first working
+ * day after the curing really ends. Their own float is approximate.
  */
 export function computeCpmWorkdays(
   tasks: Task[],
   seqs: Sequence[],
-  cal: WorkingCalendar
+  cal: WorkingCalendar,
 ): CpmResult {
   const leaves = leavesOf(tasks);
   if (!leaves.length) return emptyResult();
 
   // Snap each unfinished leaf to a working start and a working-day length.
-  // Finished leaves keep their real dates.
+  // Finished leaves keep their real dates. Continuous leaves keep their
+  // real start and calendar length.
   const snapped = leaves.map((t) => {
     const done = isDone(t);
-    const start = done ? doneStart(t) : nextWorkday(t.scheduleStart, cal);
+    const cont = !done && t.calendarMode === "CONTINUOUS";
+    const start = done
+      ? doneStart(t)
+      : cont
+        ? t.scheduleStart
+        : nextWorkday(t.scheduleStart, cal);
     const finish = done ? doneFinish(t) : t.scheduleFinish;
     const wd = Math.max(1, countWorkdays(start, finish, cal));
     return {
@@ -367,17 +396,17 @@ export function computeCpmWorkdays(
       finishDay: toDay(finish),
       wd,
       fixed: done,
+      calDur: cont ? toDay(finish) - toDay(start) : undefined,
     };
   });
 
   // Working-day index table over a generous window.
   const minStart = Math.min(...snapped.map((s) => s.startDay));
   const maxStart = Math.max(
-    ...snapped.map((s) => Math.max(s.startDay, s.finishDay))
+    ...snapped.map((s) => Math.max(s.startDay, s.finishDay)),
   );
   const base = minStart - 366; // room for negative lags
-  const horizon =
-    maxStart + snapped.reduce((a, s) => a + s.wd, 0) + 3650; // room to grow
+  const horizon = maxStart + snapped.reduce((a, s) => a + s.wd, 0) + 3650; // room to grow
 
   const workDays: number[] = []; // index -> day number
   const cum: number[] = []; // cum[d - base] = working days before day d
@@ -400,10 +429,11 @@ export function computeCpmWorkdays(
         fixed: s.fixed,
         startDay: s.startDay,
         finishDay: s.finishDay,
-      })
+        calDur: s.calDur,
+      }),
     ),
     seqs,
-    { dayOf, idxOf, size: workDays.length }
+    { dayOf, idxOf, size: workDays.length },
   );
 
   const toDays = (m: Map<string, number>) => {
@@ -442,7 +472,7 @@ export function computeCpmWorkdays(
 export function findCurrentAndNext(
   tasks: Task[],
   cpm: CpmResult,
-  todayDay: number
+  todayDay: number,
 ): { current?: Task; next?: Task } {
   const leaves = tasks.filter((t) => {
     const hasKids = tasks.some((c) => c.parentId === t.id);
@@ -477,13 +507,12 @@ export function findCurrentAndNext(
 export function findAllCurrent(
   tasks: Task[],
   cpm: CpmResult,
-  todayDay: number
+  todayDay: number,
 ): Task[] {
   const parents = new Set(
-    tasks.map((t) => t.parentId).filter((x): x is string => !!x)
+    tasks.map((t) => t.parentId).filter((x): x is string => !!x),
   );
-  const fin = (t: Task) =>
-    cpm.earlyFinish.get(t.id) ?? toDay(t.scheduleFinish);
+  const fin = (t: Task) => cpm.earlyFinish.get(t.id) ?? toDay(t.scheduleFinish);
 
   return tasks
     .filter((t) => {
@@ -503,7 +532,7 @@ export function findAllCurrent(
 export function upcomingQueue(
   tasks: Task[],
   cpm: CpmResult,
-  todayDay: number
+  todayDay: number,
 ): Task[] {
   const leaves = tasks.filter((t) => {
     const hasKids = tasks.some((c) => c.parentId === t.id);
@@ -525,7 +554,7 @@ export function upcomingQueue(
 export function daysUntil(
   task: Task,
   cpm: CpmResult,
-  todayDay: number
+  todayDay: number,
 ): number {
   const es = cpm.earlyStart.get(task.id) ?? toDay(task.scheduleStart);
   return es - todayDay;

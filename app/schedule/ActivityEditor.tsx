@@ -4,7 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Sequence, Task, SchedulePerson } from "./data";
 import AssigneePicker from "./AssigneePicker";
 import { SEQUENCE_TYPES, type SequenceType } from "./data";
-import { durationDays, durationWorkdays, toDay, wouldCycle } from "./scheduling";
+import {
+  durationDays,
+  durationWorkdays,
+  toDay,
+  wouldCycle,
+} from "./scheduling";
 import {
   addWorkdays,
   countWorkdays,
@@ -19,7 +24,7 @@ export type MoveTarget = { kind: "root" } | { kind: "under"; id: string };
 export function isDescendant(
   tasks: Task[],
   taskId: string,
-  candidateParentId: string
+  candidateParentId: string,
 ): boolean {
   if (taskId === candidateParentId) return true;
   let cur: string | null = candidateParentId;
@@ -222,11 +227,11 @@ function ParentPicker({
   const candidates = useMemo(() => {
     const list = excludeId
       ? tasks.filter(
-        (t) => t.id !== excludeId && !isDescendant(tasks, excludeId, t.id)
-      )
+          (t) => t.id !== excludeId && !isDescendant(tasks, excludeId, t.id),
+        )
       : tasks;
     return [...list].sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
     );
   }, [tasks, excludeId]);
 
@@ -268,7 +273,7 @@ function ParentPicker({
   useEffect(() => {
     if (!open) return;
     const el = wrapRef.current?.querySelector<HTMLElement>(
-      `[data-opt-idx="${highlight}"]`
+      `[data-opt-idx="${highlight}"]`,
     );
     el?.scrollIntoView({ block: "nearest" });
   }, [highlight, open]);
@@ -354,8 +359,9 @@ function ParentPicker({
                   data-opt-idx={i}
                   onMouseEnter={() => setHighlight(i)}
                   onClick={() => commit(opt.isRoot ? null : opt.id)}
-                  className={`block w-full truncate px-2 py-1 text-left ${i === highlight ? "bg-blue-50" : ""
-                    } ${selected ? "font-semibold text-blue-700" : ""}`}
+                  className={`block w-full truncate px-2 py-1 text-left ${
+                    i === highlight ? "bg-blue-50" : ""
+                  } ${selected ? "font-semibold text-blue-700" : ""}`}
                   title={opt.name}
                 >
                   {opt.name}
@@ -464,7 +470,7 @@ function LinksEditor({
       .filter((s) =>
         kind === "pred"
           ? s.relatedTask === task.id
-          : s.relatingTask === task.id
+          : s.relatingTask === task.id,
       )
       .map((s) => ({
         seq: s,
@@ -474,9 +480,11 @@ function LinksEditor({
 
   const linkedIds = useMemo(
     () => new Set(links.map((l) => l.otherId)),
-    [links]
+    [links],
   );
 
+  // Groups (tasks with children) are never offered, so a task can't be
+  // linked to its own parent header or to any other group.
   const candidates = useMemo(() => {
     return tasks.filter((t) => {
       if (t.id === task.id) return false;
@@ -516,8 +524,9 @@ function LinksEditor({
                 type="button"
                 onClick={onCreateNew}
                 className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
-                title={`Save, then create a new activity in this group as ${kind === "pred" ? "predecessor" : "successor"
-                  }`}
+                title={`Save, then create a new activity in this group as ${
+                  kind === "pred" ? "predecessor" : "successor"
+                }`}
               >
                 ＋ New
               </button>
@@ -623,7 +632,7 @@ export function ActivityEditorModal({
   const [start, setStart] = useState(task.scheduleStart);
   const [finish, setFinish] = useState(task.scheduleFinish);
   const [duration, setDuration] = useState<number>(
-    useWorkdays ? durationWorkdays(task, calendar) : durationDays(task)
+    useWorkdays ? durationWorkdays(task, calendar) : durationDays(task),
   );
   const [baseStart, setBaseStart] = useState(task.baselineStart ?? "");
   const [baseFinish, setBaseFinish] = useState(task.baselineFinish ?? "");
@@ -633,7 +642,12 @@ export function ActivityEditorModal({
   const [milestone, setMilestone] = useState(task.isMilestone);
   const [remarks, setRemarks] = useState(task.remarks ?? "");
   const [parentId, setParentId] = useState<string | null>(task.parentId);
-  const [assigneeIds, setAssigneeIds] = useState<number[]>(task.assigneeIds ?? []);
+  const [assigneeIds, setAssigneeIds] = useState<number[]>(
+    task.assigneeIds ?? [],
+  );
+  const [calendarMode, setCalendarMode] = useState<"WORKING" | "CONTINUOUS">(
+    task.calendarMode ?? "WORKING",
+  );
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -642,6 +656,12 @@ export function ActivityEditorModal({
   // Baseline is admin-only, and never editable on a group (derived).
   const canEditBaseline = isAdmin && !isGroup;
 
+  // Does the working calendar apply to THIS task right now?
+  // Not for finished work (history) and not for continuous work (curing).
+  const calOn = (pct: number, mode: "WORKING" | "CONTINUOUS") =>
+    useWorkdays && pct < 100 && mode !== "CONTINUOUS";
+  const wd = calOn(completion, calendarMode);
+
   const linksEnabled = !!onApplyLinks;
 
   // ── Local draft of this task's links (applied only on Save) ────────────
@@ -649,14 +669,14 @@ export function ActivityEditorModal({
     s.relatingTask === task.id || s.relatedTask === task.id;
 
   const [draftLinks, setDraftLinks] = useState<Sequence[]>(() =>
-    sequences.filter(isMine).map((s) => ({ ...s }))
+    sequences.filter(isMine).map((s) => ({ ...s })),
   );
 
   // Everything else + the draft, so cycle checks see the edited state.
   const draftAllSeqs = useMemo(
     () => [...sequences.filter((s) => !isMine(s)), ...draftLinks],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sequences, draftLinks, task.id]
+    [sequences, draftLinks, task.id],
   );
 
   const addDraftLink = (predId: string, succId: string) =>
@@ -673,7 +693,7 @@ export function ActivityEditorModal({
 
   const updateDraftLink = (id: string, patch: Partial<Sequence>) =>
     setDraftLinks((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+      prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
     );
 
   const removeDraftLink = (id: string) =>
@@ -692,14 +712,14 @@ export function ActivityEditorModal({
   const recomputeFinish = (nextStart: string, nextDuration: number): string => {
     const d = Math.max(1, Math.round(nextDuration));
     if (milestone) return nextStart;
-    if (!useWorkdays) return finishFromStart(nextStart, d);
+    if (!wd) return finishFromStart(nextStart, d);
     const s = nextWorkday(nextStart, calendar);
     return addWorkdays(s, d - 1, calendar);
   };
 
   const onStartChange = (v: string) => {
     if (!v) return;
-    const s = useWorkdays ? nextWorkday(v, calendar) : v;
+    const s = wd ? nextWorkday(v, calendar) : v;
     setStart(s);
     setFinish(recomputeFinish(s, duration));
   };
@@ -712,7 +732,7 @@ export function ActivityEditorModal({
 
   const onFinishChange = (v: string) => {
     if (!v) return;
-    if (!useWorkdays) {
+    if (!wd) {
       setFinish(v);
       if (!start) return;
       if (v < start) {
@@ -732,6 +752,24 @@ export function ActivityEditorModal({
     }
     setFinish(f);
     setDuration(Math.max(1, countWorkdays(start, f, calendar)));
+  };
+
+  // Keep the shown duration in the right unit when the calendar stops or
+  // starts applying (completion crosses 100%, or the continuous box changes).
+  const durationFor = (applies: boolean) =>
+    applies
+      ? Math.max(1, countWorkdays(start, finish, calendar))
+      : daysBetween(start, finish);
+
+  // One place that changes completion, used by the slider and both checkboxes.
+  const setPct = (v: number) => {
+    const before = calOn(completion, calendarMode);
+    const after = calOn(v, calendarMode);
+    setCompletion(v);
+    if (v < 100) setActFinish(""); // unfinished = no actual finish
+    if (v === 0) setActStart(""); // not started = no actual start
+    // crossing 100% switches between working and calendar days
+    if (!milestone && before !== after) setDuration(durationFor(after));
   };
 
   const save = () => {
@@ -772,21 +810,22 @@ export function ActivityEditorModal({
     if (done && as && af && as > af) as = af;
 
     // Recompute finish from start + duration so the saved values agree.
+    // Finished and continuous tasks use plain calendar days (wd = false).
     let finalStart = start;
     let finalFinish = finish;
     if (milestone) {
       finalFinish = finalStart;
-    } else if (!useWorkdays) {
+    } else if (!wd) {
       finalFinish = finishFromStart(
         finalStart,
-        Math.max(1, Math.round(duration))
+        Math.max(1, Math.round(duration)),
       );
     } else {
       finalStart = nextWorkday(finalStart, calendar);
       finalFinish = addWorkdays(
         finalStart,
         Math.max(1, Math.round(duration)) - 1,
-        calendar
+        calendar,
       );
     }
 
@@ -795,7 +834,7 @@ export function ActivityEditorModal({
 
     // In progress (1-99%): planned finish can't be in the past -> extend to today.
     if (!done && completion > 0 && !milestone && finalFinish < todayStr) {
-      finalFinish = useWorkdays ? nextWorkday(todayStr, calendar) : todayStr;
+      finalFinish = wd ? nextWorkday(todayStr, calendar) : todayStr;
     }
 
     if (finalStart > finalFinish) finalStart = finalFinish;
@@ -814,6 +853,7 @@ export function ActivityEditorModal({
       remarks: remarks.trim() || undefined,
       parentId,
       assigneeIds,
+      calendarMode,
     });
 
     // Links: apply only if something actually changed.
@@ -836,7 +876,6 @@ export function ActivityEditorModal({
 
     onClose();
   };
-
 
   // "＋ New" next to Predecessors / Successors:
   // 1) save what has been typed so far (also closes this editor),
@@ -861,9 +900,7 @@ export function ActivityEditorModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <h2 className="text-sm font-semibold text-gray-800">
-            Edit activity
-          </h2>
+          <h2 className="text-sm font-semibold text-gray-800">Edit activity</h2>
           <button
             onClick={onClose}
             className="rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800"
@@ -915,7 +952,9 @@ export function ActivityEditorModal({
 
           {!isGroup && (
             <div className="grid gap-1">
-              <span className="text-xs font-medium text-gray-600">Assigned to</span>
+              <span className="text-xs font-medium text-gray-600">
+                Assigned to
+              </span>
               <AssigneePicker
                 people={people}
                 value={assigneeIds}
@@ -937,7 +976,7 @@ export function ActivityEditorModal({
             </div>
             <div className="grid gap-1">
               <span className="text-xs font-medium text-gray-600">
-                {useWorkdays ? "Duration (work days)" : "Duration (days)"}
+                {wd ? "Duration (work days)" : "Duration (days)"}
               </span>
               <NumberInput
                 value={milestone ? 1 : duration}
@@ -950,7 +989,7 @@ export function ActivityEditorModal({
                 onCommit={onDurationCommit}
                 className={`${inputCls} w-full tabular-nums disabled:bg-gray-100`}
                 title={
-                  useWorkdays
+                  wd
                     ? "Editing duration shifts the finish by working days"
                     : "Editing duration shifts the finish by calendar days"
                 }
@@ -970,9 +1009,13 @@ export function ActivityEditorModal({
             Editing <strong>Duration</strong> keeps the start date fixed and
             moves the finish. Editing <strong>Finish</strong> recalculates the
             duration.{" "}
-            {useWorkdays
+            {wd
               ? "In working-day mode, weekends and holidays are skipped."
-              : "Milestones are always 1 day."}{" "}
+              : useWorkdays && completion >= 100
+                ? "Completed work is counted in calendar days."
+                : useWorkdays && calendarMode === "CONTINUOUS"
+                  ? "Continuous work runs through weekends and holidays."
+                  : "Milestones are always 1 day."}{" "}
             Nothing is applied until you press <strong>Save</strong>.
           </p>
           {isGroup && (
@@ -985,10 +1028,11 @@ export function ActivityEditorModal({
             <div className="-mt-1 flex items-center gap-2 text-xs">
               <span className="font-medium text-gray-600">Total float</span>
               <span
-                className={`rounded px-1.5 py-0.5 font-semibold tabular-nums ${float <= 0
+                className={`rounded px-1.5 py-0.5 font-semibold tabular-nums ${
+                  float <= 0
                     ? "bg-red-100 text-red-700"
                     : "bg-gray-100 text-gray-700"
-                  }`}
+                }`}
               >
                 {float}d{float <= 0 ? " · critical" : ""}
               </span>
@@ -1104,26 +1148,62 @@ export function ActivityEditorModal({
             </p>
           </div>
 
-          <label className="grid gap-1">
+          <div className="grid gap-1">
             <span className="flex items-center justify-between text-xs font-medium text-gray-600">
               <span>Completion</span>
               <span className="tabular-nums text-gray-800">{completion}%</span>
             </span>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={completion === 0}
+                  disabled={isGroup}
+                  onChange={(e) => setPct(e.target.checked ? 0 : 1)}
+                />
+                Not started
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={completion >= 100}
+                  disabled={isGroup}
+                  onChange={(e) => setPct(e.target.checked ? 100 : 99)}
+                />
+                Completed
+              </label>
+            </div>
+
             <input
               type="range"
               min={0}
               max={100}
               value={completion}
               disabled={isGroup}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setCompletion(v);
-                if (v < 100) setActFinish(""); // unfinished = no actual finish
-                if (v === 0) setActStart("");  // not started = no actual start
-              }}
+              onChange={(e) => setPct(Number(e.target.value))}
               className="w-full"
             />
-          </label>
+          </div>
+
+          {!isGroup && !milestone && (
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={calendarMode === "CONTINUOUS"}
+                onChange={(e) => {
+                  const mode = e.target.checked ? "CONTINUOUS" : "WORKING";
+                  setCalendarMode(mode);
+                  setDuration(durationFor(calOn(completion, mode)));
+                }}
+              />
+              <span className="text-xs text-gray-700">
+                Works through weekends &amp; holidays (e.g. curing, drying).
+                Duration is counted in calendar days.
+              </span>
+            </label>
+          )}
 
           <label className="flex items-center gap-2">
             <input
@@ -1242,7 +1322,7 @@ export function RowMenu({
         }}
         className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
       >
-        ✎  Edit…
+        ✎ Edit…
       </button>
       <button
         onClick={() => {
@@ -1251,7 +1331,7 @@ export function RowMenu({
         }}
         className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
       >
-        ＋  Add child…
+        ＋ Add child…
       </button>
       <button
         onClick={() => {
@@ -1260,7 +1340,7 @@ export function RowMenu({
         }}
         className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
       >
-        ＋  Add sibling…
+        ＋ Add sibling…
       </button>
       {!task.isMilestone && !tasks.some((t) => t.parentId === task.id) && (
         <>
@@ -1272,7 +1352,7 @@ export function RowMenu({
             className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
             title="Create a new activity in this group, linked before this one"
           >
-            ＋  Add predecessor…
+            ＋ Add predecessor…
           </button>
           <button
             onClick={() => {
@@ -1282,7 +1362,7 @@ export function RowMenu({
             className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
             title="Create a new activity in this group, linked after this one"
           >
-            ＋  Add successor…
+            ＋ Add successor…
           </button>
         </>
       )}
@@ -1294,7 +1374,7 @@ export function RowMenu({
         className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
         title="Copy this task/phase and everything under it as JSON (for AI editing)"
       >
-        ⧉  Copy JSON for AI
+        ⧉ Copy JSON for AI
       </button>
 
       <div className="border-t" />
@@ -1304,7 +1384,7 @@ export function RowMenu({
           onClick={() => setMoving(true)}
           className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
         >
-          ⇄  Move into…
+          ⇄ Move into…
         </button>
       ) : (
         <div className="px-2 py-1.5">
@@ -1337,7 +1417,7 @@ export function RowMenu({
         }}
         className="block w-full px-3 py-1.5 text-left text-red-700 hover:bg-red-50"
       >
-        🗑  Delete…
+        🗑 Delete…
       </button>
     </div>
   );
